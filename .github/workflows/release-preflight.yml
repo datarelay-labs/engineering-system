@@ -1,0 +1,45 @@
+name: Reusable Release Preflight
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: Exact candidate SHA when known.
+        required: false
+        default: ""
+        type: string
+      preflight_command:
+        description: Cheap deterministic blocker command to run before expensive release qualification.
+        required: true
+        type: string
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify candidate identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "CANDIDATE_HEAD=$actual"
+          if [[ -n "$EXPECTED_SHA" && "$actual" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA but checked out $actual" >&2
+            exit 1
+          fi
+
+      - name: Run fast release preflight
+        env:
+          PREFLIGHT_COMMAND: ${{ inputs.preflight_command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -lc "$PREFLIGHT_COMMAND"
