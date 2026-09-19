@@ -2,9 +2,21 @@
 
 The Engineering System is useful only if agents and CI actually consume it.
 
+## Applicability
+
+The global default applies to every software/product engineering project the owner works on with ChatGPT or Cursor, regardless of GitHub organization, repository owner, product name, or project location. This includes `datarelay-labs`, `xdr-labs`, and future related repositories.
+
+The canonical standard lives in `datarelay-labs/engineering-system`.
+
 ## Enforcement layers
 
-### 1. Repository entrypoint
+### 1. Global AI bootstrap
+
+ChatGPT Project/Custom Instructions and Cursor User Rules establish the default rule before any repository-specific files are read.
+
+If the target repository has not yet adopted the Engineering System, the agent must identify the adoption gap and still follow the canonical standard instead of silently ignoring it.
+
+### 2. Repository entrypoint
 
 Every adopted repository must contain:
 - `AGENTS.md`
@@ -12,46 +24,26 @@ Every adopted repository must contain:
 - `.engineering/tests.yaml`
 - `.engineering/release.yaml`
 
-An AI agent must read these before making development, debugging, test, release, upgrade, operations, incident, or documentation changes.
+An AI agent must read these before development, debugging, testing, release, upgrade, operations, incident, or documentation work.
 
-### 2. Cursor persistent rule
+### 3. Cursor persistent rule
 
 Every adopted repository must contain `.cursor/rules/engineering-system.mdc` with `alwaysApply: true`.
 
-The rule must require Cursor to load repository engineering metadata before implementation and fail closed when required context is unavailable.
+### 4. Deterministic CI compliance
 
-### 3. Cursor user-level bootstrap
+Adopted repositories should call the shared `adoption-compliance.yml` workflow. It validates mandatory context and persistent Cursor rule presence.
 
-Because a repository rule cannot help before a repository is adopted, the owner should add `templates/CURSOR_USER_RULE.txt` once to Cursor User Rules. Its purpose is to make missing Engineering System adoption visible instead of silently proceeding.
+Protected integration/release branches should require the applicable Engineering System checks after project adoption is proven.
 
-### 4. ChatGPT project/account bootstrap
+### 5. Work evidence
 
-Git cannot inject instructions into an unrelated ChatGPT conversation. The owner should add `templates/CHATGPT_PROJECT_INSTRUCTION.txt` to the ChatGPT project used for Data Relay Labs engineering work. `templates/CHATGPT_CUSTOM_INSTRUCTION.txt` is the shorter account-wide fallback.
-
-ChatGPT must not claim repository-specific compliance unless it has actually read the target repository engineering context.
-
-### 5. Deterministic CI compliance
-
-Adopted repositories should call the shared `adoption-compliance.yml` workflow. It validates that required files exist, the Cursor rule is always applied, and the repository declares an Engineering System version.
-
-After the reference implementation is proven, this compliance check should be configured as a GitHub required status check for protected integration/release branches.
-
-### 6. Work evidence
-
-A task is not complete merely because an agent states that it followed the standard. Evidence is the applicable combination of:
-- affected tests
-- regression evidence
-- security/compatibility validation
-- lifecycle/platform validation
-- release qualification
-- exact source/artifact identity
+A task is not complete merely because an agent states that it followed the standard. Evidence is the applicable combination of affected tests, regression evidence, security/compatibility validation, lifecycle/platform validation, release qualification, and exact source/artifact identity.
 
 ## Fail-closed behavior
 
-For implementation/release work, missing mandatory engineering context is a configuration defect. Do not silently continue as if the repository were adopted correctly.
+Missing or contradictory mandatory engineering context is a configuration defect. Do not silently continue as if repository-specific compliance had been established.
 
-## Enforcement boundary
-
-Repository files and GitHub CI can mechanically enforce repository structure and merge gates. External AI products require their project/user instruction layer to bootstrap repository reading. The combination is intentional:
+## Enforcement chain
 
 global/project AI instruction -> repository AGENTS/rules -> .engineering metadata -> pinned Engineering System -> deterministic GitHub gates
