@@ -6,67 +6,59 @@ Shared engineering standards, AI-assisted development workflows, testing, releas
 
 This repository is the canonical **Solo AI Engineering System** for Data Relay Labs. It is optimized for a solo developer working with ChatGPT, Cursor, GitHub, and deterministic automation.
 
-The system standardizes the parts that benefit from consistency:
+It covers the complete engineering lifecycle:
 
-- development and change lifecycle
-- AI-agent operating rules
-- test levels and regression policy
-- change-impact / affected-test execution
-- release qualification and exact-HEAD provenance
-- operational lifecycle and incident-to-regression feedback
+requirements / decisions -> development / bugfix / refactor -> testing / regression / UX / resilience -> security / dependency / OSS supply chain -> release / upgrade / rollback / deprecation -> operations / observability / backup / recovery -> incident / RCA -> knowledge feedback / continuous improvement
 
-It intentionally avoids heavyweight enterprise process such as CABs, mandatory multi-human approvals, GitFlow, separate QA/SRE organizations, or full E2E on every change.
+## Canonical domains
+
+| Domain | Canonical standard |
+|---|---|
+| Core lifecycle, roles, Definition of Done | `standards/CORE.md` |
+| Development, bugs, refactor, compatibility, migration, dependencies | `standards/DEVELOPMENT.md` |
+| Quality, regression, UX, compatibility, performance/resilience | `standards/QUALITY.md` |
+| Test levels, triggers, scenario metadata | `standards/TESTING.md` |
+| Security, secrets, dependency/OSS/supply chain | `standards/SECURITY.md` |
+| Version, artifacts, qualification, upgrade, rollback, EOL | `standards/RELEASE.md` |
+| Operations, observability, backup/restore, incidents, DR | `standards/OPERATIONS.md` |
+| Documentation, ADR, Product Master, Wiki/SSOT | `standards/KNOWLEDGE.md` |
+| ChatGPT/Cursor/GitHub enforcement | `standards/ENFORCEMENT.md` |
 
 ## Operating model
 
-```text
-Request
-  -> classify change
-  -> read project context
-  -> identify affected domains
-  -> define behavior / invariants
-  -> implement smallest correct change
-  -> run affected tests
-  -> add regression for defects
-  -> run required wider gates
-  -> review / commit
-  -> release qualification when applicable
-  -> operate
-  -> convert incidents into regression knowledge
-```
+Request -> mandatory context load -> classify change -> identify affected domains -> define behavior/invariants -> implement smallest correct change -> run affected tests -> add regression for defects -> run wider/security/lifecycle gates when required -> review/commit -> exact-candidate release qualification when applicable -> operate/observe -> feed incidents and field findings back into regression knowledge
 
 ## Repository layout
 
-- `standards/` — canonical engineering standards
+- `standards/` — canonical lifecycle standards
 - `ai/` — shared AI-agent behavior
 - `templates/` — files copied/adapted into project repositories
 - `schemas/` — machine-readable project/test/release metadata schemas
-- `.github/workflows/` — reusable GitHub Actions gates
-- `.engineering/` — this repository's own project/test/release profile
+- `.github/workflows/` — reusable compliance/test/release gates
+- `.engineering/` — this repository's own profile
+
+## Enforcement
+
+An adopted repository is expected to use:
+
+AGENTS.md
+.cursor/rules/engineering-system.mdc   # alwaysApply: true
+.engineering/project.yaml
+.engineering/tests.yaml
+.engineering/release.yaml
+
+Cursor receives the repository rule persistently. GitHub CI validates adoption and deterministic gates. ChatGPT requires the companion Project/Custom Instruction because Git alone cannot inject instructions into an unrelated chat session.
 
 ## v1 principles
 
-1. Keep standards short and executable.
-2. Use existing project-native tools; do not build a custom CI/test-management platform without evidence that it is needed.
-3. Bug fixes require a reproducible regression whenever practical.
+1. Keep standards compact and executable.
+2. Use project-native tools; do not build a custom CI/test-management platform without evidence that it is needed.
+3. Bugs create durable regression knowledge whenever practical.
 4. AI proposes, implements, and reviews; deterministic evidence decides PASS/FAIL.
 5. Run cheap affected tests during development and expensive operational E2E near release.
 6. A release is qualified only for the exact source revision that passed its gates.
-7. Real operational incidents and manual findings feed back into tests, runbooks, or ADRs.
-8. Project-specific behavior stays in the project repository; this repository defines the shared method.
-
-## Adoption model
-
-A project adopts the system with:
-
-```text
-AGENTS.md
-.engineering/
-  project.yaml
-  tests.yaml
-  release.yaml
-```
-
-Project repositories keep their existing native test runners and deployment tools. The shared system coordinates when and why they run; it does not replace them.
+7. Security, compatibility, migration, rollback, and operations are part of engineering—not afterthoughts.
+8. Real incidents/manual findings feed back into tests, runbooks, ADRs, or requirements.
+9. Git is canonical for normative engineering state; Wiki is derived/searchable context.
 
 Start with `standards/CORE.md`.
