@@ -1,0 +1,34 @@
+name: Reusable Affected Tests
+
+on:
+  workflow_call:
+    inputs:
+      affected_command:
+        description: Project-native command that determines and runs affected tests
+        required: true
+        type: string
+      base_ref:
+        description: Comparison base ref exposed to the project command
+        required: false
+        default: origin/main
+        type: string
+
+jobs:
+  affected:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run project affected qualification
+        env:
+          ENGINEERING_BASE_REF: ${{ inputs.base_ref }}
+          AFFECTED_COMMAND: ${{ inputs.affected_command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ENGINEERING_BASE_REF=$ENGINEERING_BASE_REF"
+          bash -lc "$AFFECTED_COMMAND"
