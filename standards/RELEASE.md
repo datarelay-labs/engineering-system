@@ -6,7 +6,32 @@ A release is qualified for an exact source revision and the artifacts produced f
 
 ## Default lifecycle
 
-candidate freeze -> deterministic regression -> build artifacts -> provenance / hashes / SBOM as required -> platform + lifecycle qualification -> performance / resilience -> operational E2E -> release decision -> immutable tag/release -> public smoke -> monitor / rollback if required
+```text
+candidate freeze
+ -> fast release preflight
+ -> full deterministic qualification
+ -> build artifacts
+ -> provenance / hashes / SBOM as required
+ -> platform + lifecycle qualification
+ -> performance / resilience
+ -> operational E2E
+ -> release decision
+ -> immutable tag/release
+ -> public smoke
+ -> monitor / rollback if required
+```
+
+A blocking failure stops downstream expensive stages. Fix the blocker, create the new exact candidate if source changes, then restart the required qualification from the appropriate boundary.
+
+## Fast release preflight
+
+Before a long full suite, run a short deterministic command containing the highest-value blockers: syntax/static validation, known critical regressions, release-governance checks, and other project-specific fast checks.
+
+The preflight should take minutes rather than hours. It is not a substitute for required full qualification; its purpose is to avoid wasting time and compute on a candidate that is already known to fail.
+
+## Avoid duplicate qualification
+
+If a project-native workflow already proves an invariant at the same source HEAD, do not rerun an equivalent shared workflow solely for process symmetry. Reuse the evidence and reserve shared workflows for missing gates.
 
 ## Version and candidate identity
 
@@ -26,6 +51,7 @@ When `exact_head_required: true`:
 - product/dependency changes after qualification invalidate qualification
 - a new merge commit is not automatically qualified
 - do not tag an unqualified commit as the qualified candidate
+- release evidence must identify the exact candidate SHA
 
 ## Artifact / supply-chain identity
 
@@ -48,23 +74,12 @@ Production releases must define applicable:
 - rollback support or explicit irreversibility
 - post-upgrade validation
 
-## Deprecation / EOL
-
-When removing public behavior:
-1. identify affected users/contracts
-2. provide a deprecation path when practical
-3. document replacement/migration
-4. remove only at the approved release boundary
-5. clean obsolete code/tests/docs after the compatibility decision is complete
-
-Projects entering maintenance or retirement must define the security/support horizon and final migration/export path where applicable.
-
 ## Default blockers
 
 - unresolved P0
 - unresolved P1
 - unresolved user-blocking P2
-- required release gate failure
+- required preflight/release gate failure
 - provenance mismatch
 - missing required security/platform/operational qualification
 - known rollback/upgrade failure affecting supported paths

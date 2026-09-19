@@ -1,16 +1,38 @@
 # Engineering System
 
-Shared engineering standards, AI-assisted development workflows, testing, release governance, and operational practices for software and product projects developed with ChatGPT and Cursor.
+A lightweight, cost-efficient Solo AI Engineering System for software/product projects developed with AI assistance.
 
 ## Purpose
 
-This repository is the canonical **Solo AI Engineering System** used as the default engineering standard across the owner's current and future software/product projects, regardless of GitHub organization, repository owner, product name, or project location.
+This repository is the canonical engineering standard across the owner's current and future projects, regardless of GitHub organization, repository owner, product name, or project location.
 
-This explicitly includes repositories under organizations such as `datarelay-labs`, `xdr-labs`, and any future related repositories. The canonical repository remains `datarelay-labs/engineering-system`.
+The system optimizes for:
+- small, high-signal AI context
+- affected-test-first development
+- fast deterministic PR feedback
+- no duplicate CI evidence
+- release-candidate-only expensive qualification
+- exact-HEAD release evidence
+- durable regression/incident knowledge
 
-It covers the complete engineering lifecycle:
+## Default execution model
 
-requirements / decisions -> development / bugfix / refactor -> testing / regression / UX / resilience -> security / dependency / OSS supply chain -> release / upgrade / rollback / deprecation -> operations / observability / backup / recovery -> incident / RCA -> knowledge feedback / continuous improvement
+```text
+change
+ -> affected tests
+ -> cheap PR guardrails
+ -> merge
+
+release candidate
+ -> fast release preflight
+ -> full deterministic qualification
+ -> lifecycle/platform
+ -> performance/resilience
+ -> operational E2E
+ -> exact-HEAD release
+```
+
+Do not run multi-hour full suites on every PR. Do not start expensive downstream qualification while a known blocking deterministic failure exists.
 
 ## Canonical domains
 
@@ -19,25 +41,33 @@ requirements / decisions -> development / bugfix / refactor -> testing / regress
 | Core lifecycle, roles, Definition of Done | `standards/CORE.md` |
 | Development, bugs, refactor, compatibility, migration, dependencies | `standards/DEVELOPMENT.md` |
 | Quality, regression, UX, compatibility, performance/resilience | `standards/QUALITY.md` |
-| Test levels, triggers, scenario metadata | `standards/TESTING.md` |
+| Test levels, affected selection, trigger semantics | `standards/TESTING.md` |
 | Security, secrets, dependency/OSS/supply chain | `standards/SECURITY.md` |
-| Version, artifacts, qualification, upgrade, rollback, EOL | `standards/RELEASE.md` |
+| Version, artifacts, qualification, upgrade, rollback | `standards/RELEASE.md` |
 | Operations, observability, backup/restore, incidents, DR | `standards/OPERATIONS.md` |
-| Documentation, ADR, Product Master, Wiki/SSOT | `standards/KNOWLEDGE.md` |
-| ChatGPT/Cursor/GitHub enforcement | `standards/ENFORCEMENT.md` |
+| Product Master/OpenSpec/ADR/Wiki source-of-truth roles | `standards/KNOWLEDGE.md` |
+| Core/adapters and deterministic enforcement | `standards/ENFORCEMENT.md` |
 
-## Enforcement
+## Core and adapters
 
-The global/project AI instruction bootstraps repository context loading. Adopted repositories then use:
+The core standard is tool-agnostic. Tool-specific instructions are adapters. See `adapters/README.md`.
+
+Adopted repositories use:
 
 ```text
 AGENTS.md
-.cursor/rules/engineering-system.mdc   # alwaysApply: true
+.cursor/rules/engineering-system.mdc
 .engineering/project.yaml
 .engineering/tests.yaml
 .engineering/release.yaml
 ```
 
-Cursor receives the repository rule persistently. GitHub CI validates adoption and deterministic gates. If a repository is not yet adopted, that is an adoption gap; agents must still follow this canonical Engineering System as the default standard instead of ignoring it.
+## Context rule
+
+Always load `AGENTS.md` and `.engineering/project.yaml`. Load test/release metadata and only the relevant standard/specification when needed. Do not preload the entire Engineering System or Wiki.
+
+## Canonical source
+
+GitHub is normative. Wiki/Athena is derived/searchable knowledge.
 
 Start with `standards/CORE.md`.

@@ -4,6 +4,11 @@ exact_head_required: true
 artifact_hash_required: true
 provenance_required: true
 sbom_required: false
+
+# Enable for products where full qualification is expensive.
+preflight_required: false
+preflight_command: ""
+
 operational_e2e_required: false
 full_e2e_passes: 1
 public_smoke_required: true

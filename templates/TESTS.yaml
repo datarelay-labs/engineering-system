@@ -7,16 +7,31 @@ paths:
 
 scenarios:
   - id: CORE-UNIT-001
-    name: Example core unit test
+    name: Example affected unit test
     level: unit
     domains:
       - core
     triggers:
       - affected
-      - pr
     platforms:
       - linux
     command: "pytest -q tests/test_core.py"
     invariants:
       - "core behavior remains valid"
+    release_gate: true
+
+  - id: CORE-PREFLIGHT-001
+    name: Example cheap release preflight
+    level: static
+    domains:
+      - core
+    triggers:
+      - pr
+      - preflight
+      - release
+    platforms:
+      - linux
+    command: "python -m compileall -q src"
+    invariants:
+      - "source remains syntactically valid"
     release_gate: true

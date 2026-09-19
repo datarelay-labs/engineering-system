@@ -4,19 +4,41 @@ The Engineering System is useful only if agents and CI actually consume it.
 
 ## Applicability
 
-The global default applies to every software/product engineering project the owner works on with ChatGPT or Cursor, regardless of GitHub organization, repository owner, product name, or project location. This includes `datarelay-labs`, `xdr-labs`, and future related repositories.
+The global default applies to every software/product engineering project the owner works on with AI assistance, regardless of GitHub organization, repository owner, product name, or project location.
 
 The canonical standard lives in `datarelay-labs/engineering-system`.
 
-## Enforcement layers
+## Core vs adapters
 
-### 1. Global AI bootstrap
+The Engineering System core is agent-agnostic:
+- `standards/*`
+- `.engineering/*` contract
+- deterministic GitHub gates
+- evidence and release rules
 
-ChatGPT Project/Custom Instructions and Cursor User Rules establish the default rule before any repository-specific files are read.
+Tool-specific behavior is implemented through adapters:
+- ChatGPT Custom/Project Instruction
+- Cursor User Rule
+- repository `.cursor/rules/engineering-system.mdc`
+- future AI-tool adapters
 
-If the target repository has not yet adopted the Engineering System, the agent must identify the adoption gap and still follow the canonical standard instead of silently ignoring it.
+An adapter may translate the core rules into tool-specific instructions but must not weaken them.
 
-### 2. Repository entrypoint
+## Context-loading enforcement
+
+Always read:
+- `AGENTS.md`
+- `.engineering/project.yaml`
+
+Read only when relevant:
+- `.engineering/tests.yaml` for implementation/debugging/testing
+- `.engineering/release.yaml` for release/version/artifact work
+- the relevant Engineering System standard(s)
+- relevant product specification/ADR/runbook material
+
+Do not preload every standard, Wiki page, archive, or historical discussion.
+
+## Repository entrypoint
 
 Every adopted repository must contain:
 - `AGENTS.md`
@@ -24,21 +46,11 @@ Every adopted repository must contain:
 - `.engineering/tests.yaml`
 - `.engineering/release.yaml`
 
-An AI agent must read these before development, debugging, testing, release, upgrade, operations, incident, or documentation work.
+## Deterministic CI compliance
 
-### 3. Cursor persistent rule
+Adopted repositories should validate required Engineering System files and use fast affected PR checks.
 
-Every adopted repository must contain `.cursor/rules/engineering-system.mdc` with `alwaysApply: true`.
-
-### 4. Deterministic CI compliance
-
-Adopted repositories should call the shared `adoption-compliance.yml` workflow. It validates mandatory context and persistent Cursor rule presence.
-
-Protected integration/release branches should require the applicable Engineering System checks after project adoption is proven.
-
-### 5. Work evidence
-
-A task is not complete merely because an agent states that it followed the standard. Evidence is the applicable combination of affected tests, regression evidence, security/compatibility validation, lifecycle/platform validation, release qualification, and exact source/artifact identity.
+Shared workflows must not force duplicate project-native qualification. Expensive full-suite/lifecycle/platform/performance/operational gates belong at the appropriate release boundary.
 
 ## Fail-closed behavior
 
@@ -46,4 +58,12 @@ Missing or contradictory mandatory engineering context is a configuration defect
 
 ## Enforcement chain
 
-global/project AI instruction -> repository AGENTS/rules -> .engineering metadata -> pinned Engineering System -> deterministic GitHub gates
+```text
+global AI adapter
+ -> repository AGENTS / tool adapter
+ -> minimal relevant .engineering metadata
+ -> pinned Engineering System
+ -> deterministic affected checks
+ -> release preflight
+ -> exact-candidate qualification
+```

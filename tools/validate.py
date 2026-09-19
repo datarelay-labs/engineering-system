@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -26,6 +27,16 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
     "templates/CURSOR_USER_RULE.txt",
 )
+
+REQUIRED_METHOD_FILES = (
+    "adapters/README.md",
+    ".github/workflows/affected-tests.yml",
+    ".github/workflows/release-preflight.yml",
+    ".github/workflows/release-gate.yml",
+)
+
+ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
+FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def load_json(path):
@@ -73,6 +84,23 @@ def validate_version_alignment():
     print(f"PASS engineering-system version alignment {version}")
 
 
+def validate_action_pins():
+    failures = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for match in ACTION_USE_RE.finditer(text):
+            action, ref = match.groups()
+            if action.startswith("./"):
+                continue
+            if not FULL_SHA_RE.fullmatch(ref):
+                failures.append((path.relative_to(ROOT), action, ref))
+    if failures:
+        for path, action, ref in failures:
+            print(f"FAIL unpinned GitHub Action {path}: {action}@{ref}")
+        raise SystemExit(1)
+    print("PASS all external GitHub Actions pinned to full commit SHA")
+
+
 def main():
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         load_yaml(path)
@@ -80,7 +108,9 @@ def main():
 
     require_files(REQUIRED_STANDARDS)
     require_files(REQUIRED_ENFORCEMENT_TEMPLATES)
+    require_files(REQUIRED_METHOD_FILES)
     validate_version_alignment()
+    validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
     validate(".engineering/tests.yaml", "schemas/tests.schema.json")

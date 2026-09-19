@@ -1,20 +1,20 @@
-name: Reusable Release Gate
+name: Reusable Release Preflight
 
 on:
   workflow_call:
     inputs:
       expected_sha:
-        description: Exact candidate SHA; empty only if project policy permits it
+        description: Exact candidate SHA when known.
         required: false
         default: ""
         type: string
-      qualification_command:
-        description: Project-native release qualification command
+      preflight_command:
+        description: Cheap deterministic blocker command to run before expensive release qualification.
         required: true
         type: string
 
 jobs:
-  release-gate:
+  preflight:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,10 +36,10 @@ jobs:
             exit 1
           fi
 
-      - name: Run project release qualification
+      - name: Run fast release preflight
         env:
-          QUALIFICATION_COMMAND: ${{ inputs.qualification_command }}
+          PREFLIGHT_COMMAND: ${{ inputs.preflight_command }}
         shell: bash
         run: |
           set -euo pipefail
-          bash -lc "$QUALIFICATION_COMMAND"
+          bash -lc "$PREFLIGHT_COMMAND"
