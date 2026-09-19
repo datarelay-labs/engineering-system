@@ -144,7 +144,7 @@ When resuming work:
 1. Resolve the target repository first from the current Git remote or explicit user/project context.
 2. Once resolved, do not search unrelated repositories.
 3. Resolve the current branch when a local repository is available.
-4. Read only open Issues marked as AI Work Packets (default label: `ai-work`).
+4. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
 5. Require exact `TARGET_REPO` match.
 6. Prefer an exact `BRANCH` match when branch context exists.
 7. Require exactly one matching `STATUS=ACTIVE` packet.
@@ -191,15 +191,15 @@ The resume command:
 
 The default remains single-agent sequential execution when the owner's project rules require it.
 
-## GitHub label and lifecycle
+## GitHub marker and lifecycle
 
-Default label:
+Canonical Issue title prefix:
 
 ```text
-ai-work
+[AI Work]
 ```
 
-Create the label once per adopted repository.
+An `ai-work` label is optional. The title prefix plus required identity fields are the portable deterministic markers.
 
 Use:
 
@@ -229,8 +229,8 @@ The Work Packet never overrides code, tests, canonical specifications, Git state
 
 For repositories using session continuity:
 
-- add the `ai-work` label
 - add the AI Work Packet Issue template
+- preserve the canonical `[AI Work]` title prefix
 - add Cursor `/resume` command when Cursor is used
 - ensure ChatGPT/Cursor adapters know to resolve repository first
 - never store secrets in Work Packets
