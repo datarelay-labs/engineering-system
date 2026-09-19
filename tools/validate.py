@@ -18,6 +18,7 @@ REQUIRED_STANDARDS = (
     "standards/OPERATIONS.md",
     "standards/KNOWLEDGE.md",
     "standards/ENFORCEMENT.md",
+    "standards/SESSION_CONTINUITY.md",
 )
 
 REQUIRED_ENFORCEMENT_TEMPLATES = (
@@ -26,6 +27,8 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
     "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
     "templates/CURSOR_USER_RULE.txt",
+    "templates/.cursor/commands/resume.md",
+    "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md",
 )
 
 REQUIRED_METHOD_FILES = (
@@ -84,6 +87,54 @@ def validate_version_alignment():
     print(f"PASS engineering-system version alignment {version}")
 
 
+
+def validate_session_continuity_templates():
+    issue_path = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
+    resume_path = ROOT / "templates/.cursor/commands/resume.md"
+
+    issue_text = issue_path.read_text(encoding="utf-8")
+    resume_text = resume_path.read_text(encoding="utf-8")
+
+    issue_tokens = (
+        "PACKET_VERSION=1",
+        "TARGET_REPO=",
+        "WORKSTREAM=",
+        "STATUS=ACTIVE",
+        "BRANCH=",
+        "LAST_VERIFIED_HEAD=",
+        "## Next Action",
+        "## Canonical References",
+        "## Latest Evidence",
+        "## Blockers",
+    )
+    resume_tokens = (
+        "git remote get-url origin",
+        "git branch --show-current",
+        "git rev-parse HEAD",
+        "TARGET_REPO",
+        "STATUS=ACTIVE",
+        "BRANCH",
+        "exactly one match",
+        "Next Action",
+        "update the same Work Packet",
+    )
+
+    failures = []
+    for token in issue_tokens:
+        if token not in issue_text:
+            failures.append(f"AI Work Packet template missing token: {token}")
+    for token in resume_tokens:
+        if token not in resume_text:
+            failures.append(f"Cursor resume template missing token: {token}")
+
+    if failures:
+        for item in failures:
+            print(f"FAIL {item}")
+        raise SystemExit(1)
+
+    print("PASS AI Work Packet and Cursor resume template contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -110,6 +161,7 @@ def main():
     require_files(REQUIRED_ENFORCEMENT_TEMPLATES)
     require_files(REQUIRED_METHOD_FILES)
     validate_version_alignment()
+    validate_session_continuity_templates()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")

@@ -13,6 +13,10 @@ paths:
     domains: [schemas]
   ".github/workflows/**":
     domains: [workflows]
+  ".github/ISSUE_TEMPLATE/**":
+    domains: [session-continuity]
+  ".cursor/commands/**":
+    domains: [session-continuity]
   "tools/**":
     domains: [workflows]
 
@@ -29,7 +33,7 @@ scenarios:
   - id: ENG-STATIC-002
     name: Git whitespace validation
     level: static
-    domains: [standards, ai, adapters, templates, schemas, workflows]
+    domains: [standards, ai, adapters, templates, schemas, workflows, session-continuity]
     triggers: [pr, preflight, release]
     platforms: [linux]
     command: "git diff --check"

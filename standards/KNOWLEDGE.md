@@ -22,6 +22,9 @@ A specification system is optional; do not add a second competing specification 
 ### Decision Event
 A Decision Event is a structured handoff for an explicitly accepted decision. It is not an additional permanent source of truth. Uncertain discussion text must not be auto-promoted into an accepted decision.
 
+### AI Work Packet
+An AI Work Packet is repository-scoped current coordination state for resuming an active workstream across AI sessions/tools. It is not a normative product specification and must not duplicate canonical documents or accumulate conversation history. Use `standards/SESSION_CONTINUITY.md` for the contract.
+
 ### ADR
 Use only for durable, expensive-to-reverse architecture/security/persistence/public-contract decisions.
 

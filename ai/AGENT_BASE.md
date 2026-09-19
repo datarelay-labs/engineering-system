@@ -16,6 +16,9 @@ Load only when relevant:
 
 Do not preload the entire Wiki, all standards, archived specifications, or historical discussions.
 
+## Resume / session continuity
+When the user asks to continue or resume existing engineering work, resolve the target repository first and read only that repository's active AI Work Packet before asking the user to reconstruct prior chat. Never scan unrelated repositories after the target repo is resolved. Verify current branch/HEAD/state independently; packet state is coordination context, not runtime or release authority. Fail closed if packet selection is missing or ambiguous. See `standards/SESSION_CONTINUITY.md`.
+
 ## Before editing
 - inspect repository status, branch/worktree, relevant code, and relevant tests
 - classify the change
