@@ -18,11 +18,38 @@ jobs:
       - name: Install validation dependency
         run: python -m pip install --disable-pip-version-check pyyaml
 
-      - name: Fetch pinned compliance checker
+      - name: Validate mandatory Engineering System files
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL             https://raw.githubusercontent.com/datarelay-labs/engineering-system/${{ github.workflow_sha }}/tools/check-adoption.py             -o /tmp/check-adoption.py
+          required=(
+            AGENTS.md
+            .engineering/project.yaml
+            .engineering/tests.yaml
+            .engineering/release.yaml
+            .cursor/rules/engineering-system.mdc
+          )
+          for path in "${required[@]}"; do
+            if [[ ! -f "$path" ]]; then
+              echo "FAIL missing required file: $path" >&2
+              exit 1
+            fi
+          done
 
-      - name: Validate Engineering System adoption
-        run: python /tmp/check-adoption.py --root .
+          grep -q '^alwaysApply: true$' .cursor/rules/engineering-system.mdc || {
+            echo "FAIL Cursor engineering-system rule is not alwaysApply: true" >&2
+            exit 1
+          }
+
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+
+          profile = yaml.safe_load(Path(".engineering/project.yaml").read_text()) or {}
+          version = (profile.get("engineering_system") or {}).get("version")
+          if not version:
+              raise SystemExit("FAIL project.yaml missing engineering_system.version")
+          print(f"ENGINEERING_SYSTEM_VERSION={version}")
+          PY
+
+          echo "ENGINEERING_SYSTEM_ADOPTION=PASS"
