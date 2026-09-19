@@ -1,0 +1,32 @@
+version: 1
+
+paths:
+  "standards/**":
+    domains: [standards]
+  "ai/**":
+    domains: [ai]
+  "templates/**":
+    domains: [templates]
+  "schemas/**":
+    domains: [schemas]
+  ".github/workflows/**":
+    domains: [workflows]
+
+scenarios:
+  - id: ENG-STATIC-001
+    name: JSON schemas parse
+    level: static
+    domains: [schemas]
+    triggers: [affected, pr, release]
+    platforms: [linux]
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null"
+    release_gate: true
+
+  - id: ENG-STATIC-002
+    name: Git whitespace validation
+    level: static
+    domains: [standards, ai, templates, schemas, workflows]
+    triggers: [pr, release]
+    platforms: [linux]
+    command: "git diff --check"
+    release_gate: true
