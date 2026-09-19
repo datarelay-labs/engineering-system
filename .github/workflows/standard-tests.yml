@@ -1,0 +1,25 @@
+name: Reusable Standard Tests
+
+on:
+  workflow_call:
+    inputs:
+      test_command:
+        description: Project-native deterministic test command
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run deterministic project tests
+        env:
+          TEST_COMMAND: ${{ inputs.test_command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -lc "$TEST_COMMAND"

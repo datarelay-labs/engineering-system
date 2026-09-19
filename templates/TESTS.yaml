@@ -1,0 +1,22 @@
+version: 1
+
+paths:
+  "src/**":
+    domains:
+      - core
+
+scenarios:
+  - id: CORE-UNIT-001
+    name: Example core unit test
+    level: unit
+    domains:
+      - core
+    triggers:
+      - affected
+      - pr
+    platforms:
+      - linux
+    command: "pytest -q tests/test_core.py"
+    invariants:
+      - "core behavior remains valid"
+    release_gate: true
