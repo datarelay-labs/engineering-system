@@ -21,8 +21,12 @@ Adapters translate the core into tool-specific instruction surfaces:
 | Cursor repository | `templates/.cursor/rules/engineering-system.mdc` |
 | Repository-neutral entrypoint | `templates/AGENTS.md` |
 | GitHub enforcement | reusable workflows under `.github/workflows/` |
+| GitHub session continuity | repository-scoped AI Work Packet Issue template |
+| Cursor resume workflow | `templates/.cursor/commands/resume.md` |
 
 Future tools may add adapters without changing the engineering lifecycle.
+
+Session continuity is defined by `standards/SESSION_CONTINUITY.md`; adapters retrieve repository-scoped current state without copying conversation history.
 
 ## Rule
 
