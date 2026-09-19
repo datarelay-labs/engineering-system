@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Data Relay Labs Release Profile",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "exact_head_required",
+    "artifact_hash_required",
+    "operational_e2e_required",
+    "full_e2e_passes"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "exact_head_required": {
+      "type": "boolean"
+    },
+    "artifact_hash_required": {
+      "type": "boolean"
+    },
+    "provenance_required": {
+      "type": "boolean"
+    },
+    "sbom_required": {
+      "type": "boolean"
+    },
+    "operational_e2e_required": {
+      "type": "boolean"
+    },
+    "full_e2e_passes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "public_smoke_required": {
+      "type": "boolean"
+    },
+    "blockers": {
+      "type": "object"
+    }
+  }
+}
