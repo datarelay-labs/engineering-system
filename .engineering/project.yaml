@@ -9,6 +9,7 @@ project:
 domains:
   - standards
   - ai
+  - adapters
   - templates
   - schemas
   - workflows
