@@ -1,10 +1,12 @@
-# Data Relay Labs Engineering System
+# Engineering System
 
-Shared engineering standards, AI-assisted development workflows, testing, release governance, and operational practices for Data Relay Labs projects.
+Shared engineering standards, AI-assisted development workflows, testing, release governance, and operational practices for software and product projects developed with ChatGPT and Cursor.
 
 ## Purpose
 
-This repository is the canonical **Solo AI Engineering System** for Data Relay Labs. It is optimized for a solo developer working with ChatGPT, Cursor, GitHub, and deterministic automation.
+This repository is the canonical **Solo AI Engineering System** used as the default engineering standard across the owner's current and future software/product projects, regardless of GitHub organization, repository owner, product name, or project location.
+
+This explicitly includes repositories under organizations such as `datarelay-labs`, `xdr-labs`, and any future related repositories. The canonical repository remains `datarelay-labs/engineering-system`.
 
 It covers the complete engineering lifecycle:
 
@@ -24,41 +26,18 @@ requirements / decisions -> development / bugfix / refactor -> testing / regress
 | Documentation, ADR, Product Master, Wiki/SSOT | `standards/KNOWLEDGE.md` |
 | ChatGPT/Cursor/GitHub enforcement | `standards/ENFORCEMENT.md` |
 
-## Operating model
-
-Request -> mandatory context load -> classify change -> identify affected domains -> define behavior/invariants -> implement smallest correct change -> run affected tests -> add regression for defects -> run wider/security/lifecycle gates when required -> review/commit -> exact-candidate release qualification when applicable -> operate/observe -> feed incidents and field findings back into regression knowledge
-
-## Repository layout
-
-- `standards/` — canonical lifecycle standards
-- `ai/` — shared AI-agent behavior
-- `templates/` — files copied/adapted into project repositories
-- `schemas/` — machine-readable project/test/release metadata schemas
-- `.github/workflows/` — reusable compliance/test/release gates
-- `.engineering/` — this repository's own profile
-
 ## Enforcement
 
-An adopted repository is expected to use:
+The global/project AI instruction bootstraps repository context loading. Adopted repositories then use:
 
+```text
 AGENTS.md
 .cursor/rules/engineering-system.mdc   # alwaysApply: true
 .engineering/project.yaml
 .engineering/tests.yaml
 .engineering/release.yaml
+```
 
-Cursor receives the repository rule persistently. GitHub CI validates adoption and deterministic gates. ChatGPT requires the companion Project/Custom Instruction because Git alone cannot inject instructions into an unrelated chat session.
-
-## v1 principles
-
-1. Keep standards compact and executable.
-2. Use project-native tools; do not build a custom CI/test-management platform without evidence that it is needed.
-3. Bugs create durable regression knowledge whenever practical.
-4. AI proposes, implements, and reviews; deterministic evidence decides PASS/FAIL.
-5. Run cheap affected tests during development and expensive operational E2E near release.
-6. A release is qualified only for the exact source revision that passed its gates.
-7. Security, compatibility, migration, rollback, and operations are part of engineering—not afterthoughts.
-8. Real incidents/manual findings feed back into tests, runbooks, ADRs, or requirements.
-9. Git is canonical for normative engineering state; Wiki is derived/searchable context.
+Cursor receives the repository rule persistently. GitHub CI validates adoption and deterministic gates. If a repository is not yet adopted, that is an adoption gap; agents must still follow this canonical Engineering System as the default standard instead of ignoring it.
 
 Start with `standards/CORE.md`.

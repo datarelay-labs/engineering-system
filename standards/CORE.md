@@ -2,7 +2,11 @@
 
 ## Scope
 
-The Engineering System governs the complete software lifecycle for adopted Data Relay Labs projects:
+The Engineering System governs the complete software lifecycle for every software/product engineering project the owner works on with ChatGPT or Cursor, regardless of GitHub organization, repository owner, product name, or project location.
+
+This includes, but is not limited to, repositories under `datarelay-labs`, `xdr-labs`, and future related organizations or repositories.
+
+The canonical Engineering System repository is `datarelay-labs/engineering-system`.
 
 requirements / decisions -> development -> review -> testing / regression -> security / dependency control -> release / upgrade / rollback -> operations / observability -> incident / RCA -> improvement / deprecation / retirement
 
@@ -18,22 +22,18 @@ requirements / decisions -> development -> review -> testing / regression -> sec
 ## Universal rules
 
 1. Load mandatory engineering context before implementation.
-2. Classify the change: FEATURE, BUGFIX, REFACTOR, SECURITY, PERFORMANCE, OPERATIONS, RELEASE, or DOCUMENTATION.
-3. Identify affected domains, public contracts, persisted state, security boundaries, and operational impact.
-4. Inspect relevant implementation, tests, docs, and historical regressions.
-5. Make the smallest correct change; avoid unrelated scope/refactors.
-6. Run affected tests before wider suites.
-7. Bug fixes should include a regression that fails before the fix and passes after it whenever practical.
-8. Never weaken a valid test merely to obtain PASS.
-9. Never silently skip a required gate or report unexecuted work as PASS.
-10. Historical evidence does not qualify a different source revision.
-11. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
-12. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
-
-## Engineering domains
-
-The shared system is organized into CORE, DEVELOPMENT, QUALITY, SECURITY, RELEASE, OPERATIONS, KNOWLEDGE, and AI / ENFORCEMENT.
-`TESTING.md` provides detailed test-level mechanics under QUALITY.
+2. If the target repository has not yet adopted the Engineering System, identify the adoption gap and still follow the canonical standard by default.
+3. Classify the change: FEATURE, BUGFIX, REFACTOR, SECURITY, PERFORMANCE, OPERATIONS, RELEASE, or DOCUMENTATION.
+4. Identify affected domains, public contracts, persisted state, security boundaries, and operational impact.
+5. Inspect relevant implementation, tests, docs, and historical regressions.
+6. Make the smallest correct change; avoid unrelated scope/refactors.
+7. Run affected tests before wider suites.
+8. Bug fixes should include a regression that fails before the fix and passes after it whenever practical.
+9. Never weaken a valid test merely to obtain PASS.
+10. Never silently skip a required gate or report unexecuted work as PASS.
+11. Historical evidence does not qualify a different source revision.
+12. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
+13. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
 
 ## Definition of done
 

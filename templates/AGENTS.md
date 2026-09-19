@@ -1,18 +1,20 @@
 # Repository Engineering Rules
 
-This repository follows the Data Relay Labs Engineering System:
+This repository follows the canonical Engineering System:
 https://github.com/datarelay-labs/engineering-system
+
+The standard applies regardless of GitHub organization, repository owner, or product name.
 
 ## Mandatory entry sequence
 
-Before planning, editing, refactoring, fixing, testing, or releasing code:
+Before planning, editing, refactoring, fixing, testing, releasing, upgrading, operating, or documenting:
 
 1. Read this `AGENTS.md`.
 2. Read `.engineering/project.yaml`.
 3. Read `.engineering/tests.yaml`.
 4. Read `.engineering/release.yaml` for release-related work.
 5. Follow the Engineering System version/baseline pinned by the project profile.
-6. Identify affected domains and public contracts.
+6. Identify affected domains, public contracts, persisted state, security boundaries, operational impact, and required tests.
 7. Inspect relevant existing implementation and tests.
 8. Make the smallest correct change.
 9. Run affected tests first and wider gates as required.
@@ -23,4 +25,4 @@ Before planning, editing, refactoring, fixing, testing, or releasing code:
 
 If mandatory engineering context is missing or contradictory, stop implementation and report the configuration defect instead of guessing.
 
-Cursor must also have `.cursor/rules/engineering-system.mdc` with `alwaysApply: true`.
+Cursor must also obey `.cursor/rules/engineering-system.mdc` with `alwaysApply: true`.
