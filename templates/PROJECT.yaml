@@ -1,0 +1,17 @@
+engineering_system:
+  version: "1.0.0"
+
+project:
+  name: "replace-me"
+  type: "replace-me"
+  maturity: "development"
+
+domains:
+  - core
+
+platforms:
+  - linux
+
+operations:
+  production_oriented: false
+  runbook_required: false
