@@ -1,0 +1,28 @@
+name: Reusable Engineering Adoption Compliance
+
+on:
+  workflow_call:
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependency
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Fetch pinned compliance checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL             https://raw.githubusercontent.com/datarelay-labs/engineering-system/${{ github.workflow_sha }}/tools/check-adoption.py             -o /tmp/check-adoption.py
+
+      - name: Validate Engineering System adoption
+        run: python /tmp/check-adoption.py --root .
