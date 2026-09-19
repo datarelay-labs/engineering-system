@@ -12,7 +12,7 @@ Work sequentially in a single agent context.
    - git status --short --branch
 2. Read AGENTS.md and .engineering/project.yaml.
 3. Resolve the exact GitHub owner/repository from the current origin. Do not search other repositories after this point.
-4. Retrieve open GitHub Issues labeled `ai-work` using an available GitHub integration. If none is available, use authenticated `gh`. If neither is available, STOP and report that GitHub Work Packet access must be configured; do not ask for a pasted historical handoff.
+4. Retrieve open GitHub Issues whose title begins with `[AI Work]` using an available GitHub integration. An `ai-work` label may be used to narrow results but is optional. If no GitHub integration is available, use authenticated `gh`. If neither is available, STOP and report that GitHub Work Packet access must be configured; do not ask for a pasted historical handoff.
 5. Select a packet only when:
    - TARGET_REPO exactly matches the current repository
    - STATUS=ACTIVE
