@@ -1,21 +1,21 @@
 ---
-description: Data Relay Labs mandatory Engineering System workflow
+description: Mandatory Engineering System workflow
 alwaysApply: true
 ---
 
 # Mandatory Engineering System Rule
 
-This repository is the canonical Data Relay Labs Engineering System.
+This repository is the canonical Engineering System used across all software/product projects the owner works on with ChatGPT or Cursor, including repositories under datarelay-labs, xdr-labs, and future related organizations.
 
-Before planning, editing, refactoring, fixing, testing, or releasing:
+Before planning, editing, refactoring, fixing, testing, releasing, upgrading, operating, or documenting:
 
 1. Read @AGENTS.md.
 2. Read @.engineering/project.yaml.
 3. Read @.engineering/tests.yaml.
 4. Read @.engineering/release.yaml for release-related work.
 5. Read the relevant file under @standards/.
-6. Identify the change class and affected domains before implementation.
-7. Make the smallest correct change and avoid enterprise-process expansion without demonstrated solo-developer value.
+6. Identify the change class and affected domains/contracts/security/operations before implementation.
+7. Make the smallest correct change and avoid unnecessary process expansion.
 8. Validate schemas, templates, and reusable workflows after changes.
 9. Never weaken validation merely to obtain PASS.
 10. Never report unexecuted or blocked validation as PASS.
