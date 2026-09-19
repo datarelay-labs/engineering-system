@@ -2,7 +2,7 @@
 name: AI Work Packet
 about: Repository-scoped current state for ChatGPT/Cursor session continuity
 title: "[AI Work] "
-labels: ["ai-work"]
+labels: []
 assignees: []
 ---
 
