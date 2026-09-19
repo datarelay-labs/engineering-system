@@ -5,17 +5,25 @@ alwaysApply: true
 
 # Mandatory Engineering System Rule
 
-This repository is the canonical Engineering System used across all software/product projects the owner works on with ChatGPT or Cursor, including repositories under datarelay-labs, xdr-labs, and future related organizations.
+This repository is the canonical Engineering System.
 
-Before planning, editing, refactoring, fixing, testing, releasing, upgrading, operating, or documenting:
+Always read:
+1. @AGENTS.md
+2. @.engineering/project.yaml
 
-1. Read @AGENTS.md.
-2. Read @.engineering/project.yaml.
-3. Read @.engineering/tests.yaml.
-4. Read @.engineering/release.yaml for release-related work.
-5. Read the relevant file under @standards/.
-6. Identify the change class and affected domains/contracts/security/operations before implementation.
-7. Make the smallest correct change and avoid unnecessary process expansion.
-8. Validate schemas, templates, and reusable workflows after changes.
-9. Never weaken validation merely to obtain PASS.
-10. Never report unexecuted or blocked validation as PASS.
+Read only when relevant:
+3. @.engineering/tests.yaml for implementation/debugging/testing
+4. @.engineering/release.yaml for release/version/artifact work
+5. the relevant file under @standards/
+
+Do not preload every standard, Wiki page, archive, or historical discussion.
+
+Before changing anything:
+- identify change class and affected domains/contracts/security/operations
+- inspect relevant implementation/tests
+- make the smallest correct change
+- run cheapest affected validation first
+- do not duplicate equivalent native/shared gates
+- do not start expensive downstream qualification while a blocking deterministic failure exists
+- never weaken validation merely to obtain PASS
+- never report unexecuted or blocked validation as PASS
