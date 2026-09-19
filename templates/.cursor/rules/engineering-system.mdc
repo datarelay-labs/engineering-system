@@ -29,4 +29,6 @@ Then:
 - never report unexecuted/skipped/blocked/historical evidence as current PASS
 - never reuse release qualification evidence from another source HEAD
 
+When explicitly resuming an existing workstream, use the repository-scoped active AI Work Packet and verify current Git state before acting. Do not load packets from unrelated repositories. Fail closed on missing or ambiguous packet selection.
+
 Tool-specific rules may adapt syntax but must not weaken the Engineering System core.
