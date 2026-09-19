@@ -1,21 +1,57 @@
 # Knowledge, Documentation & Source-of-Truth Standard
 
-Engineering knowledge must be durable enough that a future human or AI agent can reconstruct why the system behaves as it does.
+Engineering knowledge must be durable enough that a future human or AI agent can reconstruct current intended behavior without replaying old chat history.
 
-## Source-of-truth hierarchy
+## Final-state knowledge model
 
-Default:
-1. repository code/config/schema for executable truth
-2. repository engineering metadata and canonical product specifications
-3. ADRs for durable decisions
-4. runbooks/RCA for operations and incidents
-5. Wiki for human-readable and AI-searchable derived knowledge
+Do not preserve intermediate tool evaluations or implementation detours in the public playbook unless they remain operationally relevant. Share the final adopted method, contract, and usage.
 
-If a Wiki page conflicts with canonical Git content, Git wins unless the project explicitly defines another authority.
+## Canonical roles
 
-## Documentation rules
+### Product Master — optional
+Use only for complex products that need a durable product-level model: concepts, long-lived invariants, supported boundaries, and product semantics. Do not duplicate implementation detail already canonical elsewhere.
 
-Update documentation when a change alters:
+### OpenSpec or equivalent specification system
+When adopted by a project:
+- current accepted behavior lives in the project's canonical specs
+- active accepted changes live in change proposals/work items
+- completed changes may be archived after implementation and evidence are complete
+
+A specification system is optional; do not add a second competing specification framework to a project that already has an adequate one.
+
+### Decision Event
+A Decision Event is a structured handoff for an explicitly accepted decision. It is not an additional permanent source of truth. Uncertain discussion text must not be auto-promoted into an accepted decision.
+
+### ADR
+Use only for durable, expensive-to-reverse architecture/security/persistence/public-contract decisions.
+
+### Code + tests
+Executable implementation and deterministic behavior evidence.
+
+### Runbook / RCA
+Operational procedure and incident learning.
+
+### Wiki / Athena
+Human-readable navigation, explanation, cross-project context, and AI search. It is a derived knowledge layer, not a competing normative source.
+
+## Default authority
+
+1. executable code/config/schema for runtime truth
+2. canonical product/specification artifacts for intended behavior
+3. repository engineering metadata
+4. ADRs for durable architectural decisions
+5. runbooks/RCA for operations/incidents
+6. Wiki/Athena for derived explanation/search
+
+If derived knowledge conflicts with canonical Git content, canonical Git content wins.
+
+## Context-efficiency rule
+
+Agents should retrieve only the knowledge needed for the current task. Do not load all Wiki pages, all archived specifications, all ADRs, or historical discussions into every task context.
+
+## Documentation triggers
+
+Update durable documentation when a change alters:
 - public API/CLI
 - install/upgrade/uninstall behavior
 - configuration or persisted data
@@ -24,19 +60,7 @@ Update documentation when a change alters:
 - supported platforms
 - release/rollback procedure
 
-Avoid duplicating the same normative rule in many locations. Link to canonical content.
-
-## ADRs
-
-Use ADRs only for durable, expensive-to-reverse decisions such as architecture boundaries, public contracts, security model, persistent formats, or major runtime dependencies.
-
-## Product/specification master
-
-Projects with a Product Master or equivalent must identify its canonical path/version. Implementation must not silently diverge from accepted product semantics.
-
-## Wiki
-
-Wiki is for navigation, explanation, search, and cross-project context. Durable normative changes happen in the canonical repository first, then sync to Wiki.
+Avoid duplicating the same normative rule in multiple canonical locations. Link instead.
 
 ## Incident and field knowledge
 
@@ -46,6 +70,6 @@ Meaningful production/manual findings should become one or more of:
 - runbook improvement
 - RCA
 - ADR
-- product requirement clarification
+- product requirement/specification clarification
 
-Knowledge that only exists in a chat is not considered durable engineering state.
+Knowledge that exists only in a chat is not durable engineering state.
