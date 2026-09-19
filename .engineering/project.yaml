@@ -1,0 +1,21 @@
+engineering_system:
+  version: "1.0.0"
+
+project:
+  name: "engineering-system"
+  type: "engineering-governance"
+  maturity: "development"
+
+domains:
+  - standards
+  - ai
+  - templates
+  - schemas
+  - workflows
+
+platforms:
+  - github-actions
+
+operations:
+  production_oriented: false
+  runbook_required: false
