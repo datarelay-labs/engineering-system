@@ -23,14 +23,15 @@ Avoid dependency churn for cosmetic reasons.
 
 ## Open-source and license compliance
 
-Projects that redistribute third-party software must track applicable:
-- upstream project/version
-- license and notice obligations
-- source/binary redistribution obligations
-- local modifications where required
-- bundled/transitive components when material
+Projects that redistribute third-party software must track applicable upstream project/version, license/notice obligations, redistribution obligations, local modifications where required, and material bundled/transitive components.
 
-Do not remove required upstream notices.
+## GitHub Actions / CI supply-chain rule
+
+For canonical governance/release workflows, pin third-party GitHub Actions to a full immutable commit SHA. Keep the human-readable major tag in a comment when useful for maintenance.
+
+Project-specific workflows should apply the same rule for security-sensitive/release paths.
+
+Do not run untrusted public pull-request code on privileged or sensitive self-hosted runners. Use trusted branches/manual release workflows for lab or internal infrastructure runners.
 
 ## Supply-chain integrity
 
@@ -40,7 +41,7 @@ Release-oriented projects should use, as applicable:
 - release manifest
 - SBOM
 - provenance/attestation
-- pinned reusable workflow/action revisions where practical
+- pinned reusable workflow/action revisions
 
 ## Security bug workflow
 
