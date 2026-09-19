@@ -4,6 +4,8 @@ exact_head_required: true
 artifact_hash_required: false
 provenance_required: true
 sbom_required: false
+preflight_required: false
+preflight_command: ""
 operational_e2e_required: false
 full_e2e_passes: 0
 public_smoke_required: false
