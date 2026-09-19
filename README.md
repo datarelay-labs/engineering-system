@@ -14,6 +14,7 @@ The system optimizes for:
 - release-candidate-only expensive qualification
 - exact-HEAD release evidence
 - durable regression/incident knowledge
+- repository-scoped AI session continuity without chat handoff accumulation
 
 ## Default execution model
 
@@ -46,6 +47,7 @@ Do not run multi-hour full suites on every PR. Do not start expensive downstream
 | Version, artifacts, qualification, upgrade, rollback | `standards/RELEASE.md` |
 | Operations, observability, backup/restore, incidents, DR | `standards/OPERATIONS.md` |
 | Product Master/OpenSpec/ADR/Wiki source-of-truth roles | `standards/KNOWLEDGE.md` |
+| AI session continuity and repository-scoped Work Packets | `standards/SESSION_CONTINUITY.md` |
 | Core/adapters and deterministic enforcement | `standards/ENFORCEMENT.md` |
 
 ## Core and adapters
