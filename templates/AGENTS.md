@@ -16,6 +16,8 @@ Then only when relevant:
 
 Do not preload all standards, Wiki pages, archived changes, or historical discussions.
 
+When explicitly resuming an existing workstream, resolve this repository first and load its single matching active AI Work Packet. Do not search other repositories or replay old chat history. Verify the actual branch/HEAD/state before acting.
+
 ## Execution rules
 
 1. Classify the change and identify affected domains/contracts/security/operations.
