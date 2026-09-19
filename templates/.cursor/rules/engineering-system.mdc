@@ -1,0 +1,27 @@
+---
+description: Data Relay Labs mandatory engineering workflow and qualification rules
+alwaysApply: true
+---
+
+# Mandatory Engineering System Rule
+
+This repository follows the Data Relay Labs Engineering System.
+
+Before planning, editing, refactoring, fixing, testing, or releasing code:
+
+1. Read @AGENTS.md.
+2. Read @.engineering/project.yaml.
+3. Read @.engineering/tests.yaml.
+4. For release/version/artifact work, read @.engineering/release.yaml.
+5. Use the Engineering System version/baseline declared by the project profile.
+6. Identify the change class and affected domains before implementation.
+7. Inspect relevant existing implementation and tests.
+8. Make the smallest correct change; do not expand scope or perform unrelated refactors.
+9. Run affected tests first, then wider gates required by risk/release policy.
+10. A bug fix must add or identify durable regression coverage whenever practical.
+11. Never weaken a valid test merely to obtain PASS.
+12. Never report unexecuted, skipped, blocked, or historical evidence as current PASS.
+13. Never reuse release qualification evidence from another source HEAD.
+14. If mandatory engineering context is missing or contradictory, stop implementation and report the configuration problem instead of guessing.
+
+Repository-local public contracts and release rules override generic assumptions. The canonical shared system is datarelay-labs/engineering-system.

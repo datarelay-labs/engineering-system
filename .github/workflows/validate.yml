@@ -24,5 +24,8 @@ jobs:
       - name: Validate schemas, profiles, templates, and workflows
         run: python tools/validate.py
 
+      - name: Validate mandatory AI enforcement adoption
+        run: python tools/check-adoption.py --root .
+
       - name: Check whitespace
         run: git diff --check

@@ -1,0 +1,55 @@
+name: Reusable Engineering Adoption Compliance
+
+on:
+  workflow_call:
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependency
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Validate mandatory Engineering System files
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            AGENTS.md
+            .engineering/project.yaml
+            .engineering/tests.yaml
+            .engineering/release.yaml
+            .cursor/rules/engineering-system.mdc
+          )
+          for path in "${required[@]}"; do
+            if [[ ! -f "$path" ]]; then
+              echo "FAIL missing required file: $path" >&2
+              exit 1
+            fi
+          done
+
+          grep -q '^alwaysApply: true$' .cursor/rules/engineering-system.mdc || {
+            echo "FAIL Cursor engineering-system rule is not alwaysApply: true" >&2
+            exit 1
+          }
+
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+
+          profile = yaml.safe_load(Path(".engineering/project.yaml").read_text()) or {}
+          version = (profile.get("engineering_system") or {}).get("version")
+          if not version:
+              raise SystemExit("FAIL project.yaml missing engineering_system.version")
+          print(f"ENGINEERING_SYSTEM_VERSION={version}")
+          PY
+
+          echo "ENGINEERING_SYSTEM_ADOPTION=PASS"
