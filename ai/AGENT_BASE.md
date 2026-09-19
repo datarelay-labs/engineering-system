@@ -1,35 +1,50 @@
 # AI Agent Base Rules
 
-Applies to ChatGPT, Cursor, Codex, and similar agents.
+These are agent-agnostic base rules for ChatGPT, Cursor, Codex, and similar agents. Product-specific adapters may add tool syntax, but must not weaken the core rules.
+
+## Context budget
+
+Always load:
+1. repository `AGENTS.md`
+2. `.engineering/project.yaml`
+
+Load only when relevant:
+- `.engineering/tests.yaml` for implementation/debugging/testing
+- `.engineering/release.yaml` for release/version/artifact work
+- the single relevant Engineering System standard
+- Product Master/OpenSpec/ADR/runbook material only when the task touches that contract
+
+Do not preload the entire Wiki, all standards, archived specifications, or historical discussions.
 
 ## Before editing
-1. Read repository `AGENTS.md`.
-2. Read `.engineering/project.yaml`, `tests.yaml`, and `release.yaml` when present.
-3. Inspect repository status, branch/worktree, relevant code, and relevant tests.
-4. Classify the change.
-5. Identify affected domains and public contracts.
-6. Preserve unrelated work and user data.
+- inspect repository status, branch/worktree, relevant code, and relevant tests
+- classify the change
+- identify affected domains and public contracts
+- preserve unrelated work and user data
 
 ## Implementation
 - make the smallest correct change
 - do not silently expand scope
 - avoid unrelated refactors
-- follow repository patterns unless architecture intentionally changes
 - preserve public behavior unless requirements change it
 - add regression coverage for bugs
 - never weaken valid assertions merely to get PASS
 
 ## Testing
-- run affected tests first
+- run the cheapest affected deterministic tests first
 - expand based on risk
+- do not run an expensive full suite when a known blocking deterministic regression already exists
+- do not duplicate equivalent native CI gates
 - use actual public interfaces for user-behavior E2E
 - distinguish deterministic PASS from AI opinion
-- report required checks that are skipped or blocked
+- report skipped/blocked required checks
 
 ## Release
+- run a fast release preflight before expensive qualification
 - identify exact candidate SHA
 - never reuse evidence from another SHA
 - prefer immutable artifact references
+- stop expensive downstream stages after a blocker
 - do not tag/release/change stable channels without authorization
 - reset exact-head qualification when product code changes
 
