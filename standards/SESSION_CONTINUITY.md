@@ -158,11 +158,14 @@ Never treat a stale packet HEAD as current truth.
 
 After selecting the packet:
 
-1. Read repository `AGENTS.md`.
-2. Read `.engineering/project.yaml`.
-3. Read test/release metadata only when relevant.
-4. Read only canonical references required by `Next Action`.
-5. Do not preload all references named in the packet.
+1. Check whether repository `AGENTS.md` and `.engineering/project.yaml` exist.
+2. If they exist, read them first.
+3. If they are absent because the repository has not yet adopted the Engineering System or adoption is intentionally pending in a separate workstream/PR, record the adoption gap and continue under the canonical Engineering System default. Do not create, merge, or modify adoption files unless the current Work Packet explicitly authorizes that work.
+4. Read test/release metadata only when relevant and only if present for the adopted project state.
+5. Read only canonical references required by `Next Action`.
+6. Do not preload all references named in the packet.
+
+Missing local adoption files are not, by themselves, a reason to abandon an otherwise valid Work Packet. They are a configuration/adoption fact that must be reported and handled without guessing.
 
 The Work Packet replaces a large handoff; it must not become another large handoff.
 
