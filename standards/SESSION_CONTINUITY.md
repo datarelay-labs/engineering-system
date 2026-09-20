@@ -53,15 +53,19 @@ Multiple workstreams may coexist safely when packet selection is deterministic.
 Every packet body begins with:
 
 ```text
-PACKET_VERSION=1
+PACKET_VERSION=2
 TARGET_REPO=owner/repository
 WORKSTREAM=<stable-slug>
 STATUS=ACTIVE|PAUSED|BLOCKED|COMPLETE
 BRANCH=<branch-name|N/A>
+TASK_KIND=DESIGN|DEVELOPMENT|TEST|REVIEW|RELEASE|OPERATIONS|ADOPTION|DOCUMENTATION|CLEANUP|MIXED
+OWNER_INTENT=<one concise line describing the owner's current explicit request>
 LAST_VERIFIED_HEAD=<40-char-sha|UNKNOWN>
 ```
 
 `LAST_VERIFIED_HEAD` is evidence of the last observed state, not authority. The current repository state must be re-verified on resume.
+
+`TASK_KIND` and `OWNER_INTENT` describe the current bounded handoff, not the lifetime purpose of the workstream. Refresh them whenever the owner's explicit request changes materially.
 
 ## Required sections
 
@@ -105,6 +109,28 @@ Compact executed evidence such as exact HEAD, targeted test result, CI run/PR li
 
 Only current blockers.
 
+## Owner-intent synchronization
+
+Before handing work to an implementation agent, the coordinating agent must synchronize the packet with the owner's latest explicit request:
+
+1. Set `TASK_KIND` to the current execution phase.
+2. Set `OWNER_INTENT` to one concise statement of what the owner is asking for now.
+3. Ensure `Next Action` directly advances both the workstream `Goal` and `OWNER_INTENT`.
+4. Do not silently substitute an older release, cleanup, or validation step merely because it was previously pending.
+5. If the new request is still the same workstream, update the existing packet. If it is a genuinely independent workstream, create a separate packet.
+6. If `Goal`, `OWNER_INTENT`, `TASK_KIND`, and `Next Action` materially conflict, do not execute the packet. Report `WORK_PACKET_SCOPE_MISMATCH` and obtain or record the minimum correction needed.
+
+`STATUS` is deliberately small and fixed. Do not invent transient values such as `CURSOR_READY`, `WAITING`, or `DONE`.
+
+- `ACTIVE` — work is runnable or waiting on a machine-observable condition that can be resumed automatically.
+- `PAUSED` — the owner intentionally paused the workstream.
+- `BLOCKED` — progress requires a human/external action or a required execution environment is unavailable.
+- `COMPLETE` — terminal; no executable `Next Action` remains.
+
+"Ready for Cursor" is represented by `STATUS=ACTIVE` plus a valid `Next Action`, not by a new status value.
+
+Packet version 1 is legacy-compatible. Agents may resume a valid v1 packet, but should migrate it to v2 fields on the next meaningful packet update rather than blocking solely because `TASK_KIND` or `OWNER_INTENT` is absent.
+
 ## What must not be copied into a Work Packet
 
 Do not paste:
@@ -127,6 +153,7 @@ A Work Packet is a current-state record, not an append-only diary.
 
 After meaningful progress:
 
+- refresh `TASK_KIND` and `OWNER_INTENT` when the owner's request changes
 - replace `Current State`
 - replace `Next Action`
 - replace `Latest Evidence`
@@ -147,10 +174,12 @@ When resuming work:
 4. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
 5. Require exact `TARGET_REPO` match.
 6. Prefer an exact `BRANCH` match when branch context exists.
-7. Require exactly one matching `STATUS=ACTIVE` packet.
-8. Zero matches: report no active packet; do not reconstruct state from guesses.
-9. Multiple matches: fail closed and ask which workstream to use.
-10. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
+7. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
+8. For packet v2, require `TASK_KIND` and `OWNER_INTENT`, and verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
+9. For legacy packet v1, use `Goal` + `Next Action` conservatively and migrate the packet to v2 on the next meaningful update.
+10. Zero matches: report no active packet; do not reconstruct state from guesses.
+11. Multiple matches: fail closed and ask which workstream to use.
+12. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
 
 Never treat a stale packet HEAD as current truth.
 
@@ -175,8 +204,10 @@ When the user asks to continue/resume an existing engineering workstream:
 
 - resolve the target repository
 - load its active Work Packet
+- synchronize the packet with the owner's latest explicit request before implementation handoff
+- verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence when packet v2 is used
 - verify current GitHub/repository facts
-- continue from `Next Action`
+- continue from `Next Action` only when it still matches the current owner intent
 - do not ask the user to paste prior chat unless the required durable state genuinely does not exist
 
 ## Cursor behavior
@@ -185,9 +216,10 @@ Repository adoption should provide `.cursor/commands/resume.md`.
 
 The resume command:
 
+- requires a working local shell/process and Git context for repository implementation; if these cannot start, reports `ENVIRONMENT_BLOCKER` instead of probing unrelated knowledge systems
 - derives repository/branch/HEAD from Git
 - loads the repository-scoped active Work Packet through an available GitHub integration or authenticated `gh`
-- fails closed on missing/ambiguous packets
+- fails closed on missing/ambiguous packets, invalid status values, or material owner-intent/Next-Action mismatch
 - reads only task-relevant canonical references
 - executes the current `Next Action`
 - updates the same packet with concise verified state/evidence at completion
@@ -204,7 +236,7 @@ Canonical Issue title prefix:
 
 An `ai-work` label is optional. The title prefix plus required identity fields are the portable deterministic markers.
 
-Use:
+Use only:
 
 ```text
 ACTIVE   -> open Issue
@@ -212,6 +244,8 @@ PAUSED   -> open Issue
 BLOCKED  -> open Issue
 COMPLETE -> close Issue
 ```
+
+Do not introduce tool-specific lifecycle states. Tool readiness, CI waiting, or implementation phases belong in `Current State`, `TASK_KIND`, `OWNER_INTENT`, and `Latest Evidence`.
 
 A new independent workstream gets a new Issue rather than reusing an unrelated completed packet.
 
