@@ -178,8 +178,7 @@ def suggest_setup_command(root: Path, test_command: str) -> str:
             if (root / rel).is_file():
                 commands.append(f"python -m pip install -r {rel}")
                 break
-        if not commands:
-            commands.append("python -m pip install pytest")
+        commands.append("python -m pip install pytest")
         return " && ".join(commands)
 
     return ""
