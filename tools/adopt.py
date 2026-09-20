@@ -679,14 +679,21 @@ def main() -> int:
     parser.add_argument("--ack-rule-review", action="store_true")
     parser.add_argument("--allow-no-tests", action="store_true")
     parser.add_argument("--test-command", default="")
+    parser.add_argument("--domain-test", action="append", default=[])
     parser.add_argument("--setup-command", default="")
+    parser.add_argument("--build-command", default="")
+    parser.add_argument("--lint-command", default="")
+    parser.add_argument("--typecheck-command", default="")
     parser.add_argument("--release-command", default="")
     parser.add_argument("--preflight-command", default="")
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
     parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
+    parser.add_argument("--native-ci-workflow", action="append", default=[])
+    parser.add_argument("--merge-gate-status", default="unknown", choices=("verified", "advisory", "unknown"))
     parser.add_argument("--maturity", default="development", choices=("experimental", "development", "production", "maintenance"))
-    parser.add_argument("--domain", default="core")
+    parser.add_argument("--operations-mode", default="auto", choices=("auto", "production", "nonproduction"))
+    parser.add_argument("--domain", default="")
     parser.add_argument("--platform", default="linux")
     args = parser.parse_args()
 
@@ -728,15 +735,46 @@ def main() -> int:
         elif not args.allow_no_tests:
             raise SystemExit("FAIL no unambiguous test command found; pass --test-command or --allow-no-tests")
 
+    domain_tests = parse_domain_tests(list(args.domain_test))
+    if domain_tests and test_command:
+        raise SystemExit("FAIL use either --test-command or --domain-test, not both")
+
     setup_command = args.setup_command.strip()
     if not setup_command and test_command:
         setup_command = suggest_setup_command(root, test_command)
+
+    discovered_quality = dict(data.get("quality_candidates") or {})
+    quality_commands = {
+        "build": args.build_command.strip() or str(discovered_quality.get("build") or ""),
+        "lint": args.lint_command.strip() or str(discovered_quality.get("lint") or ""),
+        "typecheck": args.typecheck_command.strip() or str(discovered_quality.get("typecheck") or ""),
+    }
+    quality_commands = {name: command for name, command in quality_commands.items() if command}
 
     if args.preflight_command and not args.release_command:
         raise SystemExit("FAIL --preflight-command requires --release-command")
 
     project_type = args.project_type.strip() or str(data["project_type"])
-    patterns = list(data["source_patterns"])
+    if args.domain.strip():
+        domain_map = {args.domain.strip(): list(data["source_patterns"])}
+    else:
+        domain_map = dict(data.get("domain_candidates") or {"core": list(data["source_patterns"])})
+    if domain_tests:
+        unknown = sorted(set(domain_tests) - set(domain_map))
+        if unknown:
+            raise SystemExit("FAIL --domain-test references unknown domain(s): " + ",".join(unknown))
+    domains = list(domain_map)
+
+    operations_mode = args.operations_mode
+    operations_signals = list(data.get("operations_signals") or [])
+    if operations_mode == "auto":
+        if args.maturity in {"production", "maintenance"}:
+            operations_mode = "production"
+        elif operations_signals:
+            print("OPERATIONS_REVIEW_REQUIRED=" + ",".join(operations_signals))
+            raise SystemExit("FAIL deployment/operations signals detected; rerun with --operations-mode production|nonproduction after review")
+        else:
+            operations_mode = "nonproduction"
 
     ci_mode = args.ci_mode
     existing_workflows = [
@@ -748,6 +786,22 @@ def main() -> int:
             print("CI_REVIEW_REQUIRED=" + ",".join(existing_workflows))
             raise SystemExit("FAIL existing CI detected; review equivalent gates and rerun with --ci-mode shared|native")
         ci_mode = "shared"
+
+    native_ci_workflows = [item.strip() for item in args.native_ci_workflow if item.strip()]
+    if ci_mode == "native":
+        if not native_ci_workflows:
+            if len(existing_workflows) == 1:
+                native_ci_workflows = [existing_workflows[0]]
+            elif len(existing_workflows) > 1:
+                print("NATIVE_CI_MAPPING_REQUIRED=" + ",".join(existing_workflows))
+                raise SystemExit("FAIL native CI mode requires explicit --native-ci-workflow mapping")
+            else:
+                raise SystemExit("FAIL native CI mode selected but no project-native workflow exists")
+        missing_native = [path for path in native_ci_workflows if not (root / path).is_file()]
+        if missing_native:
+            raise SystemExit("FAIL mapped native CI workflow missing: " + ",".join(missing_native))
+    else:
+        native_ci_workflows = []
 
     written: list[str] = []
     skipped: list[str] = []
@@ -777,21 +831,33 @@ def main() -> int:
     write_missing(
         root,
         ".engineering/project.yaml",
-        project_yaml(root, version, baseline, ci_mode, project_type, args.maturity, args.domain, args.platform),
+        project_yaml(
+            root,
+            version,
+            baseline,
+            ci_mode,
+            native_ci_workflows,
+            args.merge_gate_status,
+            project_type,
+            args.maturity,
+            domains,
+            args.platform,
+            operations_mode,
+        ),
         written,
         skipped,
     )
     write_missing(
         root,
         ".engineering/tests.yaml",
-        tests_yaml(patterns, setup_command, test_command, args.domain, args.platform),
+        tests_yaml(domain_map, setup_command, test_command, domain_tests, quality_commands, args.platform),
         written,
         skipped,
     )
     write_missing(
         root,
         ".engineering/release.yaml",
-        release_yaml(args.preflight_command.strip(), args.release_command.strip()),
+        release_yaml(args.preflight_command.strip(), args.release_command.strip(), operations_mode),
         written,
         skipped,
     )
@@ -819,6 +885,10 @@ def main() -> int:
     print(f"ENGINEERING_SYSTEM_VERSION={version}")
     print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
     print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
+    print("NATIVE_CI_WORKFLOWS=" + (",".join(native_ci_workflows) if native_ci_workflows else "<none>"))
+    print(f"MERGE_GATE_ENFORCEMENT={args.merge_gate_status}")
+    print(f"OPERATIONS_MODE={operations_mode}")
+    print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
     if setup_command:
@@ -827,8 +897,11 @@ def main() -> int:
         print("SETUP_COMMAND=<none>")
     if test_command:
         print(f"TEST_COMMAND={test_command}")
+    elif domain_tests:
+        print("DOMAIN_TESTS=" + json.dumps(domain_tests, sort_keys=True))
     else:
         print("TEST_COMMAND=<explicitly-none>")
+    print("QUALITY_COMMANDS=" + (json.dumps(quality_commands, sort_keys=True) if quality_commands else "<none>"))
     if args.release_command:
         print("RELEASE_AUTOMATION=WIRED")
     else:
