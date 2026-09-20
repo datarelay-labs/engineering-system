@@ -1,5 +1,6 @@
 engineering_system:
-  version: "1.3.1"
+  version: "1.4.0"
+  mode: canonical
 
 project:
   name: "engineering-system"
@@ -14,6 +15,7 @@ domains:
   - schemas
   - workflows
   - session-continuity
+  - adoption
 
 platforms:
   - github-actions
