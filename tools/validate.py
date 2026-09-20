@@ -107,6 +107,16 @@ def validate_resume_template_parity():
     print("PASS canonical/template Cursor resume parity")
 
 
+def validate_issue_template_parity():
+    canonical = (ROOT / ".github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
+    template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
+    if canonical != template:
+        raise SystemExit(
+            "FAIL templates/.github/ISSUE_TEMPLATE/ai-work-packet.md drifted from canonical issue template"
+        )
+    print("PASS canonical/template AI Work Packet parity")
+
+
 def validate_session_continuity_templates():
     issue_path = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
     resume_path = ROOT / "templates/.cursor/commands/resume.md"
@@ -115,11 +125,13 @@ def validate_session_continuity_templates():
     resume_text = resume_path.read_text(encoding="utf-8")
 
     issue_tokens = (
-        "PACKET_VERSION=1",
+        "PACKET_VERSION=2",
         "TARGET_REPO=",
         "WORKSTREAM=",
         "STATUS=ACTIVE",
         "BRANCH=",
+        "TASK_KIND=",
+        "OWNER_INTENT=",
         "LAST_VERIFIED_HEAD=",
         "## Next Action",
         "## Canonical References",
@@ -127,14 +139,18 @@ def validate_session_continuity_templates():
         "## Blockers",
     )
     resume_tokens = (
+        "ENVIRONMENT_BLOCKER",
         "git remote get-url origin",
         "git branch --show-current",
         "git rev-parse HEAD",
         "TARGET_REPO",
         "STATUS=ACTIVE",
-        "BRANCH",
+        "TASK_KIND",
+        "OWNER_INTENT",
+        "WORK_PACKET_SCOPE_MISMATCH",
         "exactly one match",
         "Next Action",
+        "STATUS=COMPLETE",
         "update the same Work Packet",
     )
 
@@ -145,6 +161,14 @@ def validate_session_continuity_templates():
     for token in resume_tokens:
         if token not in resume_text:
             failures.append(f"Cursor resume template missing token: {token}")
+
+    forbidden_resume = ("STATUS=DONE", "STATUS=CURSOR_READY")
+    for token in forbidden_resume:
+        if token in resume_text:
+            failures.append(f"Cursor resume template contains non-canonical status: {token}")
+
+    if "CURSOR_READY" in issue_text or "STATUS=DONE" in issue_text:
+        failures.append("AI Work Packet template contains a non-canonical status")
 
     if failures:
         for item in failures:
@@ -231,6 +255,7 @@ def main():
     require_files(REQUIRED_METHOD_FILES)
     validate_version_alignment()
     validate_resume_template_parity()
+    validate_issue_template_parity()
     validate_session_continuity_templates()
     validate_adoption_contract()
     validate_action_pins()
