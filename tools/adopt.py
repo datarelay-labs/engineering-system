@@ -360,46 +360,128 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def project_yaml(root: Path, version: str, baseline: str, ci_mode: str, project_type: str, maturity: str, domain: str, platform: str) -> str:
-    return (
-        "engineering_system:\n"
-        f"  version: {yaml_scalar(version)}\n"
-        "  mode: adopted\n"
-        f"  baseline: {yaml_scalar(baseline)}\n"
-        f"  ci_mode: {yaml_scalar(ci_mode)}\n\n"
-        "project:\n"
-        f"  name: {yaml_scalar(root.name)}\n"
-        f"  type: {yaml_scalar(project_type)}\n"
-        f"  maturity: {yaml_scalar(maturity)}\n\n"
-        "domains:\n"
-        f"  - {yaml_scalar(domain)}\n\n"
-        "platforms:\n"
-        f"  - {yaml_scalar(platform)}\n\n"
-        "operations:\n"
-        "  production_oriented: false\n"
-        "  runbook_required: false\n"
+def parse_domain_tests(values: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"FAIL invalid --domain-test {value!r}; expected domain=command")
+        domain, command = value.split("=", 1)
+        domain = domain.strip()
+        command = command.strip()
+        if not domain or not command:
+            raise SystemExit(f"FAIL invalid --domain-test {value!r}; expected domain=command")
+        result[domain] = command
+    return result
+
+
+def project_yaml(
+    root: Path,
+    version: str,
+    baseline: str,
+    ci_mode: str,
+    native_ci_workflows: list[str],
+    merge_gate_status: str,
+    project_type: str,
+    maturity: str,
+    domains: list[str],
+    platform: str,
+    operations_mode: str,
+) -> str:
+    production = operations_mode == "production"
+    lines = [
+        "engineering_system:",
+        f"  version: {yaml_scalar(version)}",
+        "  mode: adopted",
+        f"  baseline: {yaml_scalar(baseline)}",
+        f"  ci_mode: {yaml_scalar(ci_mode)}",
+        "  native_ci_workflows:",
+    ]
+    if native_ci_workflows:
+        lines.extend(f"    - {yaml_scalar(path)}" for path in native_ci_workflows)
+    else:
+        lines.append("    []")
+    lines.extend(
+        [
+            f"  merge_gate_status: {yaml_scalar(merge_gate_status)}",
+            "",
+            "project:",
+            f"  name: {yaml_scalar(root.name)}",
+            f"  type: {yaml_scalar(project_type)}",
+            f"  maturity: {yaml_scalar(maturity)}",
+            "",
+            "domains:",
+        ]
     )
+    lines.extend(f"  - {yaml_scalar(domain)}" for domain in domains)
+    lines.extend(
+        [
+            "",
+            "platforms:",
+            f"  - {yaml_scalar(platform)}",
+            "",
+            "operations:",
+            f"  production_oriented: {'true' if production else 'false'}",
+            f"  runbook_required: {'true' if production else 'false'}",
+            f"  incident_response_required: {'true' if production else 'false'}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
-def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domain: str, platform: str) -> str:
+def tests_yaml(
+    domain_map: dict[str, list[str]],
+    setup_command: str,
+    test_command: str,
+    domain_tests: dict[str, str],
+    quality_commands: dict[str, str],
+    platform: str,
+) -> str:
+    domains = list(domain_map)
     lines = ["version: 1", "", f"setup_command: {yaml_scalar(setup_command)}", "", "paths:"]
-    for pattern in patterns:
-        lines.extend(
-            [
-                f"  {yaml_scalar(pattern)}:",
-                "    domains:",
-                f"      - {yaml_scalar(domain)}",
-            ]
-        )
+    for domain, patterns in domain_map.items():
+        for pattern in patterns:
+            lines.extend(
+                [
+                    f"  {yaml_scalar(pattern)}:",
+                    "    domains:",
+                    f"      - {yaml_scalar(domain)}",
+                ]
+            )
+
     lines.extend(["", "scenarios:"])
-    if test_command:
+    if domain_tests:
+        for index, (domain, command) in enumerate(sorted(domain_tests.items()), start=1):
+            lines.extend(
+                [
+                    f"  - id: ADOPTED-DOMAIN-{index:03d}",
+                    f"    name: {domain} affected tests",
+                    "    level: integration",
+                    "    domains:",
+                    f"      - {yaml_scalar(domain)}",
+                    "    triggers:",
+                    "      - affected",
+                    "    platforms:",
+                    f"      - {yaml_scalar(platform)}",
+                    f"    command: {yaml_scalar(command)}",
+                    "    invariants:",
+                    f"      - {yaml_scalar(domain + ' behavior remains green')}",
+                    "    release_gate: true",
+                    "",
+                ]
+            )
+    elif test_command:
         lines.extend(
             [
                 "  - id: ADOPTED-TEST-001",
                 "    name: Project-native affected tests",
                 "    level: integration",
                 "    domains:",
-                f"      - {yaml_scalar(domain)}",
+            ]
+        )
+        lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+        lines.extend(
+            [
                 "    triggers:",
                 "      - affected",
                 "    platforms:",
@@ -411,13 +493,47 @@ def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domai
                 "",
             ]
         )
+
+    for name in ("lint", "typecheck", "build"):
+        command = quality_commands.get(name, "")
+        if not command:
+            continue
+        scenario_id = f"ADOPTED-{name.upper()}-001"
+        trigger = "pr" if name in {"lint", "typecheck"} else "affected"
+        lines.extend(
+            [
+                f"  - id: {scenario_id}",
+                f"    name: Project {name}",
+                "    level: static" if name in {"lint", "typecheck"} else "    level: component",
+                "    domains:",
+            ]
+        )
+        lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+        lines.extend(
+            [
+                "    triggers:",
+                f"      - {trigger}",
+                "    platforms:",
+                f"      - {yaml_scalar(platform)}",
+                f"    command: {yaml_scalar(command)}",
+                "    invariants:",
+                f"      - {yaml_scalar('project ' + name + ' remains green')}",
+                "    release_gate: true",
+                "",
+            ]
+        )
+
     lines.extend(
         [
             "  - id: ADOPTED-STATIC-001",
             "    name: Git whitespace validation",
             "    level: static",
             "    domains:",
-            f"      - {yaml_scalar(domain)}",
+        ]
+    )
+    lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+    lines.extend(
+        [
             "    triggers:",
             "      - pr",
             "      - preflight",
@@ -434,7 +550,8 @@ def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domai
     return "\n".join(lines)
 
 
-def release_yaml(preflight_command: str, release_command: str) -> str:
+def release_yaml(preflight_command: str, release_command: str, operations_mode: str) -> str:
+    production = operations_mode == "production"
     return (
         "version: 1\n\n"
         "exact_head_required: true\n"
@@ -444,9 +561,9 @@ def release_yaml(preflight_command: str, release_command: str) -> str:
         f"preflight_required: {'true' if preflight_command else 'false'}\n"
         f"preflight_command: {yaml_scalar(preflight_command)}\n"
         f"qualification_command: {yaml_scalar(release_command)}\n"
-        "operational_e2e_required: false\n"
-        "full_e2e_passes: 0\n"
-        "public_smoke_required: false\n\n"
+        f"operational_e2e_required: {'true' if production else 'false'}\n"
+        f"full_e2e_passes: {1 if production else 0}\n"
+        f"public_smoke_required: {'true' if production else 'false'}\n\n"
         "blockers:\n"
         "  p0: true\n"
         "  p1: true\n"
