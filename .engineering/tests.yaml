@@ -15,6 +15,10 @@ paths:
     domains: [schemas]
   ".github/workflows/**":
     domains: [workflows]
+  ".github/workflows/enforcement-check.yml":
+    domains: [enforcement]
+  ".github/workflows/release-contract.yml":
+    domains: [release-contract]
   ".github/ISSUE_TEMPLATE/**":
     domains: [session-continuity]
   ".cursor/commands/**":
@@ -22,13 +26,21 @@ paths:
   "tools/**":
     domains: [workflows]
   "tools/adopt.py":
-    domains: [adoption]
+    domains: [adoption, enforcement, release-contract, operations-contract, adoption-upgrade]
   "tools/check-adoption.py":
     domains: [adoption]
   "tools/test_adopt.py":
     domains: [adoption]
+  "tools/upgrade-adoption.py":
+    domains: [adoption-upgrade]
   "standards/ADOPTION.md":
-    domains: [adoption]
+    domains: [adoption, adoption-upgrade]
+  "standards/ENFORCEMENT.md":
+    domains: [standards, enforcement]
+  "standards/RELEASE.md":
+    domains: [standards, release-contract]
+  "standards/OPERATIONS.md":
+    domains: [standards, operations-contract]
   "templates/.github/workflows/engineering-system.yml":
     domains: [adoption]
 
