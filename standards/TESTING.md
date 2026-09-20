@@ -32,6 +32,8 @@ Deterministic CI must not depend on AI inference for test selection.
 
 `.engineering/tests.yaml` maps changed paths to domains. Scenarios declare domains and triggers.
 
+A manifest may define a top-level `setup_command` for deterministic CI dependency/bootstrap preparation. The shared affected-test workflow runs it once, and only when one or more scenarios were selected. Keep scenario `command` focused on the actual test invariant.
+
 For a PR:
 - scenarios tagged `pr` are cheap global guardrails and always run
 - scenarios tagged `affected` run when their domains intersect changed-path domains
