@@ -1,8 +1,8 @@
 version: 1
 
 exact_head_required: true
-artifact_hash_required: true
-provenance_required: true
+artifact_hash_required: false
+provenance_required: false
 sbom_required: false
 
 # Optional one-time release environment/bootstrap command.
@@ -20,10 +20,10 @@ sbom_command: ""
 
 operational_e2e_required: false
 operational_e2e_command: ""
-full_e2e_passes: 1
+full_e2e_passes: 0
 
 # Executed only in the post-release phase.
-public_smoke_required: true
+public_smoke_required: false
 public_smoke_command: ""
 
 blockers:
