@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <strong>Real-world example:</strong> <a href="https://engineering.datarelay.run">engineering.datarelay.run</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/datarelay-labs/engineering-system/actions/workflows/validate.yml"><img src="https://github.com/datarelay-labs/engineering-system/actions/workflows/validate.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/GitHub-canonical-111827?style=flat-square" alt="GitHub canonical">
   <img src="https://img.shields.io/badge/AI-assisted-16A34A?style=flat-square" alt="AI-assisted">
