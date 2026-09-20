@@ -188,6 +188,9 @@ def validate_adoption_contract():
         "ENGINEERING_SYSTEM_ADOPTION=PASS",
         "tools/adopt.py",
         "immutable baseline",
+        "Link-only bootstrap",
+        "--allow-no-tests",
+        "New or empty projects",
     )
     required_tool_tokens = (
         "--audit",
