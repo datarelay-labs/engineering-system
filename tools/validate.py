@@ -37,10 +37,13 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
 REQUIRED_METHOD_FILES = (
     "adapters/README.md",
     ".github/workflows/affected-tests.yml",
+    ".github/workflows/enforcement-check.yml",
     ".github/workflows/release-preflight.yml",
     ".github/workflows/release-gate.yml",
+    ".github/workflows/release-contract.yml",
     "tools/adopt.py",
     "tools/check-adoption.py",
+    "tools/upgrade-adoption.py",
     "tools/test_adopt.py",
 )
 
@@ -176,6 +179,8 @@ def validate_adoption_contract():
         "setup_command",
         "engineering-system.yml",
         "ADOPTION_BOOTSTRAP=PASS",
+        "enforcement-check.yml",
+        "release-contract.yml",
     )
     failures = []
     for token in required_standard_tokens:
@@ -184,6 +189,14 @@ def validate_adoption_contract():
     for token in required_tool_tokens:
         if token not in adopt_text:
             failures.append(f"adoption tool missing token: {token}")
+    if failures:
+        for item in failures:
+            print(f"FAIL {item}")
+        raise SystemExit(1)
+    upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
+    for token in ("ADOPTION_UPGRADE=PASS", "--baseline-sha", "engineering_system", "release_workflow"):
+        if token not in upgrade_text:
+            failures.append(f"adoption upgrade tool missing token: {token}")
     if failures:
         for item in failures:
             print(f"FAIL {item}")
