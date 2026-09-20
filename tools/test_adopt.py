@@ -59,6 +59,10 @@ def test_clean_python_bootstrap() -> None:
             BASELINE,
             "--test-command",
             "python -m pytest -q",
+            "--preflight-command",
+            "python -m compileall -q .",
+            "--release-command",
+            "python -m pytest -q",
         )
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
 
@@ -71,6 +75,7 @@ def test_clean_python_bootstrap() -> None:
             ".cursor/commands/resume.md",
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
+            ".github/workflows/engineering-release.yml",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -83,6 +88,11 @@ def test_clean_python_bootstrap() -> None:
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
         assert f"affected-tests.yml@{BASELINE}" in workflow_text
+
+        release_workflow = (target / ".github/workflows/engineering-release.yml").read_text(encoding="utf-8")
+        assert f"release-preflight.yml@{BASELINE}" in release_workflow
+        assert f"release-gate.yml@{BASELINE}" in release_workflow
+        assert "${{ inputs.expected_sha }}" in release_workflow
 
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
