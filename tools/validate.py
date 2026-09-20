@@ -155,6 +155,8 @@ def validate_adoption_contract():
         "--audit",
         "--apply",
         "--ack-rule-review",
+        "--ci-mode",
+        "setup_command",
         "engineering-system.yml",
         "ADOPTION_BOOTSTRAP=PASS",
     )
