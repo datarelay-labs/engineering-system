@@ -31,7 +31,8 @@ If mandatory context is missing or contradictory, fail closed: report the config
 7. Stop downstream expensive qualification after a blocking deterministic failure.
 8. Changes to schemas/templates/workflows must remain backward-aware.
 9. Validate YAML/JSON syntax and reusable workflow structure before merge.
-10. Never weaken enforcement/validation merely to obtain PASS.
+10. Before merge or terminal completion, inspect machine-observable PR review feedback. Fix and revalidate every actionable review finding, or explicitly disposition it with concise evidence when it is non-actionable, out of scope, or incorrect. Do not treat COMMENTED/advisory review state as automatic PASS.
+11. Never weaken enforcement/validation merely to obtain PASS.
 
 For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path.
 
