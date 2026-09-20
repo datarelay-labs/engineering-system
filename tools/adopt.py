@@ -113,6 +113,83 @@ def node_test_command(root: Path) -> str:
     return "npm test"
 
 
+def package_script_command(root: Path, script: str) -> str:
+    package = root / "package.json"
+    if not package.is_file():
+        return ""
+    try:
+        data = json.loads(package.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    scripts = data.get("scripts") or {}
+    if not str(scripts.get(script) or "").strip():
+        return ""
+    if (root / "pnpm-lock.yaml").is_file():
+        return f"pnpm {script}"
+    if (root / "yarn.lock").is_file():
+        return f"yarn {script}"
+    return f"npm run {script}"
+
+
+def make_target(root: Path, target: str) -> str:
+    makefile = root / "Makefile"
+    if not makefile.is_file():
+        return ""
+    text = makefile.read_text(encoding="utf-8", errors="replace")
+    if re.search(rf"(?m)^{re.escape(target)}\s*:", text):
+        return f"make {target}"
+    return ""
+
+
+def discover_quality_commands(root: Path) -> dict[str, str]:
+    commands = {
+        "build": package_script_command(root, "build") or make_target(root, "build"),
+        "lint": package_script_command(root, "lint") or make_target(root, "lint"),
+        "typecheck": (
+            package_script_command(root, "typecheck")
+            or package_script_command(root, "type-check")
+            or make_target(root, "typecheck")
+        ),
+    }
+    if (root / "Cargo.toml").is_file() and not commands["build"]:
+        commands["build"] = "cargo check"
+    if (root / "go.mod").is_file() and not commands["lint"]:
+        commands["lint"] = "go vet ./..."
+    return {name: command for name, command in commands.items() if command}
+
+
+def discover_domain_map(root: Path) -> dict[str, list[str]]:
+    source_candidates = (
+        "server", "client", "agent", "frontend", "backend", "api", "cli",
+        "web", "cmd", "pkg", "internal", "src", "lib", "app"
+    )
+    present = [name for name in source_candidates if (root / name).is_dir()]
+    specific = [name for name in present if name not in {"src", "lib", "app"}]
+    selected = specific if len(specific) >= 2 else []
+
+    if not selected:
+        return {"core": source_patterns(root)}
+
+    mapping: dict[str, list[str]] = {name: [f"{name}/**"] for name in selected}
+    shared_patterns = [
+        f"{name}/**"
+        for name in ("src", "lib", "app", "tests", "test")
+        if (root / name).exists()
+    ]
+    if shared_patterns:
+        mapping["shared"] = shared_patterns
+    return mapping
+
+
+def discover_operations_signals(root: Path) -> list[str]:
+    markers = (
+        "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+        "helm", "charts", "k8s", "kubernetes", "deploy", "deployment",
+        "terraform", "ansible", "systemd", "packaging", "installer"
+    )
+    return [name for name in markers if (root / name).exists()]
+
+
 def discover_test_commands(root: Path) -> list[str]:
     commands: list[str] = []
 
@@ -240,7 +317,10 @@ def inventory(root: Path) -> dict[str, object]:
         "git": git_state(root),
         "project_type": detect_project_type(root),
         "test_candidates": test_candidates,
+        "quality_candidates": discover_quality_commands(root),
         "setup_suggestion": setup_suggestion,
+        "domain_candidates": discover_domain_map(root),
+        "operations_signals": discover_operations_signals(root),
         "source_patterns": source_patterns(root),
         "existing_rule_surfaces": rule_surfaces(root),
         "existing_ci": existing_ci(root),
@@ -265,6 +345,11 @@ def print_inventory(data: dict[str, object], as_json: bool) -> None:
     rules = data["existing_rule_surfaces"]
     ci = data["existing_ci"]
     print("TEST_CANDIDATES=" + (" | ".join(tests) if tests else "<none>"))
+    quality = data.get("quality_candidates") or {}
+    print("QUALITY_CANDIDATES=" + (json.dumps(quality, sort_keys=True) if quality else "<none>"))
+    print("DOMAIN_CANDIDATES=" + json.dumps(data.get("domain_candidates") or {}, sort_keys=True))
+    operations = data.get("operations_signals") or []
+    print("OPERATIONS_SIGNALS=" + (",".join(operations) if operations else "<none>"))
     print("SETUP_SUGGESTION=" + (str(data.get("setup_suggestion") or "") or "<none>"))
     print("RULE_SURFACES=" + (",".join(rules) if rules else "<none>"))
     print("CI_WORKFLOWS=" + (",".join(ci) if ci else "<none>"))
