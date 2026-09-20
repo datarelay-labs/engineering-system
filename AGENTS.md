@@ -1,7 +1,6 @@
 # Engineering System Repository Rules
 
-This repository defines the canonical Solo AI Engineering System.
-
+This repository defines the canonical Solo AI Engineering System:\nhttps://github.com/datarelay-labs/engineering-system\n
 ## Mandatory entry sequence
 
 Always load only the minimum high-signal context needed for the task:
