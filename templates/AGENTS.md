@@ -21,16 +21,19 @@ When explicitly resuming an existing workstream, resolve this repository first a
 ## Execution rules
 
 1. Classify the change and identify affected domains/contracts/security/operations.
-2. Inspect relevant implementation and tests.
-3. Make the smallest correct change.
-4. Run the cheapest affected deterministic tests first.
-5. PR validation should stay fast; do not run a full release suite merely because code changed.
-6. Do not duplicate an equivalent native project CI gate.
-7. A known blocking deterministic failure stops expensive downstream qualification.
-8. Bug fixes require durable regression coverage whenever practical.
-9. Never weaken a valid test merely to obtain PASS.
-10. Never claim release readiness without exact executable evidence.
-11. Never reuse qualification evidence from a different source HEAD.
+2. For material design-bearing changes, apply the canonical `standards/DESIGN.md` minimal design gate before implementation.
+3. Inspect relevant implementation and tests.
+4. Make the smallest correct change.
+5. Run the cheapest affected deterministic tests first.
+6. PR validation should stay fast; do not run a full release suite merely because code changed.
+7. Do not duplicate an equivalent native project CI gate.
+8. A known blocking deterministic failure stops expensive downstream qualification.
+9. Bug fixes require durable regression coverage whenever practical.
+10. Never weaken a valid test merely to obtain PASS.
+11. Never claim release readiness without exact executable evidence.
+12. Never reuse qualification evidence from a different source HEAD.
+
+If the user reports an outage, degraded service, failed upgrade, data-loss risk, or other production-impacting symptom, switch to the canonical `standards/OPERATIONS.md` incident lifecycle. Preserve evidence before mutation and do not perform destructive/irreversible recovery without explicit approval unless an approved runbook authorizes it.
 
 If mandatory engineering context is missing or contradictory, stop implementation and report the configuration defect instead of guessing.
 
