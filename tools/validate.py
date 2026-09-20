@@ -88,6 +88,16 @@ def validate_version_alignment():
 
 
 
+def validate_resume_template_parity():
+    canonical = (ROOT / ".cursor/commands/resume.md").read_text(encoding="utf-8")
+    template = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
+    if canonical != template:
+        raise SystemExit(
+            "FAIL templates/.cursor/commands/resume.md drifted from canonical .cursor/commands/resume.md"
+        )
+    print("PASS canonical/template Cursor resume parity")
+
+
 def validate_session_continuity_templates():
     issue_path = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
     resume_path = ROOT / "templates/.cursor/commands/resume.md"
@@ -161,6 +171,7 @@ def main():
     require_files(REQUIRED_ENFORCEMENT_TEMPLATES)
     require_files(REQUIRED_METHOD_FILES)
     validate_version_alignment()
+    validate_resume_template_parity()
     validate_session_continuity_templates()
     validate_action_pins()
 
