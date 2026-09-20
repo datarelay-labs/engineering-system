@@ -57,6 +57,7 @@ def main() -> int:
     version = ""
     mode = ""
     baseline = ""
+    ci_mode = ""
     if project_path.is_file():
         try:
             project = load_yaml(project_path) or {}
@@ -64,6 +65,7 @@ def main() -> int:
             version = str(engineering.get("version") or "")
             mode = str(engineering.get("mode") or "")
             baseline = str(engineering.get("baseline") or "")
+            ci_mode = str(engineering.get("ci_mode") or "")
             if not version:
                 failures.append("project.yaml missing engineering_system.version")
             elif not SEMVER_RE.fullmatch(version):
@@ -73,6 +75,8 @@ def main() -> int:
                     failures.append("Engineering System >=1.4.0 requires engineering_system.mode=canonical|adopted")
                 if mode == "adopted" and not FULL_SHA_RE.fullmatch(baseline):
                     failures.append("managed adopted repository requires immutable engineering_system.baseline SHA")
+                if mode == "adopted" and ci_mode not in {"shared", "native"}:
+                    failures.append("managed adopted repository requires engineering_system.ci_mode=shared|native")
         except Exception as exc:
             failures.append(f"cannot parse project.yaml: {exc}")
 
@@ -130,8 +134,17 @@ def main() -> int:
             workflow_text = workflow_path.read_text(encoding="utf-8", errors="replace")
             if f"adoption-compliance.yml@{baseline}" not in workflow_text:
                 failures.append("engineering-system.yml compliance workflow is not pinned to project baseline")
-            if f"affected-tests.yml@{baseline}" not in workflow_text:
-                failures.append("engineering-system.yml affected workflow is not pinned to project baseline")
+            if ci_mode == "shared" and f"affected-tests.yml@{baseline}" not in workflow_text:
+                failures.append("shared CI mode requires affected workflow pinned to project baseline")
+            if ci_mode == "native" and f"affected-tests.yml@{baseline}" in workflow_text:
+                failures.append("native CI mode must not duplicate the shared affected-tests workflow")
+            if ci_mode == "native":
+                other_workflows = [
+                    path for path in (root / ".github/workflows").glob("*.y*ml")
+                    if path.name not in {"engineering-system.yml", "engineering-release.yml"}
+                ]
+                if not other_workflows:
+                    failures.append("native CI mode selected but no project-native workflow was found")
 
         qualification = str(release.get("qualification_command") or "").strip()
         if qualification:
@@ -156,6 +169,8 @@ def main() -> int:
         print(f"ENGINEERING_SYSTEM_MODE={mode}")
     if baseline:
         print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
+    if ci_mode:
+        print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
     print("ENGINEERING_SYSTEM_ADOPTION=PASS")
     return 0
 
