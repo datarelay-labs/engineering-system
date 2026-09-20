@@ -317,32 +317,25 @@ def main() -> int:
         release["full_e2e_passes"] = full_e2e_passes
         release["public_smoke_required"] = True
 
+    release_workflow_path = root / ".github/workflows/engineering-release.yml"
+    release_contract_enabled = bool(plan["release_contract"])
+    if release_contract_enabled and release_workflow_path.is_file():
+        old_release_workflow = release_workflow_path.read_text(encoding="utf-8")
+        # Validate the managed release surface before mutating any repository files.
+        if (
+            f"release-preflight.yml@{old_baseline}" not in old_release_workflow
+            and f"release-gate.yml@{old_baseline}" not in old_release_workflow
+            and f"release-contract.yml@{old_baseline}" not in old_release_workflow
+        ):
+            raise SystemExit(
+                "FAIL engineering-release.yml contains local/custom changes; review manually before upgrade"
+            )
+
     write_yaml(project_path, project)
     write_yaml(release_path, release)
     workflow_path.write_text(engineering_workflow(new_baseline, ci_mode), encoding="utf-8")
 
-    release_workflow_path = root / ".github/workflows/engineering-release.yml"
-    release_contract_enabled = bool(plan["release_contract"])
     if release_contract_enabled:
-        if release_workflow_path.is_file():
-            old_release_workflow = release_workflow_path.read_text(encoding="utf-8")
-            safe_release = {
-                legacy_release_workflow(
-                    old_baseline,
-                    str(release.get("preflight_command") or ""),
-                    str(release.get("qualification_command") or ""),
-                ),
-                release_workflow(old_baseline),
-            }
-            # A 1.4/1.5 generated file may use the old commands before this upgrade.
-            if (
-                f"release-preflight.yml@{old_baseline}" not in old_release_workflow
-                and f"release-gate.yml@{old_baseline}" not in old_release_workflow
-                and f"release-contract.yml@{old_baseline}" not in old_release_workflow
-            ):
-                raise SystemExit(
-                    "FAIL engineering-release.yml contains local/custom changes; review manually before upgrade"
-                )
         release_workflow_path.write_text(release_workflow(new_baseline), encoding="utf-8")
 
     checker = CANONICAL / "tools" / "check-adoption.py"
