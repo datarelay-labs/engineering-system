@@ -57,7 +57,9 @@ The intended entrypoint for a new or existing repository is deliberately simple:
 
 > Apply https://github.com/datarelay-labs/engineering-system to this project.
 
-An AI agent should then follow `standards/ADOPTION.md`: inventory the target repository, classify existing rules, discover project-native tests/CI, preserve stricter project invariants, and use the deterministic bootstrap for the mechanical installation.
+An AI agent should then follow `standards/ADOPTION.md`: resolve the target repository, obtain the canonical Engineering System from the supplied URL, pin an immutable canonical baseline SHA, inventory the target, classify existing rules, discover project-native tests/CI, preserve stricter project invariants, and use the canonical deterministic bootstrap for the mechanical installation.
+
+The target repository does not need to contain `tools/adopt.py` beforehand. The agent may use an authenticated GitHub integration or a separate temporary checkout of this canonical repository, then run the helper against the target root. A genuinely new project should establish its Git repository boundary first; `--allow-no-tests` is permitted only while no executable test target exists.
 
 Read-only audit:
 
@@ -81,6 +83,8 @@ Managed adoption pins the canonical version and immutable baseline SHA, installs
 The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, unresolved production/deployment posture, existing CI without an explicit shared/native mapping decision, ambiguous native-CI ownership, and destructive upgrades fail closed.
 
 Existing managed 1.5 adoptions can be upgraded through the fail-closed `tools/upgrade-adoption.py` workflow rather than by blindly rerunning bootstrap.
+
+Once adoption is qualified, later feature, bugfix, testing, release, operations, incident, and retirement work is routed by the repository entrypoint, project metadata, relevant canonical standard, and deterministic evidence. There is no separate "activate the lifecycle" step.
 
 See `standards/ADOPTION.md`.
 
