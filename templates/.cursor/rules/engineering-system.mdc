@@ -31,7 +31,7 @@ Then:
 - never report unexecuted/skipped/blocked/historical evidence as current PASS
 - never reuse release qualification evidence from another source HEAD
 
-When explicitly resuming an existing workstream, use the repository-scoped active AI Work Packet and verify current Git state before acting. Do not load packets from unrelated repositories. Fail closed on missing or ambiguous packet selection.
+When explicitly resuming an existing workstream, use the repository-scoped active AI Work Packet and verify current Git state before acting. Do not load packets from unrelated repositories. For packet v2, require TASK_KIND and OWNER_INTENT and execute Next Action only when it directly advances them and the workstream Goal; otherwise stop with WORK_PACKET_SCOPE_MISMATCH. Fail closed on missing or ambiguous packet selection.
 
 When the user asks to apply/adopt/bootstrap the Engineering System, follow the canonical `standards/ADOPTION.md` procedure. Inventory and classify before cleanup; use deterministic bootstrap for missing common surfaces; preserve project-specific/stricter rules; fail closed on ambiguous tests, release commands, or destructive overwrite. For an already managed repository pinned to an older version, use the fail-closed managed upgrade workflow rather than rerunning initial bootstrap.
 
