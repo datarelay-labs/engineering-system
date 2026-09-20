@@ -69,6 +69,7 @@ python tools/adopt.py \
   --root /path/to/project \
   --apply \
   --ack-rule-review \
+  --ci-mode shared \
   --test-command "<project-native affected/full test command>"
 ```
 
@@ -112,15 +113,18 @@ Generated test metadata is conservative:
 
 ## CI wiring
 
-Managed adoption wires:
+Managed adoption always wires adoption compliance on pull requests and immutable references to the canonical Engineering System baseline.
 
-- adoption compliance on pull requests
-- affected-test selection on pull requests
-- immutable references to the canonical Engineering System baseline
+The project must select one CI mode after inventory:
+
+- `shared` — use the Engineering System reusable affected-test workflow
+- `native` — preserve an existing project-native CI workflow that already proves the affected-test invariant
+
+If existing CI is detected, automatic mode fails closed until the agent explicitly chooses `--ci-mode shared` or `--ci-mode native`.
 
 Release preflight and release gate workflows are wired only when project-specific commands are explicitly known.
 
-Do not duplicate a native gate that already proves the same invariant. In that case, keep the native gate and document the mapping instead of running both.
+Do not duplicate a native gate that already proves the same invariant. In native mode, the generated Engineering System caller contains compliance only; the project-native workflow remains responsible for its mapped tests.
 
 ## Phase 4 — qualification
 
