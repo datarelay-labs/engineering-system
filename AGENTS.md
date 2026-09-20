@@ -1,6 +1,8 @@
 # Engineering System Repository Rules
 
-This repository defines the canonical Solo AI Engineering System:\nhttps://github.com/datarelay-labs/engineering-system\n
+This repository defines the canonical Solo AI Engineering System:
+https://github.com/datarelay-labs/engineering-system
+
 ## Mandatory entry sequence
 
 Always load only the minimum high-signal context needed for the task:
@@ -10,7 +12,9 @@ Always load only the minimum high-signal context needed for the task:
 3. For implementation/debugging/testing, read `.engineering/tests.yaml`.
 4. For release/version/artifact work, read `.engineering/release.yaml`.
 5. Read `standards/CORE.md` plus only the standard(s) relevant to the change.
-6. Inspect the exact affected implementation/tests before editing.
+6. For material design-bearing changes, read `standards/DESIGN.md`.
+7. For outages/degraded service/failed upgrades/data-loss risk or other production-impacting failures, read `standards/OPERATIONS.md` and enter the incident lifecycle.
+8. Inspect the exact affected implementation/tests before editing.
 
 Do not load all standards, Wiki pages, archived changes, or historical discussions by default.
 
@@ -30,5 +34,9 @@ If mandatory context is missing or contradictory, fail closed: report the config
 10. Never weaken enforcement/validation merely to obtain PASS.
 
 For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path.
+
+For design-bearing changes, apply the minimal `standards/DESIGN.md` gate rather than creating heavyweight project planning documents.
+
+For incident/operational work, preserve evidence before mutation and do not perform destructive or irreversible recovery without explicit approval unless an approved runbook authorizes it.
 
 Cursor additionally receives the always-applied `.cursor/rules/engineering-system.mdc` adapter.
