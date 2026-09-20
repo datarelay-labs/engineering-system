@@ -306,6 +306,73 @@ def existing_ci(root: Path) -> list[str]:
     ]
 
 
+def github_repo_slug(root: Path) -> str:
+    origin = run_git(root, "remote", "get-url", "origin")
+    if not origin:
+        return ""
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", origin)
+    return match.group(1) if match else ""
+
+
+def gh_api_json(endpoint: str):
+    try:
+        output = subprocess.check_output(
+            ["gh", "api", endpoint],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return json.loads(output)
+    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def detect_merge_gate_status(root: Path) -> str:
+    slug = github_repo_slug(root)
+    if not slug:
+        return "unknown"
+
+    repo = gh_api_json(f"repos/{slug}")
+    rulesets = gh_api_json(f"repos/{slug}/rulesets?per_page=100")
+    if not isinstance(repo, dict) or not isinstance(rulesets, list):
+        return "unknown"
+
+    default_branch = str(repo.get("default_branch") or "")
+    if not default_branch:
+        return "unknown"
+
+    candidates = {"~ALL", "~DEFAULT_BRANCH", default_branch, f"refs/heads/{default_branch}"}
+    has_pr_gate = False
+    has_required_checks = False
+
+    for summary in rulesets:
+        if summary.get("target") != "branch" or summary.get("enforcement") != "active":
+            continue
+        ruleset_id = summary.get("id")
+        if ruleset_id is None:
+            continue
+        detail = gh_api_json(f"repos/{slug}/rulesets/{ruleset_id}")
+        if not isinstance(detail, dict):
+            continue
+
+        ref = ((detail.get("conditions") or {}).get("ref_name") or {})
+        includes = set(ref.get("include") or [])
+        excludes = set(ref.get("exclude") or [])
+        if includes and not (includes & candidates):
+            continue
+        if excludes & candidates:
+            continue
+
+        for rule in detail.get("rules") or []:
+            if rule.get("type") == "pull_request":
+                has_pr_gate = True
+            elif rule.get("type") == "required_status_checks":
+                checks = ((rule.get("parameters") or {}).get("required_status_checks") or [])
+                if checks:
+                    has_required_checks = True
+
+    return "verified" if has_pr_gate and has_required_checks else "advisory"
+
+
 def inventory(root: Path) -> dict[str, object]:
     test_candidates = discover_test_commands(root)
     setup_suggestion = suggest_setup_command(root, test_candidates[0]) if len(test_candidates) == 1 else ""
@@ -382,6 +449,13 @@ def project_yaml(
     domains: list[str],
     platform: str,
     operations_mode: str,
+    persistent_state: bool,
+    runbook_paths: list[str],
+    health_command: str,
+    backup_command: str,
+    restore_test_command: str,
+    upgrade_command: str,
+    rollback_command: str,
 ) -> str:
     production = operations_mode == "production"
     lines = [
@@ -419,6 +493,21 @@ def project_yaml(
             f"  production_oriented: {'true' if production else 'false'}",
             f"  runbook_required: {'true' if production else 'false'}",
             f"  incident_response_required: {'true' if production else 'false'}",
+            f"  persistent_state: {'true' if persistent_state else 'false'}",
+            "  runbook_paths:",
+        ]
+    )
+    if runbook_paths:
+        lines.extend(f"    - {yaml_scalar(path)}" for path in runbook_paths)
+    else:
+        lines[-1] = "  runbook_paths: []"
+    lines.extend(
+        [
+            f"  health_command: {yaml_scalar(health_command)}",
+            f"  backup_command: {yaml_scalar(backup_command)}",
+            f"  restore_test_command: {yaml_scalar(restore_test_command)}",
+            f"  upgrade_command: {yaml_scalar(upgrade_command)}",
+            f"  rollback_command: {yaml_scalar(rollback_command)}",
             "",
         ]
     )
@@ -546,20 +635,37 @@ def tests_yaml(
     return "\n".join(lines)
 
 
-def release_yaml(preflight_command: str, release_command: str, operations_mode: str) -> str:
+def release_yaml(
+    release_setup_command: str,
+    preflight_command: str,
+    release_command: str,
+    artifact_hash_command: str,
+    provenance_command: str,
+    sbom_command: str,
+    operations_mode: str,
+    operational_e2e_command: str,
+    full_e2e_passes: int,
+    public_smoke_command: str,
+) -> str:
     production = operations_mode == "production"
     return (
         "version: 1\n\n"
         "exact_head_required: true\n"
-        "artifact_hash_required: false\n"
-        "provenance_required: false\n"
-        "sbom_required: false\n"
+        f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}\n"
+        f"provenance_required: {'true' if provenance_command else 'false'}\n"
+        f"sbom_required: {'true' if sbom_command else 'false'}\n"
+        f"setup_command: {yaml_scalar(release_setup_command)}\n"
         f"preflight_required: {'true' if preflight_command else 'false'}\n"
         f"preflight_command: {yaml_scalar(preflight_command)}\n"
         f"qualification_command: {yaml_scalar(release_command)}\n"
+        f"artifact_hash_command: {yaml_scalar(artifact_hash_command)}\n"
+        f"provenance_command: {yaml_scalar(provenance_command)}\n"
+        f"sbom_command: {yaml_scalar(sbom_command)}\n"
         f"operational_e2e_required: {'true' if production else 'false'}\n"
-        f"full_e2e_passes: {1 if production else 0}\n"
-        f"public_smoke_required: {'true' if production else 'false'}\n\n"
+        f"operational_e2e_command: {yaml_scalar(operational_e2e_command)}\n"
+        f"full_e2e_passes: {full_e2e_passes if production else 0}\n"
+        f"public_smoke_required: {'true' if production else 'false'}\n"
+        f"public_smoke_command: {yaml_scalar(public_smoke_command)}\n\n"
         "blockers:\n"
         "  p0: true\n"
         "  p1: true\n"
@@ -581,6 +687,13 @@ def engineering_workflow(baseline: str, ci_mode: str) -> str:
         "  adoption-compliance:",
         f"    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}",
     ]
+    lines.extend(
+        [
+            "",
+            "  enforcement-reconcile:",
+            f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{baseline}",
+        ]
+    )
     if ci_mode == "shared":
         lines.extend(
             [
@@ -596,52 +709,42 @@ def engineering_workflow(baseline: str, ci_mode: str) -> str:
     return "\n".join(lines)
 
 
-def release_workflow(baseline: str, preflight_command: str, release_command: str) -> str:
+def release_workflow(baseline: str) -> str:
     expression = "$" + "{{ inputs.expected_sha }}"
-    lines = [
-        "name: Engineering Release Qualification",
-        "",
-        "on:",
-        "  workflow_dispatch:",
-        "    inputs:",
-        "      expected_sha:",
-        "        description: Exact candidate SHA",
-        "        required: true",
-        "        type: string",
-        "",
-        "permissions:",
-        "  contents: read",
-        "",
-        "jobs:",
-    ]
-    if preflight_command:
-        lines.extend(
-            [
-                "  preflight:",
-                f"    uses: datarelay-labs/engineering-system/.github/workflows/release-preflight.yml@{baseline}",
-                "    with:",
-                f"      expected_sha: {expression}",
-                f"      preflight_command: {yaml_scalar(preflight_command)}",
-                "",
-            ]
-        )
-    lines.extend(
+    phase_expression = "$" + "{{ inputs.phase }}"
+    return "\n".join(
         [
-            "  release-gate:",
-        ]
-    )
-    if preflight_command:
-        lines.append("    needs: preflight")
-    lines.extend(
-        [
-            f"    uses: datarelay-labs/engineering-system/.github/workflows/release-gate.yml@{baseline}",
+            "name: Engineering Release Contract",
+            "",
+            "on:",
+            "  workflow_dispatch:",
+            "    inputs:",
+            "      expected_sha:",
+            "        description: Exact candidate SHA",
+            "        required: true",
+            "        type: string",
+            "      phase:",
+            "        description: Release contract phase",
+            "        required: true",
+            "        type: choice",
+            "        default: qualify",
+            "        options:",
+            "          - qualify",
+            "          - post-release",
+            "",
+            "permissions:",
+            "  contents: read",
+            "",
+            "jobs:",
+            "  release-contract:",
+            f"    uses: datarelay-labs/engineering-system/.github/workflows/release-contract.yml@{baseline}",
             "    with:",
             f"      expected_sha: {expression}",
-            f"      qualification_command: {yaml_scalar(release_command)}",
+            f"      phase: {phase_expression}",
+            "      profile_path: .engineering/release.yaml",
             "",
         ]
     )
-    return "\n".join(lines)
 
 
 def write_missing(root: Path, rel: str, content: str, written: list[str], skipped: list[str]) -> None:
@@ -681,14 +784,28 @@ def main() -> int:
     parser.add_argument("--lint-command", default="")
     parser.add_argument("--typecheck-command", default="")
     parser.add_argument("--release-command", default="")
+    parser.add_argument("--release-setup-command", default="")
     parser.add_argument("--preflight-command", default="")
+    parser.add_argument("--artifact-hash-command", default="")
+    parser.add_argument("--provenance-command", default="")
+    parser.add_argument("--sbom-command", default="")
+    parser.add_argument("--operational-e2e-command", default="")
+    parser.add_argument("--public-smoke-command", default="")
+    parser.add_argument("--full-e2e-passes", type=int, default=1)
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
     parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
     parser.add_argument("--native-ci-workflow", action="append", default=[])
-    parser.add_argument("--merge-gate-status", default="unknown", choices=("verified", "advisory", "unknown"))
+    parser.add_argument("--merge-gate-status", default="auto", choices=("auto", "verified", "advisory", "unknown"))
     parser.add_argument("--maturity", default="development", choices=("experimental", "development", "production", "maintenance"))
     parser.add_argument("--operations-mode", default="auto", choices=("auto", "production", "nonproduction"))
+    parser.add_argument("--persistent-state", action="store_true")
+    parser.add_argument("--runbook-path", action="append", default=[])
+    parser.add_argument("--health-command", default="")
+    parser.add_argument("--backup-command", default="")
+    parser.add_argument("--restore-test-command", default="")
+    parser.add_argument("--upgrade-command", default="")
+    parser.add_argument("--rollback-command", default="")
     parser.add_argument("--domain", default="")
     parser.add_argument("--platform", default="linux")
     args = parser.parse_args()
@@ -747,8 +864,8 @@ def main() -> int:
     }
     quality_commands = {name: command for name, command in quality_commands.items() if command}
 
-    if args.preflight_command and not args.release_command:
-        raise SystemExit("FAIL --preflight-command requires --release-command")
+    if args.full_e2e_passes < 0:
+        raise SystemExit("FAIL --full-e2e-passes must be >= 0")
 
     project_type = args.project_type.strip() or str(data["project_type"])
     if args.domain.strip():
@@ -771,6 +888,47 @@ def main() -> int:
             raise SystemExit("FAIL deployment/operations signals detected; rerun with --operations-mode production|nonproduction after review")
         else:
             operations_mode = "nonproduction"
+
+    detected_merge_gate = detect_merge_gate_status(root)
+    if args.merge_gate_status == "auto":
+        merge_gate_status = detected_merge_gate
+    else:
+        merge_gate_status = args.merge_gate_status
+        if detected_merge_gate != "unknown" and merge_gate_status != detected_merge_gate:
+            raise SystemExit(
+                "FAIL declared merge-gate status conflicts with live GitHub enforcement: "
+                f"declared={merge_gate_status} observed={detected_merge_gate}"
+            )
+
+    runbook_paths = [item.strip() for item in args.runbook_path if item.strip()]
+    health_command = args.health_command.strip()
+    backup_command = args.backup_command.strip()
+    restore_test_command = args.restore_test_command.strip()
+    upgrade_command = args.upgrade_command.strip()
+    rollback_command = args.rollback_command.strip()
+
+    if operations_mode == "production":
+        if not runbook_paths:
+            raise SystemExit("FAIL production adoption requires at least one --runbook-path")
+        missing_runbooks = [path for path in runbook_paths if not (root / path).is_file()]
+        if missing_runbooks:
+            raise SystemExit("FAIL production runbook path missing: " + ",".join(missing_runbooks))
+        if not health_command:
+            raise SystemExit("FAIL production adoption requires --health-command")
+    if args.persistent_state and (not backup_command or not restore_test_command):
+        raise SystemExit(
+            "FAIL --persistent-state requires --backup-command and --restore-test-command"
+        )
+
+    operational_e2e_command = args.operational_e2e_command.strip()
+    public_smoke_command = args.public_smoke_command.strip()
+    if operations_mode == "production":
+        if not operational_e2e_command:
+            raise SystemExit("FAIL production adoption requires --operational-e2e-command")
+        if args.full_e2e_passes < 1:
+            raise SystemExit("FAIL production adoption requires --full-e2e-passes >= 1")
+        if not public_smoke_command:
+            raise SystemExit("FAIL production adoption requires --public-smoke-command")
 
     ci_mode = args.ci_mode
     existing_workflows = [
@@ -833,12 +991,19 @@ def main() -> int:
             baseline,
             ci_mode,
             native_ci_workflows,
-            args.merge_gate_status,
+            merge_gate_status,
             project_type,
             args.maturity,
             domains,
             args.platform,
             operations_mode,
+            args.persistent_state,
+            runbook_paths,
+            health_command,
+            backup_command,
+            restore_test_command,
+            upgrade_command,
+            rollback_command,
         ),
         written,
         skipped,
@@ -853,7 +1018,18 @@ def main() -> int:
     write_missing(
         root,
         ".engineering/release.yaml",
-        release_yaml(args.preflight_command.strip(), args.release_command.strip(), operations_mode),
+        release_yaml(
+            args.release_setup_command.strip(),
+            args.preflight_command.strip(),
+            args.release_command.strip(),
+            args.artifact_hash_command.strip(),
+            args.provenance_command.strip(),
+            args.sbom_command.strip(),
+            operations_mode,
+            operational_e2e_command,
+            args.full_e2e_passes,
+            public_smoke_command,
+        ),
         written,
         skipped,
     )
@@ -864,11 +1040,23 @@ def main() -> int:
         written,
         skipped,
     )
-    if args.release_command.strip():
+    release_contract_enabled = any(
+        [
+            args.release_command.strip(),
+            args.release_setup_command.strip(),
+            args.preflight_command.strip(),
+            args.artifact_hash_command.strip(),
+            args.provenance_command.strip(),
+            args.sbom_command.strip(),
+            operational_e2e_command,
+            public_smoke_command,
+        ]
+    )
+    if release_contract_enabled:
         write_missing(
             root,
             ".github/workflows/engineering-release.yml",
-            release_workflow(baseline, args.preflight_command.strip(), args.release_command.strip()),
+            release_workflow(baseline),
             written,
             skipped,
         )
@@ -882,7 +1070,8 @@ def main() -> int:
     print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
     print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
     print("NATIVE_CI_WORKFLOWS=" + (",".join(native_ci_workflows) if native_ci_workflows else "<none>"))
-    print(f"MERGE_GATE_ENFORCEMENT={args.merge_gate_status}")
+    print(f"MERGE_GATE_ENFORCEMENT={merge_gate_status}")
+    print(f"MERGE_GATE_OBSERVED={detected_merge_gate}")
     print(f"OPERATIONS_MODE={operations_mode}")
     print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
@@ -898,7 +1087,7 @@ def main() -> int:
     else:
         print("TEST_COMMAND=<explicitly-none>")
     print("QUALITY_COMMANDS=" + (json.dumps(quality_commands, sort_keys=True) if quality_commands else "<none>"))
-    if args.release_command:
+    if release_contract_enabled:
         print("RELEASE_AUTOMATION=WIRED")
     else:
         print("RELEASE_AUTOMATION=NOT_APPLICABLE_OR_PENDING_EXPLICIT_COMMAND")

@@ -34,7 +34,7 @@ If mandatory context is missing or contradictory, fail closed: report the config
 10. Before merge or terminal completion, inspect machine-observable PR review feedback. Fix and revalidate every actionable review finding, or explicitly disposition it with concise evidence when it is non-actionable, out of scope, or incorrect. Do not treat COMMENTED/advisory review state as automatic PASS.
 11. Never weaken enforcement/validation merely to obtain PASS.
 
-For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path.
+For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path. When an already managed repository is pinned to an older Engineering System version, use the fail-closed adoption upgrade workflow rather than rerunning initial bootstrap over it.
 
 For design-bearing changes, apply the minimal `standards/DESIGN.md` gate rather than creating heavyweight project planning documents.
 

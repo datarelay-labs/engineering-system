@@ -1,0 +1,130 @@
+name: Reusable Release Contract
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: Exact candidate SHA.
+        required: true
+        type: string
+      phase:
+        description: qualify or post-release.
+        required: false
+        default: qualify
+        type: string
+      profile_path:
+        description: Release contract path in the caller repository.
+        required: false
+        default: .engineering/release.yaml
+        type: string
+
+jobs:
+  release-contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install release contract dependency
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Execute release contract
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          RELEASE_PROFILE: ${{ inputs.profile_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import yaml
+
+          profile_path = Path(os.environ["RELEASE_PROFILE"])
+          if not profile_path.is_file():
+              raise SystemExit(f"FAIL missing release profile: {profile_path}")
+
+          profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
+          phase = os.environ.get("RELEASE_PHASE", "qualify").strip()
+          if phase not in {"qualify", "post-release"}:
+              raise SystemExit(f"FAIL invalid release phase: {phase}")
+
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          expected = os.environ.get("EXPECTED_SHA", "").strip()
+          print(f"CANDIDATE_HEAD={actual}")
+          if bool(profile.get("exact_head_required", True)):
+              if not expected:
+                  raise SystemExit("FAIL exact_head_required=true but expected_sha is empty")
+              if actual != expected:
+                  raise SystemExit(f"FAIL expected {expected} but checked out {actual}")
+          elif expected and actual != expected:
+              raise SystemExit(f"FAIL expected {expected} but checked out {actual}")
+
+          def command(name):
+              return str(profile.get(name) or "").strip()
+
+          def require_command(flag, command_name):
+              if bool(profile.get(flag)) and not command(command_name):
+                  raise SystemExit(f"FAIL {flag}=true but {command_name} is empty")
+
+          require_command("preflight_required", "preflight_command")
+          require_command("artifact_hash_required", "artifact_hash_command")
+          require_command("provenance_required", "provenance_command")
+          require_command("sbom_required", "sbom_command")
+          require_command("operational_e2e_required", "operational_e2e_command")
+          require_command("public_smoke_required", "public_smoke_command")
+
+          if bool(profile.get("operational_e2e_required")) and int(profile.get("full_e2e_passes") or 0) < 1:
+              raise SystemExit("FAIL operational_e2e_required=true but full_e2e_passes<1")
+
+          def run(label, value):
+              if not value:
+                  return
+              print(f"=== {label} ===", flush=True)
+              print(f"$ {value}", flush=True)
+              result = subprocess.run(["bash", "-lc", value])
+              if result.returncode:
+                  raise SystemExit(f"FAIL {label} exit={result.returncode}")
+              print(f"PASS {label}", flush=True)
+
+          run("release setup", command("setup_command"))
+
+          if phase == "qualify":
+              if bool(profile.get("preflight_required")) or command("preflight_command"):
+                  run("release preflight", command("preflight_command"))
+
+              run("release qualification", command("qualification_command"))
+
+              if bool(profile.get("artifact_hash_required")) or command("artifact_hash_command"):
+                  run("artifact hash verification", command("artifact_hash_command"))
+
+              if bool(profile.get("provenance_required")) or command("provenance_command"):
+                  run("provenance verification", command("provenance_command"))
+
+              if bool(profile.get("sbom_required")) or command("sbom_command"):
+                  run("SBOM verification", command("sbom_command"))
+
+              if bool(profile.get("operational_e2e_required")) or command("operational_e2e_command"):
+                  e2e = command("operational_e2e_command")
+                  passes = int(profile.get("full_e2e_passes") or 0)
+                  if e2e and passes < 1:
+                      passes = 1
+                  for index in range(1, passes + 1):
+                      run(f"operational E2E pass {index}/{passes}", e2e)
+
+              print("RELEASE_QUALIFICATION_CONTRACT=PASS")
+          else:
+              if bool(profile.get("public_smoke_required")) or command("public_smoke_command"):
+                  run("post-release public smoke", command("public_smoke_command"))
+              print("POST_RELEASE_CONTRACT=PASS")
+          PY

@@ -10,6 +10,9 @@ jobs:
   adoption-compliance:
     uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@REPLACE_WITH_ENGINEERING_SYSTEM_BASELINE_SHA
 
+  enforcement-reconcile:
+    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@REPLACE_WITH_ENGINEERING_SYSTEM_BASELINE_SHA
+
   affected-tests:
     uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@REPLACE_WITH_ENGINEERING_SYSTEM_BASELINE_SHA
     with:

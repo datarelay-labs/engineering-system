@@ -66,3 +66,26 @@ For multi-component systems, test realistic maintenance/failure conditions:
 - state preservation required by contract
 
 Never perform uncontrolled destructive testing on production/customer systems.
+
+## Repository operations contract
+
+Engineering System 1.6 production-oriented project profiles record the smallest project-native operational contract needed by future humans and AI agents:
+
+```yaml
+operations:
+  production_oriented: true
+  runbook_required: true
+  incident_response_required: true
+  persistent_state: true|false
+  runbook_paths:
+    - path/to/runbook.md
+  health_command: "<project-native health check>"
+  backup_command: "<when persistent state applies>"
+  restore_test_command: "<when persistent state applies>"
+  upgrade_command: "<when available>"
+  rollback_command: "<when available>"
+```
+
+A production profile without a real runbook path or health command is incomplete. A persistent-state profile without backup and restore-test commands is incomplete.
+
+These commands are references to project-native behavior; the Engineering System must not invent operational commands merely to fill metadata. Destructive commands such as restore, rollback, or rebuild still require the safety/approval rules in the incident lifecycle.

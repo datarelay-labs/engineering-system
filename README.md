@@ -31,7 +31,9 @@
 
 That is the intended adoption entrypoint for a new or existing repository.
 
-An AI agent should inventory the repository first, preserve project-specific invariants, discover project-native tests and CI, apply the smallest compatible Engineering System surfaces, and fail closed when a decision cannot be inferred safely.
+An AI agent should resolve the exact target repository, obtain the canonical Engineering System from the supplied URL, pin an immutable canonical baseline SHA, inventory the repository, preserve project-specific invariants, discover project-native tests and CI, apply the smallest compatible Engineering System surfaces, and fail closed when a decision cannot be inferred safely.
+
+The target repository does not need to contain `tools/adopt.py` beforehand. The agent may use an authenticated GitHub integration or a separate temporary checkout of the canonical repository, then run the helper against the target root. For a brand-new project, establish the Git repository boundary first; `--allow-no-tests` is only a temporary bootstrap state while no executable test target exists.
 
 The goal is not to replace a project's engineering reality. The goal is to make that reality **explicit, repeatable, testable, and easy for AI agents to consume**.
 
@@ -42,7 +44,7 @@ The goal is not to replace a project's engineering reality. The goal is to make 
 | **Repository-aware adoption** | Inventories rules, tests, CI, release and operations signals before installing anything |
 | **Minimal AI context** | Loads only the repository entrypoints and standards relevant to the current task |
 | **Affected-test-first validation** | Uses the cheapest deterministic check that can disprove correctness before broad suites |
-| **Session continuity** | Keeps active implementation state in repository-scoped GitHub AI Work Packets instead of giant handoff prompts |
+| **Session continuity** | Keeps active implementation state in repository-scoped GitHub AI Work Packets; Work Packet v2 binds the current owner intent and task kind to the next action instead of relying on giant handoff prompts |
 | **Review discipline** | Requires actionable human or automated review feedback to be fixed or explicitly dispositioned before completion |
 | **Release qualification** | Separates fast PR feedback from expensive release-candidate qualification and requires exact-HEAD evidence |
 | **Operations feedback loop** | Feeds incidents, regressions and operational failures back into tests, runbooks, RCA, ADR or requirements |
@@ -76,7 +78,7 @@ python tools/adopt.py --root /path/to/project --audit
 
 ### 2. Managed adoption
 
-After repository-specific rules, tests and CI ownership have been reviewed:
+After repository-specific rules, tests and CI ownership have been reviewed, the canonical helper installs only missing managed surfaces and pins the exact canonical baseline:
 
 ```bash
 python tools/adopt.py \
@@ -89,6 +91,8 @@ python tools/adopt.py \
 
 If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
+Engineering System 1.6 also reconciles observable GitHub merge enforcement, records project-native production operations contracts when applicable, and can generate an executable release contract with separate qualification and post-release smoke phases.
+
 ### 3. Qualify the adoption
 
 ```bash
@@ -96,6 +100,8 @@ python tools/check-adoption.py --root /path/to/project
 ```
 
 Adoption is not PASS because files exist. Structural validation and the required project-native smoke/affected evidence must succeed.
+
+Existing managed 1.5+ repositories upgrade through the fail-closed `tools/upgrade-adoption.py` path rather than blindly rerunning initial bootstrap. Once adoption is qualified, feature, bugfix, testing, review, release, operations, incident, and retirement work automatically route through the repository entrypoint, project metadata, relevant canonical standard, and deterministic evidence; there is no separate lifecycle activation step.
 
 ## Default execution model
 

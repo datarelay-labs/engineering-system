@@ -15,10 +15,45 @@ Adoption is not permission to redesign the product, replace native CI, weaken te
 When a user asks to apply, adopt, bootstrap, migrate to, or align a repository with the Engineering System:
 
 1. Resolve the exact target repository and current branch/worktree.
-2. Read this standard and only the other standards needed for discovered conflicts.
-3. Inventory the repository before writing files.
-4. Prefer the deterministic adoption tool for mechanical installation.
-5. Keep semantic decisions visible and fail closed when they cannot be inferred safely.
+2. Resolve the canonical Engineering System source from the supplied repository URL and identify an immutable canonical baseline SHA.
+3. Read this standard and only the other standards needed for discovered conflicts.
+4. Inventory the repository before writing files.
+5. Prefer the deterministic adoption tool from the canonical Engineering System source for mechanical installation.
+6. Keep semantic decisions visible and fail closed when they cannot be inferred safely.
+
+## Link-only bootstrap and canonical source acquisition
+
+The target repository does not initially contain `tools/adopt.py`. A link-only request therefore requires the agent to obtain the canonical Engineering System source first rather than inventing or reconstructing the helper.
+
+Use one of these bounded approaches:
+
+- read the canonical repository through an authenticated GitHub integration and materialize the required canonical files/tooling in a temporary workspace, or
+- clone/fetch `datarelay-labs/engineering-system` into a separate temporary/tooling checkout.
+
+Before applying changes, resolve and record the exact canonical commit SHA that will become the target repository's immutable `engineering_system.baseline`. Run the canonical `tools/adopt.py` from that canonical checkout against the target repository root.
+
+Do not:
+- copy an unpinned `main` snapshot into the product repository and call it the baseline
+- assume the target repository already has the adoption helper
+- modify the target merely to make the bootstrap tool available
+- treat handbook/Athena content as a substitute for the canonical repository
+
+After adoption, the target repository's generated entrypoints and pinned baseline are sufficient for normal lifecycle work; the target does not need to vendor the whole Engineering System.
+
+## New or empty projects
+
+A brand-new project still needs an explicit Git repository boundary before managed adoption because branch/HEAD/history are part of the safety and evidence model.
+
+For a genuinely new repository with no executable product code yet:
+
+1. establish or initialize the intended Git repository and origin/ownership boundary
+2. run the same inventory/adoption flow
+3. do not invent product architecture, frameworks, release commands, or operational contracts that the owner has not decided
+4. use `--allow-no-tests` only when the repository genuinely has no executable test target yet
+5. keep test/release/operations metadata conservative until real project-native commands exist
+6. once executable implementation begins, establish real project-native tests and update the affected-test contract before treating normal development/release qualification as complete
+
+`--allow-no-tests` is an explicit bootstrap state, not a permanent exemption from testing for a software project.
 
 ## Phase 1 — inventory
 
@@ -101,7 +136,16 @@ AGENTS.md
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
-Release automation is added only when the project has an explicit project-native release qualification command.
+For Engineering System >=1.6.0, the generated pull-request workflow also calls the pinned enforcement-reconciliation workflow. If live GitHub rulesets are visible during adoption, `merge_gate_status` is detected automatically; an explicit value that contradicts observable GitHub enforcement is rejected.
+
+Production-oriented 1.6 adoption additionally requires:
+- at least one repository runbook path
+- a deterministic health command
+- an operational E2E command and pass count
+- a post-release public smoke command
+- backup and restore-test commands when the project declares persistent state
+
+Release automation is added when any release-contract command is configured. The generated release caller has separate `qualify` and `post-release` phases and is pinned to the same immutable Engineering System baseline.
 
 ## Test discovery rules
 
@@ -187,6 +231,23 @@ For an upgrade:
 4. migrate generated surfaces deliberately
 5. rerun adoption qualification
 6. keep the upgrade in a separate branch/PR from unrelated product work
+
+For the managed 1.5 -> 1.6 transition, use the deterministic helper:
+
+```bash
+python tools/upgrade-adoption.py --root /path/to/project --audit
+```
+
+Then apply only after required production/operations/release inputs are resolved:
+
+```bash
+python tools/upgrade-adoption.py \
+  --root /path/to/project \
+  --apply \
+  --baseline-sha <canonical-1.6-sha>
+```
+
+The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
 ## Fail-closed cases
 
