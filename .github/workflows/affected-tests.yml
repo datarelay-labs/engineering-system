@@ -106,6 +106,7 @@ jobs:
           manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
           path_rules = manifest.get("paths") or {}
           scenarios = manifest.get("scenarios") or []
+          setup_command = str(manifest.get("setup_command") or "").strip()
           trigger = os.environ.get("ENGINEERING_TRIGGER", "pr").strip() or "pr"
           base = os.environ.get("ENGINEERING_BASE_REF", "").strip()
 
@@ -168,6 +169,14 @@ jobs:
               raise SystemExit(0)
 
           print("SELECTED_SCENARIOS=" + ",".join(str(s.get("id")) for s in selected))
+          if setup_command:
+              print("=== setup ===", flush=True)
+              print(f"$ {setup_command}", flush=True)
+              completed = subprocess.run(["bash", "-lc", setup_command])
+              if completed.returncode:
+                  raise SystemExit(f"FAIL setup_command exit={completed.returncode}")
+              print("PASS setup", flush=True)
+
           for scenario in selected:
               sid = scenario["id"]
               command = scenario["command"]
