@@ -28,5 +28,5 @@ Before changing anything:
 - do not duplicate equivalent native/shared gates
 - do not start expensive downstream qualification while a blocking deterministic failure exists
 - never weaken validation merely to obtain PASS
-- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review feedback finding; do not treat COMMENTED/advisory state as automatic PASS
+- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review finding; do not treat COMMENTED/advisory state as automatic PASS
 - never report unexecuted or blocked validation as PASS
