@@ -20,6 +20,8 @@ Do not preload every standard, Wiki page, archive, or historical discussion.
 
 Before changing anything:
 - identify change class and affected domains/contracts/security/operations
+- apply standards/DESIGN.md before material design-bearing changes
+- switch to standards/OPERATIONS.md incident lifecycle for production-impacting failures
 - inspect relevant implementation/tests
 - make the smallest correct change
 - run cheapest affected validation first
