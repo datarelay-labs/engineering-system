@@ -132,6 +132,7 @@ def validate_session_continuity_templates():
         "BRANCH",
         "exactly one match",
         "Next Action",
+        "actionable review feedback",
         "update the same Work Packet",
     )
 
@@ -149,6 +150,24 @@ def validate_session_continuity_templates():
         raise SystemExit(1)
 
     print("PASS AI Work Packet and Cursor resume template contract")
+
+
+def validate_actionable_review_gate():
+    required_paths = (
+        "standards/CORE.md",
+        ".cursor/commands/resume.md",
+        "templates/.cursor/commands/resume.md",
+        ".cursor/rules/engineering-system.mdc",
+        "templates/.cursor/rules/engineering-system.mdc",
+    )
+    missing = []
+    for rel in required_paths:
+        text = (ROOT / rel).read_text(encoding="utf-8").lower()
+        if "actionable review" not in text:
+            missing.append(rel)
+    if missing:
+        raise SystemExit("FAIL actionable PR review gate missing from: " + ", ".join(missing))
+    print("PASS actionable PR review feedback gate")
 
 
 def validate_adoption_contract():
@@ -219,6 +238,7 @@ def main():
     validate_version_alignment()
     validate_resume_template_parity()
     validate_session_continuity_templates()
+    validate_actionable_review_gate()
     validate_adoption_contract()
     validate_action_pins()
 
