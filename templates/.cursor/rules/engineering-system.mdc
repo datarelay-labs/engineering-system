@@ -18,6 +18,8 @@ Read only when relevant:
 
 Then:
 - classify the change and affected domains/contracts/security/operations
+- apply the minimal `standards/DESIGN.md` gate before material design-bearing changes
+- for outages/degraded service/failed upgrades/data-loss risk, enter the `standards/OPERATIONS.md` incident lifecycle and preserve evidence before mutation
 - inspect relevant implementation/tests
 - make the smallest correct change
 - run cheapest affected deterministic tests first

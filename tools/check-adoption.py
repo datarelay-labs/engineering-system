@@ -53,23 +53,39 @@ def main() -> int:
         if not (root / rel).is_file():
             failures.append(f"missing required file: {rel}")
 
-    project_path = root / ".engineering/project.yaml"
+    project: dict = {}
+    engineering: dict = {}
+    operations: dict = {}
     version = ""
     mode = ""
     baseline = ""
     ci_mode = ""
+    native_ci_workflows: list[str] = []
+    merge_gate_status = ""
+    project_domains: set[str] = set()
+
+    project_path = root / ".engineering/project.yaml"
     if project_path.is_file():
         try:
             project = load_yaml(project_path) or {}
             engineering = project.get("engineering_system") or {}
+            operations = project.get("operations") or {}
             version = str(engineering.get("version") or "")
             mode = str(engineering.get("mode") or "")
             baseline = str(engineering.get("baseline") or "")
             ci_mode = str(engineering.get("ci_mode") or "")
+            native_ci_workflows = [str(item) for item in (engineering.get("native_ci_workflows") or [])]
+            merge_gate_status = str(engineering.get("merge_gate_status") or "")
+            project_domains = {str(item) for item in (project.get("domains") or []) if str(item).strip()}
+
             if not version:
                 failures.append("project.yaml missing engineering_system.version")
             elif not SEMVER_RE.fullmatch(version):
                 failures.append(f"project.yaml has invalid engineering_system.version: {version}")
+
+            if not project_domains:
+                failures.append("project.yaml must define at least one domain")
+
             if version_at_least(version, (1, 4, 0)):
                 if mode not in {"canonical", "adopted"}:
                     failures.append("Engineering System >=1.4.0 requires engineering_system.mode=canonical|adopted")
@@ -77,6 +93,18 @@ def main() -> int:
                     failures.append("managed adopted repository requires immutable engineering_system.baseline SHA")
                 if mode == "adopted" and ci_mode not in {"shared", "native"}:
                     failures.append("managed adopted repository requires engineering_system.ci_mode=shared|native")
+
+            if version_at_least(version, (1, 5, 0)) and mode == "adopted":
+                if merge_gate_status not in {"verified", "advisory", "unknown"}:
+                    failures.append("Engineering System >=1.5.0 requires merge_gate_status=verified|advisory|unknown")
+                for key in ("production_oriented", "runbook_required", "incident_response_required"):
+                    if not isinstance(operations.get(key), bool):
+                        failures.append(f"Engineering System >=1.5.0 requires operations.{key}=true|false")
+                if bool(operations.get("production_oriented")):
+                    if not bool(operations.get("runbook_required")):
+                        failures.append("production-oriented adoption requires operations.runbook_required=true")
+                    if not bool(operations.get("incident_response_required")):
+                        failures.append("production-oriented adoption requires operations.incident_response_required=true")
         except Exception as exc:
             failures.append(f"cannot parse project.yaml: {exc}")
 
@@ -90,6 +118,11 @@ def main() -> int:
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
         if CANONICAL_URL not in agents_text:
             failures.append("AGENTS.md does not reference canonical Engineering System")
+        if version_at_least(version, (1, 5, 0)):
+            if "standards/DESIGN.md" not in agents_text:
+                failures.append("AGENTS.md missing minimal design-gate routing")
+            if "standards/OPERATIONS.md" not in agents_text:
+                failures.append("AGENTS.md missing incident/operations routing")
 
     cursor_path = root / ".cursor/rules/engineering-system.mdc"
     if cursor_path.is_file():
@@ -103,24 +136,43 @@ def main() -> int:
     if tests_path.is_file():
         try:
             tests = load_yaml(tests_path) or {}
+            paths = tests.get("paths") or {}
+            for pattern, spec in paths.items():
+                for domain in (spec or {}).get("domains") or []:
+                    if project_domains and str(domain) not in project_domains:
+                        failures.append(f"tests.yaml path {pattern} references unknown domain: {domain}")
+
             scenarios = tests.get("scenarios")
             if not isinstance(scenarios, list) or not scenarios:
                 failures.append("tests.yaml must contain at least one scenario")
             else:
                 for scenario in scenarios:
-                    if not str((scenario or {}).get("command") or "").strip():
+                    scenario = scenario or {}
+                    if not str(scenario.get("command") or "").strip():
                         failures.append("tests.yaml contains scenario without command")
                         break
+                    for domain in scenario.get("domains") or []:
+                        if project_domains and str(domain) not in project_domains:
+                            failures.append(
+                                f"tests.yaml scenario {scenario.get('id', '<unknown>')} references unknown domain: {domain}"
+                            )
         except Exception as exc:
             failures.append(f"cannot parse tests.yaml: {exc}")
 
     release_path = root / ".engineering/release.yaml"
-    release = {}
+    release: dict = {}
     if release_path.is_file():
         try:
             release = load_yaml(release_path) or {}
             if bool(release.get("preflight_required")) and not str(release.get("preflight_command") or "").strip():
                 failures.append("release.yaml preflight_required=true but preflight_command is empty")
+            if version_at_least(version, (1, 5, 0)) and bool(operations.get("production_oriented")):
+                if not bool(release.get("operational_e2e_required")):
+                    failures.append("production-oriented adoption requires operational_e2e_required=true")
+                if int(release.get("full_e2e_passes") or 0) < 1:
+                    failures.append("production-oriented adoption requires full_e2e_passes>=1")
+                if not bool(release.get("public_smoke_required")):
+                    failures.append("production-oriented adoption requires public_smoke_required=true")
         except Exception as exc:
             failures.append(f"cannot parse release.yaml: {exc}")
 
@@ -138,7 +190,15 @@ def main() -> int:
                 failures.append("shared CI mode requires affected workflow pinned to project baseline")
             if ci_mode == "native" and f"affected-tests.yml@{baseline}" in workflow_text:
                 failures.append("native CI mode must not duplicate the shared affected-tests workflow")
-            if ci_mode == "native":
+
+        if ci_mode == "native":
+            if version_at_least(version, (1, 5, 0)):
+                if not native_ci_workflows:
+                    failures.append("native CI mode requires explicit native_ci_workflows mapping")
+                for rel in native_ci_workflows:
+                    if not (root / rel).is_file():
+                        failures.append(f"mapped native CI workflow missing: {rel}")
+            else:
                 other_workflows = [
                     path for path in (root / ".github/workflows").glob("*.y*ml")
                     if path.name not in {"engineering-system.yml", "engineering-release.yml"}
@@ -171,6 +231,15 @@ def main() -> int:
         print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
     if ci_mode:
         print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
+    if native_ci_workflows:
+        print("NATIVE_CI_WORKFLOWS=" + ",".join(native_ci_workflows))
+    if merge_gate_status:
+        print(f"MERGE_GATE_ENFORCEMENT={merge_gate_status}")
+    if operations:
+        print(
+            "OPERATIONS_PROFILE="
+            + ("production" if operations.get("production_oriented") else "nonproduction")
+        )
     print("ENGINEERING_SYSTEM_ADOPTION=PASS")
     return 0
 

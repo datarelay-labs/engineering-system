@@ -41,6 +41,20 @@ For a PR:
 
 A project may keep its native affected-test selector; shared tooling must not duplicate it if both prove the same invariant.
 
+### Domain quality
+
+Affected-test economics depend on meaningful domains. Adoption should avoid mapping every complex repository path to a single `core` domain when clear component boundaries exist.
+
+Prefer conservative mappings:
+- top-level product components may become separate domains when the repository layout makes the boundary clear
+- shared source/test paths may widen to multiple domains rather than incorrectly narrowing coverage
+- domain-specific test commands should be recorded when they exist
+- if only one broad project test command exists, it may cover all discovered domains, but that broad scope should be explicit rather than pretending to be fine-grained
+
+### Build / lint / typecheck
+
+Existing project-native build, lint, and typecheck commands are deterministic quality signals and may be represented as scenarios. Adoption may auto-wire them only when the repository already declares an unambiguous command (for example a package-manager script or Makefile target). Do not invent new linters/typecheckers merely to satisfy the Engineering System.
+
 ## Trigger semantics
 
 - `affected`: selected when mapped domains are affected

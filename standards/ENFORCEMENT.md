@@ -55,6 +55,13 @@ Engineering System >=1.4.0 managed adoption additionally requires:
 - immutable `engineering_system.baseline`
 - `.github/workflows/engineering-system.yml` pinned to that baseline
 
+Engineering System >=1.5.0 managed adoption additionally records:
+- explicit operations posture (production or non-production)
+- incident/runbook requirements for production-oriented projects
+- concrete native CI workflow ownership when `ci_mode=native`
+- merge-gate enforcement state as `verified`, `advisory`, or `unknown`
+- design/incident routing in the repository AGENTS entrypoint
+
 Use `standards/ADOPTION.md` and `tools/adopt.py` for managed adoption. Existing repository rules must be classified before destructive cleanup.
 
 ## Deterministic CI compliance

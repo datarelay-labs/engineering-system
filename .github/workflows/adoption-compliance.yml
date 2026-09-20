@@ -25,8 +25,11 @@ jobs:
           python - <<'PY'
           import re
           from pathlib import Path
-
           import yaml
+
+          semver_re = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+          sha_re = re.compile(r"^[0-9a-f]{40}$")
+          failures = []
 
           required = (
               "AGENTS.md",
@@ -39,10 +42,6 @@ jobs:
               ".cursor/commands/resume.md",
               ".github/ISSUE_TEMPLATE/ai-work-packet.md",
           )
-          semver_re = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
-          sha_re = re.compile(r"^[0-9a-f]{40}$")
-
-          failures = []
           for rel in required:
               if not Path(rel).is_file():
                   failures.append(f"missing required file: {rel}")
@@ -54,20 +53,31 @@ jobs:
           mode = ""
           baseline = ""
           ci_mode = ""
+          native_ci_workflows = []
+          merge_gate_status = ""
+          operations = {}
+          project_domains = set()
+
           project_path = Path(".engineering/project.yaml")
           if project_path.is_file():
               profile = load(project_path)
               engineering = profile.get("engineering_system") or {}
+              operations = profile.get("operations") or {}
+              project_domains = {str(item) for item in (profile.get("domains") or []) if str(item).strip()}
               version = str(engineering.get("version") or "")
               mode = str(engineering.get("mode") or "")
               baseline = str(engineering.get("baseline") or "")
               ci_mode = str(engineering.get("ci_mode") or "")
+              native_ci_workflows = [str(item) for item in (engineering.get("native_ci_workflows") or [])]
+              merge_gate_status = str(engineering.get("merge_gate_status") or "")
+
               match = semver_re.fullmatch(version)
+              version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
               if not match:
                   failures.append(f"invalid engineering_system.version: {version or '<empty>'}")
-                  version_tuple = (0, 0, 0)
-              else:
-                  version_tuple = tuple(int(part) for part in match.groups())
+
+              if not project_domains:
+                  failures.append("project.yaml must define at least one domain")
 
               if version_tuple >= (1, 3, 0):
                   for rel in continuity_required:
@@ -77,30 +87,35 @@ jobs:
               if version_tuple >= (1, 4, 0):
                   if mode not in {"canonical", "adopted"}:
                       failures.append("Engineering System >=1.4.0 requires mode=canonical|adopted")
-                  if mode == "adopted":
-                      if not sha_re.fullmatch(baseline):
-                          failures.append("managed adopted repository requires immutable baseline SHA")
-                      if ci_mode not in {"shared", "native"}:
-                          failures.append("managed adopted repository requires ci_mode=shared|native")
-                      workflow = Path(".github/workflows/engineering-system.yml")
-                      if not workflow.is_file():
-                          failures.append("managed adoption missing .github/workflows/engineering-system.yml")
-                      elif sha_re.fullmatch(baseline):
-                          text = workflow.read_text(encoding="utf-8")
-                          if f"adoption-compliance.yml@{baseline}" not in text:
-                              failures.append("compliance workflow is not pinned to project baseline")
-                          if ci_mode == "shared" and f"affected-tests.yml@{baseline}" not in text:
-                              failures.append("shared CI mode requires affected workflow pinned to project baseline")
-                          if ci_mode == "native" and f"affected-tests.yml@{baseline}" in text:
-                              failures.append("native CI mode must not duplicate the shared affected-tests workflow")
-                      if ci_mode == "native":
-                          workflow_dir = Path(".github/workflows")
-                          other_workflows = [
-                              path for path in workflow_dir.glob("*.y*ml")
-                              if path.name not in {"engineering-system.yml", "engineering-release.yml"}
-                          ]
-                          if not other_workflows:
-                              failures.append("native CI mode selected but no project-native workflow was found")
+                  if mode == "adopted" and not sha_re.fullmatch(baseline):
+                      failures.append("managed adopted repository requires immutable baseline SHA")
+                  if mode == "adopted" and ci_mode not in {"shared", "native"}:
+                      failures.append("managed adopted repository requires ci_mode=shared|native")
+
+              if version_tuple >= (1, 5, 0) and mode == "adopted":
+                  if merge_gate_status not in {"verified", "advisory", "unknown"}:
+                      failures.append("Engineering System >=1.5.0 requires merge_gate_status=verified|advisory|unknown")
+                  for key in ("production_oriented", "runbook_required", "incident_response_required"):
+                      if not isinstance(operations.get(key), bool):
+                          failures.append(f"Engineering System >=1.5.0 requires operations.{key}=true|false")
+                  if operations.get("production_oriented"):
+                      if not operations.get("runbook_required"):
+                          failures.append("production-oriented adoption requires runbook_required=true")
+                      if not operations.get("incident_response_required"):
+                          failures.append("production-oriented adoption requires incident_response_required=true")
+
+          agents = Path("AGENTS.md")
+          if agents.is_file():
+              text = agents.read_text(encoding="utf-8")
+              if "https://github.com/datarelay-labs/engineering-system" not in text:
+                  failures.append("AGENTS.md does not reference canonical Engineering System")
+              match = semver_re.fullmatch(version)
+              version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+              if version_tuple >= (1, 5, 0):
+                  if "standards/DESIGN.md" not in text:
+                      failures.append("AGENTS.md missing design-gate routing")
+                  if "standards/OPERATIONS.md" not in text:
+                      failures.append("AGENTS.md missing incident/operations routing")
 
           cursor = Path(".cursor/rules/engineering-system.mdc")
           if cursor.is_file():
@@ -108,29 +123,75 @@ jobs:
               if "alwaysApply: true" not in text:
                   failures.append("Cursor engineering-system rule is not alwaysApply: true")
 
-          agents = Path("AGENTS.md")
-          if agents.is_file() and "https://github.com/datarelay-labs/engineering-system" not in agents.read_text(encoding="utf-8"):
-              failures.append("AGENTS.md does not reference canonical Engineering System")
-
           tests_path = Path(".engineering/tests.yaml")
           if tests_path.is_file():
               tests = load(tests_path)
+              for pattern, spec in (tests.get("paths") or {}).items():
+                  for domain in (spec or {}).get("domains") or []:
+                      if project_domains and str(domain) not in project_domains:
+                          failures.append(f"tests.yaml path {pattern} references unknown domain: {domain}")
               scenarios = tests.get("scenarios")
               if not isinstance(scenarios, list) or not scenarios:
                   failures.append("tests.yaml must contain at least one scenario")
-              elif any(not str((scenario or {}).get("command") or "").strip() for scenario in scenarios):
-                  failures.append("tests.yaml contains scenario without command")
+              else:
+                  for scenario in scenarios:
+                      scenario = scenario or {}
+                      if not str(scenario.get("command") or "").strip():
+                          failures.append("tests.yaml contains scenario without command")
+                          break
+                      for domain in scenario.get("domains") or []:
+                          if project_domains and str(domain) not in project_domains:
+                              failures.append(f"tests.yaml scenario {scenario.get('id', '<unknown>')} references unknown domain: {domain}")
 
+          release = {}
           release_path = Path(".engineering/release.yaml")
           if release_path.is_file():
               release = load(release_path)
-              preflight_required = bool(release.get("preflight_required"))
-              preflight_command = str(release.get("preflight_command") or "").strip()
-              qualification_command = str(release.get("qualification_command") or "").strip()
-              if preflight_required and not preflight_command:
+              if bool(release.get("preflight_required")) and not str(release.get("preflight_command") or "").strip():
                   failures.append("preflight_required=true but preflight_command is empty")
+              match = semver_re.fullmatch(version)
+              version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+              if version_tuple >= (1, 5, 0) and operations.get("production_oriented"):
+                  if not release.get("operational_e2e_required"):
+                      failures.append("production-oriented adoption requires operational_e2e_required=true")
+                  if int(release.get("full_e2e_passes") or 0) < 1:
+                      failures.append("production-oriented adoption requires full_e2e_passes>=1")
+                  if not release.get("public_smoke_required"):
+                      failures.append("production-oriented adoption requires public_smoke_required=true")
 
-              if mode == "adopted" and qualification_command:
+          match = semver_re.fullmatch(version)
+          version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+          if version_tuple >= (1, 4, 0) and mode == "adopted":
+              workflow = Path(".github/workflows/engineering-system.yml")
+              if not workflow.is_file():
+                  failures.append("managed adoption missing .github/workflows/engineering-system.yml")
+              elif sha_re.fullmatch(baseline):
+                  text = workflow.read_text(encoding="utf-8")
+                  if f"adoption-compliance.yml@{baseline}" not in text:
+                      failures.append("compliance workflow is not pinned to project baseline")
+                  if ci_mode == "shared" and f"affected-tests.yml@{baseline}" not in text:
+                      failures.append("shared CI mode requires affected workflow pinned to project baseline")
+                  if ci_mode == "native" and f"affected-tests.yml@{baseline}" in text:
+                      failures.append("native CI mode must not duplicate shared affected-tests workflow")
+
+              if ci_mode == "native":
+                  if version_tuple >= (1, 5, 0):
+                      if not native_ci_workflows:
+                          failures.append("native CI mode requires explicit native_ci_workflows mapping")
+                      for rel in native_ci_workflows:
+                          if not Path(rel).is_file():
+                              failures.append(f"mapped native CI workflow missing: {rel}")
+                  else:
+                      workflow_dir = Path(".github/workflows")
+                      others = [
+                          path for path in workflow_dir.glob("*.y*ml")
+                          if path.name not in {"engineering-system.yml", "engineering-release.yml"}
+                      ]
+                      if not others:
+                          failures.append("native CI mode selected but no project-native workflow was found")
+
+              qualification = str(release.get("qualification_command") or "").strip()
+              if qualification:
                   release_workflow = Path(".github/workflows/engineering-release.yml")
                   if not release_workflow.is_file():
                       failures.append("qualification_command configured but engineering-release.yml is missing")
@@ -138,7 +199,7 @@ jobs:
                       text = release_workflow.read_text(encoding="utf-8")
                       if f"release-gate.yml@{baseline}" not in text:
                           failures.append("release gate is not pinned to project baseline")
-                      if preflight_required and f"release-preflight.yml@{baseline}" not in text:
+                      if bool(release.get("preflight_required")) and f"release-preflight.yml@{baseline}" not in text:
                           failures.append("release preflight is not pinned to project baseline")
 
           if failures:
@@ -147,11 +208,11 @@ jobs:
               raise SystemExit(1)
 
           print(f"ENGINEERING_SYSTEM_VERSION={version}")
-          if mode:
-              print(f"ENGINEERING_SYSTEM_MODE={mode}")
-          if baseline:
-              print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
-          if ci_mode:
-              print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
+          print(f"ENGINEERING_SYSTEM_MODE={mode}")
+          print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
+          if merge_gate_status:
+              print(f"MERGE_GATE_ENFORCEMENT={merge_gate_status}")
+          if operations:
+              print("OPERATIONS_PROFILE=" + ("production" if operations.get("production_oriented") else "nonproduction"))
           print("ENGINEERING_SYSTEM_ADOPTION=PASS")
           PY

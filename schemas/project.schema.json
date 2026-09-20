@@ -30,6 +30,18 @@
         "ci_mode": {
           "type": "string",
           "enum": ["shared", "native"]
+        },
+        "native_ci_workflows": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "merge_gate_status": {
+          "type": "string",
+          "enum": ["verified", "advisory", "unknown"]
         }
       }
     },
@@ -78,7 +90,12 @@
       }
     },
     "operations": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "production_oriented": {"type": "boolean"},
+        "runbook_required": {"type": "boolean"},
+        "incident_response_required": {"type": "boolean"}
+      }
     }
   }
 }

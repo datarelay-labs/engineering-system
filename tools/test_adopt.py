@@ -7,6 +7,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
 CHECK = ROOT / "tools" / "check-adoption.py"
@@ -35,6 +37,10 @@ def commit_all(root: Path, message: str = "fixture") -> None:
     run("git", "commit", "-qm", message, cwd=root)
 
 
+def load_yaml(path: Path):
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
 def test_clean_python_bootstrap() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-python"
@@ -48,6 +54,8 @@ def test_clean_python_bootstrap() -> None:
         audit = run(sys.executable, str(ADOPT), "--root", str(target), "--audit")
         assert "PROJECT_TYPE=python" in audit.stdout
         assert "python -m pytest -q" in audit.stdout
+        assert "DOMAIN_CANDIDATES=" in audit.stdout
+        assert "OPERATIONS_SIGNALS=<none>" in audit.stdout
 
         applied = run(
             sys.executable,
@@ -65,6 +73,8 @@ def test_clean_python_bootstrap() -> None:
             "python -m pytest -q",
         )
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert "OPERATIONS_MODE=nonproduction" in applied.stdout
+        assert "MERGE_GATE_ENFORCEMENT=unknown" in applied.stdout
 
         required = (
             "AGENTS.md",
@@ -80,11 +90,16 @@ def test_clean_python_bootstrap() -> None:
         for rel in required:
             assert (target / rel).is_file(), rel
 
-        project_text = (target / ".engineering/project.yaml").read_text(encoding="utf-8")
-        assert 'version: "1.4.0"' in project_text
-        assert "mode: adopted" in project_text
-        assert 'ci_mode: "shared"' in project_text
-        assert BASELINE in project_text
+        project = load_yaml(target / ".engineering/project.yaml")
+        engineering = project["engineering_system"]
+        assert engineering["version"] == "1.5.0"
+        assert engineering["mode"] == "adopted"
+        assert engineering["ci_mode"] == "shared"
+        assert engineering["baseline"] == BASELINE
+        assert engineering["native_ci_workflows"] == []
+        assert engineering["merge_gate_status"] == "unknown"
+        assert project["operations"]["production_oriented"] is False
+        assert project["operations"]["incident_response_required"] is False
 
         tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
         assert 'setup_command: "python -m pip install -e . && python -m pip install pytest"' in tests_text
@@ -128,7 +143,7 @@ def test_rule_review_is_fail_closed() -> None:
         assert "classify existing rules before apply" in result.stdout
 
 
-def test_existing_ci_requires_explicit_mode() -> None:
+def test_existing_ci_requires_mapping_when_ambiguous() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-native-ci"
         target.mkdir()
@@ -136,10 +151,66 @@ def test_existing_ci_requires_explicit_mode() -> None:
         (target / "go.mod").write_text("module example.invalid/native\n\ngo 1.23\n", encoding="utf-8")
         workflow_dir = target / ".github" / "workflows"
         workflow_dir.mkdir(parents=True)
-        (workflow_dir / "native.yml").write_text(
-            "name: Native CI\non:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: go test ./...\n",
-            encoding="utf-8",
+        for name in ("unit.yml", "integration.yml"):
+            (workflow_dir / name).write_text(
+                f"name: {name}\non:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: go test ./...\n",
+                encoding="utf-8",
+            )
+        commit_all(target)
+
+        blocked = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--ci-mode",
+            "native",
+            check=False,
         )
+        assert blocked.returncode != 0
+        assert "NATIVE_CI_MAPPING_REQUIRED=" in blocked.stdout
+
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--ci-mode",
+            "native",
+            "--native-ci-workflow",
+            ".github/workflows/unit.yml",
+            "--merge-gate-status",
+            "advisory",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
+        assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
+        assert "affected-tests.yml@" not in workflow_text
+
+        project = load_yaml(target / ".engineering/project.yaml")
+        engineering = project["engineering_system"]
+        assert engineering["ci_mode"] == "native"
+        assert engineering["native_ci_workflows"] == [".github/workflows/unit.yml"]
+        assert engineering["merge_gate_status"] == "advisory"
+
+
+def test_operations_signals_fail_closed_then_production_profile() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-service"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/service\n\ngo 1.23\n", encoding="utf-8")
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         commit_all(target)
 
         blocked = run(
@@ -155,7 +226,7 @@ def test_existing_ci_requires_explicit_mode() -> None:
             check=False,
         )
         assert blocked.returncode != 0
-        assert "CI_REVIEW_REQUIRED=.github/workflows/native.yml" in blocked.stdout
+        assert "OPERATIONS_REVIEW_REQUIRED=Dockerfile" in blocked.stdout
 
         applied = run(
             sys.executable,
@@ -167,22 +238,77 @@ def test_existing_ci_requires_explicit_mode() -> None:
             BASELINE,
             "--test-command",
             "go test ./...",
-            "--ci-mode",
-            "native",
+            "--operations-mode",
+            "production",
+        )
+        assert "OPERATIONS_MODE=production" in applied.stdout
+
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["operations"]["production_oriented"] is True
+        assert project["operations"]["runbook_required"] is True
+        assert project["operations"]["incident_response_required"] is True
+
+        release = load_yaml(target / ".engineering/release.yaml")
+        assert release["operational_e2e_required"] is True
+        assert release["full_e2e_passes"] == 1
+        assert release["public_smoke_required"] is True
+
+        checked = run(sys.executable, str(CHECK), "--root", str(target))
+        assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
+
+
+def test_quality_and_domain_discovery() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-node"
+        target.mkdir()
+        init_repo(target)
+        (target / "package.json").write_text(
+            '{"scripts":{"test":"vitest run","build":"vite build","lint":"eslint .","typecheck":"tsc --noEmit"}}\n',
+            encoding="utf-8",
+        )
+        (target / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        (target / "server").mkdir()
+        (target / "client").mkdir()
+        (target / "tests").mkdir()
+        commit_all(target)
+
+        audit = run(sys.executable, str(ADOPT), "--root", str(target), "--audit")
+        assert '"build": "npm run build"' in audit.stdout
+        assert '"lint": "npm run lint"' in audit.stdout
+        assert '"typecheck": "npm run typecheck"' in audit.stdout
+        assert '"server"' in audit.stdout
+        assert '"client"' in audit.stdout
+
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "npm test",
         )
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
-        workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
-        assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
-        assert "affected-tests.yml@" not in workflow_text
-        project_text = (target / ".engineering/project.yaml").read_text(encoding="utf-8")
-        assert 'ci_mode: "native"' in project_text
+
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert {"server", "client"}.issubset(set(project["domains"]))
+
+        tests = load_yaml(target / ".engineering/tests.yaml")
+        ids = {scenario["id"] for scenario in tests["scenarios"]}
+        assert "ADOPTED-BUILD-001" in ids
+        assert "ADOPTED-LINT-001" in ids
+        assert "ADOPTED-TYPECHECK-001" in ids
 
 
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK))
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
-    test_existing_ci_requires_explicit_mode()
+    test_existing_ci_requires_mapping_when_ambiguous()
+    test_operations_signals_fail_closed_then_production_profile()
+    test_quality_and_domain_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
 

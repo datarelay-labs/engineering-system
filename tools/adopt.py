@@ -113,6 +113,79 @@ def node_test_command(root: Path) -> str:
     return "npm test"
 
 
+def package_script_command(root: Path, script: str) -> str:
+    package = root / "package.json"
+    if not package.is_file():
+        return ""
+    try:
+        data = json.loads(package.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    scripts = data.get("scripts") or {}
+    if not str(scripts.get(script) or "").strip():
+        return ""
+    if (root / "pnpm-lock.yaml").is_file():
+        return f"pnpm {script}"
+    if (root / "yarn.lock").is_file():
+        return f"yarn {script}"
+    return f"npm run {script}"
+
+
+def make_target(root: Path, target: str) -> str:
+    makefile = root / "Makefile"
+    if not makefile.is_file():
+        return ""
+    text = makefile.read_text(encoding="utf-8", errors="replace")
+    if re.search(rf"(?m)^{re.escape(target)}\s*:", text):
+        return f"make {target}"
+    return ""
+
+
+def discover_quality_commands(root: Path) -> dict[str, str]:
+    commands = {
+        "build": package_script_command(root, "build") or make_target(root, "build"),
+        "lint": package_script_command(root, "lint") or make_target(root, "lint"),
+        "typecheck": (
+            package_script_command(root, "typecheck")
+            or package_script_command(root, "type-check")
+            or make_target(root, "typecheck")
+        ),
+    }
+    return {name: command for name, command in commands.items() if command}
+
+
+def discover_domain_map(root: Path) -> dict[str, list[str]]:
+    source_candidates = (
+        "server", "client", "agent", "frontend", "backend", "api", "cli",
+        "web", "cmd", "pkg", "internal", "src", "lib", "app"
+    )
+    present = [name for name in source_candidates if (root / name).is_dir()]
+    specific = [name for name in present if name not in {"src", "lib", "app"}]
+    selected = specific if len(specific) >= 2 else []
+
+    if not selected:
+        return {"core": source_patterns(root)}
+
+    mapping: dict[str, list[str]] = {name: [f"{name}/**"] for name in selected}
+    shared_patterns = [
+        f"{name}/**"
+        for name in ("src", "lib", "app", "tests", "test")
+        if (root / name).exists()
+    ]
+    if shared_patterns:
+        mapping["shared"] = shared_patterns
+    return mapping
+
+
+def discover_operations_signals(root: Path) -> list[str]:
+    markers = (
+        "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+        "helm", "charts", "k8s", "kubernetes", "deploy", "deployment",
+        "terraform", "ansible", "systemd", "packaging", "installer"
+    )
+    return [name for name in markers if (root / name).exists()]
+
+
 def discover_test_commands(root: Path) -> list[str]:
     commands: list[str] = []
 
@@ -240,7 +313,10 @@ def inventory(root: Path) -> dict[str, object]:
         "git": git_state(root),
         "project_type": detect_project_type(root),
         "test_candidates": test_candidates,
+        "quality_candidates": discover_quality_commands(root),
         "setup_suggestion": setup_suggestion,
+        "domain_candidates": discover_domain_map(root),
+        "operations_signals": discover_operations_signals(root),
         "source_patterns": source_patterns(root),
         "existing_rule_surfaces": rule_surfaces(root),
         "existing_ci": existing_ci(root),
@@ -265,6 +341,11 @@ def print_inventory(data: dict[str, object], as_json: bool) -> None:
     rules = data["existing_rule_surfaces"]
     ci = data["existing_ci"]
     print("TEST_CANDIDATES=" + (" | ".join(tests) if tests else "<none>"))
+    quality = data.get("quality_candidates") or {}
+    print("QUALITY_CANDIDATES=" + (json.dumps(quality, sort_keys=True) if quality else "<none>"))
+    print("DOMAIN_CANDIDATES=" + json.dumps(data.get("domain_candidates") or {}, sort_keys=True))
+    operations = data.get("operations_signals") or []
+    print("OPERATIONS_SIGNALS=" + (",".join(operations) if operations else "<none>"))
     print("SETUP_SUGGESTION=" + (str(data.get("setup_suggestion") or "") or "<none>"))
     print("RULE_SURFACES=" + (",".join(rules) if rules else "<none>"))
     print("CI_WORKFLOWS=" + (",".join(ci) if ci else "<none>"))
@@ -275,46 +356,128 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def project_yaml(root: Path, version: str, baseline: str, ci_mode: str, project_type: str, maturity: str, domain: str, platform: str) -> str:
-    return (
-        "engineering_system:\n"
-        f"  version: {yaml_scalar(version)}\n"
-        "  mode: adopted\n"
-        f"  baseline: {yaml_scalar(baseline)}\n"
-        f"  ci_mode: {yaml_scalar(ci_mode)}\n\n"
-        "project:\n"
-        f"  name: {yaml_scalar(root.name)}\n"
-        f"  type: {yaml_scalar(project_type)}\n"
-        f"  maturity: {yaml_scalar(maturity)}\n\n"
-        "domains:\n"
-        f"  - {yaml_scalar(domain)}\n\n"
-        "platforms:\n"
-        f"  - {yaml_scalar(platform)}\n\n"
-        "operations:\n"
-        "  production_oriented: false\n"
-        "  runbook_required: false\n"
+def parse_domain_tests(values: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"FAIL invalid --domain-test {value!r}; expected domain=command")
+        domain, command = value.split("=", 1)
+        domain = domain.strip()
+        command = command.strip()
+        if not domain or not command:
+            raise SystemExit(f"FAIL invalid --domain-test {value!r}; expected domain=command")
+        result[domain] = command
+    return result
+
+
+def project_yaml(
+    root: Path,
+    version: str,
+    baseline: str,
+    ci_mode: str,
+    native_ci_workflows: list[str],
+    merge_gate_status: str,
+    project_type: str,
+    maturity: str,
+    domains: list[str],
+    platform: str,
+    operations_mode: str,
+) -> str:
+    production = operations_mode == "production"
+    lines = [
+        "engineering_system:",
+        f"  version: {yaml_scalar(version)}",
+        "  mode: adopted",
+        f"  baseline: {yaml_scalar(baseline)}",
+        f"  ci_mode: {yaml_scalar(ci_mode)}",
+        "  native_ci_workflows:",
+    ]
+    if native_ci_workflows:
+        lines.extend(f"    - {yaml_scalar(path)}" for path in native_ci_workflows)
+    else:
+        lines[-1] = "  native_ci_workflows: []"
+    lines.extend(
+        [
+            f"  merge_gate_status: {yaml_scalar(merge_gate_status)}",
+            "",
+            "project:",
+            f"  name: {yaml_scalar(root.name)}",
+            f"  type: {yaml_scalar(project_type)}",
+            f"  maturity: {yaml_scalar(maturity)}",
+            "",
+            "domains:",
+        ]
     )
+    lines.extend(f"  - {yaml_scalar(domain)}" for domain in domains)
+    lines.extend(
+        [
+            "",
+            "platforms:",
+            f"  - {yaml_scalar(platform)}",
+            "",
+            "operations:",
+            f"  production_oriented: {'true' if production else 'false'}",
+            f"  runbook_required: {'true' if production else 'false'}",
+            f"  incident_response_required: {'true' if production else 'false'}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
-def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domain: str, platform: str) -> str:
+def tests_yaml(
+    domain_map: dict[str, list[str]],
+    setup_command: str,
+    test_command: str,
+    domain_tests: dict[str, str],
+    quality_commands: dict[str, str],
+    platform: str,
+) -> str:
+    domains = list(domain_map)
     lines = ["version: 1", "", f"setup_command: {yaml_scalar(setup_command)}", "", "paths:"]
-    for pattern in patterns:
-        lines.extend(
-            [
-                f"  {yaml_scalar(pattern)}:",
-                "    domains:",
-                f"      - {yaml_scalar(domain)}",
-            ]
-        )
+    for domain, patterns in domain_map.items():
+        for pattern in patterns:
+            lines.extend(
+                [
+                    f"  {yaml_scalar(pattern)}:",
+                    "    domains:",
+                    f"      - {yaml_scalar(domain)}",
+                ]
+            )
+
     lines.extend(["", "scenarios:"])
-    if test_command:
+    if domain_tests:
+        for index, (domain, command) in enumerate(sorted(domain_tests.items()), start=1):
+            lines.extend(
+                [
+                    f"  - id: ADOPTED-DOMAIN-{index:03d}",
+                    f"    name: {domain} affected tests",
+                    "    level: integration",
+                    "    domains:",
+                    f"      - {yaml_scalar(domain)}",
+                    "    triggers:",
+                    "      - affected",
+                    "    platforms:",
+                    f"      - {yaml_scalar(platform)}",
+                    f"    command: {yaml_scalar(command)}",
+                    "    invariants:",
+                    f"      - {yaml_scalar(domain + ' behavior remains green')}",
+                    "    release_gate: true",
+                    "",
+                ]
+            )
+    elif test_command:
         lines.extend(
             [
                 "  - id: ADOPTED-TEST-001",
                 "    name: Project-native affected tests",
                 "    level: integration",
                 "    domains:",
-                f"      - {yaml_scalar(domain)}",
+            ]
+        )
+        lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+        lines.extend(
+            [
                 "    triggers:",
                 "      - affected",
                 "    platforms:",
@@ -326,13 +489,47 @@ def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domai
                 "",
             ]
         )
+
+    for name in ("lint", "typecheck", "build"):
+        command = quality_commands.get(name, "")
+        if not command:
+            continue
+        scenario_id = f"ADOPTED-{name.upper()}-001"
+        trigger = "pr" if name in {"lint", "typecheck"} else "affected"
+        lines.extend(
+            [
+                f"  - id: {scenario_id}",
+                f"    name: Project {name}",
+                "    level: static" if name in {"lint", "typecheck"} else "    level: component",
+                "    domains:",
+            ]
+        )
+        lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+        lines.extend(
+            [
+                "    triggers:",
+                f"      - {trigger}",
+                "    platforms:",
+                f"      - {yaml_scalar(platform)}",
+                f"    command: {yaml_scalar(command)}",
+                "    invariants:",
+                f"      - {yaml_scalar('project ' + name + ' remains green')}",
+                "    release_gate: true",
+                "",
+            ]
+        )
+
     lines.extend(
         [
             "  - id: ADOPTED-STATIC-001",
             "    name: Git whitespace validation",
             "    level: static",
             "    domains:",
-            f"      - {yaml_scalar(domain)}",
+        ]
+    )
+    lines.extend(f"      - {yaml_scalar(domain)}" for domain in domains)
+    lines.extend(
+        [
             "    triggers:",
             "      - pr",
             "      - preflight",
@@ -349,7 +546,8 @@ def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domai
     return "\n".join(lines)
 
 
-def release_yaml(preflight_command: str, release_command: str) -> str:
+def release_yaml(preflight_command: str, release_command: str, operations_mode: str) -> str:
+    production = operations_mode == "production"
     return (
         "version: 1\n\n"
         "exact_head_required: true\n"
@@ -359,9 +557,9 @@ def release_yaml(preflight_command: str, release_command: str) -> str:
         f"preflight_required: {'true' if preflight_command else 'false'}\n"
         f"preflight_command: {yaml_scalar(preflight_command)}\n"
         f"qualification_command: {yaml_scalar(release_command)}\n"
-        "operational_e2e_required: false\n"
-        "full_e2e_passes: 0\n"
-        "public_smoke_required: false\n\n"
+        f"operational_e2e_required: {'true' if production else 'false'}\n"
+        f"full_e2e_passes: {1 if production else 0}\n"
+        f"public_smoke_required: {'true' if production else 'false'}\n\n"
         "blockers:\n"
         "  p0: true\n"
         "  p1: true\n"
@@ -477,14 +675,21 @@ def main() -> int:
     parser.add_argument("--ack-rule-review", action="store_true")
     parser.add_argument("--allow-no-tests", action="store_true")
     parser.add_argument("--test-command", default="")
+    parser.add_argument("--domain-test", action="append", default=[])
     parser.add_argument("--setup-command", default="")
+    parser.add_argument("--build-command", default="")
+    parser.add_argument("--lint-command", default="")
+    parser.add_argument("--typecheck-command", default="")
     parser.add_argument("--release-command", default="")
     parser.add_argument("--preflight-command", default="")
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
     parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
+    parser.add_argument("--native-ci-workflow", action="append", default=[])
+    parser.add_argument("--merge-gate-status", default="unknown", choices=("verified", "advisory", "unknown"))
     parser.add_argument("--maturity", default="development", choices=("experimental", "development", "production", "maintenance"))
-    parser.add_argument("--domain", default="core")
+    parser.add_argument("--operations-mode", default="auto", choices=("auto", "production", "nonproduction"))
+    parser.add_argument("--domain", default="")
     parser.add_argument("--platform", default="linux")
     args = parser.parse_args()
 
@@ -526,15 +731,46 @@ def main() -> int:
         elif not args.allow_no_tests:
             raise SystemExit("FAIL no unambiguous test command found; pass --test-command or --allow-no-tests")
 
+    domain_tests = parse_domain_tests(list(args.domain_test))
+    if domain_tests and test_command:
+        raise SystemExit("FAIL use either --test-command or --domain-test, not both")
+
     setup_command = args.setup_command.strip()
     if not setup_command and test_command:
         setup_command = suggest_setup_command(root, test_command)
+
+    discovered_quality = dict(data.get("quality_candidates") or {})
+    quality_commands = {
+        "build": args.build_command.strip() or str(discovered_quality.get("build") or ""),
+        "lint": args.lint_command.strip() or str(discovered_quality.get("lint") or ""),
+        "typecheck": args.typecheck_command.strip() or str(discovered_quality.get("typecheck") or ""),
+    }
+    quality_commands = {name: command for name, command in quality_commands.items() if command}
 
     if args.preflight_command and not args.release_command:
         raise SystemExit("FAIL --preflight-command requires --release-command")
 
     project_type = args.project_type.strip() or str(data["project_type"])
-    patterns = list(data["source_patterns"])
+    if args.domain.strip():
+        domain_map = {args.domain.strip(): list(data["source_patterns"])}
+    else:
+        domain_map = dict(data.get("domain_candidates") or {"core": list(data["source_patterns"])})
+    if domain_tests:
+        unknown = sorted(set(domain_tests) - set(domain_map))
+        if unknown:
+            raise SystemExit("FAIL --domain-test references unknown domain(s): " + ",".join(unknown))
+    domains = list(domain_map)
+
+    operations_mode = args.operations_mode
+    operations_signals = list(data.get("operations_signals") or [])
+    if operations_mode == "auto":
+        if args.maturity in {"production", "maintenance"}:
+            operations_mode = "production"
+        elif operations_signals:
+            print("OPERATIONS_REVIEW_REQUIRED=" + ",".join(operations_signals))
+            raise SystemExit("FAIL deployment/operations signals detected; rerun with --operations-mode production|nonproduction after review")
+        else:
+            operations_mode = "nonproduction"
 
     ci_mode = args.ci_mode
     existing_workflows = [
@@ -546,6 +782,22 @@ def main() -> int:
             print("CI_REVIEW_REQUIRED=" + ",".join(existing_workflows))
             raise SystemExit("FAIL existing CI detected; review equivalent gates and rerun with --ci-mode shared|native")
         ci_mode = "shared"
+
+    native_ci_workflows = [item.strip() for item in args.native_ci_workflow if item.strip()]
+    if ci_mode == "native":
+        if not native_ci_workflows:
+            if len(existing_workflows) == 1:
+                native_ci_workflows = [existing_workflows[0]]
+            elif len(existing_workflows) > 1:
+                print("NATIVE_CI_MAPPING_REQUIRED=" + ",".join(existing_workflows))
+                raise SystemExit("FAIL native CI mode requires explicit --native-ci-workflow mapping")
+            else:
+                raise SystemExit("FAIL native CI mode selected but no project-native workflow exists")
+        missing_native = [path for path in native_ci_workflows if not (root / path).is_file()]
+        if missing_native:
+            raise SystemExit("FAIL mapped native CI workflow missing: " + ",".join(missing_native))
+    else:
+        native_ci_workflows = []
 
     written: list[str] = []
     skipped: list[str] = []
@@ -575,21 +827,33 @@ def main() -> int:
     write_missing(
         root,
         ".engineering/project.yaml",
-        project_yaml(root, version, baseline, ci_mode, project_type, args.maturity, args.domain, args.platform),
+        project_yaml(
+            root,
+            version,
+            baseline,
+            ci_mode,
+            native_ci_workflows,
+            args.merge_gate_status,
+            project_type,
+            args.maturity,
+            domains,
+            args.platform,
+            operations_mode,
+        ),
         written,
         skipped,
     )
     write_missing(
         root,
         ".engineering/tests.yaml",
-        tests_yaml(patterns, setup_command, test_command, args.domain, args.platform),
+        tests_yaml(domain_map, setup_command, test_command, domain_tests, quality_commands, args.platform),
         written,
         skipped,
     )
     write_missing(
         root,
         ".engineering/release.yaml",
-        release_yaml(args.preflight_command.strip(), args.release_command.strip()),
+        release_yaml(args.preflight_command.strip(), args.release_command.strip(), operations_mode),
         written,
         skipped,
     )
@@ -617,6 +881,10 @@ def main() -> int:
     print(f"ENGINEERING_SYSTEM_VERSION={version}")
     print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
     print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
+    print("NATIVE_CI_WORKFLOWS=" + (",".join(native_ci_workflows) if native_ci_workflows else "<none>"))
+    print(f"MERGE_GATE_ENFORCEMENT={args.merge_gate_status}")
+    print(f"OPERATIONS_MODE={operations_mode}")
+    print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
     if setup_command:
@@ -625,8 +893,11 @@ def main() -> int:
         print("SETUP_COMMAND=<none>")
     if test_command:
         print(f"TEST_COMMAND={test_command}")
+    elif domain_tests:
+        print("DOMAIN_TESTS=" + json.dumps(domain_tests, sort_keys=True))
     else:
         print("TEST_COMMAND=<explicitly-none>")
+    print("QUALITY_COMMANDS=" + (json.dumps(quality_commands, sort_keys=True) if quality_commands else "<none>"))
     if args.release_command:
         print("RELEASE_AUTOMATION=WIRED")
     else:
