@@ -1,6 +1,7 @@
 engineering_system:
   version: "1.4.0"
   mode: canonical
+  ci_mode: native
 
 project:
   name: "engineering-system"
