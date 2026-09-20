@@ -62,6 +62,13 @@ Engineering System >=1.5.0 managed adoption additionally records:
 - merge-gate enforcement state as `verified`, `advisory`, or `unknown`
 - design/incident routing in the repository AGENTS entrypoint
 
+Engineering System >=1.6.0 managed adoption additionally:
+- wires `.github/workflows/enforcement-check.yml` through the pinned baseline
+- compares declared merge-gate state with observable live GitHub rulesets on pull requests
+- treats a declared `verified` state that cannot be verified as a failure
+- treats observable `verified` vs `advisory` drift as a configuration failure
+- permits `unknown` when GitHub enforcement visibility genuinely is unavailable
+
 Use `standards/ADOPTION.md` and `tools/adopt.py` for managed adoption. Existing repository rules must be classified before destructive cleanup.
 
 ## Deterministic CI compliance
@@ -85,3 +92,22 @@ global AI adapter
  -> release preflight
  -> exact-candidate qualification
 ```
+
+
+## Live GitHub enforcement reconciliation
+
+Workflow existence is not evidence that merge blocking is active.
+
+For 1.6+ adopted repositories:
+
+```text
+project.yaml merge_gate_status
+        +
+live default-branch GitHub rulesets
+        ↓
+reconciliation
+```
+
+`verified` means an active default-branch rule requires both pull requests and one or more status checks. `advisory` means the repository automation may run but those merge gates are not both enforced. `unknown` is reserved for cases where live enforcement cannot be observed safely.
+
+The reconciliation workflow is read-only. The Engineering System does not silently create or relax GitHub administrative rulesets.
