@@ -43,12 +43,13 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 9. Bug fixes should include a regression that fails before the fix and passes after it whenever practical.
 10. Never weaken a valid test merely to obtain PASS.
 11. Never silently skip a required gate or report unexecuted work as PASS.
-12. Historical evidence does not qualify a different source revision.
-13. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
-14. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
+12. Before merge or terminal completion, inspect machine-observable PR review feedback. Every actionable finding from a human reviewer or configured automated reviewer must be fixed and revalidated, or explicitly dispositioned with concise evidence showing why it is non-actionable, out of scope, or incorrect. A COMMENTED/advisory review state is not itself PASS or FAIL; the content controls. Do not merge or complete while actionable review feedback remains unaddressed.
+13. Historical evidence does not qualify a different source revision.
+14. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
+15. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
 
 ## Definition of done
 
-A normal change is done when intended behavior is implemented, affected tests pass, fixed defects are durably regressed when practical, and relevant contract/security/operational documentation is updated.
+A normal change is done when intended behavior is implemented, affected tests pass, fixed defects are durably regressed when practical, actionable review feedback is addressed or explicitly dispositioned with evidence, and relevant contract/security/operational documentation is updated.
 
 Release readiness is stricter and is defined by `RELEASE.md`.

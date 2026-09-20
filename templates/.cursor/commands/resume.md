@@ -28,6 +28,9 @@ Work sequentially in a single agent context.
    - Execute the current Next Action and its required validation without expanding scope.
    - After each milestone, re-read/update the same Work Packet. If STATUS remains ACTIVE and the next action is executable without a new user decision, continue to that next action in the same session instead of returning a final "Done" response.
    - A successful intermediate milestone such as implementation PASS, commit, push, or PR creation is not workstream completion when CI/review/merge/closure remains.
+   - Before merge or terminal completion, inspect the current PR's machine-observable review submissions, top-level comments, and inline review feedback.
+   - Treat every actionable finding from a human reviewer or configured automated reviewer as an executable Next Action. A COMMENTED/advisory review state is not itself PASS or FAIL; inspect the content.
+   - Resolve each actionable finding by fixing it and rerunning affected validation, or by recording a concise evidence-backed disposition explaining why it is non-actionable, out of scope, or incorrect. Do not merge or claim terminal completion while actionable review feedback remains unaddressed.
    - When required CI or another machine-observable external condition is pending, actively monitor it at a reasonable interval (normally 30-60 seconds) and keep the CLI session in a working/waiting state. Print concise progress such as `WAITING_FOR_CI`; do not present a final completion summary while STATUS=ACTIVE.
    - If progress requires a human decision/approval, credentials, or another non-machine-resolvable action, update the packet with WAITING/BLOCKED evidence and the exact required action, then return a non-completion status. Do not claim Done.
    - If an external wait remains pending for about 30 minutes without a state change, record WAITING with fresh evidence and return without claiming completion; a later /resume continues from that durable state.
@@ -43,6 +46,7 @@ Work sequentially in a single agent context.
     - required implementation and validation are PASS
     - required commit/push/PR steps are complete
     - required CI/review gates are settled successfully
+    - no actionable PR review feedback remains unaddressed
     - required integration/merge is complete
     - explicitly linked product issues that the packet expects to close are closed
     - no executable Next Action remains

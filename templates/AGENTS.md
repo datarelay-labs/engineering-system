@@ -30,8 +30,9 @@ When explicitly resuming an existing workstream, resolve this repository first a
 8. A known blocking deterministic failure stops expensive downstream qualification.
 9. Bug fixes require durable regression coverage whenever practical.
 10. Never weaken a valid test merely to obtain PASS.
-11. Never claim release readiness without exact executable evidence.
-12. Never reuse qualification evidence from a different source HEAD.
+11. Before merge or terminal completion, inspect machine-observable PR review feedback. Fix and revalidate every actionable review finding, or explicitly disposition it with concise evidence when it is non-actionable, out of scope, or incorrect. Do not treat COMMENTED/advisory review state as automatic PASS.
+12. Never claim release readiness without exact executable evidence.
+13. Never reuse qualification evidence from a different source HEAD.
 
 If the user reports an outage, degraded service, failed upgrade, data-loss risk, or other production-impacting symptom, switch to the canonical `standards/OPERATIONS.md` incident lifecycle. Preserve evidence before mutation and do not perform destructive/irreversible recovery without explicit approval unless an approved runbook authorizes it.
 
