@@ -9,6 +9,9 @@
       "type": "integer",
       "minimum": 1
     },
+    "setup_command": {
+      "type": "string"
+    },
     "paths": {
       "type": "object",
       "additionalProperties": {
