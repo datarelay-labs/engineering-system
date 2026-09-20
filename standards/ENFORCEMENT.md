@@ -45,6 +45,17 @@ Every adopted repository must contain:
 - `.engineering/project.yaml`
 - `.engineering/tests.yaml`
 - `.engineering/release.yaml`
+- `.cursor/rules/engineering-system.mdc`
+
+Engineering System >=1.3.0 additionally requires:
+- `.cursor/commands/resume.md`
+- `.github/ISSUE_TEMPLATE/ai-work-packet.md`
+
+Engineering System >=1.4.0 managed adoption additionally requires:
+- immutable `engineering_system.baseline`
+- `.github/workflows/engineering-system.yml` pinned to that baseline
+
+Use `standards/ADOPTION.md` and `tools/adopt.py` for managed adoption. Existing repository rules must be classified before destructive cleanup.
 
 ## Deterministic CI compliance
 

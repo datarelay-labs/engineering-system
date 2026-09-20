@@ -16,6 +16,10 @@ Load only when relevant:
 
 Do not preload the entire Wiki, all standards, archived specifications, or historical discussions.
 
+## Repository adoption
+
+When the user asks to apply/adopt/bootstrap the Engineering System to a repository, read `standards/ADOPTION.md` and treat adoption as its own bounded workstream. Inventory first, preserve project-specific invariants, classify existing AI/engineering rules, prefer `tools/adopt.py` for mechanical installation, and fail closed on ambiguous test/release commands or destructive overwrite. Do not mix adoption with unrelated product changes.
+
 ## Resume / session continuity
 When the user asks to continue or resume existing engineering work, resolve the target repository first and read only that repository's active AI Work Packet before asking the user to reconstruct prior chat. Never scan unrelated repositories after the target repo is resolved. Verify current branch/HEAD/state independently; packet state is coordination context, not runtime or release authority. Fail closed if packet selection is missing or ambiguous. See `standards/SESSION_CONTINUITY.md`.
 

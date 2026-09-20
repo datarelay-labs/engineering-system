@@ -48,7 +48,39 @@ Do not run multi-hour full suites on every PR. Do not start expensive downstream
 | Operations, observability, backup/restore, incidents, DR | `standards/OPERATIONS.md` |
 | Product Master/OpenSpec/ADR/Wiki source-of-truth roles | `standards/KNOWLEDGE.md` |
 | AI session continuity and repository-scoped Work Packets | `standards/SESSION_CONTINUITY.md` |
+| Automated repository adoption and qualification | `standards/ADOPTION.md` |
 | Core/adapters and deterministic enforcement | `standards/ENFORCEMENT.md` |
+
+## Automated adoption
+
+The intended entrypoint for a new or existing repository is deliberately simple:
+
+> Apply https://github.com/datarelay-labs/engineering-system to this project.
+
+An AI agent should then follow `standards/ADOPTION.md`: inventory the target repository, classify existing rules, discover project-native tests/CI, preserve stricter project invariants, and use the deterministic bootstrap for the mechanical installation.
+
+Read-only audit:
+
+```bash
+python tools/adopt.py --root /path/to/project --audit
+```
+
+Managed bootstrap after the repository-specific rule/test review:
+
+```bash
+python tools/adopt.py \
+  --root /path/to/project \
+  --apply \
+  --ack-rule-review \
+  --ci-mode shared \
+  --test-command "<project-native test command>"
+```
+
+Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, discovers a one-time dependency setup command when safe, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
+
+The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, existing CI without an explicit shared/native mapping decision, and destructive upgrades fail closed.
+
+See `standards/ADOPTION.md`.
 
 ## Core and adapters
 

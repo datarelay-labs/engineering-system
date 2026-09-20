@@ -19,6 +19,7 @@ REQUIRED_STANDARDS = (
     "standards/KNOWLEDGE.md",
     "standards/ENFORCEMENT.md",
     "standards/SESSION_CONTINUITY.md",
+    "standards/ADOPTION.md",
 )
 
 REQUIRED_ENFORCEMENT_TEMPLATES = (
@@ -29,6 +30,7 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/CURSOR_USER_RULE.txt",
     "templates/.cursor/commands/resume.md",
     "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md",
+    "templates/.github/workflows/engineering-system.yml",
 )
 
 REQUIRED_METHOD_FILES = (
@@ -36,6 +38,9 @@ REQUIRED_METHOD_FILES = (
     ".github/workflows/affected-tests.yml",
     ".github/workflows/release-preflight.yml",
     ".github/workflows/release-gate.yml",
+    "tools/adopt.py",
+    "tools/check-adoption.py",
+    "tools/test_adopt.py",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -145,6 +150,40 @@ def validate_session_continuity_templates():
     print("PASS AI Work Packet and Cursor resume template contract")
 
 
+def validate_adoption_contract():
+    adoption_text = (ROOT / "standards/ADOPTION.md").read_text(encoding="utf-8")
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    required_standard_tokens = (
+        "KEEP_STRICTER",
+        "DUPLICATE",
+        "CONFLICT",
+        "ENGINEERING_SYSTEM_ADOPTION=PASS",
+        "tools/adopt.py",
+        "immutable baseline",
+    )
+    required_tool_tokens = (
+        "--audit",
+        "--apply",
+        "--ack-rule-review",
+        "--ci-mode",
+        "setup_command",
+        "engineering-system.yml",
+        "ADOPTION_BOOTSTRAP=PASS",
+    )
+    failures = []
+    for token in required_standard_tokens:
+        if token not in adoption_text:
+            failures.append(f"adoption standard missing token: {token}")
+    for token in required_tool_tokens:
+        if token not in adopt_text:
+            failures.append(f"adoption tool missing token: {token}")
+    if failures:
+        for item in failures:
+            print(f"FAIL {item}")
+        raise SystemExit(1)
+    print("PASS automated adoption standard/tool contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -173,6 +212,7 @@ def main():
     validate_version_alignment()
     validate_resume_template_parity()
     validate_session_continuity_templates()
+    validate_adoption_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -181,6 +221,11 @@ def main():
     validate("templates/PROJECT.yaml", "schemas/project.schema.json")
     validate("templates/TESTS.yaml", "schemas/tests.schema.json")
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
+
+    import subprocess
+    completed = subprocess.run(["python3", "tools/test_adopt.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
 
     print("ENGINEERING_SYSTEM_VALIDATION=PASS")
 

@@ -1,7 +1,6 @@
 # Engineering System Repository Rules
 
-This repository defines the canonical Solo AI Engineering System.
-
+This repository defines the canonical Solo AI Engineering System:\nhttps://github.com/datarelay-labs/engineering-system\n
 ## Mandatory entry sequence
 
 Always load only the minimum high-signal context needed for the task:
@@ -29,5 +28,7 @@ If mandatory context is missing or contradictory, fail closed: report the config
 8. Changes to schemas/templates/workflows must remain backward-aware.
 9. Validate YAML/JSON syntax and reusable workflow structure before merge.
 10. Never weaken enforcement/validation merely to obtain PASS.
+
+For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path.
 
 Cursor additionally receives the always-applied `.cursor/rules/engineering-system.mdc` adapter.

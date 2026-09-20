@@ -28,6 +28,8 @@ Future tools may add adapters without changing the engineering lifecycle.
 
 Session continuity is defined by `standards/SESSION_CONTINUITY.md`; adapters retrieve repository-scoped current state without copying conversation history.
 
+Repository adoption is defined by `standards/ADOPTION.md`. `tools/adopt.py` performs the deterministic bootstrap while AI adapters handle repository-specific inventory, rule classification, and ambiguous command resolution.
+
 ## Rule
 
 An adapter may:

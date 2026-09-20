@@ -18,6 +18,18 @@
         "version": {
           "type": "string",
           "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["canonical", "adopted"]
+        },
+        "baseline": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "ci_mode": {
+          "type": "string",
+          "enum": ["shared", "native"]
         }
       }
     },

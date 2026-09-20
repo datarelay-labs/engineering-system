@@ -34,4 +34,6 @@ When explicitly resuming an existing workstream, resolve this repository first a
 
 If mandatory engineering context is missing or contradictory, stop implementation and report the configuration defect instead of guessing.
 
+When the user explicitly asks to apply/adopt/bootstrap the Engineering System to this repository, use the canonical `standards/ADOPTION.md` workflow: inventory first, classify existing rules, discover project-native tests/CI, preserve stricter project invariants, use deterministic bootstrap for missing common surfaces, and qualify the adoption before reporting PASS.
+
 Tool-specific adapters must not weaken these rules.

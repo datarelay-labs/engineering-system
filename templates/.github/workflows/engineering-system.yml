@@ -1,0 +1,17 @@
+name: Engineering System
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  adoption-compliance:
+    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@REPLACE_WITH_ENGINEERING_SYSTEM_BASELINE_SHA
+
+  affected-tests:
+    uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@REPLACE_WITH_ENGINEERING_SYSTEM_BASELINE_SHA
+    with:
+      manifest_path: .engineering/tests.yaml
+      trigger: pr

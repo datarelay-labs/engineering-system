@@ -6,6 +6,8 @@ The Engineering System governs the complete software lifecycle for every softwar
 
 The canonical Engineering System repository is `datarelay-labs/engineering-system`.
 
+Repository onboarding/adoption is defined by `ADOPTION.md`.
+
 requirements / decisions -> development -> review -> affected validation -> release qualification -> operations -> incident / RCA -> improvement / retirement
 
 ## Roles

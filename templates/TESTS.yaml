@@ -1,5 +1,8 @@
 version: 1
 
+# Optional one-time dependency/bootstrap command for shared affected-test CI.
+setup_command: ""
+
 paths:
   "src/**":
     domains:

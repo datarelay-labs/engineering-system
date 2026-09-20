@@ -18,6 +18,7 @@
     "sbom_required": {"type": "boolean"},
     "preflight_required": {"type": "boolean"},
     "preflight_command": {"type": "string"},
+    "qualification_command": {"type": "string"},
     "operational_e2e_required": {"type": "boolean"},
     "full_e2e_passes": {"type": "integer", "minimum": 0},
     "public_smoke_required": {"type": "boolean"},
