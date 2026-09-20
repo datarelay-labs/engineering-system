@@ -155,10 +155,15 @@ def validate_session_continuity_templates():
 def validate_actionable_review_gate():
     required_paths = (
         "standards/CORE.md",
+        "AGENTS.md",
+        "templates/AGENTS.md",
         ".cursor/commands/resume.md",
         "templates/.cursor/commands/resume.md",
         ".cursor/rules/engineering-system.mdc",
         "templates/.cursor/rules/engineering-system.mdc",
+        "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
+        "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
+        "templates/CURSOR_USER_RULE.txt",
     )
     missing = []
     for rel in required_paths:
