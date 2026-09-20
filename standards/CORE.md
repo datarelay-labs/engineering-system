@@ -8,7 +8,7 @@ The canonical Engineering System repository is `datarelay-labs/engineering-syste
 
 Repository onboarding/adoption is defined by `ADOPTION.md`.
 
-requirements / decisions -> development -> review -> affected validation -> release qualification -> operations -> incident / RCA -> improvement / retirement
+requirements / decisions -> minimal design gate -> development -> review -> affected validation -> release qualification -> operations -> incident / RCA -> improvement / retirement
 
 ## Roles
 
@@ -36,15 +36,16 @@ requirements / decisions -> development -> review -> affected validation -> rele
 2. Load test/release metadata and standards only when relevant to the task.
 3. If the target repository has not yet adopted the Engineering System, identify the adoption gap and still follow the canonical standard by default.
 4. Classify the change: FEATURE, BUGFIX, REFACTOR, SECURITY, PERFORMANCE, OPERATIONS, RELEASE, or DOCUMENTATION.
-5. Identify affected domains, public contracts, persisted state, security boundaries, and operational impact.
-6. Inspect relevant implementation, tests, docs, and known regressions.
-7. Make the smallest correct change; avoid unrelated scope/refactors.
-8. Bug fixes should include a regression that fails before the fix and passes after it whenever practical.
-9. Never weaken a valid test merely to obtain PASS.
-10. Never silently skip a required gate or report unexecuted work as PASS.
-11. Historical evidence does not qualify a different source revision.
-12. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
-13. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
+5. For material design-bearing changes, apply the minimal gate in `DESIGN.md` before implementation.
+6. Identify affected domains, public contracts, persisted state, security boundaries, and operational impact.
+7. Inspect relevant implementation, tests, docs, and known regressions.
+8. Make the smallest correct change; avoid unrelated scope/refactors.
+9. Bug fixes should include a regression that fails before the fix and passes after it whenever practical.
+10. Never weaken a valid test merely to obtain PASS.
+11. Never silently skip a required gate or report unexecuted work as PASS.
+12. Historical evidence does not qualify a different source revision.
+13. Public compatibility, data migration, security, upgrade, rollback, and documentation impact must be handled when relevant.
+14. Operational failures should feed back into tests, runbooks, RCA, ADR, or requirements.
 
 ## Definition of done
 
