@@ -5,8 +5,16 @@ Quality covers correctness, regression safety, usability, compatibility, resilie
 ## Required quality loop
 
 ```text
-change -> affected tests -> regression -> wider qualification by risk -> evidence
+design gate when needed
+ -> change
+ -> build/lint/typecheck when applicable
+ -> affected tests
+ -> regression
+ -> wider qualification by risk
+ -> evidence
 ```
+
+Use existing project-native build/lint/typecheck commands when they are meaningful. The Engineering System does not require adding a new tool merely to fill a checklist.
 
 ## Test model
 
