@@ -8,6 +8,7 @@ sbom_required: false
 # Enable for products where full qualification is expensive.
 preflight_required: false
 preflight_command: ""
+qualification_command: ""
 
 operational_e2e_required: false
 full_e2e_passes: 1
