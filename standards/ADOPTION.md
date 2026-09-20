@@ -26,12 +26,15 @@ Record:
 
 - repository root, origin, branch, HEAD, and dirty state
 - languages/frameworks/package managers
-- existing build/test/lint/typecheck commands
+- existing build/test/lint/typecheck commands and package-manager scripts
 - existing CI workflows and release workflows
 - source/test directory layout
 - existing AI instruction surfaces such as AGENTS.md, CLAUDE.md, .cursorrules, .cursor/rules/**, .cursor/commands/**, and repository-specific agent files
 - release/version/artifact sources
 - product-specific architecture, security, persistence, migration, API, operational, and compatibility invariants
+- production/deployment signals, runbook/incident expectations, and release/rollback ownership
+- candidate domain boundaries for affected-test mapping
+- whether repository checks are actually merge-blocking or only advisory
 
 Do not infer that an existing rule is obsolete merely because a canonical rule exists.
 
@@ -77,6 +80,10 @@ The tool installs only missing generated surfaces by default. It does not overwr
 
 For repositories with a known release qualification command, also provide `--release-command`. Provide `--preflight-command` only when the command is a genuinely cheap deterministic release blocker.
 
+For production-oriented repositories, pass `--operations-mode production`. The generated project profile then requires runbook/incident handling and the release profile requires operational E2E plus public smoke. If deployment signals exist while maturity is not clearly production/non-production, automatic mode fails closed for review instead of silently writing `production_oriented: false`.
+
+The audit also reports discovered build/lint/typecheck commands and candidate domains. Override them only when repository evidence supports a better mapping.
+
 ## Required adopted surfaces
 
 A managed adopted repository contains:
@@ -106,8 +113,10 @@ If multiple plausible commands exist or no safe command is found, adoption must 
 
 Generated test metadata is conservative:
 
-- changed source/test paths map to a project domain
-- project-native tests run on affected changes
+- changed source/test paths map to discovered domains rather than blindly forcing every path into `core`
+- `--domain-test domain=command` may define truly domain-specific affected tests
+- without domain-specific commands, one broad project-native test command may still cover all discovered domains and is reported as broad coverage
+- discovered lint/typecheck/build commands become deterministic scenarios when safe
 - a one-time `setup_command` may prepare dependencies before selected shared-CI scenarios
 - cheap static PR guardrails remain separate
 - ordinary PR adoption never turns a multi-hour release suite into a default PR gate
@@ -124,6 +133,10 @@ The project must select one CI mode after inventory:
 - `native` — preserve an existing project-native CI workflow that already proves the affected-test invariant
 
 If existing CI is detected, automatic mode fails closed until the agent explicitly chooses `--ci-mode shared` or `--ci-mode native`.
+
+Native mode must record the specific workflow file(s) that own the affected-test invariant through `native_ci_workflows`; "some workflow exists" is not sufficient evidence. When several native workflows exist, adoption requires explicit `--native-ci-workflow` mapping.
+
+Merge enforcement is recorded separately as `merge_gate_status: verified|advisory|unknown`. If the AI has GitHub ruleset/branch-protection visibility, it should verify required checks and record `verified`; otherwise it must not pretend that a workflow merely existing means merge is blocked.
 
 Release preflight and release gate workflows are wired only when project-specific commands are explicitly known.
 
@@ -144,6 +157,9 @@ At minimum verify:
 7. affected-test command is real or the repository is explicitly classified as having no executable tests
 8. generated workflow YAML parses
 9. the cheapest project-native smoke/affected test is executed when practical
+10. production/operations profile is explicitly resolved when deployment signals exist
+11. native CI ownership is mapped to concrete workflow files when native mode is selected
+12. merge-gate enforcement is reported as verified, advisory, or unknown rather than assumed
 
 Run:
 
