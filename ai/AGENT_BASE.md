@@ -16,6 +16,14 @@ Load only when relevant:
 
 Do not preload the entire Wiki, all standards, archived specifications, or historical discussions.
 
+## Design
+
+Before implementing material FEATURE, REFACTOR, SECURITY, public-contract, persistence/schema, or operational behavior changes, apply the minimal design gate in `standards/DESIGN.md`. Reuse existing canonical product/specification decisions instead of creating redundant design documents.
+
+## Incident / operational failure
+
+When the user reports an outage, degraded service, failed upgrade, data-loss risk, or other production-impacting symptom, read `standards/OPERATIONS.md` and enter the incident lifecycle. Preserve evidence first; do not perform destructive or irreversible recovery without explicit owner approval unless an approved runbook already authorizes it.
+
 ## Repository adoption
 
 When the user asks to apply/adopt/bootstrap the Engineering System to a repository, read `standards/ADOPTION.md` and treat adoption as its own bounded workstream. Inventory first, preserve project-specific invariants, classify existing AI/engineering rules, prefer `tools/adopt.py` for mechanical installation, and fail closed on ambiguous test/release commands or destructive overwrite. Do not mix adoption with unrelated product changes.
