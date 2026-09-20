@@ -16,12 +16,18 @@
     "artifact_hash_required": {"type": "boolean"},
     "provenance_required": {"type": "boolean"},
     "sbom_required": {"type": "boolean"},
+    "setup_command": {"type": "string"},
     "preflight_required": {"type": "boolean"},
     "preflight_command": {"type": "string"},
     "qualification_command": {"type": "string"},
+    "artifact_hash_command": {"type": "string"},
+    "provenance_command": {"type": "string"},
+    "sbom_command": {"type": "string"},
     "operational_e2e_required": {"type": "boolean"},
+    "operational_e2e_command": {"type": "string"},
     "full_e2e_passes": {"type": "integer", "minimum": 0},
     "public_smoke_required": {"type": "boolean"},
+    "public_smoke_command": {"type": "string"},
     "blockers": {"type": "object"}
   }
 }
