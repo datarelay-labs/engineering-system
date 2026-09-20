@@ -104,6 +104,36 @@ jobs:
                       if not operations.get("incident_response_required"):
                           failures.append("production-oriented adoption requires incident_response_required=true")
 
+              if version_tuple >= (1, 6, 0) and mode == "adopted":
+                  if not isinstance(operations.get("persistent_state"), bool):
+                      failures.append("Engineering System >=1.6.0 requires operations.persistent_state=true|false")
+                  runbooks = operations.get("runbook_paths")
+                  if not isinstance(runbooks, list):
+                      failures.append("Engineering System >=1.6.0 requires operations.runbook_paths list")
+                      runbooks = []
+                  for key in (
+                      "health_command",
+                      "backup_command",
+                      "restore_test_command",
+                      "upgrade_command",
+                      "rollback_command",
+                  ):
+                      if not isinstance(operations.get(key), str):
+                          failures.append(f"Engineering System >=1.6.0 requires operations.{key} string")
+                  if operations.get("production_oriented"):
+                      if not runbooks:
+                          failures.append("production-oriented adoption requires at least one runbook path")
+                      for rel in runbooks:
+                          if not Path(str(rel)).is_file():
+                              failures.append(f"production runbook path missing: {rel}")
+                      if not str(operations.get("health_command") or "").strip():
+                          failures.append("production-oriented adoption requires health_command")
+                  if operations.get("persistent_state"):
+                      if not str(operations.get("backup_command") or "").strip():
+                          failures.append("persistent-state adoption requires backup_command")
+                      if not str(operations.get("restore_test_command") or "").strip():
+                          failures.append("persistent-state adoption requires restore_test_command")
+
           agents = Path("AGENTS.md")
           if agents.is_file():
               text = agents.read_text(encoding="utf-8")
@@ -159,6 +189,29 @@ jobs:
                   if not release.get("public_smoke_required"):
                       failures.append("production-oriented adoption requires public_smoke_required=true")
 
+              if version_tuple >= (1, 6, 0) and mode == "adopted":
+                  for key in (
+                      "setup_command",
+                      "preflight_command",
+                      "qualification_command",
+                      "artifact_hash_command",
+                      "provenance_command",
+                      "sbom_command",
+                      "operational_e2e_command",
+                      "public_smoke_command",
+                  ):
+                      if not isinstance(release.get(key), str):
+                          failures.append(f"Engineering System >=1.6.0 requires release.{key} string")
+                  for flag, command_key in (
+                      ("artifact_hash_required", "artifact_hash_command"),
+                      ("provenance_required", "provenance_command"),
+                      ("sbom_required", "sbom_command"),
+                      ("operational_e2e_required", "operational_e2e_command"),
+                      ("public_smoke_required", "public_smoke_command"),
+                  ):
+                      if release.get(flag) and not str(release.get(command_key) or "").strip():
+                          failures.append(f"{flag}=true requires {command_key}")
+
           match = semver_re.fullmatch(version)
           version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
           if version_tuple >= (1, 4, 0) and mode == "adopted":
@@ -173,6 +226,8 @@ jobs:
                       failures.append("shared CI mode requires affected workflow pinned to project baseline")
                   if ci_mode == "native" and f"affected-tests.yml@{baseline}" in text:
                       failures.append("native CI mode must not duplicate shared affected-tests workflow")
+                  if version_tuple >= (1, 6, 0) and f"enforcement-check.yml@{baseline}" not in text:
+                      failures.append("Engineering System >=1.6.0 requires enforcement reconciliation pinned to baseline")
 
               if ci_mode == "native":
                   if version_tuple >= (1, 5, 0):
@@ -191,7 +246,26 @@ jobs:
                           failures.append("native CI mode selected but no project-native workflow was found")
 
               qualification = str(release.get("qualification_command") or "").strip()
-              if qualification:
+              release_contract_commands = [
+                  qualification,
+                  str(release.get("setup_command") or "").strip(),
+                  str(release.get("preflight_command") or "").strip(),
+                  str(release.get("artifact_hash_command") or "").strip(),
+                  str(release.get("provenance_command") or "").strip(),
+                  str(release.get("sbom_command") or "").strip(),
+                  str(release.get("operational_e2e_command") or "").strip(),
+                  str(release.get("public_smoke_command") or "").strip(),
+              ]
+              if version_tuple >= (1, 6, 0):
+                  if any(release_contract_commands):
+                      release_workflow = Path(".github/workflows/engineering-release.yml")
+                      if not release_workflow.is_file():
+                          failures.append("release contract configured but engineering-release.yml is missing")
+                      elif sha_re.fullmatch(baseline):
+                          text = release_workflow.read_text(encoding="utf-8")
+                          if f"release-contract.yml@{baseline}" not in text:
+                              failures.append("release contract is not pinned to project baseline")
+              elif qualification:
                   release_workflow = Path(".github/workflows/engineering-release.yml")
                   if not release_workflow.is_file():
                       failures.append("qualification_command configured but engineering-release.yml is missing")
