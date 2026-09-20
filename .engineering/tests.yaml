@@ -19,6 +19,16 @@ paths:
     domains: [session-continuity]
   "tools/**":
     domains: [workflows]
+  "tools/adopt.py":
+    domains: [adoption]
+  "tools/check-adoption.py":
+    domains: [adoption]
+  "tools/test_adopt.py":
+    domains: [adoption]
+  "standards/ADOPTION.md":
+    domains: [adoption]
+  "templates/.github/workflows/engineering-system.yml":
+    domains: [adoption]
 
 scenarios:
   - id: ENG-STATIC-001
@@ -37,4 +47,15 @@ scenarios:
     triggers: [pr, preflight, release]
     platforms: [linux]
     command: "git diff --check"
+    release_gate: true
+
+  - id: ENG-ADOPTION-001
+    name: Automated adoption bootstrap regression
+    level: integration
+    domains: [adoption]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_adopt.py"
+    invariants:
+      - "managed adoption remains fail-closed and baseline-pinned"
     release_gate: true
