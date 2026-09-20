@@ -1,71 +1,78 @@
-# Engineering System
+<h1 align="center">Engineering System</h1>
 
-A lightweight, cost-efficient Solo AI Engineering System for software/product projects developed with AI assistance.
+<p align="center">
+  <strong>A canonical AI-assisted engineering lifecycle for designing, building, testing, releasing, operating, and evolving software.</strong>
+</p>
 
-## Purpose
+<p align="center">
+  Optimized for small, high-signal context, deterministic automation, and human-controlled product decisions.
+</p>
 
-This repository is the canonical engineering standard across the owner's current and future projects, regardless of GitHub organization, repository owner, product name, or project location.
+<p align="center">
+  <strong>English</strong> · <a href="README.ko.md">한국어</a> · <a href="https://engineering.datarelay.run">Human Handbook</a>
+</p>
 
-The system optimizes for:
-- small, high-signal AI context
-- affected-test-first development
-- fast deterministic PR feedback
-- no duplicate CI evidence
-- release-candidate-only expensive qualification
-- exact-HEAD release evidence
-- durable regression/incident knowledge
-- repository-scoped AI session continuity without chat handoff accumulation
+<p align="center">
+  <a href="https://github.com/datarelay-labs/engineering-system/actions/workflows/validate.yml"><img src="https://github.com/datarelay-labs/engineering-system/actions/workflows/validate.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/GitHub-canonical-111827?style=flat-square" alt="GitHub canonical">
+  <img src="https://img.shields.io/badge/AI-assisted-16A34A?style=flat-square" alt="AI-assisted">
+  <img src="https://img.shields.io/badge/validation-affected--test--first-2563EB?style=flat-square" alt="Affected-test-first">
+</p>
 
-## Default execution model
+---
 
-```text
-change
- -> affected tests
- -> cheap PR guardrails
- -> merge
+## Start with one instruction
 
-release candidate
- -> fast release preflight
- -> full deterministic qualification
- -> lifecycle/platform
- -> performance/resilience
- -> operational E2E
- -> exact-HEAD release
+> **Apply https://github.com/datarelay-labs/engineering-system to this project.**
+
+That is the intended adoption entrypoint for a new or existing repository.
+
+An AI agent should inventory the repository first, preserve project-specific invariants, discover project-native tests and CI, apply the smallest compatible Engineering System surfaces, and fail closed when a decision cannot be inferred safely.
+
+The goal is not to replace a project's engineering reality. The goal is to make that reality **explicit, repeatable, testable, and easy for AI agents to consume**.
+
+## What this system does
+
+| Capability | What it provides |
+|---|---|
+| **Repository-aware adoption** | Inventories rules, tests, CI, release and operations signals before installing anything |
+| **Minimal AI context** | Loads only the repository entrypoints and standards relevant to the current task |
+| **Affected-test-first validation** | Uses the cheapest deterministic check that can disprove correctness before broad suites |
+| **Session continuity** | Keeps active implementation state in repository-scoped GitHub AI Work Packets instead of giant handoff prompts |
+| **Review discipline** | Requires actionable human or automated review feedback to be fixed or explicitly dispositioned before completion |
+| **Release qualification** | Separates fast PR feedback from expensive release-candidate qualification and requires exact-HEAD evidence |
+| **Operations feedback loop** | Feeds incidents, regressions and operational failures back into tests, runbooks, RCA, ADR or requirements |
+| **Knowledge boundaries** | Keeps GitHub canonical while Athena and human-readable documentation remain derived/searchable layers |
+
+## The lifecycle
+
+```mermaid
+flowchart LR
+    R["Requirements / Decisions"] --> D["Minimal Design Gate"]
+    D --> I["Development"]
+    I --> V["Affected Validation"]
+    V --> P["Review / PR"]
+    P --> Q["Release Qualification"]
+    Q --> O["Operations"]
+    O --> X["Incident / RCA"]
+    X --> R
+
+    G["GitHub<br/>Canonical Truth"] --> A["Athena<br/>Derived Knowledge"]
 ```
 
-Do not run multi-hour full suites on every PR. Do not start expensive downstream qualification while a known blocking deterministic failure exists.
+The owner retains product scope, final decisions, release approval, and human UX judgment. AI agents assist the engineering process; they do not silently broaden product scope.
 
-## Canonical domains
+## Quick start
 
-| Domain | Canonical standard |
-|---|---|
-| Core lifecycle, roles, Definition of Done | `standards/CORE.md` |
-| Development, bugs, refactor, compatibility, migration, dependencies | `standards/DEVELOPMENT.md` |
-| Quality, regression, UX, compatibility, performance/resilience | `standards/QUALITY.md` |
-| Test levels, affected selection, trigger semantics | `standards/TESTING.md` |
-| Security, secrets, dependency/OSS/supply chain | `standards/SECURITY.md` |
-| Version, artifacts, qualification, upgrade, rollback | `standards/RELEASE.md` |
-| Operations, observability, backup/restore, incidents, DR | `standards/OPERATIONS.md` |
-| Product Master/OpenSpec/ADR/Wiki source-of-truth roles | `standards/KNOWLEDGE.md` |
-| AI session continuity and repository-scoped Work Packets | `standards/SESSION_CONTINUITY.md` |
-| Automated repository adoption and qualification | `standards/ADOPTION.md` |
-| Core/adapters and deterministic enforcement | `standards/ENFORCEMENT.md` |
-
-## Automated adoption
-
-The intended entrypoint for a new or existing repository is deliberately simple:
-
-> Apply https://github.com/datarelay-labs/engineering-system to this project.
-
-An AI agent should then follow `standards/ADOPTION.md`: inventory the target repository, classify existing rules, discover project-native tests/CI, preserve stricter project invariants, and use the deterministic bootstrap for the mechanical installation.
-
-Read-only audit:
+### 1. Read-only adoption audit
 
 ```bash
 python tools/adopt.py --root /path/to/project --audit
 ```
 
-Managed bootstrap after the repository-specific rule/test review:
+### 2. Managed adoption
+
+After repository-specific rules, tests and CI ownership have been reviewed:
 
 ```bash
 python tools/adopt.py \
@@ -76,32 +83,113 @@ python tools/adopt.py \
   --test-command "<project-native test command>"
 ```
 
-Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, discovers test plus build/lint/typecheck commands when safe, derives conservative domain candidates, resolves production/operations posture, records native CI ownership and merge-gate status, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
+If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
-The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, unresolved production/deployment posture, existing CI without an explicit shared/native mapping decision, ambiguous native-CI ownership, and destructive upgrades fail closed.
+### 3. Qualify the adoption
 
-See `standards/ADOPTION.md`.
+```bash
+python tools/check-adoption.py --root /path/to/project
+```
+
+Adoption is not PASS because files exist. Structural validation and the required project-native smoke/affected evidence must succeed.
+
+## Default execution model
+
+```text
+change
+ -> affected tests
+ -> cheap deterministic PR guardrails
+ -> review feedback handled
+ -> merge
+
+release candidate
+ -> fast release preflight
+ -> full deterministic qualification
+ -> lifecycle / platform
+ -> performance / resilience
+ -> operational E2E
+ -> exact-HEAD release
+```
+
+Do not run multi-hour full suites on every PR. Do not continue expensive downstream qualification while a known blocking deterministic failure exists.
+
+## Canonical standards
+
+| Domain | Canonical standard |
+|---|---|
+| Core lifecycle, roles, Definition of Done | [`standards/CORE.md`](standards/CORE.md) |
+| Minimal design gate | [`standards/DESIGN.md`](standards/DESIGN.md) |
+| Development, bugs, refactor, compatibility, migration, dependencies | [`standards/DEVELOPMENT.md`](standards/DEVELOPMENT.md) |
+| Quality, regression, UX, compatibility, performance/resilience | [`standards/QUALITY.md`](standards/QUALITY.md) |
+| Test levels, affected selection, trigger semantics | [`standards/TESTING.md`](standards/TESTING.md) |
+| Security, secrets, dependency/OSS/supply chain | [`standards/SECURITY.md`](standards/SECURITY.md) |
+| Version, artifacts, qualification, upgrade, rollback | [`standards/RELEASE.md`](standards/RELEASE.md) |
+| Operations, observability, backup/restore, incidents, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
+| Product Master/OpenSpec/ADR/Wiki source-of-truth roles | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
+| AI session continuity and repository-scoped Work Packets | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
+| Automated repository adoption and qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
+| Core/adapters and deterministic enforcement | [`standards/ENFORCEMENT.md`](standards/ENFORCEMENT.md) |
 
 ## Core and adapters
 
-The core standard is tool-agnostic. Tool-specific instructions are adapters. See `adapters/README.md`.
+The core standard is tool-agnostic. Tool-specific instructions are adapters.
 
-Adopted repositories use:
+See [`adapters/README.md`](adapters/README.md).
+
+A managed adopted repository normally contains:
 
 ```text
 AGENTS.md
-.cursor/rules/engineering-system.mdc
 .engineering/project.yaml
 .engineering/tests.yaml
 .engineering/release.yaml
+.cursor/rules/engineering-system.mdc
+.cursor/commands/resume.md
+.github/ISSUE_TEMPLATE/ai-work-packet.md
+.github/workflows/engineering-system.yml
 ```
+
+Project-specific rules that are valid or stricter than the canonical standard are preserved.
 
 ## Context rule
 
-Always load `AGENTS.md` and `.engineering/project.yaml`. Load test/release metadata and only the relevant standard/specification when needed. Do not preload the entire Engineering System or Wiki.
+Always load:
 
-## Canonical source
+```text
+AGENTS.md
+.engineering/project.yaml
+```
 
-GitHub is normative. Wiki/Athena is derived/searchable knowledge.
+Then load test/release metadata and only the standards or specifications relevant to the task.
 
-Start with `standards/CORE.md`.
+Do **not** preload the entire Engineering System, Wiki, historical discussions, or unrelated project context.
+
+## Source of truth
+
+> **GitHub is normative. Wiki/Athena is derived/searchable knowledge.**
+
+Code, tests, specifications, commits, PRs, CI evidence, release evidence, and accepted durable decisions belong in canonical Git/GitHub artifacts.
+
+Athena and the [human handbook](https://engineering.datarelay.run) make that knowledge easier to navigate and search, but they do not override canonical repository state.
+
+## Design principles
+
+- Keep the system lightweight enough for a solo developer using AI-assisted development.
+- Prefer existing GitHub and project-native capabilities over custom platforms.
+- Add process only when it removes repeated manual work or materially improves correctness.
+- Preserve stricter project-specific invariants.
+- Fail closed on ambiguous or destructive decisions.
+- Never weaken enforcement or validation merely to obtain PASS.
+- Never reuse historical PASS evidence for a different source revision.
+
+---
+
+<p align="center">
+  <strong>Conversation is temporary. Durable engineering state belongs in the repository.</strong>
+</p>
+
+<p align="center">
+  Start with <a href="standards/CORE.md"><code>standards/CORE.md</code></a> ·
+  Adoption: <a href="standards/ADOPTION.md"><code>standards/ADOPTION.md</code></a> ·
+  Handbook: <a href="https://engineering.datarelay.run">engineering.datarelay.run</a>
+</p>
