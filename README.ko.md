@@ -31,7 +31,9 @@
 
 신규 프로젝트든 기존 프로젝트든 이 문장이 기본 adoption entrypoint입니다.
 
-AI는 먼저 repository를 조사하고, project-specific invariant를 보존하며, 실제 test/CI를 찾아낸 뒤, 현재 프로젝트와 충돌하지 않는 최소한의 Engineering System surface만 적용해야 합니다. 안전하게 판단할 수 없는 항목은 추측하지 않고 fail-closed로 멈춥니다.
+AI는 먼저 정확한 target repository를 식별하고, 제공된 URL에서 canonical Engineering System을 확보해 immutable baseline SHA를 정합니다. 그 다음 repository를 조사하고, project-specific invariant를 보존하며, 실제 test/CI를 찾아낸 뒤, 현재 프로젝트와 충돌하지 않는 최소한의 Engineering System surface만 적용해야 합니다. 안전하게 판단할 수 없는 항목은 추측하지 않고 fail-closed로 멈춥니다.
+
+Target repository에 `tools/adopt.py`가 미리 있을 필요는 없습니다. 인증된 GitHub integration 또는 별도의 임시 canonical checkout에서 helper를 가져와 target root에 대해 실행합니다. 완전히 새 프로젝트라면 먼저 Git repository 경계를 만들고, `--allow-no-tests`는 실행 가능한 test target이 아직 없을 때만 임시 bootstrap 상태로 사용합니다.
 
 목표는 기존 프로젝트의 engineering 현실을 덮어쓰는 것이 아닙니다. 그 현실을 **명시적이고, 반복 가능하고, 검증 가능하며, AI가 정확히 소비할 수 있는 형태**로 만드는 것입니다.
 
@@ -42,7 +44,7 @@ AI는 먼저 repository를 조사하고, project-specific invariant를 보존하
 | **Repository-aware adoption** | 기존 rule, test, CI, release, operations 신호를 먼저 조사한 뒤 적용 |
 | **Minimal AI context** | 현재 작업에 필요한 repository entrypoint와 standard만 로드 |
 | **Affected-test-first validation** | broad suite 전에 오류를 가장 싸고 빠르게 증명할 deterministic check부터 실행 |
-| **Session continuity** | 긴 handoff prompt 대신 GitHub의 repository-scoped AI Work Packet에 현재 구현 상태 유지 |
+| **Session continuity** | 긴 handoff prompt 대신 repository-scoped AI Work Packet을 사용하고, Work Packet v2의 `TASK_KIND`/`OWNER_INTENT`로 현재 사용자 의도와 다음 작업을 묶어 stale handoff를 방지 |
 | **Review discipline** | 사람 또는 자동 reviewer의 actionable finding을 수정하거나 근거와 함께 disposition하기 전에는 완료 처리하지 않음 |
 | **Release qualification** | 빠른 PR feedback과 비싼 release-candidate qualification을 분리하고 exact-HEAD evidence 요구 |
 | **Operations feedback loop** | incident, regression, 운영 장애를 test/runbook/RCA/ADR/requirement로 환류 |
@@ -76,7 +78,7 @@ python tools/adopt.py --root /path/to/project --audit
 
 ### 2. Managed adoption
 
-Repository-specific rule, test, CI ownership을 확인한 뒤:
+Repository-specific rule, test, CI ownership을 확인한 뒤 canonical helper가 없는 managed surface만 설치하고 exact canonical baseline을 pin합니다:
 
 ```bash
 python tools/adopt.py \
@@ -89,6 +91,8 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
+Engineering System 1.6은 observable GitHub merge enforcement를 reconcile하고, production-oriented project에 project-native runbook/health/recovery contract를 기록하며, 실제 command가 있을 때 qualification과 post-release smoke를 분리한 executable release contract를 사용할 수 있습니다.
+
 ### 3. Adoption qualification
 
 ```bash
@@ -96,6 +100,8 @@ python tools/check-adoption.py --root /path/to/project
 ```
 
 파일이 생겼다는 이유만으로 adoption이 PASS가 되는 것은 아닙니다. 구조 검증과 필요한 project-native smoke/affected evidence가 실제로 성공해야 합니다.
+
+기존 managed 1.5+ repository는 initial bootstrap을 다시 덮어쓰는 대신 fail-closed `tools/upgrade-adoption.py` 경로로 upgrade합니다. Adoption이 qualification되면 이후 feature, bugfix, test, review, release, operations, incident, retirement 작업은 repository entrypoint, project metadata, 관련 canonical standard, deterministic evidence를 통해 자동으로 lifecycle에 연결되며 별도의 "lifecycle 활성화" 단계는 없습니다.
 
 ## 기본 실행 모델
 
