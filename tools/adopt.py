@@ -181,6 +181,23 @@ def rule_surfaces(root: Path) -> list[str]:
     return found
 
 
+def review_required_rules(root: Path, rules: list[str]) -> list[str]:
+    exact_generated = {
+        "AGENTS.md": CANONICAL / "templates" / "AGENTS.md",
+        ".cursor/rules/engineering-system.mdc": CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc",
+        ".cursor/commands/resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
+    }
+    required: list[str] = []
+    for rel in rules:
+        source = exact_generated.get(rel)
+        target = root / rel
+        if source and source.is_file() and target.is_file():
+            if source.read_text(encoding="utf-8") == target.read_text(encoding="utf-8", errors="replace"):
+                continue
+        required.append(rel)
+    return required
+
+
 def existing_ci(root: Path) -> list[str]:
     workflow_dir = root / ".github" / "workflows"
     if not workflow_dir.is_dir():
@@ -450,8 +467,7 @@ def main() -> int:
         raise SystemExit("FAIL target worktree is dirty; preserve unrelated work or pass --allow-dirty after explicit review")
 
     rules = list(data["existing_rule_surfaces"])
-    generated_rule_paths = {"AGENTS.md", ".cursor/rules/engineering-system.mdc", ".cursor/commands/resume.md"}
-    preexisting_rules = [item for item in rules if item not in generated_rule_paths]
+    preexisting_rules = review_required_rules(root, rules)
     if preexisting_rules and not args.ack_rule_review:
         print("RULE_REVIEW_REQUIRED=" + ",".join(preexisting_rules))
         raise SystemExit("FAIL classify existing rules before apply; rerun with --ack-rule-review after review")
