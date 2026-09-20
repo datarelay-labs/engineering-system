@@ -26,6 +26,10 @@
         "baseline": {
           "type": "string",
           "pattern": "^[0-9a-f]{40}$"
+        },
+        "ci_mode": {
+          "type": "string",
+          "enum": ["shared", "native"]
         }
       }
     },
