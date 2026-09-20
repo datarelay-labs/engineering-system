@@ -101,7 +101,16 @@ AGENTS.md
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
-Release automation is added only when the project has an explicit project-native release qualification command.
+For Engineering System >=1.6.0, the generated pull-request workflow also calls the pinned enforcement-reconciliation workflow. If live GitHub rulesets are visible during adoption, `merge_gate_status` is detected automatically; an explicit value that contradicts observable GitHub enforcement is rejected.
+
+Production-oriented 1.6 adoption additionally requires:
+- at least one repository runbook path
+- a deterministic health command
+- an operational E2E command and pass count
+- a post-release public smoke command
+- backup and restore-test commands when the project declares persistent state
+
+Release automation is added when any release-contract command is configured. The generated release caller has separate `qualify` and `post-release` phases and is pinned to the same immutable Engineering System baseline.
 
 ## Test discovery rules
 
@@ -187,6 +196,23 @@ For an upgrade:
 4. migrate generated surfaces deliberately
 5. rerun adoption qualification
 6. keep the upgrade in a separate branch/PR from unrelated product work
+
+For the managed 1.5 -> 1.6 transition, use the deterministic helper:
+
+```bash
+python tools/upgrade-adoption.py --root /path/to/project --audit
+```
+
+Then apply only after required production/operations/release inputs are resolved:
+
+```bash
+python tools/upgrade-adoption.py \
+  --root /path/to/project \
+  --apply \
+  --baseline-sha <canonical-1.6-sha>
+```
+
+The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
 ## Fail-closed cases
 
