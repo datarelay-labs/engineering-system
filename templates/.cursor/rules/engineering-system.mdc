@@ -28,7 +28,7 @@ Then:
 - do not run a full release suite while a blocking deterministic regression exists
 - add/retain durable regression coverage for bugs
 - never weaken a valid test merely to obtain PASS
-- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review feedback finding; do not treat COMMENTED/advisory state as automatic PASS
+- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review finding; do not treat COMMENTED/advisory state as automatic PASS
 - never report unexecuted/skipped/blocked/historical evidence as current PASS
 - never reuse release qualification evidence from another source HEAD
 
