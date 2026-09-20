@@ -151,10 +151,6 @@ def discover_quality_commands(root: Path) -> dict[str, str]:
             or make_target(root, "typecheck")
         ),
     }
-    if (root / "Cargo.toml").is_file() and not commands["build"]:
-        commands["build"] = "cargo check"
-    if (root / "go.mod").is_file() and not commands["lint"]:
-        commands["lint"] = "go vet ./..."
     return {name: command for name, command in commands.items() if command}
 
 
@@ -399,7 +395,7 @@ def project_yaml(
     if native_ci_workflows:
         lines.extend(f"    - {yaml_scalar(path)}" for path in native_ci_workflows)
     else:
-        lines.append("    []")
+        lines[-1] = "  native_ci_workflows: []"
     lines.extend(
         [
             f"  merge_gate_status: {yaml_scalar(merge_gate_status)}",
