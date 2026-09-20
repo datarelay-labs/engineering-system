@@ -182,6 +182,11 @@ def main() -> int:
         raise SystemExit(
             f"FAIL target adoption {old_version} is newer than canonical {current_version}"
         )
+    if semver_tuple(old_version) < (1, 5, 0):
+        raise SystemExit(
+            "FAIL automatic upgrade currently supports managed Engineering System 1.5+; "
+            "older adoptions require an explicit intermediate review"
+        )
 
     if old_version == current_version and old_baseline == new_baseline:
         print("ADOPTION_UPGRADE=NO_CHANGE")
