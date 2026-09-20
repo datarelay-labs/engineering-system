@@ -85,3 +85,40 @@ Production releases must define applicable:
 - known rollback/upgrade failure affecting supported paths
 
 Build/qualification and publication are separate steps.
+
+
+## Executable release contract
+
+Engineering System 1.6 turns `.engineering/release.yaml` into an executable contract when project-native commands are known.
+
+Supported command fields are:
+
+```text
+setup_command
+preflight_command
+qualification_command
+artifact_hash_command
+provenance_command
+sbom_command
+operational_e2e_command
+public_smoke_command
+```
+
+A required evidence flag without its corresponding command is invalid. The reusable release contract executes cheap blockers first and stops immediately on failure.
+
+The generated project workflow has two explicit phases:
+
+```text
+qualify
+  -> setup
+  -> preflight
+  -> qualification
+  -> hash/provenance/SBOM checks when configured
+  -> operational E2E for the configured pass count
+
+post-release
+  -> setup when needed
+  -> public stable-path smoke
+```
+
+Public smoke is intentionally not run as pre-publication qualification. Publication/tag/stable-channel authorization remains an owner/product decision unless a project explicitly defines separate publication automation.
