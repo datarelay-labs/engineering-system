@@ -33,6 +33,6 @@ Then:
 
 When explicitly resuming an existing workstream, use the repository-scoped active AI Work Packet and verify current Git state before acting. Do not load packets from unrelated repositories. Fail closed on missing or ambiguous packet selection.
 
-When the user asks to apply/adopt/bootstrap the Engineering System, follow the canonical `standards/ADOPTION.md` procedure. Inventory and classify before cleanup; use deterministic bootstrap for missing common surfaces; preserve project-specific/stricter rules; fail closed on ambiguous tests, release commands, or destructive overwrite.
+When the user asks to apply/adopt/bootstrap the Engineering System, follow the canonical `standards/ADOPTION.md` procedure. Inventory and classify before cleanup; use deterministic bootstrap for missing common surfaces; preserve project-specific/stricter rules; fail closed on ambiguous tests, release commands, or destructive overwrite. For an already managed repository pinned to an older version, use the fail-closed managed upgrade workflow rather than rerunning initial bootstrap.
 
 Tool-specific rules may adapt syntax but must not weaken the Engineering System core.
