@@ -30,4 +30,6 @@ If mandatory context is missing or contradictory, fail closed: report the config
 9. Validate YAML/JSON syntax and reusable workflow structure before merge.
 10. Never weaken enforcement/validation merely to obtain PASS.
 
+For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path.
+
 Cursor additionally receives the always-applied `.cursor/rules/engineering-system.mdc` adapter.
