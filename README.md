@@ -76,9 +76,11 @@ python tools/adopt.py \
   --test-command "<project-native test command>"
 ```
 
-Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, discovers test plus build/lint/typecheck commands when safe, derives conservative domain candidates, resolves production/operations posture, records native CI ownership and merge-gate status, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
+Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, discovers test plus build/lint/typecheck commands when safe, derives conservative domain candidates, resolves production/operations posture, records native CI ownership, reconciles observable GitHub merge enforcement, and validates the result. Engineering System 1.6 production projects also record project-native runbook/health/recovery contracts, while release workflows use an executable `release.yaml` contract with separate qualification and post-release smoke phases.
 
 The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, unresolved production/deployment posture, existing CI without an explicit shared/native mapping decision, ambiguous native-CI ownership, and destructive upgrades fail closed.
+
+Existing managed 1.5 adoptions can be upgraded through the fail-closed `tools/upgrade-adoption.py` workflow rather than by blindly rerunning bootstrap.
 
 See `standards/ADOPTION.md`.
 
