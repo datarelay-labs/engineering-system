@@ -160,6 +160,31 @@ def discover_test_commands(root: Path) -> list[str]:
     return unique
 
 
+def suggest_setup_command(root: Path, test_command: str) -> str:
+    if test_command in {"npm test", "pnpm test", "yarn test"}:
+        if test_command == "pnpm test":
+            return "corepack enable && pnpm install --frozen-lockfile"
+        if test_command == "yarn test":
+            return "corepack enable && yarn install --immutable"
+        if (root / "package-lock.json").is_file():
+            return "npm ci"
+        return "npm install"
+
+    if test_command == "python -m pytest -q":
+        commands: list[str] = []
+        if (root / "pyproject.toml").is_file() or (root / "setup.py").is_file() or (root / "setup.cfg").is_file():
+            commands.append("python -m pip install -e .")
+        for rel in ("requirements-dev.txt", "requirements-test.txt", "requirements.txt"):
+            if (root / rel).is_file():
+                commands.append(f"python -m pip install -r {rel}")
+                break
+        if not commands:
+            commands.append("python -m pip install pytest")
+        return " && ".join(commands)
+
+    return ""
+
+
 def source_patterns(root: Path) -> list[str]:
     candidates = ("src", "lib", "app", "cmd", "pkg", "internal", "server", "client", "tests", "test")
     patterns = [f"{name}/**" for name in candidates if (root / name).exists()]
@@ -210,10 +235,13 @@ def existing_ci(root: Path) -> list[str]:
 
 
 def inventory(root: Path) -> dict[str, object]:
+    test_candidates = discover_test_commands(root)
+    setup_suggestion = suggest_setup_command(root, test_candidates[0]) if len(test_candidates) == 1 else ""
     return {
         "git": git_state(root),
         "project_type": detect_project_type(root),
-        "test_candidates": discover_test_commands(root),
+        "test_candidates": test_candidates,
+        "setup_suggestion": setup_suggestion,
         "source_patterns": source_patterns(root),
         "existing_rule_surfaces": rule_surfaces(root),
         "existing_ci": existing_ci(root),
@@ -238,6 +266,7 @@ def print_inventory(data: dict[str, object], as_json: bool) -> None:
     rules = data["existing_rule_surfaces"]
     ci = data["existing_ci"]
     print("TEST_CANDIDATES=" + (" | ".join(tests) if tests else "<none>"))
+    print("SETUP_SUGGESTION=" + (str(data.get("setup_suggestion") or "") or "<none>"))
     print("RULE_SURFACES=" + (",".join(rules) if rules else "<none>"))
     print("CI_WORKFLOWS=" + (",".join(ci) if ci else "<none>"))
     print("ADOPTION_AUDIT=PASS")
@@ -268,8 +297,8 @@ def project_yaml(root: Path, version: str, baseline: str, ci_mode: str, project_
     )
 
 
-def tests_yaml(patterns: list[str], test_command: str, domain: str, platform: str) -> str:
-    lines = ["version: 1", "", "paths:"]
+def tests_yaml(patterns: list[str], setup_command: str, test_command: str, domain: str, platform: str) -> str:
+    lines = ["version: 1", "", f"setup_command: {yaml_scalar(setup_command)}", "", "paths:"]
     for pattern in patterns:
         lines.extend(
             [
@@ -449,6 +478,7 @@ def main() -> int:
     parser.add_argument("--ack-rule-review", action="store_true")
     parser.add_argument("--allow-no-tests", action="store_true")
     parser.add_argument("--test-command", default="")
+    parser.add_argument("--setup-command", default="")
     parser.add_argument("--release-command", default="")
     parser.add_argument("--preflight-command", default="")
     parser.add_argument("--baseline-sha", default="")
@@ -496,6 +526,10 @@ def main() -> int:
             raise SystemExit("FAIL multiple test commands discovered; pass --test-command explicitly")
         elif not args.allow_no_tests:
             raise SystemExit("FAIL no unambiguous test command found; pass --test-command or --allow-no-tests")
+
+    setup_command = args.setup_command.strip()
+    if not setup_command and test_command:
+        setup_command = suggest_setup_command(root, test_command)
 
     if args.preflight_command and not args.release_command:
         raise SystemExit("FAIL --preflight-command requires --release-command")
@@ -549,7 +583,7 @@ def main() -> int:
     write_missing(
         root,
         ".engineering/tests.yaml",
-        tests_yaml(patterns, test_command, args.domain, args.platform),
+        tests_yaml(patterns, setup_command, test_command, args.domain, args.platform),
         written,
         skipped,
     )
@@ -586,6 +620,10 @@ def main() -> int:
     print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
+    if setup_command:
+        print(f"SETUP_COMMAND={setup_command}")
+    else:
+        print("SETUP_COMMAND=<none>")
     if test_command:
         print(f"TEST_COMMAND={test_command}")
     else:
