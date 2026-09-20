@@ -72,12 +72,13 @@ python tools/adopt.py \
   --root /path/to/project \
   --apply \
   --ack-rule-review \
+  --ci-mode shared \
   --test-command "<project-native test command>"
 ```
 
 Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
 
-The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, and destructive upgrades fail closed.
+The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, existing CI without an explicit shared/native mapping decision, and destructive upgrades fail closed.
 
 See `standards/ADOPTION.md`.
 
