@@ -83,6 +83,7 @@ def test_clean_python_bootstrap() -> None:
         project_text = (target / ".engineering/project.yaml").read_text(encoding="utf-8")
         assert 'version: "1.4.0"' in project_text
         assert "mode: adopted" in project_text
+        assert 'ci_mode: "shared"' in project_text
         assert BASELINE in project_text
 
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
@@ -124,10 +125,61 @@ def test_rule_review_is_fail_closed() -> None:
         assert "classify existing rules before apply" in result.stdout
 
 
+def test_existing_ci_requires_explicit_mode() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-native-ci"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/native\n\ngo 1.23\n", encoding="utf-8")
+        workflow_dir = target / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "native.yml").write_text(
+            "name: Native CI\non:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: go test ./...\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        blocked = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert "CI_REVIEW_REQUIRED=.github/workflows/native.yml" in blocked.stdout
+
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--ci-mode",
+            "native",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
+        assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
+        assert "affected-tests.yml@" not in workflow_text
+        project_text = (target / ".engineering/project.yaml").read_text(encoding="utf-8")
+        assert 'ci_mode: "native"' in project_text
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK))
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
+    test_existing_ci_requires_explicit_mode()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
 
