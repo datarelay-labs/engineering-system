@@ -15,10 +15,45 @@ Adoption is not permission to redesign the product, replace native CI, weaken te
 When a user asks to apply, adopt, bootstrap, migrate to, or align a repository with the Engineering System:
 
 1. Resolve the exact target repository and current branch/worktree.
-2. Read this standard and only the other standards needed for discovered conflicts.
-3. Inventory the repository before writing files.
-4. Prefer the deterministic adoption tool for mechanical installation.
-5. Keep semantic decisions visible and fail closed when they cannot be inferred safely.
+2. Resolve the canonical Engineering System source from the supplied repository URL and identify an immutable canonical baseline SHA.
+3. Read this standard and only the other standards needed for discovered conflicts.
+4. Inventory the repository before writing files.
+5. Prefer the deterministic adoption tool from the canonical Engineering System source for mechanical installation.
+6. Keep semantic decisions visible and fail closed when they cannot be inferred safely.
+
+## Link-only bootstrap and canonical source acquisition
+
+The target repository does not initially contain `tools/adopt.py`. A link-only request therefore requires the agent to obtain the canonical Engineering System source first rather than inventing or reconstructing the helper.
+
+Use one of these bounded approaches:
+
+- read the canonical repository through an authenticated GitHub integration and materialize the required canonical files/tooling in a temporary workspace, or
+- clone/fetch `datarelay-labs/engineering-system` into a separate temporary/tooling checkout.
+
+Before applying changes, resolve and record the exact canonical commit SHA that will become the target repository's immutable `engineering_system.baseline`. Run the canonical `tools/adopt.py` from that canonical checkout against the target repository root.
+
+Do not:
+- copy an unpinned `main` snapshot into the product repository and call it the baseline
+- assume the target repository already has the adoption helper
+- modify the target merely to make the bootstrap tool available
+- treat handbook/Athena content as a substitute for the canonical repository
+
+After adoption, the target repository's generated entrypoints and pinned baseline are sufficient for normal lifecycle work; the target does not need to vendor the whole Engineering System.
+
+## New or empty projects
+
+A brand-new project still needs an explicit Git repository boundary before managed adoption because branch/HEAD/history are part of the safety and evidence model.
+
+For a genuinely new repository with no executable product code yet:
+
+1. establish or initialize the intended Git repository and origin/ownership boundary
+2. run the same inventory/adoption flow
+3. do not invent product architecture, frameworks, release commands, or operational contracts that the owner has not decided
+4. use `--allow-no-tests` only when the repository genuinely has no executable test target yet
+5. keep test/release/operations metadata conservative until real project-native commands exist
+6. once executable implementation begins, establish real project-native tests and update the affected-test contract before treating normal development/release qualification as complete
+
+`--allow-no-tests` is an explicit bootstrap state, not a permanent exemption from testing for a software project.
 
 ## Phase 1 — inventory
 
