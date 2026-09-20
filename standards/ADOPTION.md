@@ -108,8 +108,11 @@ Generated test metadata is conservative:
 
 - changed source/test paths map to a project domain
 - project-native tests run on affected changes
+- a one-time `setup_command` may prepare dependencies before selected shared-CI scenarios
 - cheap static PR guardrails remain separate
 - ordinary PR adoption never turns a multi-hour release suite into a default PR gate
+
+If the repository already has mature CI/runtime setup, prefer `ci_mode=native` unless the shared workflow is explicitly verified to provide equivalent environment setup.
 
 ## CI wiring
 
