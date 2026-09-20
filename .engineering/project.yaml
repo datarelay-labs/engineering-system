@@ -1,7 +1,10 @@
 engineering_system:
-  version: "1.4.0"
+  version: "1.5.0"
   mode: canonical
   ci_mode: native
+  native_ci_workflows:
+    - ".github/workflows/validate.yml"
+  merge_gate_status: advisory
 
 project:
   name: "engineering-system"
@@ -10,6 +13,7 @@ project:
 
 domains:
   - standards
+  - design
   - ai
   - adapters
   - templates
@@ -24,3 +28,4 @@ platforms:
 operations:
   production_oriented: false
   runbook_required: false
+  incident_response_required: false
