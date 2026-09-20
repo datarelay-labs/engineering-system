@@ -2,7 +2,7 @@
 
 ## Default flow
 
-Request -> classify -> load context -> affected domains/contracts -> invariants -> implement -> affected tests -> wider gate if required -> diff review -> commit/PR
+Request -> classify -> load context -> minimal design gate when required -> affected domains/contracts -> invariants -> implement -> affected tests -> wider gate if required -> diff review -> commit/PR
 
 ## Repository / worktree safety
 
@@ -11,6 +11,10 @@ Before coding:
 - preserve unrelated/uncommitted work
 - do not implement in the wrong worktree/branch
 - record the starting revision for release-sensitive work
+
+## Design handoff
+
+For FEATURE, material REFACTOR, SECURITY, public-contract, persistence/schema, or operational behavior changes, apply `DESIGN.md` before implementation. Do not create a heavyweight design document when the required decisions already exist in canonical product/specification artifacts.
 
 ## Implementation
 
