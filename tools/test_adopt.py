@@ -90,6 +90,10 @@ def test_clean_python_bootstrap() -> None:
         for rel in required:
             assert (target / rel).is_file(), rel
 
+        agents_text = (target / "AGENTS.md").read_text(encoding="utf-8").lower()
+        assert "actionable review" in agents_text
+        assert "commented/advisory" in agents_text
+
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.5.1"
