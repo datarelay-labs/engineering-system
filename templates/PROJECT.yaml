@@ -1,6 +1,7 @@
 engineering_system:
   version: "1.4.0"
   mode: adopted
+  ci_mode: shared
   # baseline is injected by tools/adopt.py as the immutable 40-character canonical SHA.
 
 project:
