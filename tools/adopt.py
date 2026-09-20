@@ -247,12 +247,13 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def project_yaml(root: Path, version: str, baseline: str, project_type: str, maturity: str, domain: str, platform: str) -> str:
+def project_yaml(root: Path, version: str, baseline: str, ci_mode: str, project_type: str, maturity: str, domain: str, platform: str) -> str:
     return (
         "engineering_system:\n"
         f"  version: {yaml_scalar(version)}\n"
         "  mode: adopted\n"
-        f"  baseline: {yaml_scalar(baseline)}\n\n"
+        f"  baseline: {yaml_scalar(baseline)}\n"
+        f"  ci_mode: {yaml_scalar(ci_mode)}\n\n"
         "project:\n"
         f"  name: {yaml_scalar(root.name)}\n"
         f"  type: {yaml_scalar(project_type)}\n"
@@ -340,25 +341,33 @@ def release_yaml(preflight_command: str, release_command: str) -> str:
     )
 
 
-def engineering_workflow(baseline: str) -> str:
-    return f"""name: Engineering System
-
-on:
-  pull_request:
-
-permissions:
-  contents: read
-
-jobs:
-  adoption-compliance:
-    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}
-
-  affected-tests:
-    uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@{baseline}
-    with:
-      manifest_path: .engineering/tests.yaml
-      trigger: pr
-"""
+def engineering_workflow(baseline: str, ci_mode: str) -> str:
+    lines = [
+        "name: Engineering System",
+        "",
+        "on:",
+        "  pull_request:",
+        "",
+        "permissions:",
+        "  contents: read",
+        "",
+        "jobs:",
+        "  adoption-compliance:",
+        f"    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}",
+    ]
+    if ci_mode == "shared":
+        lines.extend(
+            [
+                "",
+                "  affected-tests:",
+                f"    uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@{baseline}",
+                "    with:",
+                "      manifest_path: .engineering/tests.yaml",
+                "      trigger: pr",
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def release_workflow(baseline: str, preflight_command: str, release_command: str) -> str:
@@ -444,6 +453,7 @@ def main() -> int:
     parser.add_argument("--preflight-command", default="")
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
+    parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
     parser.add_argument("--maturity", default="development", choices=("experimental", "development", "production", "maintenance"))
     parser.add_argument("--domain", default="core")
     parser.add_argument("--platform", default="linux")
@@ -493,6 +503,17 @@ def main() -> int:
     project_type = args.project_type.strip() or str(data["project_type"])
     patterns = list(data["source_patterns"])
 
+    ci_mode = args.ci_mode
+    existing_workflows = [
+        item for item in list(data["existing_ci"])
+        if item != ".github/workflows/engineering-system.yml"
+    ]
+    if ci_mode == "auto":
+        if existing_workflows:
+            print("CI_REVIEW_REQUIRED=" + ",".join(existing_workflows))
+            raise SystemExit("FAIL existing CI detected; review equivalent gates and rerun with --ci-mode shared|native")
+        ci_mode = "shared"
+
     written: list[str] = []
     skipped: list[str] = []
 
@@ -521,7 +542,7 @@ def main() -> int:
     write_missing(
         root,
         ".engineering/project.yaml",
-        project_yaml(root, version, baseline, project_type, args.maturity, args.domain, args.platform),
+        project_yaml(root, version, baseline, ci_mode, project_type, args.maturity, args.domain, args.platform),
         written,
         skipped,
     )
@@ -542,7 +563,7 @@ def main() -> int:
     write_missing(
         root,
         ".github/workflows/engineering-system.yml",
-        engineering_workflow(baseline),
+        engineering_workflow(baseline, ci_mode),
         written,
         skipped,
     )
@@ -562,6 +583,7 @@ def main() -> int:
 
     print(f"ENGINEERING_SYSTEM_VERSION={version}")
     print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
+    print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
     if test_command:
