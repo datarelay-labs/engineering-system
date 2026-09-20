@@ -1,10 +1,10 @@
 engineering_system:
-  version: "1.5.0"
+  version: "1.6.0"
   mode: canonical
   ci_mode: native
   native_ci_workflows:
     - ".github/workflows/validate.yml"
-  merge_gate_status: advisory
+  merge_gate_status: verified
 
 project:
   name: "engineering-system"
@@ -21,6 +21,10 @@ domains:
   - workflows
   - session-continuity
   - adoption
+  - enforcement
+  - release-contract
+  - operations-contract
+  - adoption-upgrade
 
 platforms:
   - github-actions
@@ -29,3 +33,10 @@ operations:
   production_oriented: false
   runbook_required: false
   incident_response_required: false
+  persistent_state: false
+  runbook_paths: []
+  health_command: ""
+  backup_command: ""
+  restore_test_command: ""
+  upgrade_command: ""
+  rollback_command: ""
