@@ -76,7 +76,7 @@ python tools/adopt.py \
   --test-command "<project-native test command>"
 ```
 
-Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
+Managed adoption pins the canonical version and immutable baseline SHA, installs the repository entrypoints, session continuity, pull-request compliance/affected-test wiring, discovers a one-time dependency setup command when safe, and validates the result. Release workflows are wired only when explicit project-native release commands are known.
 
 The bootstrap does not overwrite existing project files. Ambiguous tests, dirty worktrees, unreviewed AI rules, existing CI without an explicit shared/native mapping decision, and destructive upgrades fail closed.
 
