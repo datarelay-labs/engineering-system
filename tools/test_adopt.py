@@ -92,7 +92,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.5.0"
+        assert engineering["version"] == "1.5.1"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
