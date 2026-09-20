@@ -3,6 +3,8 @@ version: 1
 paths:
   "standards/**":
     domains: [standards]
+  "standards/DESIGN.md":
+    domains: [design]
   "ai/**":
     domains: [ai]
   "adapters/**":
@@ -43,7 +45,7 @@ scenarios:
   - id: ENG-STATIC-002
     name: Git whitespace validation
     level: static
-    domains: [standards, ai, adapters, templates, schemas, workflows, session-continuity]
+    domains: [standards, design, ai, adapters, templates, schemas, workflows, session-continuity]
     triggers: [pr, preflight, release]
     platforms: [linux]
     command: "git diff --check"
