@@ -1,7 +1,9 @@
 engineering_system:
-  version: "1.4.0"
+  version: "1.5.0"
   mode: adopted
   ci_mode: shared
+  native_ci_workflows: []
+  merge_gate_status: unknown
   # baseline is injected by tools/adopt.py as the immutable 40-character canonical SHA.
 
 project:
@@ -18,3 +20,4 @@ platforms:
 operations:
   production_oriented: false
   runbook_required: false
+  incident_response_required: false
