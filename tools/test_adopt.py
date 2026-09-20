@@ -12,7 +12,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
 CHECK = ROOT / "tools" / "check-adoption.py"
+UPGRADE = ROOT / "tools" / "upgrade-adoption.py"
 BASELINE = "a" * 40
+NEW_BASELINE = "b" * 40
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -92,7 +94,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.5.0"
+        assert engineering["version"] == "1.6.0"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -106,12 +108,13 @@ def test_clean_python_bootstrap() -> None:
 
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
+        assert f"enforcement-check.yml@{BASELINE}" in workflow_text
         assert f"affected-tests.yml@{BASELINE}" in workflow_text
 
         release_workflow = (target / ".github/workflows/engineering-release.yml").read_text(encoding="utf-8")
-        assert f"release-preflight.yml@{BASELINE}" in release_workflow
-        assert f"release-gate.yml@{BASELINE}" in release_workflow
+        assert f"release-contract.yml@{BASELINE}" in release_workflow
         assert "${{ inputs.expected_sha }}" in release_workflow
+        assert "${{ inputs.phase }}" in release_workflow
 
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
@@ -211,6 +214,7 @@ def test_operations_signals_fail_closed_then_production_profile() -> None:
         init_repo(target)
         (target / "go.mod").write_text("module example.invalid/service\n\ngo 1.23\n", encoding="utf-8")
         (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (target / "RUNBOOK.md").write_text("# Operations Runbook\n", encoding="utf-8")
         commit_all(target)
 
         blocked = run(
@@ -240,6 +244,25 @@ def test_operations_signals_fail_closed_then_production_profile() -> None:
             "go test ./...",
             "--operations-mode",
             "production",
+            "--persistent-state",
+            "--runbook-path",
+            "RUNBOOK.md",
+            "--health-command",
+            "true",
+            "--backup-command",
+            "true",
+            "--restore-test-command",
+            "true",
+            "--upgrade-command",
+            "true",
+            "--rollback-command",
+            "true",
+            "--operational-e2e-command",
+            "true",
+            "--public-smoke-command",
+            "true",
+            "--full-e2e-passes",
+            "2",
         )
         assert "OPERATIONS_MODE=production" in applied.stdout
 
@@ -247,11 +270,20 @@ def test_operations_signals_fail_closed_then_production_profile() -> None:
         assert project["operations"]["production_oriented"] is True
         assert project["operations"]["runbook_required"] is True
         assert project["operations"]["incident_response_required"] is True
+        assert project["operations"]["persistent_state"] is True
+        assert project["operations"]["runbook_paths"] == ["RUNBOOK.md"]
+        assert project["operations"]["health_command"] == "true"
+        assert project["operations"]["backup_command"] == "true"
+        assert project["operations"]["restore_test_command"] == "true"
 
         release = load_yaml(target / ".engineering/release.yaml")
         assert release["operational_e2e_required"] is True
-        assert release["full_e2e_passes"] == 1
+        assert release["operational_e2e_command"] == "true"
+        assert release["full_e2e_passes"] == 2
         assert release["public_smoke_required"] is True
+        assert release["public_smoke_command"] == "true"
+        release_workflow = (target / ".github/workflows/engineering-release.yml").read_text(encoding="utf-8")
+        assert f"release-contract.yml@{BASELINE}" in release_workflow
 
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
@@ -302,13 +334,70 @@ def test_quality_and_domain_discovery() -> None:
         assert "ADOPTED-TYPECHECK-001" in ids
 
 
+def test_managed_upgrade_to_1_6() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/upgrade\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.5.0"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+
+        workflow_path = target / ".github/workflows/engineering-system.yml"
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        enforcement_block = (
+            "\n  enforcement-reconcile:\n"
+            f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{BASELINE}\n"
+        )
+        workflow_text = workflow_text.replace(enforcement_block, "")
+        workflow_path.write_text(workflow_text, encoding="utf-8")
+        commit_all(target, "downgrade fixture to 1.5")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+
+        upgraded_project = load_yaml(project_path)
+        assert upgraded_project["engineering_system"]["version"] == "1.6.0"
+        assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
+        upgraded_workflow = workflow_path.read_text(encoding="utf-8")
+        assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
+        assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
+        assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
+
+
 def main() -> int:
-    run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK))
+    run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
     test_existing_ci_requires_mapping_when_ambiguous()
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
+    test_managed_upgrade_to_1_6()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
 
