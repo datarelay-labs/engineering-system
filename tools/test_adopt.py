@@ -86,6 +86,9 @@ def test_clean_python_bootstrap() -> None:
         assert 'ci_mode: "shared"' in project_text
         assert BASELINE in project_text
 
+        tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
+        assert 'setup_command: "python -m pip install -e . && python -m pip install pytest"' in tests_text
+
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
         assert f"affected-tests.yml@{BASELINE}" in workflow_text
