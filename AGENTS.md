@@ -26,7 +26,7 @@ Use the minimum sufficient context and reasoning. Expand only when a concrete bl
 - Stop expensive downstream qualification after a blocking deterministic failure.
 - Add durable regression coverage for bug fixes when practical.
 - Never weaken validation or report unexecuted, blocked, historical, or different-HEAD evidence as PASS.
-- Before merge or terminal completion, inspect machine-observable review feedback and fix/revalidate or evidence-disposition every actionable finding.
+- Before merge or terminal completion, inspect actionable review feedback and fix/revalidate or evidence-disposition every actionable finding.
 - Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.
 - Keep schemas/templates/workflows backward-aware.
 

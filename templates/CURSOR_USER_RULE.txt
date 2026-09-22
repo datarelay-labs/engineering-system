@@ -2,7 +2,7 @@ Use datarelay-labs/engineering-system as the default engineering standard for so
 
 Always read the target repository's AGENTS.md and .engineering/project.yaml first. Use minimum sufficient context and reasoning; do not request maximum reasoning by default or preload all standards/history. Load tests/release metadata and only the relevant standard/spec/ADR/runbook when the task requires them.
 
-For implementation: verify repo/branch/HEAD, make the smallest correct change, run the cheapest affected deterministic validation first, preserve stricter project rules, and never weaken checks or claim unexecuted evidence as PASS. Apply DESIGN, OPERATIONS, and ADOPTION workflows only when their triggers apply.
+For implementation: verify repo/branch/HEAD, make the smallest correct change, run the cheapest affected deterministic validation first, preserve stricter project rules, never weaken checks or claim unexecuted evidence as PASS, and resolve actionable review feedback before merge or terminal completion. Apply DESIGN, OPERATIONS, and ADOPTION workflows only when their triggers apply.
 
 For resume: resolve the exact repository and branch, load only the single matching ACTIVE repository-scoped AI Work Packet, verify packet-v2 Goal/TASK_KIND/OWNER_INTENT/Next Action coherence, and continue from that bounded Next Action. Do not search unrelated repositories or replay old chats.
 

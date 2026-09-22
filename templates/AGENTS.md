@@ -27,7 +27,7 @@ When resuming a workstream, resolve this repository first, load only its single 
 - Do not duplicate equivalent native/shared CI or run expensive downstream qualification after a blocking deterministic failure.
 - Add durable regression coverage for bugs when practical.
 - Never weaken validation or claim PASS from unexecuted, blocked, historical, or different-HEAD evidence.
-- Before merge or terminal completion, resolve every actionable machine-observable review finding.
+- Before merge or terminal completion, resolve every actionable review finding with revalidation or an evidence-backed disposition.
 - Do not keep a coding-agent session alive polling CI/review/external waits; persist concise state and yield to coordinator/automation.
 - If mandatory engineering context is missing or contradictory, fail closed instead of guessing.
 

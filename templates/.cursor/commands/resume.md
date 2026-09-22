@@ -33,7 +33,7 @@ Use minimum sufficient context and reasoning. Do not request maximum reasoning b
    - If progress requires a human decision, approval, credential, or other non-machine-resolvable action, set `STATUS=BLOCKED` and record the exact required action.
    - A later resume must re-check the external state rather than replay old logs.
 
-8. Before merge or terminal completion, inspect current machine-observable review feedback. Fix/revalidate every actionable finding or record a concise evidence-backed disposition.
+8. Before merge or terminal completion, inspect current actionable review feedback. Fix/revalidate every actionable finding or record a concise evidence-backed disposition.
 
 9. Complete the packet only when all scope-applicable implementation, validation, commit/push/PR, CI/review, integration/merge, and explicitly linked issue conditions are settled and no executable Next Action remains. Then set `STATUS=COMPLETE`, `Next Action=NONE`, fresh evidence, `Blockers=NONE`, and current LAST_VERIFIED_HEAD. Otherwise do not claim completion.
 
