@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
-Engineering System 1.6.2은 observable GitHub merge enforcement를 reconcile하고, production-oriented project에 project-native runbook/health/recovery contract를 기록하며, 실제 command가 있을 때 qualification과 post-release smoke를 분리한 executable release contract를 사용할 수 있습니다. 채택 저장소는 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version만 아니라 해당 baseline을 기준으로 비교합니다.
+Engineering System 1.6.3은 observable GitHub merge enforcement를 reconcile하고, production-oriented project에 project-native runbook/health/recovery contract를 기록하며, 실제 command가 있을 때 qualification과 post-release smoke를 분리한 executable release contract를 사용할 수 있습니다. 채택 저장소는 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version만 아니라 해당 baseline을 기준으로 비교합니다.
 
 ### 3. Adoption qualification
 

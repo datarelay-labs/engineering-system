@@ -95,7 +95,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.6.2"
+        assert engineering["version"] == "1.6.3"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -397,7 +397,7 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
 
         upgraded_project = load_yaml(project_path)
-        assert upgraded_project["engineering_system"]["version"] == "1.6.2"
+        assert upgraded_project["engineering_system"]["version"] == "1.6.3"
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
@@ -460,6 +460,130 @@ def test_custom_resume_adapter_fails_closed() -> None:
         assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == "# project-custom resume\n"
 
 
+def test_grant_style_baseline_declarations_upgraded() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-grant-decls"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/grant\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.1"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+
+        stale_sha = "f" * 40
+        existing_agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+        agents = (
+            "# DataRelay Grant Repository Engineering Rules\n\n"
+            "This repository follows the canonical Data Relay Labs Engineering System:\n"
+            "https://github.com/datarelay-labs/engineering-system\n\n"
+            f"Adoption baseline: Engineering System version 1.6.1 at immutable commit `{stale_sha}`.\n\n"
+            "## Product invariants\n\nKeep project-specific text.\n\n"
+            + existing_agents
+        )
+        readme = (
+            "# Grant\n\n"
+            "## Engineering\n\n"
+            "This repository follows the canonical Data Relay Labs Engineering System.\n\n"
+            "The current repository baseline identifies Engineering System **1.6.1** and keeps "
+            "patent-described concepts separated.\n"
+        )
+        (target / "AGENTS.md").write_text(agents, encoding="utf-8")
+        (target / "README.md").write_text(readme, encoding="utf-8")
+        commit_all(target, "stale grant-style declarations")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "BASELINE_DECLARATIONS_SYNCED=AGENTS.md,README.md" in upgraded.stdout
+
+        agents_text = (target / "AGENTS.md").read_text(encoding="utf-8")
+        readme_text = (target / "README.md").read_text(encoding="utf-8")
+        assert "Keep project-specific text." in agents_text
+        assert (
+            f"Adoption baseline: Engineering System version 1.6.3 at immutable commit `{NEW_BASELINE}`."
+            in agents_text
+        )
+        assert "1.6.1" not in agents_text
+        assert stale_sha not in agents_text
+        assert (
+            "The current repository baseline identifies Engineering System **1.6.3** and keeps"
+            in readme_text
+        )
+        assert "1.6.1" not in readme_text
+        assert "patent-described concepts separated." in readme_text
+
+
+def test_ambiguous_baseline_declaration_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-ambiguous-decls"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/ambiguous\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.1"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        (target / "AGENTS.md").write_text(
+            "# Custom rules\n\nPinned Engineering System version 1.6.1 for this fork.\n",
+            encoding="utf-8",
+        )
+        commit_all(target, "ambiguous declaration fixture")
+
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "ambiguous/custom" in failed.stdout
+        assert "Pinned Engineering System version 1.6.1" in (target / "AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -489,6 +613,8 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_custom_resume_adapter_fails_closed()
+    test_grant_style_baseline_declarations_upgraded()
+    test_ambiguous_baseline_declaration_fails_closed()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

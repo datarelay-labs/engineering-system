@@ -251,6 +251,8 @@ The upgrade helper only rewrites known managed metadata/workflow surfaces and fa
 
 Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text. Existing resume adapters are replaced only when their content matches a known managed version; project-custom resume content fails closed for manual review.
 
+Managed upgrades also synchronize known managed Engineering System version and immutable baseline SHA declarations in `AGENTS.md` and `README.md` when those exact managed forms are present. Surrounding project-specific text is preserved. Ambiguous or custom declaration forms fail closed for manual review rather than broad replacement.
+
 ## Organization-wide rollout
 
 Use the deterministic org rollout helper to inventory an organization, classify repositories, and optionally open isolated per-repository rollout branches/PRs:
