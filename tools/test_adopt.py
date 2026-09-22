@@ -85,6 +85,7 @@ def test_clean_python_bootstrap() -> None:
             ".engineering/release.yaml",
             ".cursor/rules/engineering-system.mdc",
             ".cursor/commands/resume.md",
+            ".cursor/commands/work-resume.md",
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
@@ -103,7 +104,15 @@ def test_clean_python_bootstrap() -> None:
         assert project["operations"]["production_oriented"] is False
         assert project["operations"]["incident_response_required"] is False
 
+        resume_text = (target / ".cursor/commands/resume.md").read_text(encoding="utf-8")
+        assert resume_text == (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8")
+        assert "WORK_PACKET_PROVENANCE_UNTRUSTED" in resume_text
+        assert "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE" in resume_text
+
         tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
+        assert "ENGINEERING_BASE_REF" in tests_text
+        assert "origin/main...HEAD" in tests_text
+        assert tests_text.count('command: "git diff --check"') == 0
         assert 'setup_command: "python -m pip install -e . && python -m pip install pytest"' in tests_text
 
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
@@ -368,6 +377,10 @@ def test_managed_upgrade_to_1_6() -> None:
         )
         workflow_text = workflow_text.replace(enforcement_block, "")
         workflow_path.write_text(workflow_text, encoding="utf-8")
+
+        stale_resume = "# stale resume adapter\n"
+        (target / ".cursor/commands/resume.md").write_text(stale_resume, encoding="utf-8")
+        (target / ".cursor/commands/work-resume.md").write_text(stale_resume, encoding="utf-8")
         commit_all(target, "downgrade fixture to 1.5")
 
         upgraded = run(
@@ -380,6 +393,7 @@ def test_managed_upgrade_to_1_6() -> None:
             NEW_BASELINE,
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.6.1"
@@ -388,6 +402,10 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
+
+        canonical_resume = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
+        assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == canonical_resume
+        assert (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8") == canonical_resume
 
 
 def main() -> int:

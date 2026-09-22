@@ -30,6 +30,7 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
     "templates/CURSOR_USER_RULE.txt",
     "templates/.cursor/commands/resume.md",
+    "templates/.cursor/commands/work-resume.md",
     "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md",
     "templates/.github/workflows/engineering-system.yml",
 )
@@ -44,7 +45,9 @@ REQUIRED_METHOD_FILES = (
     "tools/adopt.py",
     "tools/check-adoption.py",
     "tools/upgrade-adoption.py",
+    "tools/org-rollout.py",
     "tools/test_adopt.py",
+    "tools/test_org_rollout.py",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -104,6 +107,13 @@ def validate_resume_template_parity():
         raise SystemExit(
             "FAIL templates/.cursor/commands/resume.md drifted from canonical .cursor/commands/resume.md"
         )
+    for rel in (
+        ".cursor/commands/work-resume.md",
+        "templates/.cursor/commands/work-resume.md",
+    ):
+        alias = (ROOT / rel).read_text(encoding="utf-8")
+        if alias != canonical:
+            raise SystemExit(f"FAIL {rel} drifted from canonical .cursor/commands/resume.md")
     print("PASS canonical/template Cursor resume parity")
 
 
@@ -148,6 +158,10 @@ def validate_session_continuity_templates():
         "TASK_KIND",
         "OWNER_INTENT",
         "WORK_PACKET_SCOPE_MISMATCH",
+        "WORK_PACKET_PROVENANCE_UNTRUSTED",
+        "authenticated",
+        "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE",
+        "TASK_KIND=ADOPTION",
         "exactly one match",
         "Next Action",
         "STATUS=COMPLETE",
@@ -297,6 +311,9 @@ def main():
 
     import subprocess
     completed = subprocess.run(["python3", "tools/test_adopt.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_org_rollout.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
 

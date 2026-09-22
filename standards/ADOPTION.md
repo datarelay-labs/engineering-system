@@ -249,6 +249,19 @@ python tools/upgrade-adoption.py \
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
+Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text.
+
+## Organization-wide rollout
+
+Use the deterministic org rollout helper to inventory an organization, classify repositories, and optionally open isolated per-repository rollout branches/PRs:
+
+```bash
+python tools/org-rollout.py --org <github-org> --audit
+python tools/org-rollout.py --org <github-org> --apply --baseline-sha <canonical-sha>
+```
+
+Default mode is audit/dry-run. Archived repositories are reported as `SKIP_ARCHIVED` unless `--include-archived` is set. Apply mode reuses `tools/adopt.py` and `tools/upgrade-adoption.py`, never writes directly to default branches, and fails closed when adoption/upgrade inputs are ambiguous. A partial inventory must be reported as `ORG_ROLLOUT=PARTIAL` or `FAIL`, never as a global PASS.
+
 ## Fail-closed cases
 
 Stop and report the smallest missing decision when:

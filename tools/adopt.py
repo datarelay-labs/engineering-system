@@ -36,6 +36,24 @@ REQUIRED_MANAGED = (
     ".github/workflows/engineering-system.yml",
 )
 
+# Known Cursor resume aliases kept in sync when present or installed as managed adapters.
+RESUME_ADAPTER_ALIASES = (
+    ".cursor/commands/work-resume.md",
+)
+
+# Prefer committed candidate/base diffs when ENGINEERING_BASE_REF is provided by shared CI.
+WHITESPACE_CHECK_COMMAND = (
+    'bash -lc \'if [ -n "${ENGINEERING_BASE_REF:-}" ]; then '
+    'git diff --check "${ENGINEERING_BASE_REF}...HEAD"; '
+    "elif git rev-parse --verify --quiet origin/main >/dev/null; then "
+    "git diff --check origin/main...HEAD; "
+    "elif git rev-parse --verify --quiet main >/dev/null; then "
+    "git diff --check main...HEAD; "
+    "elif git rev-parse --verify --quiet HEAD^ >/dev/null; then "
+    "git diff --check HEAD^...HEAD; "
+    "else git diff --check; fi'"
+)
+
 
 def run_git(root: Path, *args: str) -> str:
     try:
@@ -283,6 +301,7 @@ def review_required_rules(root: Path, rules: list[str]) -> list[str]:
         "AGENTS.md": CANONICAL / "templates" / "AGENTS.md",
         ".cursor/rules/engineering-system.mdc": CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc",
         ".cursor/commands/resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
+        ".cursor/commands/work-resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
     }
     required: list[str] = []
     for rel in rules:
@@ -625,9 +644,9 @@ def tests_yaml(
             "      - release",
             "    platforms:",
             f"      - {yaml_scalar(platform)}",
-            '    command: "git diff --check"',
+            f"    command: {yaml_scalar(WHITESPACE_CHECK_COMMAND)}",
             "    invariants:",
-            '      - "repository diff has no whitespace errors"',
+            '      - "committed candidate/base diff has no whitespace errors"',
             "    release_gate: true",
             "",
         ]
@@ -968,13 +987,16 @@ def main() -> int:
         written,
         skipped,
     )
+    resume_text = (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
     write_missing(
         root,
         ".cursor/commands/resume.md",
-        (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8"),
+        resume_text,
         written,
         skipped,
     )
+    for alias in RESUME_ADAPTER_ALIASES:
+        write_missing(root, alias, resume_text, written, skipped)
     write_missing(
         root,
         ".github/ISSUE_TEMPLATE/ai-work-packet.md",
