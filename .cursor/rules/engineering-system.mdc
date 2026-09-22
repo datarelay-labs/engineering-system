@@ -1,32 +1,20 @@
 ---
-description: Mandatory Engineering System workflow
+description: Mandatory Engineering System entry rule
 alwaysApply: true
 ---
 
-# Mandatory Engineering System Rule
+# Engineering System
 
-This repository is the canonical Engineering System.
+This repository follows the canonical Engineering System.
 
-Always read:
-1. @AGENTS.md
-2. @.engineering/project.yaml
+Always read @AGENTS.md and @.engineering/project.yaml first.
 
-Read only when relevant:
-3. @.engineering/tests.yaml for implementation/debugging/testing
-4. @.engineering/release.yaml for release/version/artifact work
-5. the relevant file under @standards/
+Use minimum sufficient context and reasoning. Load @.engineering/tests.yaml, @.engineering/release.yaml, standards, specs, ADRs, runbooks, and Work Packet references only when the current task requires them. Do not preload history or unrelated repositories.
 
-Do not preload every standard, Wiki page, archive, or historical discussion.
+Follow AGENTS.md for design, operations, adoption, validation, and review gates. Make the smallest correct change and run the cheapest affected deterministic check first. Never weaken validation or claim unexecuted evidence as PASS. Resolve actionable review feedback before merge or terminal completion.
 
-Before changing anything:
-- identify change class and affected domains/contracts/security/operations
-- apply standards/DESIGN.md before material design-bearing changes
-- switch to standards/OPERATIONS.md incident lifecycle for production-impacting failures
-- inspect relevant implementation/tests
-- make the smallest correct change
-- run cheapest affected validation first
-- do not duplicate equivalent native/shared gates
-- do not start expensive downstream qualification while a blocking deterministic failure exists
-- never weaken validation merely to obtain PASS
-- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review finding; do not treat COMMENTED/advisory state as automatic PASS
-- never report unexecuted or blocked validation as PASS
+For resume work, use only the exact repository/branch ACTIVE AI Work Packet and verify actual Git state. Fail closed on missing/ambiguous packets or packet-v2 Goal/TASK_KIND/OWNER_INTENT/Next Action mismatch.
+
+Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting evidence and yield to coordinator/automation for re-entry.
+
+Tool-specific adapters may change syntax but must not weaken the Engineering System.

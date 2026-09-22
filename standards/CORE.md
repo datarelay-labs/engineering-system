@@ -28,7 +28,9 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 5. A blocking deterministic failure stops downstream expensive qualification until fixed.
 6. Full lifecycle/platform/performance/operational E2E belongs at release-candidate boundaries unless a change specifically requires earlier execution.
 7. Keep AI context small and high-signal; load only task-relevant standards/specifications.
-8. Add tooling only when it removes repeated manual work or materially improves correctness.
+8. Use the minimum sufficient AI reasoning/context; do not request maximum reasoning by default. Escalate only when concrete evidence, a failed check, or an unresolved design question requires it.
+9. Do not spend coding-agent model time polling CI, review, deployment, or other machine-observable external waits. Persist state and hand waiting/re-entry to coordinator or automation.
+10. Add tooling only when it removes repeated manual work or materially improves correctness.
 
 ## Universal rules
 
