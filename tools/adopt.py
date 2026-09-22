@@ -36,6 +36,24 @@ REQUIRED_MANAGED = (
     ".github/workflows/engineering-system.yml",
 )
 
+# Known Cursor resume aliases kept in sync when present or installed as managed adapters.
+RESUME_ADAPTER_ALIASES = (
+    ".cursor/commands/work-resume.md",
+)
+
+# Prefer committed candidate/base diffs when ENGINEERING_BASE_REF is provided by shared CI.
+WHITESPACE_CHECK_COMMAND = (
+    'bash -lc \'if [ -n "${ENGINEERING_BASE_REF:-}" ]; then '
+    'git diff --check "${ENGINEERING_BASE_REF}...HEAD"; '
+    "elif git rev-parse --verify --quiet origin/main >/dev/null; then "
+    "git diff --check origin/main...HEAD; "
+    "elif git rev-parse --verify --quiet main >/dev/null; then "
+    "git diff --check main...HEAD; "
+    "elif git rev-parse --verify --quiet HEAD^ >/dev/null; then "
+    "git diff --check HEAD^...HEAD; "
+    "else git diff --check; fi'"
+)
+
 
 def run_git(root: Path, *args: str) -> str:
     try:
@@ -95,6 +113,17 @@ def detect_project_type(root: Path) -> str:
     return types[0] if types else "generic"
 
 
+def node_package_manager(root: Path) -> str:
+    """Prefer Bun when Bun lockfiles are present, then pnpm/yarn/npm."""
+    if (root / "bun.lockb").is_file() or (root / "bun.lock").is_file():
+        return "bun"
+    if (root / "pnpm-lock.yaml").is_file():
+        return "pnpm"
+    if (root / "yarn.lock").is_file():
+        return "yarn"
+    return "npm"
+
+
 def node_test_command(root: Path) -> str:
     package = root / "package.json"
     if not package.is_file():
@@ -104,11 +133,15 @@ def node_test_command(root: Path) -> str:
     except Exception:
         return ""
     test = str(((data.get("scripts") or {}).get("test")) or "").strip()
+    manager = node_package_manager(root)
+    # Bun's native test runner does not require package.json scripts.test.
+    if manager == "bun":
+        return "bun test"
     if not test or "no test specified" in test.lower():
         return ""
-    if (root / "pnpm-lock.yaml").is_file():
+    if manager == "pnpm":
         return "pnpm test"
-    if (root / "yarn.lock").is_file():
+    if manager == "yarn":
         return "yarn test"
     return "npm test"
 
@@ -124,9 +157,12 @@ def package_script_command(root: Path, script: str) -> str:
     scripts = data.get("scripts") or {}
     if not str(scripts.get(script) or "").strip():
         return ""
-    if (root / "pnpm-lock.yaml").is_file():
+    manager = node_package_manager(root)
+    if manager == "bun":
+        return f"bun run {script}"
+    if manager == "pnpm":
         return f"pnpm {script}"
-    if (root / "yarn.lock").is_file():
+    if manager == "yarn":
         return f"yarn {script}"
     return f"npm run {script}"
 
@@ -234,6 +270,8 @@ def discover_test_commands(root: Path) -> list[str]:
 
 
 def suggest_setup_command(root: Path, test_command: str) -> str:
+    if test_command == "bun test":
+        return "bun install --frozen-lockfile"
     if test_command in {"npm test", "pnpm test", "yarn test"}:
         if test_command == "pnpm test":
             return "corepack enable && pnpm install --frozen-lockfile"
@@ -283,6 +321,7 @@ def review_required_rules(root: Path, rules: list[str]) -> list[str]:
         "AGENTS.md": CANONICAL / "templates" / "AGENTS.md",
         ".cursor/rules/engineering-system.mdc": CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc",
         ".cursor/commands/resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
+        ".cursor/commands/work-resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
     }
     required: list[str] = []
     for rel in rules:
@@ -625,9 +664,9 @@ def tests_yaml(
             "      - release",
             "    platforms:",
             f"      - {yaml_scalar(platform)}",
-            '    command: "git diff --check"',
+            f"    command: {yaml_scalar(WHITESPACE_CHECK_COMMAND)}",
             "    invariants:",
-            '      - "repository diff has no whitespace errors"',
+            '      - "committed candidate/base diff has no whitespace errors"',
             "    release_gate: true",
             "",
         ]
@@ -968,13 +1007,16 @@ def main() -> int:
         written,
         skipped,
     )
+    resume_text = (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
     write_missing(
         root,
         ".cursor/commands/resume.md",
-        (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8"),
+        resume_text,
         written,
         skipped,
     )
+    for alias in RESUME_ADAPTER_ALIASES:
+        write_missing(root, alias, resume_text, written, skipped)
     write_missing(
         root,
         ".github/ISSUE_TEMPLATE/ai-work-packet.md",

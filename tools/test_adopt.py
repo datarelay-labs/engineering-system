@@ -85,6 +85,7 @@ def test_clean_python_bootstrap() -> None:
             ".engineering/release.yaml",
             ".cursor/rules/engineering-system.mdc",
             ".cursor/commands/resume.md",
+            ".cursor/commands/work-resume.md",
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
@@ -94,7 +95,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.6.1"
+        assert engineering["version"] == "1.6.2"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -103,7 +104,15 @@ def test_clean_python_bootstrap() -> None:
         assert project["operations"]["production_oriented"] is False
         assert project["operations"]["incident_response_required"] is False
 
+        resume_text = (target / ".cursor/commands/resume.md").read_text(encoding="utf-8")
+        assert resume_text == (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8")
+        assert "WORK_PACKET_PROVENANCE_UNTRUSTED" in resume_text
+        assert "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE" in resume_text
+
         tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
+        assert "ENGINEERING_BASE_REF" in tests_text
+        assert "origin/main...HEAD" in tests_text
+        assert tests_text.count('command: "git diff --check"') == 0
         assert 'setup_command: "python -m pip install -e . && python -m pip install pytest"' in tests_text
 
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
@@ -368,6 +377,11 @@ def test_managed_upgrade_to_1_6() -> None:
         )
         workflow_text = workflow_text.replace(enforcement_block, "")
         workflow_path.write_text(workflow_text, encoding="utf-8")
+
+        history = ROOT / "tools" / "managed_adapter_history" / "resume" / "1.6.1.md"
+        managed_prior = history.read_text(encoding="utf-8")
+        (target / ".cursor/commands/resume.md").write_text(managed_prior, encoding="utf-8")
+        (target / ".cursor/commands/work-resume.md").write_text(managed_prior, encoding="utf-8")
         commit_all(target, "downgrade fixture to 1.5")
 
         upgraded = run(
@@ -380,14 +394,90 @@ def test_managed_upgrade_to_1_6() -> None:
             NEW_BASELINE,
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
 
         upgraded_project = load_yaml(project_path)
-        assert upgraded_project["engineering_system"]["version"] == "1.6.1"
+        assert upgraded_project["engineering_system"]["version"] == "1.6.2"
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
+
+        canonical_resume = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
+        assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == canonical_resume
+        assert (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8") == canonical_resume
+
+
+def test_custom_resume_adapter_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-resume"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.5.0"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+
+        workflow_path = target / ".github/workflows/engineering-system.yml"
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        enforcement_block = (
+            "\n  enforcement-reconcile:\n"
+            f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{BASELINE}\n"
+        )
+        workflow_path.write_text(workflow_text.replace(enforcement_block, ""), encoding="utf-8")
+        (target / ".cursor/commands/resume.md").write_text("# project-custom resume\n", encoding="utf-8")
+        commit_all(target, "custom resume fixture")
+
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "local/custom changes" in failed.stdout
+        assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == "# project-custom resume\n"
+
+
+def test_bun_native_discovery() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-bun"
+        target.mkdir()
+        init_repo(target)
+        (target / "package.json").write_text(
+            '{"scripts":{"test":"vitest run","build":"vite build","lint":"eslint .","typecheck":"tsc --noEmit"}}\n',
+            encoding="utf-8",
+        )
+        (target / "bun.lockb").write_bytes(b"bun")
+        (target / "src").mkdir()
+        commit_all(target)
+
+        audit = run(sys.executable, str(ADOPT), "--root", str(target), "--audit")
+        assert '"build": "bun run build"' in audit.stdout
+        assert '"lint": "bun run lint"' in audit.stdout
+        assert '"typecheck": "bun run typecheck"' in audit.stdout
+        assert "bun test" in audit.stdout
 
 
 def main() -> int:
@@ -398,6 +488,8 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_custom_resume_adapter_fails_closed()
+    test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
 

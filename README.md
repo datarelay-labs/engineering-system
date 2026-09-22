@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
-Engineering System 1.6 also reconciles observable GitHub merge enforcement, records project-native production operations contracts when applicable, and can generate an executable release contract with separate qualification and post-release smoke phases.
+Engineering System 1.6.2 also reconciles observable GitHub merge enforcement, records project-native production operations contracts when applicable, and can generate an executable release contract with separate qualification and post-release smoke phases. Adopted repositories pin `engineering_system.version` plus an immutable `engineering_system.baseline` SHA; org-wide rollout targets that exact baseline rather than version alone.
 
 ### 3. Qualify the adoption
 

@@ -1,0 +1,24 @@
+# Optional organization-wide Engineering System rollout overrides.
+# Pass with: python tools/org-rollout.py --org <org> --apply --baseline-sha <sha> \
+#   --override-manifest templates/ORG_ROLLOUT_OVERRIDE.yaml
+version: 1
+defaults:
+  ack_rule_review: true
+  ci_mode: shared
+repositories:
+  example/skip-me:
+    exclude: true
+  example/bootstrap-empty:
+    allow_no_tests: true
+    operations_mode: nonproduction
+  example/production-service:
+    operations_mode: production
+    persistent_state: true
+    runbook_paths:
+      - RUNBOOK.md
+    health_command: "./scripts/health.sh"
+    backup_command: "./scripts/backup.sh"
+    restore_test_command: "./scripts/restore-test.sh"
+    operational_e2e_command: "./scripts/operational-e2e.sh"
+    public_smoke_command: "./scripts/public-smoke.sh"
+    full_e2e_passes: 1
