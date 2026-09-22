@@ -277,11 +277,15 @@ def rewrite_known_baseline_declarations(
     return updated, updated != text
 
 
-def sync_baseline_declarations(
+def plan_baseline_declaration_updates(
     root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
-) -> list[str]:
-    """Synchronize known managed AGENTS.md/README version+baseline declarations."""
-    updated: list[str] = []
+) -> list[tuple[str, str]]:
+    """Compute rewrite + stale validation for AGENTS.md/README before any mutation.
+
+    Returns (rel, rewritten_text) pairs for files that would change. Raises SystemExit
+    on ambiguous/custom forms or remaining stale version/baseline substrings.
+    """
+    planned: list[tuple[str, str]] = []
     for rel in ("AGENTS.md", "README.md"):
         path = root / rel
         if not path.is_file():
@@ -307,9 +311,27 @@ def sync_baseline_declarations(
                 f"{old_baseline} after managed declaration sync; review manually"
             )
         if changed:
-            path.write_text(rewritten, encoding="utf-8")
-            updated.append(rel)
+            planned.append((rel, rewritten))
+    return planned
+
+
+def apply_baseline_declaration_updates(root: Path, planned: list[tuple[str, str]]) -> list[str]:
+    """Write previously validated declaration rewrites."""
+    updated: list[str] = []
+    for rel, rewritten in planned:
+        (root / rel).write_text(rewritten, encoding="utf-8")
+        updated.append(rel)
     return updated
+
+
+def sync_baseline_declarations(
+    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
+) -> list[str]:
+    """Synchronize known managed AGENTS.md/README version+baseline declarations."""
+    planned = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, new_version, new_baseline
+    )
+    return apply_baseline_declaration_updates(root, planned)
 
 
 def coalesce(arg_value: str, current: object) -> str:
@@ -530,20 +552,11 @@ def main() -> int:
                 "FAIL engineering-release.yml contains local/custom changes; review manually before upgrade"
             )
 
-    # Validate managed declaration rewrites before mutating metadata/workflows.
-    for rel in ("AGENTS.md", "README.md"):
-        path = root / rel
-        if not path.is_file():
-            continue
-        try:
-            rewrite_known_baseline_declarations(
-                path.read_text(encoding="utf-8"), current_version, new_baseline
-            )
-        except SystemExit as exc:
-            message = str(exc)
-            if message.startswith("FAIL AGENTS.md/README"):
-                raise SystemExit(message.replace("AGENTS.md/README", rel, 1)) from exc
-            raise
+    # Validate managed declaration rewrites AND stale old-version/old-baseline
+    # checks for both files before mutating metadata/workflows/adapters.
+    planned_declarations = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, current_version, new_baseline
+    )
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -558,9 +571,7 @@ def main() -> int:
     else:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=<none>")
 
-    synced_declarations = sync_baseline_declarations(
-        root, old_version, old_baseline, current_version, new_baseline
-    )
+    synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:
         print("BASELINE_DECLARATIONS_SYNCED=" + ",".join(synced_declarations))
     else:

@@ -321,6 +321,8 @@ def validate_adoption_contract():
             failures.append(f"adoption upgrade tool missing token: {token}")
     if "rewrite_known_baseline_declarations" not in upgrade_text:
         failures.append("adoption upgrade tool missing baseline declaration sync helper")
+    if "plan_baseline_declaration_updates" not in upgrade_text:
+        failures.append("adoption upgrade tool missing pre-mutation declaration planner")
     if failures:
         for item in failures:
             print(f"FAIL {item}")

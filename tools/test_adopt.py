@@ -584,6 +584,77 @@ def test_ambiguous_baseline_declaration_fails_closed() -> None:
         )
 
 
+def _managed_upgrade_file_snapshot(root: Path) -> dict[str, bytes]:
+    rels = (
+        ".engineering/project.yaml",
+        ".engineering/release.yaml",
+        ".engineering/tests.yaml",
+        ".github/workflows/engineering-system.yml",
+        ".github/workflows/engineering-release.yml",
+        "AGENTS.md",
+        "README.md",
+        ".cursor/commands/resume.md",
+        ".cursor/commands/work-resume.md",
+    )
+    return {rel: (root / rel).read_bytes() for rel in rels if (root / rel).is_file()}
+
+
+def test_stale_outside_form_declaration_fails_without_partial_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-stale-outside-form"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/stale-outside\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.1"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+
+        existing_agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+        (target / "AGENTS.md").write_text(
+            "# Stale outside-form fixture\n\n"
+            "Adoption baseline: Engineering System version 1.6.1 at immutable commit "
+            f"`{BASELINE}`.\n\n"
+            "Compatibility note: temporary support for 1.6.1 clients remains during migration.\n\n"
+            + existing_agents,
+            encoding="utf-8",
+        )
+        commit_all(target, "stale outside-form declaration fixture")
+
+        before = _managed_upgrade_file_snapshot(target)
+        assert "AGENTS.md" in before
+        assert ".engineering/project.yaml" in before
+
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "stale Engineering System version 1.6.1" in failed.stdout
+        assert _managed_upgrade_file_snapshot(target) == before
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -615,6 +686,7 @@ def main() -> int:
     test_custom_resume_adapter_fails_closed()
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()
+    test_stale_outside_form_declaration_fails_without_partial_upgrade()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
