@@ -12,7 +12,7 @@ Use minimum sufficient context and reasoning. Do not request maximum reasoning b
 
 2. Read `AGENTS.md` and `.engineering/project.yaml` when present. If adoption files are missing, record `ENGINEERING_SYSTEM_ADOPTION=ABSENT_OR_PENDING` and continue under the canonical Engineering System unless the packet explicitly requires adoption work.
 
-3. Resolve the exact GitHub repository from origin. Read only open Issues titled `[AI Work] ...` in that repository and select exactly one packet where:
+3. Resolve the exact GitHub repository from origin. Read only open Issues titled `[AI Work] ...` in that repository and require exactly one match where:
    - `TARGET_REPO` matches exactly
    - `STATUS=ACTIVE`
    - `BRANCH` matches the current branch when specified
@@ -26,7 +26,7 @@ Use minimum sufficient context and reasoning. Do not request maximum reasoning b
 
 5. Re-verify actual branch/HEAD/dirty state and PR state when relevant. Treat LAST_VERIFIED_HEAD as advisory. Load `.engineering/tests.yaml`, `.engineering/release.yaml`, and canonical references only when needed for the current Next Action.
 
-6. Execute the current bounded local/deterministic phase without expanding scope. Use the smallest correct change and cheapest affected validation first. Update the same Work Packet after a meaningful milestone with concise current state, exact evidence, and the next action.
+6. Execute the current bounded local/deterministic phase without expanding scope. Use the smallest correct change and cheapest affected validation first. After a meaningful milestone, update the same Work Packet with concise current state, exact evidence, and the next action.
 
 7. Do not keep the AI coding session alive polling CI, review, deployment, or another machine-observable external condition.
    - If such a wait is pending, keep `STATUS=ACTIVE`, record `WAITING_FOR_<CONDITION>` plus the observable reference in Current State/Latest Evidence, set the resumable Next Action, and return control to coordinator/automation.
