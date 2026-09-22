@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering.datarelay.run/schemas/org-rollout-override.schema.json",
+  "title": "Engineering System org rollout override manifest",
+  "type": "object",
+  "required": ["version", "repositories"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "repositories": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

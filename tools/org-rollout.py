@@ -4,6 +4,10 @@
 Default mode is audit/dry-run. Apply mode creates isolated per-repository
 branches (and optional PRs) and reuses tools/adopt.py and
 tools/upgrade-adoption.py rather than reimplementing adoption contracts.
+
+Optional versioned override manifests supply repository-specific adoption or
+upgrade inputs that cannot be safely inferred, enabling one-command apply for a
+reviewed organization while preserving per-repository fail-closed behavior.
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +28,7 @@ from adopt import canonical_baseline, canonical_version
 CANONICAL = Path(__file__).resolve().parents[1]
 ADOPT = CANONICAL / "tools" / "adopt.py"
 UPGRADE = CANONICAL / "tools" / "upgrade-adoption.py"
+CHECK = CANONICAL / "tools" / "check-adoption.py"
 
 STATES = (
     "CURRENT",
@@ -32,7 +37,61 @@ STATES = (
     "ARCHIVED",
     "INCOMPLETE",
     "ERROR",
+    "EXCLUDED",
 )
+
+OVERRIDE_MANIFEST_VERSION = 1
+
+# Scalar CLI flags shared by adopt/upgrade helpers.
+ADOPT_SCALAR_FLAGS = {
+    "test_command": "--test-command",
+    "setup_command": "--setup-command",
+    "build_command": "--build-command",
+    "lint_command": "--lint-command",
+    "typecheck_command": "--typecheck-command",
+    "release_command": "--release-command",
+    "release_setup_command": "--release-setup-command",
+    "preflight_command": "--preflight-command",
+    "artifact_hash_command": "--artifact-hash-command",
+    "provenance_command": "--provenance-command",
+    "sbom_command": "--sbom-command",
+    "operational_e2e_command": "--operational-e2e-command",
+    "public_smoke_command": "--public-smoke-command",
+    "baseline_sha": "--baseline-sha",
+    "project_type": "--project-type",
+    "ci_mode": "--ci-mode",
+    "merge_gate_status": "--merge-gate-status",
+    "maturity": "--maturity",
+    "operations_mode": "--operations-mode",
+    "health_command": "--health-command",
+    "backup_command": "--backup-command",
+    "restore_test_command": "--restore-test-command",
+    "upgrade_command": "--upgrade-command",
+    "rollback_command": "--rollback-command",
+    "domain": "--domain",
+    "platform": "--platform",
+}
+
+UPGRADE_SCALAR_FLAGS = {
+    "persistent_state": "--persistent-state",
+    "health_command": "--health-command",
+    "backup_command": "--backup-command",
+    "restore_test_command": "--restore-test-command",
+    "upgrade_command": "--upgrade-command",
+    "rollback_command": "--rollback-command",
+    "release_setup_command": "--release-setup-command",
+    "preflight_command": "--preflight-command",
+    "release_command": "--release-command",
+    "artifact_hash_command": "--artifact-hash-command",
+    "provenance_command": "--provenance-command",
+    "sbom_command": "--sbom-command",
+    "operational_e2e_command": "--operational-e2e-command",
+    "public_smoke_command": "--public-smoke-command",
+}
+
+
+class CheckoutError(RuntimeError):
+    """Per-repository checkout/clone failure that must not abort the org run."""
 
 
 @dataclass
@@ -56,6 +115,18 @@ class RepoResult:
     branch: str = ""
     pr_url: str = ""
     outcome: str = "SKIPPED"
+
+
+@dataclass
+class OverrideManifest:
+    version: int = OVERRIDE_MANIFEST_VERSION
+    defaults: dict[str, Any] = field(default_factory=dict)
+    repositories: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def for_repo(self, full_name: str) -> dict[str, Any]:
+        merged = dict(self.defaults)
+        merged.update(self.repositories.get(full_name) or {})
+        return merged
 
 
 def run_git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -95,6 +166,20 @@ def semver_tuple(value: str) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in parts)
 
 
+def flatten_paginated_payload(payload: Any) -> list[Any]:
+    """Flatten gh --paginate --slurp output into a single list of items."""
+    if isinstance(payload, list):
+        if not payload:
+            return []
+        if all(isinstance(item, list) for item in payload):
+            flattened: list[Any] = []
+            for page in payload:
+                flattened.extend(page)
+            return flattened
+        return payload
+    raise SystemExit("FAIL unexpected org repository inventory payload")
+
+
 def gh_json(args: list[str]) -> Any:
     completed = run_cmd(["gh", *args])
     if completed.returncode != 0:
@@ -110,13 +195,13 @@ def inventory_from_org(org: str) -> list[RepoRecord]:
         [
             "api",
             "--paginate",
+            "--slurp",
             f"/orgs/{org}/repos?per_page=100&type=all",
         ]
     )
-    if not isinstance(payload, list):
-        raise SystemExit("FAIL unexpected org repository inventory payload")
+    items = flatten_paginated_payload(payload)
     records: list[RepoRecord] = []
-    for item in payload:
+    for item in items:
         if not isinstance(item, dict):
             continue
         full_name = str(item.get("full_name") or "").strip()
@@ -154,6 +239,44 @@ def inventory_from_file(path: Path) -> list[RepoRecord]:
             )
         )
     return sorted(records, key=lambda row: row.full_name)
+
+
+def load_override_manifest(path: Path) -> OverrideManifest:
+    data = load_yaml(path)
+    if not data:
+        raise SystemExit(f"FAIL override manifest is empty or invalid: {path}")
+    version = data.get("version")
+    if version != OVERRIDE_MANIFEST_VERSION:
+        raise SystemExit(
+            f"FAIL unsupported override manifest version {version!r}; expected {OVERRIDE_MANIFEST_VERSION}"
+        )
+    defaults = data.get("defaults") or {}
+    repositories = data.get("repositories") or {}
+    if not isinstance(defaults, dict):
+        raise SystemExit("FAIL override manifest defaults must be a mapping")
+    if not isinstance(repositories, dict):
+        raise SystemExit("FAIL override manifest repositories must be a mapping")
+    normalized: dict[str, dict[str, Any]] = {}
+    for name, entry in repositories.items():
+        full_name = str(name).strip()
+        if not full_name:
+            raise SystemExit("FAIL override manifest repository key must be owner/name")
+        if entry is None:
+            normalized[full_name] = {}
+            continue
+        if not isinstance(entry, dict):
+            raise SystemExit(f"FAIL override for {full_name} must be a mapping")
+        normalized[full_name] = entry
+    return OverrideManifest(version=int(version), defaults=defaults, repositories=normalized)
+
+
+def structural_adoption_ok(root: Path) -> tuple[bool, str]:
+    completed = run_cmd([sys.executable, str(CHECK), "--root", str(root)])
+    if completed.returncode == 0 and "ENGINEERING_SYSTEM_ADOPTION=PASS" in completed.stdout:
+        return True, "structural adoption validation passed"
+    detail = completed.stdout.strip().splitlines()
+    summary = detail[-1] if detail else "structural adoption validation failed"
+    return False, summary
 
 
 def classify_checkout(root: Path, target_version: str, target_baseline: str) -> RepoResult:
@@ -232,7 +355,7 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
         )
 
     if mode == "canonical":
-        if version == target_version:
+        if version == target_version and (not target_baseline or baseline == target_baseline or not baseline):
             return RepoResult(
                 full_name="",
                 state="CURRENT",
@@ -252,7 +375,18 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
             detail="canonical repository version drift requires manual release process",
         )
 
-    if version == target_version and (not target_baseline or baseline == target_baseline):
+    if version == target_version and target_baseline and baseline == target_baseline:
+        ok, detail = structural_adoption_ok(root)
+        if not ok:
+            return RepoResult(
+                full_name="",
+                state="INCOMPLETE",
+                action="NEEDS_INPUT",
+                version=version,
+                baseline=baseline,
+                mode=mode,
+                detail=f"version/baseline match but adoption incomplete: {detail}",
+            )
         return RepoResult(
             full_name="",
             state="CURRENT",
@@ -261,6 +395,17 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
             baseline=baseline,
             mode=mode,
             detail="managed adoption already current",
+        )
+
+    if version == target_version and target_baseline and baseline != target_baseline:
+        return RepoResult(
+            full_name="",
+            state="OUTDATED",
+            action="UPGRADE",
+            version=version,
+            baseline=baseline,
+            mode=mode,
+            detail=f"same version {version} pinned to different baseline; upgrade toward {target_baseline}",
         )
 
     if current_semver > target_semver:
@@ -289,11 +434,11 @@ def ensure_checkout(record: RepoRecord, workdir: Path) -> Path:
     if record.local_path:
         path = Path(record.local_path).expanduser().resolve()
         if not path.is_dir():
-            raise SystemExit(f"FAIL local_path missing for {record.full_name}: {path}")
+            raise CheckoutError(f"local_path missing for {record.full_name}: {path}")
         return path
 
     if not record.clone_url:
-        raise SystemExit(f"FAIL no clone_url or local_path for {record.full_name}")
+        raise CheckoutError(f"no clone_url or local_path for {record.full_name}")
 
     dest = workdir / record.full_name.replace("/", "__")
     if dest.exists():
@@ -311,7 +456,7 @@ def ensure_checkout(record: RepoRecord, workdir: Path) -> Path:
         ]
     )
     if completed.returncode != 0:
-        raise SystemExit(f"FAIL clone {record.full_name}: {completed.stdout.strip()}")
+        raise CheckoutError(f"clone {record.full_name}: {completed.stdout.strip()}")
     return dest
 
 
@@ -366,18 +511,90 @@ def maybe_create_pr(root: Path, branch_name: str, title: str, body: str, create_
     return pr.stdout.strip().splitlines()[-1] if pr.stdout.strip() else ""
 
 
-def apply_upgrade(root: Path, baseline: str) -> subprocess.CompletedProcess[str]:
-    return run_cmd(
-        [
-            sys.executable,
-            str(UPGRADE),
-            "--root",
-            str(root),
-            "--apply",
-            "--baseline-sha",
-            baseline,
-        ]
-    )
+def append_bool_flag(argv: list[str], enabled: bool, flag: str) -> None:
+    if enabled:
+        argv.append(flag)
+
+
+def append_scalar(argv: list[str], override: dict[str, Any], key: str, flag: str) -> None:
+    if key not in override or override[key] is None:
+        return
+    value = override[key]
+    if isinstance(value, bool):
+        return
+    text = str(value).strip()
+    if text:
+        argv.extend([flag, text])
+
+
+def append_repeatable(argv: list[str], override: dict[str, Any], key: str, flag: str) -> None:
+    if key not in override or override[key] is None:
+        return
+    value = override[key]
+    items = value if isinstance(value, list) else [value]
+    for item in items:
+        text = str(item).strip()
+        if text:
+            argv.extend([flag, text])
+
+
+def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any]) -> list[str]:
+    argv = [
+        sys.executable,
+        str(ADOPT),
+        "--root",
+        str(root),
+        "--apply",
+        "--baseline-sha",
+        str(override.get("baseline_sha") or target_baseline),
+    ]
+    append_bool_flag(argv, bool(override.get("ack_rule_review")), "--ack-rule-review")
+    append_bool_flag(argv, bool(override.get("allow_no_tests")), "--allow-no-tests")
+    append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
+    append_bool_flag(argv, bool(override.get("persistent_state")), "--persistent-state")
+    for key, flag in ADOPT_SCALAR_FLAGS.items():
+        if key == "baseline_sha":
+            continue
+        append_scalar(argv, override, key, flag)
+    append_repeatable(argv, override, "native_ci_workflows", "--native-ci-workflow")
+    append_repeatable(argv, override, "runbook_paths", "--runbook-path")
+    append_repeatable(argv, override, "domain_tests", "--domain-test")
+    if "full_e2e_passes" in override and override["full_e2e_passes"] is not None:
+        argv.extend(["--full-e2e-passes", str(int(override["full_e2e_passes"]))])
+    return argv
+
+
+def build_upgrade_argv(root: Path, target_baseline: str, override: dict[str, Any]) -> list[str]:
+    argv = [
+        sys.executable,
+        str(UPGRADE),
+        "--root",
+        str(root),
+        "--apply",
+        "--baseline-sha",
+        str(override.get("baseline_sha") or target_baseline),
+    ]
+    append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
+    if "persistent_state" in override and override["persistent_state"] is not None:
+        value = override["persistent_state"]
+        if isinstance(value, bool):
+            argv.extend(["--persistent-state", "yes" if value else "no"])
+        else:
+            text = str(value).strip()
+            if text:
+                argv.extend(["--persistent-state", text])
+    for key, flag in UPGRADE_SCALAR_FLAGS.items():
+        if key == "persistent_state":
+            continue
+        append_scalar(argv, override, key, flag)
+    append_repeatable(argv, override, "runbook_paths", "--runbook-path")
+    if "full_e2e_passes" in override and override["full_e2e_passes"] is not None:
+        argv.extend(["--full-e2e-passes", str(int(override["full_e2e_passes"]))])
+    return argv
+
+
+def apply_upgrade(root: Path, target_baseline: str, override: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    return run_cmd(build_upgrade_argv(root, target_baseline, override))
 
 
 def process_repo(
@@ -390,7 +607,17 @@ def process_repo(
     branch_prefix: str,
     workdir: Path,
     create_pr: bool,
+    override: dict[str, Any],
 ) -> RepoResult:
+    if bool(override.get("exclude")):
+        return RepoResult(
+            full_name=record.full_name,
+            state="EXCLUDED",
+            action="SKIP_EXCLUDED",
+            detail="repository excluded by override manifest",
+            outcome="SKIPPED",
+        )
+
     if record.archived and not include_archived:
         return RepoResult(
             full_name=record.full_name,
@@ -400,7 +627,17 @@ def process_repo(
             outcome="SKIPPED",
         )
 
-    root = ensure_checkout(record, workdir)
+    try:
+        root = ensure_checkout(record, workdir)
+    except CheckoutError as exc:
+        return RepoResult(
+            full_name=record.full_name,
+            state="ERROR",
+            action="NEEDS_INPUT",
+            detail=str(exc),
+            outcome="FAIL",
+        )
+
     result = classify_checkout(root, target_version, target_baseline)
     result.full_name = record.full_name
 
@@ -412,7 +649,7 @@ def process_repo(
         result.detail = (result.detail + "; archived repository included for classification only").strip("; ")
         return result
 
-    if result.action in {"NONE", "SKIP_ARCHIVED"}:
+    if result.action in {"NONE", "SKIP_ARCHIVED", "SKIP_EXCLUDED"}:
         result.outcome = "NO_CHANGE"
         return result
 
@@ -425,11 +662,23 @@ def process_repo(
         return result
 
     branch_name = f"{branch_prefix}{target_version.replace('.', '-')}"
-    create_rollout_branch(root, record.default_branch, branch_name)
+    try:
+        create_rollout_branch(root, record.default_branch, branch_name)
+    except SystemExit as exc:
+        return RepoResult(
+            full_name=record.full_name,
+            state="ERROR",
+            action=result.action,
+            version=result.version,
+            baseline=result.baseline,
+            mode=result.mode,
+            detail=str(exc),
+            outcome="FAIL",
+        )
     result.branch = branch_name
 
     if result.action == "UPGRADE":
-        upgraded = apply_upgrade(root, target_baseline)
+        upgraded = apply_upgrade(root, target_baseline, override)
         if upgraded.returncode != 0:
             result.state = "ERROR"
             result.outcome = "FAIL"
@@ -463,17 +712,7 @@ def process_repo(
         return result
 
     if result.action == "ADOPT":
-        attempted = run_cmd(
-            [
-                sys.executable,
-                str(ADOPT),
-                "--root",
-                str(root),
-                "--apply",
-                "--baseline-sha",
-                target_baseline,
-            ]
-        )
+        attempted = run_cmd(build_adopt_argv(root, target_baseline, override))
         if attempted.returncode != 0:
             result.state = "UNADOPTED"
             result.action = "NEEDS_INPUT"
@@ -560,12 +799,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Audit or apply organization-wide Engineering System rollout")
     parser.add_argument("--org", default="", help="GitHub organization login to inventory")
     parser.add_argument("--inventory-file", default="", help="JSON inventory fixture/override")
+    parser.add_argument(
+        "--override-manifest",
+        default="",
+        help="Optional versioned YAML/JSON rollout override manifest for per-repository inputs",
+    )
     parser.add_argument("--include-archived", action="store_true")
     parser.add_argument("--audit", action="store_true", help="Explicit audit/dry-run (default)")
     parser.add_argument("--apply", action="store_true", help="Create isolated rollout branches and optional PRs")
     parser.add_argument("--create-pr", action="store_true", help="Push branch and open PR during --apply")
     parser.add_argument("--workdir", default="", help="Working directory for clones")
-    parser.add_argument("--baseline-sha", default="", help="Immutable canonical baseline SHA for apply/upgrade")
+    parser.add_argument("--baseline-sha", default="", help="Immutable canonical baseline SHA for audit/apply")
     parser.add_argument("--branch-prefix", default="chore/engineering-system-rollout-")
     parser.add_argument(
         "--repo",
@@ -582,9 +826,14 @@ def main() -> int:
         raise SystemExit("FAIL --create-pr requires --apply")
 
     target_version = canonical_version()
-    target_baseline = canonical_baseline(args.baseline_sha) if (apply or args.baseline_sha) else args.baseline_sha
+    # Always resolve an immutable baseline so audit compares pins, not version alone.
+    target_baseline = canonical_baseline(args.baseline_sha)
     if apply and not target_baseline:
         raise SystemExit("FAIL --apply requires --baseline-sha or a resolvable canonical HEAD")
+
+    overrides = OverrideManifest()
+    if args.override_manifest:
+        overrides = load_override_manifest(Path(args.override_manifest))
 
     if args.inventory_file:
         records = inventory_from_file(Path(args.inventory_file))
@@ -602,9 +851,10 @@ def main() -> int:
 
     print(f"ORG_ROLLOUT_MODE={'APPLY' if apply else 'AUDIT'}")
     print(f"TARGET_VERSION={target_version}")
-    print(f"TARGET_BASELINE={target_baseline or '<audit-unpinned>'}")
+    print(f"TARGET_BASELINE={target_baseline}")
     print(f"REPO_COUNT={len(records)}")
     print(f"INCLUDE_ARCHIVED={'YES' if args.include_archived else 'NO'}")
+    print(f"OVERRIDE_MANIFEST={'YES' if args.override_manifest else 'NO'}")
 
     workdir = Path(args.workdir).expanduser().resolve() if args.workdir else Path(tempfile.mkdtemp(prefix="org-rollout-"))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -621,6 +871,7 @@ def main() -> int:
             branch_prefix=args.branch_prefix,
             workdir=workdir,
             create_pr=bool(args.create_pr),
+            override=overrides.for_repo(record.full_name),
         )
         print_result(result)
         results.append(result)

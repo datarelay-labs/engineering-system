@@ -113,6 +113,17 @@ def detect_project_type(root: Path) -> str:
     return types[0] if types else "generic"
 
 
+def node_package_manager(root: Path) -> str:
+    """Prefer Bun when Bun lockfiles are present, then pnpm/yarn/npm."""
+    if (root / "bun.lockb").is_file() or (root / "bun.lock").is_file():
+        return "bun"
+    if (root / "pnpm-lock.yaml").is_file():
+        return "pnpm"
+    if (root / "yarn.lock").is_file():
+        return "yarn"
+    return "npm"
+
+
 def node_test_command(root: Path) -> str:
     package = root / "package.json"
     if not package.is_file():
@@ -122,11 +133,15 @@ def node_test_command(root: Path) -> str:
     except Exception:
         return ""
     test = str(((data.get("scripts") or {}).get("test")) or "").strip()
+    manager = node_package_manager(root)
+    # Bun's native test runner does not require package.json scripts.test.
+    if manager == "bun":
+        return "bun test"
     if not test or "no test specified" in test.lower():
         return ""
-    if (root / "pnpm-lock.yaml").is_file():
+    if manager == "pnpm":
         return "pnpm test"
-    if (root / "yarn.lock").is_file():
+    if manager == "yarn":
         return "yarn test"
     return "npm test"
 
@@ -142,9 +157,12 @@ def package_script_command(root: Path, script: str) -> str:
     scripts = data.get("scripts") or {}
     if not str(scripts.get(script) or "").strip():
         return ""
-    if (root / "pnpm-lock.yaml").is_file():
+    manager = node_package_manager(root)
+    if manager == "bun":
+        return f"bun run {script}"
+    if manager == "pnpm":
         return f"pnpm {script}"
-    if (root / "yarn.lock").is_file():
+    if manager == "yarn":
         return f"yarn {script}"
     return f"npm run {script}"
 
@@ -252,6 +270,8 @@ def discover_test_commands(root: Path) -> list[str]:
 
 
 def suggest_setup_command(root: Path, test_command: str) -> str:
+    if test_command == "bun test":
+        return "bun install --frozen-lockfile"
     if test_command in {"npm test", "pnpm test", "yarn test"}:
         if test_command == "pnpm test":
             return "corepack enable && pnpm install --frozen-lockfile"

@@ -249,7 +249,7 @@ python tools/upgrade-adoption.py \
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
-Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text.
+Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text. Existing resume adapters are replaced only when their content matches a known managed version; project-custom resume content fails closed for manual review.
 
 ## Organization-wide rollout
 
@@ -260,7 +260,24 @@ python tools/org-rollout.py --org <github-org> --audit
 python tools/org-rollout.py --org <github-org> --apply --baseline-sha <canonical-sha>
 ```
 
-Default mode is audit/dry-run. Archived repositories are reported as `SKIP_ARCHIVED` unless `--include-archived` is set. Apply mode reuses `tools/adopt.py` and `tools/upgrade-adoption.py`, never writes directly to default branches, and fails closed when adoption/upgrade inputs are ambiguous. A partial inventory must be reported as `ORG_ROLLOUT=PARTIAL` or `FAIL`, never as a global PASS.
+Default mode is audit/dry-run and always resolves/compares the immutable canonical baseline. Archived repositories are reported as `SKIP_ARCHIVED` unless `--include-archived` is set. Apply mode reuses `tools/adopt.py` and `tools/upgrade-adoption.py`, never writes directly to default branches, and fails closed when adoption/upgrade inputs are ambiguous. A partial inventory must be reported as `ORG_ROLLOUT=PARTIAL` or `FAIL`, never as a global PASS. Per-repository checkout/clone failures are isolated as `ERROR`/`FAIL` results so the organization summary remains complete.
+
+For a reviewed one-command apply, supply an optional versioned override manifest (`--override-manifest`) with repository-specific inputs that cannot be safely inferred (CI mode/native workflows, allow-no-tests, production/nonproduction, persistent-state, runbooks, health/backup/restore/release/E2E/smoke commands, and explicit exclusions). Missing required inputs still fail closed per repository.
+
+Example override manifest:
+
+```yaml
+version: 1
+defaults:
+  ack_rule_review: true
+  ci_mode: shared
+repositories:
+  example/skip-me:
+    exclude: true
+  example/needs-inputs:
+    allow_no_tests: true
+    operations_mode: nonproduction
+```
 
 ## Fail-closed cases
 

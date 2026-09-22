@@ -99,6 +99,40 @@ def validate_version_alignment():
     print(f"PASS engineering-system version alignment {version}")
 
 
+def validate_baseline_declarations():
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    for rel in ("AGENTS.md", "README.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if version not in text:
+            raise SystemExit(f"FAIL {rel} missing managed Engineering System version declaration {version}")
+        if "baseline" not in text.lower():
+            raise SystemExit(f"FAIL {rel} missing managed baseline declaration")
+    print(f"PASS managed baseline declarations for {version}")
+
+
+def validate_bun_discovery():
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    for token in ("bun.lockb", "bun.lock", "bun test", "node_package_manager"):
+        if token not in adopt_text:
+            raise SystemExit(f"FAIL Bun-native discovery missing token: {token}")
+    print("PASS Bun-native test discovery contract")
+
+
+def validate_work_packet_author_authority():
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    resume = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
+    for token in (
+        "WORK_PACKET_AUTHOR_UNTRUSTED",
+        "OWNER",
+        "MEMBER",
+        "COLLABORATOR",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing Work Packet author token: {token}")
+        if token not in resume:
+            raise SystemExit(f"FAIL resume template missing Work Packet author token: {token}")
+    print("PASS trusted Work Packet author authority contract")
+
 
 def validate_resume_template_parity():
     canonical = (ROOT / ".cursor/commands/resume.md").read_text(encoding="utf-8")
@@ -159,6 +193,10 @@ def validate_session_continuity_templates():
         "OWNER_INTENT",
         "WORK_PACKET_SCOPE_MISMATCH",
         "WORK_PACKET_PROVENANCE_UNTRUSTED",
+        "WORK_PACKET_AUTHOR_UNTRUSTED",
+        "OWNER",
+        "MEMBER",
+        "COLLABORATOR",
         "authenticated",
         "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE",
         "TASK_KIND=ADOPTION",
@@ -266,6 +304,18 @@ def validate_adoption_contract():
         for item in failures:
             print(f"FAIL {item}")
         raise SystemExit(1)
+    org_text = (ROOT / "tools/org-rollout.py").read_text(encoding="utf-8")
+    adoption_standard = (ROOT / "standards/ADOPTION.md").read_text(encoding="utf-8")
+    for token in ("--override-manifest", "flatten_paginated_payload", "--slurp", "OVERRIDE_MANIFEST"):
+        if token not in org_text:
+            failures.append(f"org rollout tool missing token: {token}")
+    for token in ("org-rollout.py", "override manifest", "--override-manifest"):
+        if token not in adoption_standard:
+            failures.append(f"adoption standard missing org rollout token: {token}")
+    if failures:
+        for item in failures:
+            print(f"FAIL {item}")
+        raise SystemExit(1)
     print("PASS automated adoption standard/tool contract")
 
 
@@ -295,6 +345,9 @@ def main():
     require_files(REQUIRED_ENFORCEMENT_TEMPLATES)
     require_files(REQUIRED_METHOD_FILES)
     validate_version_alignment()
+    validate_baseline_declarations()
+    validate_bun_discovery()
+    validate_work_packet_author_authority()
     validate_resume_template_parity()
     validate_issue_template_parity()
     validate_session_continuity_templates()

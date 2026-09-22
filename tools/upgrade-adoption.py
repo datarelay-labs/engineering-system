@@ -124,27 +124,61 @@ def legacy_release_workflow(baseline: str, preflight_command: str, release_comma
     return "\n".join(lines)
 
 
+def known_managed_resume_texts(canonical_text: str) -> set[str]:
+    """Return known managed resume adapter texts that may be safely replaced."""
+    known = {canonical_text}
+    history_dir = CANONICAL / "tools" / "managed_adapter_history" / "resume"
+    if history_dir.is_dir():
+        for path in sorted(history_dir.glob("*.md")):
+            known.add(path.read_text(encoding="utf-8"))
+    return known
+
+
 def sync_cursor_resume_adapters(root: Path) -> list[str]:
-    """Rewrite managed Cursor resume adapters to the canonical template text."""
+    """Rewrite managed Cursor resume adapters to the canonical template text.
+
+    Missing adapters are installed. Existing adapters are replaced only when their
+    content matches a known managed version; project-custom content fails closed.
+    """
     source = CANONICAL / "templates" / ".cursor" / "commands" / "resume.md"
     if not source.is_file():
         raise SystemExit("FAIL canonical Cursor resume template missing")
     text = source.read_text(encoding="utf-8")
+    known = known_managed_resume_texts(text)
     updated: list[str] = []
 
     resume_path = root / ".cursor/commands/resume.md"
     resume_path.parent.mkdir(parents=True, exist_ok=True)
-    if not resume_path.is_file() or resume_path.read_text(encoding="utf-8") != text:
+    if not resume_path.is_file():
         resume_path.write_text(text, encoding="utf-8")
         updated.append(".cursor/commands/resume.md")
+    else:
+        existing = resume_path.read_text(encoding="utf-8")
+        if existing == text:
+            pass
+        elif existing in known:
+            resume_path.write_text(text, encoding="utf-8")
+            updated.append(".cursor/commands/resume.md")
+        else:
+            raise SystemExit(
+                "FAIL .cursor/commands/resume.md contains local/custom changes; "
+                "preserve/review them manually before upgrade"
+            )
 
     for rel in RESUME_ADAPTER_ALIASES:
         path = root / rel
         if not path.is_file():
             continue
-        if path.read_text(encoding="utf-8") != text:
+        existing = path.read_text(encoding="utf-8")
+        if existing == text:
+            continue
+        if existing in known:
             path.write_text(text, encoding="utf-8")
             updated.append(rel)
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
     return updated
 
 
