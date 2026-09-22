@@ -14,7 +14,7 @@ Load only when relevant:
 - the single relevant Engineering System standard
 - Product Master/OpenSpec/ADR/runbook material only when the task touches that contract
 
-Do not preload the entire Wiki, all standards, archived specifications, or historical discussions.
+Do not preload the entire Wiki, all standards, archived specifications, or historical discussions. Use minimum sufficient reasoning/context and do not request maximum reasoning by default; escalate only for a concrete blocker, failed check, or unresolved design question.
 
 ## Design
 
@@ -53,6 +53,7 @@ When the user asks to continue or resume existing engineering work, resolve the 
 - use actual public interfaces for user-behavior E2E
 - distinguish deterministic PASS from AI opinion
 - report skipped/blocked required checks
+- do not spend coding-agent model time polling CI/review/deployment waits; persist concise waiting state and yield to coordinator/automation
 
 ## Release
 - run a fast release preflight before expensive qualification

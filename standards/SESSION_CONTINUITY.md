@@ -192,7 +192,9 @@ After selecting the packet:
 3. If they are absent because the repository has not yet adopted the Engineering System or adoption is intentionally pending in a separate workstream/PR, record the adoption gap and continue under the canonical Engineering System default. Do not create, merge, or modify adoption files unless the current Work Packet explicitly authorizes that work.
 4. Read test/release metadata only when relevant and only if present for the adopted project state.
 5. Read only canonical references required by `Next Action`.
-6. Do not preload all references named in the packet.
+6. Use minimum sufficient reasoning/context; do not request maximum reasoning by default.
+7. Do not preload all references named in the packet.
+8. Do not keep a coding-agent session alive polling CI, review, deployment, or another machine-observable external condition. Record a concise `WAITING_FOR_<CONDITION>` state and yield to coordinator/automation; the next resume re-checks the condition.
 
 Missing local adoption files are not, by themselves, a reason to abandon an otherwise valid Work Packet. They are a configuration/adoption fact that must be reported and handled without guessing.
 
@@ -220,11 +222,13 @@ The resume command:
 - derives repository/branch/HEAD from Git
 - loads the repository-scoped active Work Packet through an available GitHub integration or authenticated `gh`
 - fails closed on missing/ambiguous packets, invalid status values, or material owner-intent/Next-Action mismatch
-- reads only task-relevant canonical references
-- executes the current `Next Action`
-- updates the same packet with concise verified state/evidence at completion
+- reads only task-relevant canonical references with minimum sufficient reasoning/context
+- executes the current bounded local/deterministic phase beginning at `Next Action`
+- updates the same packet with concise verified state/evidence after meaningful milestones
+- yields instead of polling when CI/review/deployment or another machine-observable external condition is pending; coordinator/automation owns waiting and re-entry
+- uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
 
-The default remains single-agent sequential execution when the owner's project rules require it.
+The default remains single-agent sequential execution when the owner's project rules require it. A long-lived coding-agent session is not a substitute for durable packet state or external orchestration.
 
 ## GitHub marker and lifecycle
 

@@ -3,41 +3,35 @@
 This repository defines the canonical Solo AI Engineering System:
 https://github.com/datarelay-labs/engineering-system
 
-## Mandatory entry sequence
+## Context budget
 
-Always load only the minimum high-signal context needed for the task:
+Always read:
+1. `AGENTS.md`
+2. `.engineering/project.yaml`
 
-1. Read this `AGENTS.md`.
-2. Read `.engineering/project.yaml`.
-3. For implementation/debugging/testing, read `.engineering/tests.yaml`.
-4. For release/version/artifact work, read `.engineering/release.yaml`.
-5. Read `standards/CORE.md` plus only the standard(s) relevant to the change.
-6. For material design-bearing changes, read `standards/DESIGN.md`.
-7. For outages/degraded service/failed upgrades/data-loss risk or other production-impacting failures, read `standards/OPERATIONS.md` and enter the incident lifecycle.
-8. Inspect the exact affected implementation/tests before editing.
+Read only when the task requires it:
+- `.engineering/tests.yaml` for implementation/debugging/testing
+- `.engineering/release.yaml` for release/version/artifact work
+- one relevant Engineering System standard plus only task-relevant product/spec/ADR/runbook material
 
-Do not load all standards, Wiki pages, archived changes, or historical discussions by default.
+Use the minimum sufficient context and reasoning. Expand only when a concrete blocker, failed check, or unresolved design question requires it. Do not preload all standards, Wiki pages, archives, historical discussions, or old agent transcripts.
 
-If mandatory context is missing or contradictory, fail closed: report the configuration problem instead of guessing.
+## Execution rules
 
-## Repository-specific rules
+- Classify the change and affected domains/contracts/security/operations.
+- Apply `standards/DESIGN.md` for material design-bearing changes.
+- Apply `standards/OPERATIONS.md` for production-impacting failures; preserve evidence before mutation.
+- Inspect only the affected implementation/tests before editing and make the smallest correct change.
+- Run the cheapest affected deterministic validation first; do not duplicate equivalent native/shared gates.
+- Stop expensive downstream qualification after a blocking deterministic failure.
+- Add durable regression coverage for bug fixes when practical.
+- Never weaken validation or report unexecuted, blocked, historical, or different-HEAD evidence as PASS.
+- Before merge or terminal completion, inspect machine-observable review feedback and fix/revalidate or evidence-disposition every actionable finding.
+- Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.
+- Keep schemas/templates/workflows backward-aware.
 
-1. Keep the system lightweight for a solo developer using AI-assisted development.
-2. Prefer existing GitHub/project-native capabilities over custom platforms.
-3. Do not add enterprise process unless it produces clear solo-developer value.
-4. Prefer the cheapest deterministic test that can disprove correctness first.
-5. PR validation should be affected/fast by default; expensive full qualification belongs near release.
-6. Do not duplicate an equivalent native project gate merely because a shared gate exists.
-7. Stop downstream expensive qualification after a blocking deterministic failure.
-8. Changes to schemas/templates/workflows must remain backward-aware.
-9. Validate YAML/JSON syntax and reusable workflow structure before merge.
-10. Before merge or terminal completion, inspect machine-observable PR review feedback. Fix and revalidate every actionable review finding, or explicitly disposition it with concise evidence when it is non-actionable, out of scope, or incorrect. Do not treat COMMENTED/advisory review state as automatic PASS.
-11. Never weaken enforcement/validation merely to obtain PASS.
+For repository adoption or managed upgrades, follow `standards/ADOPTION.md`; preserve project-specific/stricter rules and fail closed on ambiguous destructive changes.
 
-For changes to repository adoption behavior, read `standards/ADOPTION.md`, preserve backward compatibility for existing adopted repositories, and test the bootstrap/compliance path. When an already managed repository is pinned to an older Engineering System version, use the fail-closed adoption upgrade workflow rather than rerunning initial bootstrap over it.
+If mandatory context is missing or contradictory, report the configuration defect instead of guessing.
 
-For design-bearing changes, apply the minimal `standards/DESIGN.md` gate rather than creating heavyweight project planning documents.
-
-For incident/operational work, preserve evidence before mutation and do not perform destructive or irreversible recovery without explicit approval unless an approved runbook authorizes it.
-
-Cursor additionally receives the always-applied `.cursor/rules/engineering-system.mdc` adapter.
+Cursor receives the always-applied `.cursor/rules/engineering-system.mdc` adapter; that adapter must stay intentionally small and defer detail to this file and task-relevant standards.
