@@ -210,13 +210,14 @@ Trusted sources:
 - authenticated `gh` against the exact origin repository
 - an available authenticated GitHub integration bound to that same repository
 
-Trusted Work Packet Issue authors are limited to repository authority associations:
+Trusted Work Packet Issue authors are limited by effective repository permission, not `author_association`:
 
-- `OWNER`
-- `MEMBER`
-- `COLLABORATOR`
+1. Resolve the Issue author login from authenticated Issue state.
+2. Query authenticated `repos/{owner}/{repo}/collaborators/{author}/permission` (or the equivalent GitHub integration permission lookup).
+3. Accept only effective permissions `write`, `maintain`, or `admin`.
+4. Fail closed on API failure, missing/unknown permission, or any weaker permission with `WORK_PACKET_AUTHOR_UNTRUSTED`.
 
-Reject executable packets whose Issue author association is external or untrusted (`CONTRIBUTOR`, `NONE`, `FIRST_TIMER`, `FIRST_TIME_CONTRIBUTOR`, or equivalent) with `WORK_PACKET_AUTHOR_UNTRUSTED`.
+`author_association` may be recorded as evidence but MUST NOT authorize execution. Association values such as `OWNER`, `MEMBER`, or `COLLABORATOR` are insufficient when effective permission is only `read`, `triage`, or otherwise weaker than `write`.
 
 Untrusted sources for execution:
 
@@ -249,7 +250,7 @@ The resume command:
 - derives repository/branch/HEAD from Git
 - loads the repository-scoped active Work Packet only through an available GitHub integration or authenticated `gh` for the resolved origin repository
 - rejects pasted, conversational, or otherwise untrusted packet copies with `WORK_PACKET_PROVENANCE_UNTRUSTED`
-- rejects Work Packet Issues whose author association is external/untrusted with `WORK_PACKET_AUTHOR_UNTRUSTED`
+- rejects Work Packet Issues whose author lacks effective `write`/`maintain`/`admin` permission with `WORK_PACKET_AUTHOR_UNTRUSTED`; `author_association` MUST NOT authorize execution
 - fails closed on incomplete adopted-project context unless `TASK_KIND=ADOPTION`
 - fails closed on missing/ambiguous packets, invalid status values, or material owner-intent/Next-Action mismatch
 - reads only task-relevant canonical references with minimum sufficient reasoning/context

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,57 @@ from adopt import (
 )
 
 CANONICAL = Path(__file__).resolve().parents[1]
+
+# Known managed version/baseline declaration forms. Only these are rewritten;
+# surrounding project-specific text is preserved. Ambiguous/custom forms fail closed.
+KNOWN_BASELINE_DECLARATION_RES = (
+    re.compile(
+        r"(Adoption baseline: Engineering System version )"
+        r"(\d+\.\d+\.\d+)"
+        r"( at immutable commit `)"
+        r"([0-9a-f]{40})"
+        r"(`\.)"
+    ),
+    re.compile(
+        r"(This canonical repository currently ships Engineering System )"
+        r"(\d+\.\d+\.\d+)"
+        r"(;)"
+    ),
+    re.compile(
+        r"(canonical Engineering System release \(currently )"
+        r"(\d+\.\d+\.\d+)"
+        r"(\))"
+    ),
+    re.compile(
+        r"(The current repository baseline identifies Engineering System \*\*)"
+        r"(\d+\.\d+\.\d+)"
+        r"(\*\*)"
+    ),
+    re.compile(
+        r"(Engineering System )"
+        r"(\d+\.\d+\.\d+)"
+        r"( also reconciles)"
+    ),
+    re.compile(
+        r"(Engineering System )"
+        r"(\d+\.\d+\.\d+)"
+        r"(은 )"
+    ),
+)
+
+# Broad hints that look like Engineering System version/baseline pins.
+# Any hint not fully covered by a known managed pattern is ambiguous.
+BASELINE_DECLARATION_HINT_RES = (
+    re.compile(r"Adoption baseline: Engineering System version \d+\.\d+\.\d+\b"),
+    re.compile(r"This canonical repository currently ships Engineering System \d+\.\d+\.\d+\b"),
+    re.compile(r"canonical Engineering System release \(currently \d+\.\d+\.\d+\)"),
+    re.compile(r"The current repository baseline identifies Engineering System \*\*\d+\.\d+\.\d+\*\*"),
+    re.compile(r"Engineering System \d+\.\d+\.\d+ also reconciles"),
+    re.compile(r"Engineering System \d+\.\d+\.\d+은 "),
+    re.compile(r"Engineering System version \d+\.\d+\.\d+\b"),
+    re.compile(r"immutable commit `[0-9a-f]{40}`"),
+    re.compile(r"engineering_system\.baseline[`'\"\s:=]+[0-9a-f]{40}"),
+)
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -180,6 +232,106 @@ def sync_cursor_resume_adapters(root: Path) -> list[str]:
             f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
         )
     return updated
+
+
+def _span_covered(span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(start >= c_start and end <= c_end for c_start, c_end in covered)
+
+
+def rewrite_known_baseline_declarations(
+    text: str, new_version: str, new_baseline: str
+) -> tuple[str, bool]:
+    """Rewrite known managed version/baseline declarations; fail closed on ambiguity.
+
+    Returns (new_text, changed). Raises SystemExit when a declaration-like hint is
+    present but is not an exact known managed form.
+    """
+    covered: list[tuple[int, int]] = []
+    for pattern in KNOWN_BASELINE_DECLARATION_RES:
+        for match in pattern.finditer(text):
+            covered.append(match.span())
+
+    for pattern in BASELINE_DECLARATION_HINT_RES:
+        for match in pattern.finditer(text):
+            if not _span_covered(match.span(), covered):
+                raise SystemExit(
+                    "FAIL AGENTS.md/README contains ambiguous/custom Engineering System "
+                    "version/baseline declarations; preserve/review them manually before upgrade"
+                )
+
+    updated = text
+    for pattern in KNOWN_BASELINE_DECLARATION_RES:
+        def _replace(match: re.Match[str], _pattern: re.Pattern[str] = pattern) -> str:
+            groups = list(match.groups())
+            # Patterns alternate literal, version, literal, optional sha, optional literal.
+            if len(groups) == 5 and re.fullmatch(r"[0-9a-f]{40}", groups[3] or ""):
+                groups[1] = new_version
+                groups[3] = new_baseline
+            elif len(groups) >= 2:
+                groups[1] = new_version
+            return "".join(groups)
+
+        updated = pattern.sub(_replace, updated)
+
+    return updated, updated != text
+
+
+def plan_baseline_declaration_updates(
+    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
+) -> list[tuple[str, str]]:
+    """Compute rewrite + stale validation for AGENTS.md/README before any mutation.
+
+    Returns (rel, rewritten_text) pairs for files that would change. Raises SystemExit
+    on ambiguous/custom forms or remaining stale version/baseline substrings.
+    """
+    planned: list[tuple[str, str]] = []
+    for rel in ("AGENTS.md", "README.md"):
+        path = root / rel
+        if not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8")
+        try:
+            rewritten, changed = rewrite_known_baseline_declarations(
+                original, new_version, new_baseline
+            )
+        except SystemExit as exc:
+            message = str(exc)
+            if message.startswith("FAIL AGENTS.md/README"):
+                raise SystemExit(message.replace("AGENTS.md/README", rel, 1)) from exc
+            raise
+        if old_version and old_version != new_version and old_version in rewritten:
+            raise SystemExit(
+                f"FAIL {rel} still contains stale Engineering System version "
+                f"{old_version} after managed declaration sync; review manually"
+            )
+        if old_baseline and old_baseline != new_baseline and old_baseline in rewritten:
+            raise SystemExit(
+                f"FAIL {rel} still contains stale Engineering System baseline "
+                f"{old_baseline} after managed declaration sync; review manually"
+            )
+        if changed:
+            planned.append((rel, rewritten))
+    return planned
+
+
+def apply_baseline_declaration_updates(root: Path, planned: list[tuple[str, str]]) -> list[str]:
+    """Write previously validated declaration rewrites."""
+    updated: list[str] = []
+    for rel, rewritten in planned:
+        (root / rel).write_text(rewritten, encoding="utf-8")
+        updated.append(rel)
+    return updated
+
+
+def sync_baseline_declarations(
+    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
+) -> list[str]:
+    """Synchronize known managed AGENTS.md/README version+baseline declarations."""
+    planned = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, new_version, new_baseline
+    )
+    return apply_baseline_declaration_updates(root, planned)
 
 
 def coalesce(arg_value: str, current: object) -> str:
@@ -400,6 +552,12 @@ def main() -> int:
                 "FAIL engineering-release.yml contains local/custom changes; review manually before upgrade"
             )
 
+    # Validate managed declaration rewrites AND stale old-version/old-baseline
+    # checks for both files before mutating metadata/workflows/adapters.
+    planned_declarations = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, current_version, new_baseline
+    )
+
     write_yaml(project_path, project)
     write_yaml(release_path, release)
     workflow_path.write_text(engineering_workflow(new_baseline, ci_mode), encoding="utf-8")
@@ -412,6 +570,12 @@ def main() -> int:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=" + ",".join(synced_adapters))
     else:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=<none>")
+
+    synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
+    if synced_declarations:
+        print("BASELINE_DECLARATIONS_SYNCED=" + ",".join(synced_declarations))
+    else:
+        print("BASELINE_DECLARATIONS_SYNCED=<none>")
 
     checker = CANONICAL / "tools" / "check-adoption.py"
     result = subprocess.run([sys.executable, str(checker), "--root", str(root)])

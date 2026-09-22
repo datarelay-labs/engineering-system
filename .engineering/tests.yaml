@@ -33,6 +33,10 @@ paths:
     domains: [adoption]
   "tools/upgrade-adoption.py":
     domains: [adoption-upgrade]
+  "tools/work_packet_authority.py":
+    domains: [session-continuity]
+  "tools/test_work_packet_authority.py":
+    domains: [session-continuity]
   "tools/org-rollout.py":
     domains: [adoption, adoption-upgrade]
   "tools/test_org_rollout.py":
@@ -76,6 +80,17 @@ scenarios:
     command: "python3 tools/test_adopt.py"
     invariants:
       - "managed adoption remains fail-closed and baseline-pinned"
+    release_gate: true
+
+  - id: ENG-SESSION-001
+    name: Work Packet author permission regression
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_work_packet_authority.py"
+    invariants:
+      - "executable Work Packet authors require write/maintain/admin effective permission"
     release_gate: true
 
   - id: ENG-ADOPTION-002

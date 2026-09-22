@@ -46,8 +46,10 @@ REQUIRED_METHOD_FILES = (
     "tools/check-adoption.py",
     "tools/upgrade-adoption.py",
     "tools/org-rollout.py",
+    "tools/work_packet_authority.py",
     "tools/test_adopt.py",
     "tools/test_org_rollout.py",
+    "tools/test_work_packet_authority.py",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -121,16 +123,30 @@ def validate_bun_discovery():
 def validate_work_packet_author_authority():
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     resume = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
+    authority = (ROOT / "tools/work_packet_authority.py").read_text(encoding="utf-8")
     for token in (
         "WORK_PACKET_AUTHOR_UNTRUSTED",
-        "OWNER",
-        "MEMBER",
-        "COLLABORATOR",
+        "collaborators/{author}/permission",
+        "write",
+        "maintain",
+        "admin",
+        "author_association",
+        "MUST NOT authorize",
     ):
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing Work Packet author token: {token}")
         if token not in resume:
             raise SystemExit(f"FAIL resume template missing Work Packet author token: {token}")
+    for token in (
+        "AUTHORIZED_WORK_PACKET_PERMISSIONS",
+        "write",
+        "maintain",
+        "admin",
+        "WORK_PACKET_AUTHOR_UNTRUSTED",
+        "permission_from_collaborator_payload",
+    ):
+        if token not in authority:
+            raise SystemExit(f"FAIL work packet authority helper missing token: {token}")
     print("PASS trusted Work Packet author authority contract")
 
 
@@ -194,9 +210,12 @@ def validate_session_continuity_templates():
         "WORK_PACKET_SCOPE_MISMATCH",
         "WORK_PACKET_PROVENANCE_UNTRUSTED",
         "WORK_PACKET_AUTHOR_UNTRUSTED",
-        "OWNER",
-        "MEMBER",
-        "COLLABORATOR",
+        "collaborators/{author}/permission",
+        "write",
+        "maintain",
+        "admin",
+        "author_association",
+        "MUST NOT authorize",
         "authenticated",
         "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE",
         "TASK_KIND=ADOPTION",
@@ -297,9 +316,13 @@ def validate_adoption_contract():
             print(f"FAIL {item}")
         raise SystemExit(1)
     upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
-    for token in ("ADOPTION_UPGRADE=PASS", "--baseline-sha", "engineering_system", "release_workflow"):
+    for token in ("ADOPTION_UPGRADE=PASS", "--baseline-sha", "engineering_system", "release_workflow", "BASELINE_DECLARATIONS_SYNCED"):
         if token not in upgrade_text:
             failures.append(f"adoption upgrade tool missing token: {token}")
+    if "rewrite_known_baseline_declarations" not in upgrade_text:
+        failures.append("adoption upgrade tool missing baseline declaration sync helper")
+    if "plan_baseline_declaration_updates" not in upgrade_text:
+        failures.append("adoption upgrade tool missing pre-mutation declaration planner")
     if failures:
         for item in failures:
             print(f"FAIL {item}")
@@ -309,7 +332,14 @@ def validate_adoption_contract():
     for token in ("--override-manifest", "flatten_paginated_payload", "--slurp", "OVERRIDE_MANIFEST"):
         if token not in org_text:
             failures.append(f"org rollout tool missing token: {token}")
-    for token in ("org-rollout.py", "override manifest", "--override-manifest"):
+    for token in (
+        "org-rollout.py",
+        "override manifest",
+        "--override-manifest",
+        "AGENTS.md",
+        "README.md",
+        "version and immutable baseline",
+    ):
         if token not in adoption_standard:
             failures.append(f"adoption standard missing org rollout token: {token}")
     if failures:
@@ -363,6 +393,9 @@ def main():
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
     import subprocess
+    completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_adopt.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
