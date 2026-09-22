@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Engineering System
 
+This repository follows the canonical Engineering System.
+
 Always read @AGENTS.md and @.engineering/project.yaml first.
 
 Use minimum sufficient context and reasoning. Load @.engineering/tests.yaml, @.engineering/release.yaml, standards, specs, ADRs, runbooks, and Work Packet references only when the current task requires them. Do not preload history or unrelated repositories.
