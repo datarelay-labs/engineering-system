@@ -30,6 +30,18 @@ State the stable workstream outcome in one concise paragraph.
 State exactly the next bounded action or phase.
 It must directly advance both Goal and OWNER_INTENT and be compatible with TASK_KIND.
 
+
+## Handoff Sizing
+
+```text
+WORK_PACKET_SIZING=KEEP
+INCLUDED_ISSUES=NONE
+SIZING_REASON=One medium-sized coherent outcome with a single deterministic completion oracle.
+```
+
+Before Cursor/coding-agent handoff, set `WORK_PACKET_SIZING` to `BATCH`, `KEEP`, or `SPLIT`.
+Do not assume one GitHub Issue equals one Cursor job. Batch adjacent small Issues/findings that share implementation context and validation; split unrelated outcomes or scope that cannot reliably complete implementation plus validation in one bounded session.
+
 ## Constraints
 
 - List only current scope/safety constraints that materially affect execution.
