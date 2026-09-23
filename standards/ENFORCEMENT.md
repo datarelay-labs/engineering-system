@@ -38,6 +38,28 @@ Read only when relevant:
 
 Do not preload every standard, Wiki page, archive, or historical discussion.
 
+## Mutating side effects and safe retry
+
+A transient transport failure does not prove that an external mutation failed.
+
+For agent/coordinator actions that may create, send, publish, deploy, modify, or delete external state, classify the action as one of:
+
+- `READ_ONLY`
+- `IDEMPOTENT`
+- `IDEMPOTENCY_KEYED`
+- `NON_IDEMPOTENT`
+- `IRREVERSIBLE`
+
+Retry policy:
+
+- read-only/idempotent actions may use bounded transient retry when other safety rules allow;
+- idempotency-keyed actions must reuse a stable operation key for the same intended mutation;
+- after timeout, disconnect, or another ambiguous outcome on a mutating action, reconcile the authoritative external state before retrying;
+- do not blindly repeat non-idempotent/irreversible actions such as sending a message, creating duplicate Issues/PRs/resources, publishing/releasing, deploying, rotating credentials, or destructive mutation;
+- if actual outcome cannot be determined safely, yield/block for reconciliation rather than guessing.
+
+This rule composes with approval, permission, and replay protections; it does not replace them.
+
 ## Agent-facing tool contract
 
 Tools intended for AI agents should be designed for reliable selection and bounded context use:

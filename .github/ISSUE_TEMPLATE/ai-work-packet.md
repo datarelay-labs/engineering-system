@@ -14,6 +14,9 @@ BRANCH=replace-with-branch-or-N/A
 TASK_KIND=DEVELOPMENT
 OWNER_INTENT=State the owner's current explicit request in one concise line.
 LAST_VERIFIED_HEAD=UNKNOWN
+PRIORITY=NORMAL
+INTENT_REVISION=1
+CHANGE_RISK=MEDIUM
 
 ## Goal
 
@@ -24,6 +27,7 @@ State the stable workstream outcome in one concise paragraph.
 - Keep only facts needed to resume now.
 - Replace this section as work progresses; do not append history.
 - Tool readiness or waiting state belongs here, not in STATUS.
+- If a worker is active, record its starting INTENT_REVISION and any named WAITING/STALL condition here.
 
 ## Next Action
 
@@ -61,6 +65,7 @@ Record meaningful out-of-scope findings as linked Issues/Work Packets. Do not si
 ## Constraints
 
 - List only current scope/safety constraints that materially affect execution.
+- For mutating external actions, note idempotency/reconciliation requirements when retries could duplicate side effects.
 
 ## Canonical References
 

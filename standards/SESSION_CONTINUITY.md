@@ -109,6 +109,23 @@ LAST_VERIFIED_HEAD=<40-char-sha|UNKNOWN>
 
 `TASK_KIND` and `OWNER_INTENT` describe the current bounded handoff, not the lifetime purpose of the workstream. Refresh them whenever the owner's explicit request changes materially.
 
+
+### Optional coordinator fields
+
+New or actively coordinated packets should record these compact fields when the coordinator/orchestrator uses them:
+
+```text
+PRIORITY=NORMAL
+INTENT_REVISION=1
+CHANGE_RISK=MEDIUM
+```
+
+- `PRIORITY=URGENT|HIGH|NORMAL|LOW` controls scheduling order only. It is not a security/risk rating.
+- `INTENT_REVISION` is a monotonically increasing integer for material handoff changes.
+- `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` controls verification/approval depth, not scheduling priority.
+
+Legacy packets without these fields remain valid. A coordinator may conservatively treat missing `PRIORITY` as `NORMAL`, missing `CHANGE_RISK` as `MEDIUM`, and establish `INTENT_REVISION=1` at the next material handoff update.
+
 ## Required sections
 
 Keep the packet short and current:
@@ -167,6 +184,35 @@ Compact executed evidence such as exact HEAD, targeted test result, CI run/PR li
 ### Blockers
 
 Only current blockers.
+
+## Portfolio priority and safe preemption
+
+Sizing answers “how much work belongs in one handoff”; priority answers “which eligible outcome runs next.” Keep them separate.
+
+Coordinator scheduling rules:
+
+1. Respect explicit owner priority first.
+2. Run only dependency-eligible work whose required environment/authority is available.
+3. Within the same priority, prefer the oldest eligible packet unless a repository-specific policy says otherwise.
+4. Risk/severity may increase verification depth but must not silently become scheduling priority.
+5. When the owner raises another packet's priority or an incident/release blocker becomes explicitly prioritized, lower-priority work may be preempted at the next safe checkpoint.
+6. Preemption must preserve recoverable state: finish/abort the current atomic operation safely, persist current evidence, mark/yield the packet, and release worker claims when safe. Do not terminate in the middle of an irreversible/external mutation merely to switch tasks.
+7. Preempted work remains durable and resumable; it does not become COMPLETE or discarded.
+
+A non-empty follow-up backlog does not entitle the current theme to retain priority after sufficiency is reached.
+
+## Intent revision and stale-worker rejection
+
+A coding-agent worker must not finalize an obsolete handoff after the owner/coordinator materially changes direction.
+
+- Increment `INTENT_REVISION` whenever `Goal`, `OWNER_INTENT`, `TASK_KIND`, `Next Action`, material constraints, completion contract, or approval boundary changes.
+- Evidence refreshes, comments, or wording changes that do not alter executable intent need not increment it.
+- A worker records the revision it started from.
+- Before commit/push, merge request creation/update, external write, production action, release/deploy action, or terminal completion, re-read the authoritative Work Packet and compare the revision.
+- Revision mismatch means `STALE_WORKER`: do not finalize the old intent. Persist useful recoverable state and yield to the coordinator.
+- Steering messages or conversation context are advisory; the repository-scoped Work Packet revision is the durable authority.
+
+For legacy packets without a revision, establish one before the next material implementation handoff rather than inventing freshness from chat history.
 
 ## Owner-intent synchronization
 
@@ -316,6 +362,50 @@ Classify a failed attempt before retrying:
 - **ambiguous tool/model behavior** — preserve evidence and use a deterministic alternative or independent verifier rather than looping.
 
 A task/session budget may stop work earlier. There is no universal retry count, but repeated materially identical semantic failure without new evidence must trigger a strategy change rather than another blind retry.
+
+## Progress, stall, and worker lifecycle
+
+A live process is not evidence of useful progress.
+
+Meaningful progress is a machine-observable state/evidence delta such as:
+- Git/worktree change that advances the declared outcome;
+- new deterministic test/build/runtime evidence;
+- a Work Packet milestone/state update;
+- completion of a bounded tool/action;
+- an explicit named external wait condition with durable re-entry state.
+
+“Thinking”, process liveness, repeated identical logs, or repeated retries without new evidence are not progress.
+
+A coordinator should apply a bounded stall budget appropriate to the task/environment. When no meaningful progress occurs within that budget:
+
+1. reconcile Work Packet, Git/worktree, process, PR/CI/runtime, and dependency state;
+2. distinguish a legitimate named external wait from a stalled worker;
+3. restart/replace/yield the disposable worker when safe rather than leaving it indefinitely `running`;
+4. preserve evidence and do not kill unrelated workers.
+
+Worker ownership also has a lifecycle:
+
+```text
+CLAIMED -> ACTIVE -> WAIT/YIELD or RETRY -> COMPLETE/ABANDON/SUPERSEDED -> RELEASED
+```
+
+- Claims/locks are scoped to repository + workstream + intent revision (and worktree where applicable).
+- Release claims when work completes, is safely preempted, is superseded, or is abandoned.
+- Terminal cleanup may stop disposable sessions and remove temporary worktrees/branches only after proving that no uncommitted/unpushed work, unresolved evidence, or needed PR/branch state will be lost.
+- Dirty, ambiguous, unpushed, or externally referenced state must never be auto-deleted merely to reclaim resources.
+
+## Mutable evidence revalidation
+
+Evidence tied to immutable source identity may be reused only for that identity. Mutable external state must be re-read at the decision boundary.
+
+Before merge, deploy/release, external/prod mutation, or terminal PASS, refresh any materially relevant mutable state such as:
+- PR review/approval and mergeability;
+- CI/check status;
+- issue/Work Packet eligibility and intent revision;
+- deployment/runtime health;
+- external resource existence/version/state.
+
+Prefer subject/version identity or exact revision over arbitrary time-to-live. Historical “was green” evidence is not current authority when the external state can change independently.
 
 ## Coordinator / worker execution model
 
