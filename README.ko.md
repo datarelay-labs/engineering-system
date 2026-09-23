@@ -93,6 +93,8 @@ python tools/adopt.py \
 
 Engineering System 1.6.4는 기존 1.6.x adoption/release contract 위에 Cursor token efficiency를 추가합니다. always-applied Cursor rule을 최소화하고, 기존 PR 작업은 Git diff부터 시작하며, test manifest에 cost/timeout/default metadata를 둘 수 있습니다. `tools/engineering-test.py`는 가장 저렴한 안전한 affected check를 선택하고, verbose command output은 제한하며, 새 adoption에는 보수적인 `.cursorignore` 기본값을 설치합니다. 또한 새로운 bounded Work Packet action마다 fresh coding-agent session을 우선하고, managed upgrade는 known-managed Cursor rule만 동기화하면서 custom `.cursorignore`는 보존합니다. 채택 저장소는 계속 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version뿐 아니라 해당 baseline까지 비교합니다.
 
+Engineering System 1.6.5는 Cursor persistent session resource guard를 추가합니다. `agent persist` 전에 `python3 tools/cursor-resource-preflight.py`를 실행합니다. Exit 0은 `PASS` 또는 `WARN`이며 진행할 수 있고, 0이 아닌 `BLOCK`은 새 세션만 거절하며 기존 세션을 중단하지 않습니다. 임계값은 small/medium/large 호스트에 맞게 정해지며, repository를 수정하지 않는 host-local override를 지원합니다. 자원 안전은 fresh session 선호보다 우선합니다.
+
 ### 3. Adoption qualification
 
 ```bash

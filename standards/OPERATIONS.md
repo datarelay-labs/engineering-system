@@ -89,3 +89,7 @@ operations:
 A production profile without a real runbook path or health command is incomplete. A persistent-state profile without backup and restore-test commands is incomplete.
 
 These commands are references to project-native behavior; the Engineering System must not invent operational commands merely to fill metadata. Destructive commands such as restore, rollback, or rebuild still require the safety/approval rules in the incident lifecycle.
+
+## Development-host session pressure
+
+Shared development hosts can become unresponsive when many Cursor persistent sessions accumulate. Before creating a new persistent session, run `tools/cursor-resource-preflight.py`. `PASS` and `WARN` (exit 0) may proceed. `BLOCK` refuses only the new session. Do not stop, kill, or mutate existing sessions to recover capacity. Record the preflight `RESULT` and `REASON` as evidence. Host monitoring may alert on `WARN` or `BLOCK`; Telegram or another notifier is not part of this contract.

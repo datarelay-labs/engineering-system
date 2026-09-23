@@ -251,7 +251,7 @@ python tools/upgrade-adoption.py \
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
-Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text. Existing resume adapters are replaced only when their content matches a known managed version; project-custom resume content fails closed for manual review.
+Managed upgrades also synchronize the canonical Cursor resume adapter (`.cursor/commands/resume.md`). When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text. Existing resume adapters are replaced only when their content matches a known managed version; project-custom resume content fails closed for manual review. The managed resume text includes the Cursor persistent-session resource-guard handoff. Host thresholds stay outside the adopted repository; custom resume text is preserved by failing closed rather than being overwritten.
 
 Managed upgrades also synchronize known managed Engineering System version and immutable baseline SHA declarations in `AGENTS.md` and `README.md` when those exact managed forms are present. Surrounding project-specific text is preserved. Ambiguous or custom declaration forms fail closed for manual review rather than broad replacement.
 

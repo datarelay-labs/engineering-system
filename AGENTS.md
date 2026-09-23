@@ -35,7 +35,7 @@ Use the minimum sufficient context and reasoning. Expand only when a concrete bl
 
 For repository adoption or managed upgrades, follow `standards/ADOPTION.md`; preserve project-specific/stricter rules and fail closed on ambiguous destructive changes.
 
-Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. This canonical repository currently ships Engineering System 1.6.4; do not treat an older same-major pin as current without matching the immutable baseline.
+Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. This canonical repository currently ships Engineering System 1.6.5; do not treat an older same-major pin as current without matching the immutable baseline.
 
 If mandatory context is missing or contradictory, report the configuration defect instead of guessing.
 
