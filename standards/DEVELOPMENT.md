@@ -55,6 +55,16 @@ When persisted state or schema changes:
 
 Dependency additions/upgrades must satisfy `SECURITY.md` and include compatibility/regression validation. Do not add dependencies merely for convenience when native/existing capability is adequate.
 
+## Scope discoveries during implementation
+
+Implementation and review frequently expose adjacent problems. Discovery does not automatically expand scope.
+
+- If the finding is required to satisfy the active outcome or its completion contract, keep it in the current Work Packet and re-size only when the change is material.
+- If it is independently releasable or has a different owner, approval boundary, rollback boundary, or validation oracle, create/update a linked follow-up Issue/Work Packet and continue the current outcome.
+- Preserve concise reproduction/evidence and affected paths; do not dump raw conversation or logs into the follow-up.
+- Do not perform opportunistic refactors merely because the files are already open.
+- A growing list of follow-ups is a planning/backlog signal, not permission to turn the current packet into a multi-domain program.
+
 ## Technical debt
 
 Do not mix unrelated debt cleanup into urgent bug fixes. Record meaningful deferred debt rather than expanding current scope.
