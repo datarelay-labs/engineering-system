@@ -23,6 +23,7 @@ When resuming a workstream, resolve this repository first, load only its single 
 ## Execution rules
 
 - Classify the change and affected domains/contracts/security/operations.
+- Before handing implementation to Cursor/coding agent, apply the canonical Work Packet sizing contract: do not map one GitHub Issue to one Cursor job by default; `BATCH` adjacent micro-issues/findings, `KEEP` one medium-sized coherent outcome, and `SPLIT` unrelated or context-exhausting scope. Preserve enough session context for implementation plus deterministic validation.
 - Apply `standards/DESIGN.md` for material design-bearing changes.
 - Apply `standards/OPERATIONS.md` for production-impacting failures and preserve evidence before mutation.
 - Inspect affected implementation/tests and make the smallest correct change.

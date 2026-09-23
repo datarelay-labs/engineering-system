@@ -48,6 +48,48 @@ Examples:
 
 Multiple workstreams may coexist safely when packet selection is deterministic.
 
+
+## Work Packet sizing before implementation handoff
+
+A GitHub Issue is coordination state, not automatically the unit of Cursor execution. Do **not** hand Cursor one tiny Issue/finding at a time, and do not combine unrelated outcomes into one oversized session.
+
+Before every implementation handoff, the coordinator must classify the next executable scope as:
+
+- `BATCH` — too small by itself. Combine adjacent small Issues/findings when they share the same repository area, implementation context, owner intent, and validation oracle. Multiple GitHub Issues may be referenced by one medium-sized Work Packet/Next Action.
+- `KEEP` — right-sized. Prefer one primary independently verifiable outcome with a few tightly coupled subgoals that one persistent coding-agent session can implement, test, and hand back while retaining enough context for deterministic validation.
+- `SPLIT` — too large. Split when the scope contains multiple independently releasable outcomes, unrelated domains/owners, materially different approval or validation gates, unclear rollback boundaries, or is likely to exhaust the session context before implementation **and** validation finish.
+
+Default handoff behavior:
+
+1. Do not use “one GitHub Issue = one Cursor job” as a rule.
+2. Batch micro-fixes and closely related findings into a coherent medium-sized packet instead of creating repeated short Cursor cycles and notifications.
+3. Keep one primary outcome; a small number of tightly coupled subgoals is preferred over either a single trivial edit or a broad multi-domain program.
+4. File count and LOC are advisory only. Structural coupling, independent verification, approval boundaries, rollback boundaries, and context budget determine size.
+5. Reserve context for implementation **and** testing/review. If implementation alone is expected to consume the reliable session context, split before handoff.
+6. If scope materially expands during execution, the coding agent must stop absorbing unrelated work, update the Work Packet, and yield for coordinator re-sizing.
+7. Record the sizing decision in the packet’s current handoff state, for example:
+
+```text
+WORK_PACKET_SIZING=KEEP
+INCLUDED_ISSUES=#101,#102,#105
+SIZING_REASON=Same subsystem and validation oracle; one independently verifiable outcome.
+```
+
+The goal is a **medium-sized, coherent, independently verifiable handoff**: large enough to avoid handoff/review overhead, small enough to complete implementation plus deterministic validation in one bounded session.
+
+### Initial sizing calibration
+
+Use these as **soft operating defaults**, not hard limits. Structural coupling and a clear completion oracle override raw counts.
+
+- Preferred center: roughly **one hour of competent human engineering work** for the primary outcome.
+- Initial `KEEP` band: roughly **30–120 minutes human-equivalent effort**, one logical outcome, and one coherent validation plan.
+- A change of **a few hundred hand-written lines** is normally still in the target zone when it stays within one outcome. Generated files, lockfiles, snapshots, and mechanical propagation do not determine size by themselves.
+- `BATCH` when a task is materially below that band and adjacent findings share the same subsystem, implementation context, and validation oracle. GitHub Issue count is not a sizing metric; one handoff may reference several small Issues.
+- `SPLIT` when the work is likely to exceed roughly two hours of human-equivalent effort, contains multiple independent outcomes/rollback boundaries, or would consume the useful agent context before targeted validation and review can finish.
+- During execution, if context usage is already high and a distinct implementation subgoal remains, persist the verified state and continue that subgoal in a fresh bounded session rather than forcing the original session through compaction/noise. Finishing the current tightly coupled validation step is preferred over splitting in the middle of an atomic check.
+
+These values are calibration defaults, not universal constants. P0/P1 efficiency telemetry should measure rework, validation failures, context pressure, and handoff overhead; revise the band from observed outcomes rather than increasing task size merely because a model can technically run longer.
+
 ## Required identity fields
 
 Every packet body begins with:
