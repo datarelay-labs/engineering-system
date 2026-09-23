@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
-Engineering System 1.6.3은 observable GitHub merge enforcement를 reconcile하고, production-oriented project에 project-native runbook/health/recovery contract를 기록하며, 실제 command가 있을 때 qualification과 post-release smoke를 분리한 executable release contract를 사용할 수 있습니다. 채택 저장소는 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version만 아니라 해당 baseline을 기준으로 비교합니다.
+Engineering System 1.6.4는 기존 1.6.x adoption/release contract 위에 Cursor token efficiency를 추가합니다. always-applied Cursor rule을 최소화하고, 기존 PR 작업은 Git diff부터 시작하며, test manifest에 cost/timeout/default metadata를 둘 수 있습니다. `tools/engineering-test.py`는 가장 저렴한 안전한 affected check를 선택하고, verbose command output은 제한하며, 새 adoption에는 보수적인 `.cursorignore` 기본값을 설치합니다. 또한 새로운 bounded Work Packet action마다 fresh coding-agent session을 우선하고, managed upgrade는 known-managed Cursor rule만 동기화하면서 custom `.cursorignore`는 보존합니다. 채택 저장소는 계속 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version뿐 아니라 해당 baseline까지 비교합니다.
 
 ### 3. Adoption qualification
 

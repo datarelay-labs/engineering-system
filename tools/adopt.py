@@ -31,6 +31,7 @@ REQUIRED_MANAGED = (
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
     ".cursor/rules/engineering-system.mdc",
+    ".cursorignore",
     ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
@@ -579,6 +580,11 @@ def tests_yaml(
             lines.extend(
                 [
                     f"  - id: ADOPTED-DOMAIN-{index:03d}",
+                    "    cost: medium",
+                    "    estimated_seconds: 120",
+                    "    timeout_seconds: 600",
+                    "    agent_default: true",
+                    "    scope: integration",
                     f"    name: {domain} affected tests",
                     "    level: integration",
                     "    domains:",
@@ -598,6 +604,11 @@ def tests_yaml(
         lines.extend(
             [
                 "  - id: ADOPTED-TEST-001",
+                "    cost: medium",
+                "    estimated_seconds: 180",
+                "    timeout_seconds: 600",
+                "    agent_default: true",
+                "    scope: integration",
                 "    name: Project-native affected tests",
                 "    level: integration",
                 "    domains:",
@@ -627,6 +638,11 @@ def tests_yaml(
         lines.extend(
             [
                 f"  - id: {scenario_id}",
+                "    cost: cheap" if name in {"lint", "typecheck"} else "    cost: medium",
+                "    estimated_seconds: 60" if name in {"lint", "typecheck"} else "    estimated_seconds: 180",
+                "    timeout_seconds: 180" if name in {"lint", "typecheck"} else "    timeout_seconds: 600",
+                "    agent_default: true",
+                "    scope: static" if name in {"lint", "typecheck"} else "    scope: component",
                 f"    name: Project {name}",
                 "    level: static" if name in {"lint", "typecheck"} else "    level: component",
                 "    domains:",
@@ -650,6 +666,11 @@ def tests_yaml(
     lines.extend(
         [
             "  - id: ADOPTED-STATIC-001",
+            "    cost: cheap",
+            "    estimated_seconds: 2",
+            "    timeout_seconds: 30",
+            "    agent_default: true",
+            "    scope: static",
             "    name: Git whitespace validation",
             "    level: static",
             "    domains:",
@@ -1004,6 +1025,13 @@ def main() -> int:
         root,
         ".cursor/rules/engineering-system.mdc",
         (CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8"),
+        written,
+        skipped,
+    )
+    write_missing(
+        root,
+        ".cursorignore",
+        (CANONICAL / "templates" / ".cursorignore").read_text(encoding="utf-8"),
         written,
         skipped,
     )

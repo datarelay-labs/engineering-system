@@ -186,31 +186,78 @@ def known_managed_resume_texts(canonical_text: str) -> set[str]:
     return known
 
 
-def sync_cursor_resume_adapters(root: Path) -> list[str]:
-    """Rewrite managed Cursor resume adapters to the canonical template text.
+def known_managed_cursor_rule_texts(canonical_text: str) -> set[str]:
+    known = {canonical_text}
+    history_dir = CANONICAL / "tools" / "managed_adapter_history" / "rule"
+    if history_dir.is_dir():
+        for path in sorted(history_dir.glob("*.mdc")):
+            known.add(path.read_text(encoding="utf-8"))
+    return known
 
-    Missing adapters are installed. Existing adapters are replaced only when their
-    content matches a known managed version; project-custom content fails closed.
-    """
+
+def plan_cursor_rule_update(root: Path) -> str | None:
+    source = CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc"
+    if not source.is_file():
+        raise SystemExit("FAIL canonical Cursor engineering-system rule missing")
+    canonical_text = source.read_text(encoding="utf-8")
+    path = root / ".cursor/rules/engineering-system.mdc"
+    if not path.is_file():
+        return canonical_text
+    existing = path.read_text(encoding="utf-8")
+    if existing == canonical_text:
+        return None
+    if existing in known_managed_cursor_rule_texts(canonical_text):
+        return canonical_text
+    raise SystemExit(
+        "FAIL .cursor/rules/engineering-system.mdc contains local/custom changes; "
+        "preserve/review them manually before upgrade"
+    )
+
+
+def apply_cursor_rule_update(root: Path, planned_text: str | None) -> bool:
+    if planned_text is None:
+        return False
+    path = root / ".cursor/rules/engineering-system.mdc"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(planned_text, encoding="utf-8")
+    return True
+
+
+def plan_cursorignore_install(root: Path) -> str | None:
+    path = root / ".cursorignore"
+    if path.exists():
+        return None
+    source = CANONICAL / "templates" / ".cursorignore"
+    if not source.is_file():
+        raise SystemExit("FAIL canonical .cursorignore template missing")
+    return source.read_text(encoding="utf-8")
+
+
+def apply_cursorignore_install(root: Path, planned_text: str | None) -> bool:
+    if planned_text is None:
+        return False
+    (root / ".cursorignore").write_text(planned_text, encoding="utf-8")
+    return True
+
+
+def plan_cursor_resume_adapters(root: Path) -> dict[str, str]:
+    """Validate managed Cursor resume adapters before any repository mutation."""
     source = CANONICAL / "templates" / ".cursor" / "commands" / "resume.md"
     if not source.is_file():
         raise SystemExit("FAIL canonical Cursor resume template missing")
     text = source.read_text(encoding="utf-8")
     known = known_managed_resume_texts(text)
-    updated: list[str] = []
+    planned: dict[str, str] = {}
 
     resume_path = root / ".cursor/commands/resume.md"
-    resume_path.parent.mkdir(parents=True, exist_ok=True)
     if not resume_path.is_file():
-        resume_path.write_text(text, encoding="utf-8")
-        updated.append(".cursor/commands/resume.md")
+        planned[".cursor/commands/resume.md"] = text
     else:
         existing = resume_path.read_text(encoding="utf-8")
         if existing == text:
             pass
         elif existing in known:
-            resume_path.write_text(text, encoding="utf-8")
-            updated.append(".cursor/commands/resume.md")
+            planned[".cursor/commands/resume.md"] = text
         else:
             raise SystemExit(
                 "FAIL .cursor/commands/resume.md contains local/custom changes; "
@@ -225,14 +272,27 @@ def sync_cursor_resume_adapters(root: Path) -> list[str]:
         if existing == text:
             continue
         if existing in known:
-            path.write_text(text, encoding="utf-8")
-            updated.append(rel)
+            planned[rel] = text
             continue
         raise SystemExit(
             f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
         )
+    return planned
+
+
+def apply_cursor_resume_adapters(root: Path, planned: dict[str, str]) -> list[str]:
+    updated: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        updated.append(rel)
     return updated
 
+
+def sync_cursor_resume_adapters(root: Path) -> list[str]:
+    """Compatibility wrapper for callers outside the upgrade transaction."""
+    return apply_cursor_resume_adapters(root, plan_cursor_resume_adapters(root))
 
 def _span_covered(span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
     start, end = span
@@ -557,6 +617,9 @@ def main() -> int:
     planned_declarations = plan_baseline_declaration_updates(
         root, old_version, old_baseline, current_version, new_baseline
     )
+    planned_cursor_rule = plan_cursor_rule_update(root)
+    planned_cursorignore = plan_cursorignore_install(root)
+    planned_resume_adapters = plan_cursor_resume_adapters(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -565,7 +628,13 @@ def main() -> int:
     if release_contract_enabled:
         release_workflow_path.write_text(release_workflow(new_baseline), encoding="utf-8")
 
-    synced_adapters = sync_cursor_resume_adapters(root)
+    cursor_rule_updated = apply_cursor_rule_update(root, planned_cursor_rule)
+    print("CURSOR_RULE_SYNCED=" + ("YES" if cursor_rule_updated else "NO"))
+
+    cursorignore_installed = apply_cursorignore_install(root, planned_cursorignore)
+    print("CURSORIGNORE_INSTALLED=" + ("YES" if cursorignore_installed else "NO"))
+
+    synced_adapters = apply_cursor_resume_adapters(root, planned_resume_adapters)
     if synced_adapters:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=" + ",".join(synced_adapters))
     else:

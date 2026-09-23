@@ -156,6 +156,9 @@ def main() -> int:
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
 
+    if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
+        failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
+
     cursor_path = root / ".cursor/rules/engineering-system.mdc"
     if cursor_path.is_file():
         text = cursor_path.read_text(encoding="utf-8", errors="replace")

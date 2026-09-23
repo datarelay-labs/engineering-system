@@ -22,6 +22,9 @@ Use the minimum sufficient context and reasoning. Expand only when a concrete bl
 - Apply `standards/DESIGN.md` for material design-bearing changes.
 - Apply `standards/OPERATIONS.md` for production-impacting failures; preserve evidence before mutation.
 - Inspect only the affected implementation/tests before editing and make the smallest correct change.
+- On an existing branch or PR, start with `git diff --name-only`/`git diff --stat` against the base and inspect changed files first; expand to call-sites/dependencies only when evidence requires it.
+- Treat `.engineering/tests.yaml` as an ordered-cost manifest, not a list to execute from the first entry: prefer `agent_default: true` and the lowest explicit `cost`; when metadata is absent, treat static/unit as cheap, component/feature as medium, and integration/lifecycle/performance/e2e as expensive. Do not auto-run expensive/full checks for metadata-only changes.
+- For verbose commands, write full output to a log file and return only exit status plus focused `grep`/`tail` evidence; read more only on failure or ambiguity.
 - Run the cheapest affected deterministic validation first; do not duplicate equivalent native/shared gates.
 - Stop expensive downstream qualification after a blocking deterministic failure.
 - Add durable regression coverage for bug fixes when practical.
@@ -32,7 +35,7 @@ Use the minimum sufficient context and reasoning. Expand only when a concrete bl
 
 For repository adoption or managed upgrades, follow `standards/ADOPTION.md`; preserve project-specific/stricter rules and fail closed on ambiguous destructive changes.
 
-Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. This canonical repository currently ships Engineering System 1.6.3; do not treat an older same-major pin as current without matching the immutable baseline.
+Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. This canonical repository currently ships Engineering System 1.6.4; do not treat an older same-major pin as current without matching the immutable baseline.
 
 If mandatory context is missing or contradictory, report the configuration defect instead of guessing.
 

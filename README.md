@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
-Engineering System 1.6.3 also reconciles observable GitHub merge enforcement, records project-native production operations contracts when applicable, and can generate an executable release contract with separate qualification and post-release smoke phases. Adopted repositories pin `engineering_system.version` plus an immutable `engineering_system.baseline` SHA; org-wide rollout targets that exact baseline rather than version alone.
+Engineering System 1.6.4 adds token-efficient Cursor operation on top of the 1.6.x adoption/release contracts: the always-applied Cursor rule is intentionally compact, existing PR work starts from the Git diff, test manifests may declare cost/timeout/default metadata, `tools/engineering-test.py` selects the cheapest safe affected check, verbose command output is bounded, new adoptions receive conservative `.cursorignore` defaults, and each new bounded Work Packet action prefers a fresh coding-agent session. Managed upgrades synchronize only known-managed Cursor rules and preserve custom `.cursorignore` content. Adopted repositories still pin `engineering_system.version` plus an immutable `engineering_system.baseline` SHA; org-wide rollout targets that exact baseline rather than version alone.
 
 ### 3. Qualify the adoption
 

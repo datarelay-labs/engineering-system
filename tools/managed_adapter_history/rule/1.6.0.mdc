@@ -1,0 +1,39 @@
+---
+description: Mandatory Engineering System workflow and qualification rules
+alwaysApply: true
+---
+
+# Mandatory Engineering System Rule
+
+This repository follows the canonical Engineering System.
+
+Always read:
+1. @AGENTS.md
+2. @.engineering/project.yaml
+
+Read only when relevant:
+3. @.engineering/tests.yaml for implementation/debugging/testing
+4. @.engineering/release.yaml for release/version/artifact work
+5. only the relevant product specification/ADR/runbook/Engineering System standard
+
+Then:
+- classify the change and affected domains/contracts/security/operations
+- apply the minimal `standards/DESIGN.md` gate before material design-bearing changes
+- for outages/degraded service/failed upgrades/data-loss risk, enter the `standards/OPERATIONS.md` incident lifecycle and preserve evidence before mutation
+- inspect relevant implementation/tests
+- make the smallest correct change
+- run cheapest affected deterministic tests first
+- keep ordinary PR validation fast
+- do not duplicate equivalent native CI
+- do not run a full release suite while a blocking deterministic regression exists
+- add/retain durable regression coverage for bugs
+- never weaken a valid test merely to obtain PASS
+- before merge or completion, inspect machine-observable PR review feedback and fix/revalidate or explicitly disposition every actionable review finding; do not treat COMMENTED/advisory state as automatic PASS
+- never report unexecuted/skipped/blocked/historical evidence as current PASS
+- never reuse release qualification evidence from another source HEAD
+
+When explicitly resuming an existing workstream, use the repository-scoped active AI Work Packet and verify current Git state before acting. Do not load packets from unrelated repositories. For packet v2, require TASK_KIND and OWNER_INTENT and execute Next Action only when it directly advances them and the workstream Goal; otherwise stop with WORK_PACKET_SCOPE_MISMATCH. Fail closed on missing or ambiguous packet selection.
+
+When the user asks to apply/adopt/bootstrap the Engineering System, follow the canonical `standards/ADOPTION.md` procedure. Inventory and classify before cleanup; use deterministic bootstrap for missing common surfaces; preserve project-specific/stricter rules; fail closed on ambiguous tests, release commands, or destructive overwrite. For an already managed repository pinned to an older version, use the fail-closed managed upgrade workflow rather than rerunning initial bootstrap.
+
+Tool-specific rules may adapt syntax but must not weaken the Engineering System core.

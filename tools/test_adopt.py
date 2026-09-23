@@ -2,6 +2,8 @@
 """Regression tests for deterministic Engineering System adoption bootstrap."""
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -84,6 +86,7 @@ def test_clean_python_bootstrap() -> None:
             ".engineering/tests.yaml",
             ".engineering/release.yaml",
             ".cursor/rules/engineering-system.mdc",
+            ".cursorignore",
             ".cursor/commands/resume.md",
             ".cursor/commands/work-resume.md",
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
@@ -95,7 +98,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.6.3"
+        assert engineering["version"] == "1.6.4"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -110,6 +113,8 @@ def test_clean_python_bootstrap() -> None:
         assert "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE" in resume_text
 
         tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
+        assert "cost: medium" in tests_text
+        assert "agent_default: true" in tests_text
         assert "ENGINEERING_BASE_REF" in tests_text
         assert "origin/main...HEAD" in tests_text
         assert tests_text.count('command: "git diff --check"') == 0
@@ -382,6 +387,9 @@ def test_managed_upgrade_to_1_6() -> None:
         managed_prior = history.read_text(encoding="utf-8")
         (target / ".cursor/commands/resume.md").write_text(managed_prior, encoding="utf-8")
         (target / ".cursor/commands/work-resume.md").write_text(managed_prior, encoding="utf-8")
+        prior_rule = (ROOT / "tools" / "managed_adapter_history" / "rule" / "1.6.3.mdc").read_text(encoding="utf-8")
+        (target / ".cursor/rules/engineering-system.mdc").write_text(prior_rule, encoding="utf-8")
+        (target / ".cursorignore").unlink()
         commit_all(target, "downgrade fixture to 1.5")
 
         upgraded = run(
@@ -394,10 +402,12 @@ def test_managed_upgrade_to_1_6() -> None:
             NEW_BASELINE,
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CURSOR_RULE_SYNCED=YES" in upgraded.stdout
+        assert "CURSORIGNORE_INSTALLED=YES" in upgraded.stdout
         assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
 
         upgraded_project = load_yaml(project_path)
-        assert upgraded_project["engineering_system"]["version"] == "1.6.3"
+        assert upgraded_project["engineering_system"]["version"] == "1.6.4"
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
@@ -407,6 +417,82 @@ def test_managed_upgrade_to_1_6() -> None:
         canonical_resume = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
         assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == canonical_resume
         assert (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8") == canonical_resume
+        canonical_rule = (ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8")
+        assert (target / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8") == canonical_rule
+        assert (target / ".cursorignore").read_text(encoding="utf-8") == (ROOT / "templates" / ".cursorignore").read_text(encoding="utf-8")
+
+
+def test_custom_cursorignore_preserved_on_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-ignore"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-ignore\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(sys.executable, str(ADOPT), "--root", str(target), "--apply", "--baseline-sha", BASELINE, "--test-command", "go test ./...")
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.3"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        prior_rule = (ROOT / "tools" / "managed_adapter_history" / "rule" / "1.6.3.mdc").read_text(encoding="utf-8")
+        (target / ".cursor/rules/engineering-system.mdc").write_text(prior_rule, encoding="utf-8")
+        (target / ".cursorignore").write_text("# custom\nprivate-generated/\n", encoding="utf-8")
+        commit_all(target, "custom ignore fixture")
+        upgraded = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply", "--baseline-sha", NEW_BASELINE)
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CURSORIGNORE_INSTALLED=NO" in upgraded.stdout
+        assert (target / ".cursorignore").read_text(encoding="utf-8") == "# custom\nprivate-generated/\n"
+
+
+def test_supported_managed_cursor_rule_history_is_upgradeable() -> None:
+    expected = {
+        "1.5.0.mdc": "051b2798360b1519d86f5575f98dd1f38d077b7bc866eef80a9e9619f0701626",
+        "1.5.1.mdc": "7d13a513dceae8cc96a285044079a3a25cff5422d919a71d9a03cbec771ab506",
+        "1.6.0.mdc": "48b933abedf8baeea2ebcce433eb0e1b8de2c82e8727ab23316830b89e6d1503",
+        "1.6.0-cursor-rule-routing.mdc": "af8e76084880d2effefb50336a8e02777892d04932852ac5784b47d318196553",
+        "1.6.0-work-packet-intent.mdc": "81edcc3137ca63ee5074b0edd0315d3b2ae863fe5b8643d68faacfa5e07eac2a",
+        "1.6.3.mdc": "01a357b466549a3bf2e7495fca78ef9a2aaead3b895f3583186e7fa8874732e5",
+    }
+    history = ROOT / "tools" / "managed_adapter_history" / "rule"
+    assert {path.name for path in history.glob("*.mdc")} == set(expected)
+    spec = importlib.util.spec_from_file_location("upgrade_adoption", UPGRADE)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    canonical = (ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp)
+        rule = target / ".cursor/rules/engineering-system.mdc"
+        rule.parent.mkdir(parents=True)
+        for name, digest in expected.items():
+            text = (history / name).read_text(encoding="utf-8")
+            assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest
+            assert text != canonical
+            rule.write_text(text, encoding="utf-8")
+            assert module.plan_cursor_rule_update(target) == canonical
+
+
+def test_custom_cursor_rule_fails_closed_before_upgrade_mutation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-rule"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-rule\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(sys.executable, str(ADOPT), "--root", str(target), "--apply", "--baseline-sha", BASELINE, "--test-command", "go test ./...")
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.3"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        (target / ".cursor/rules/engineering-system.mdc").write_text("# custom cursor rule\n", encoding="utf-8")
+        commit_all(target, "custom rule fixture")
+        before = _managed_upgrade_file_snapshot(target)
+        failed = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply", "--baseline-sha", NEW_BASELINE, check=False)
+        assert failed.returncode != 0
+        assert "local/custom changes" in failed.stdout
+        assert _managed_upgrade_file_snapshot(target) == before
 
 
 def test_custom_resume_adapter_fails_closed() -> None:
@@ -445,6 +531,8 @@ def test_custom_resume_adapter_fails_closed() -> None:
         (target / ".cursor/commands/resume.md").write_text("# project-custom resume\n", encoding="utf-8")
         commit_all(target, "custom resume fixture")
 
+        before = _managed_upgrade_file_snapshot(target)
+
         failed = run(
             sys.executable,
             str(UPGRADE),
@@ -458,6 +546,7 @@ def test_custom_resume_adapter_fails_closed() -> None:
         assert failed.returncode != 0
         assert "local/custom changes" in failed.stdout
         assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == "# project-custom resume\n"
+        assert _managed_upgrade_file_snapshot(target) == before
 
 
 def test_grant_style_baseline_declarations_upgraded() -> None:
@@ -523,13 +612,13 @@ def test_grant_style_baseline_declarations_upgraded() -> None:
         readme_text = (target / "README.md").read_text(encoding="utf-8")
         assert "Keep project-specific text." in agents_text
         assert (
-            f"Adoption baseline: Engineering System version 1.6.3 at immutable commit `{NEW_BASELINE}`."
+            f"Adoption baseline: Engineering System version 1.6.4 at immutable commit `{NEW_BASELINE}`."
             in agents_text
         )
         assert "1.6.1" not in agents_text
         assert stale_sha not in agents_text
         assert (
-            "The current repository baseline identifies Engineering System **1.6.3** and keeps"
+            "The current repository baseline identifies Engineering System **1.6.4** and keeps"
             in readme_text
         )
         assert "1.6.1" not in readme_text
@@ -683,6 +772,9 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_custom_cursorignore_preserved_on_upgrade()
+    test_supported_managed_cursor_rule_history_is_upgradeable()
+    test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
     test_custom_resume_adapter_fails_closed()
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()

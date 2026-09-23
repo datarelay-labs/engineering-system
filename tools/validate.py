@@ -26,6 +26,7 @@ REQUIRED_STANDARDS = (
 REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/AGENTS.md",
     "templates/.cursor/rules/engineering-system.mdc",
+    "templates/.cursorignore",
     "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
     "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
     "templates/CURSOR_USER_RULE.txt",
@@ -47,6 +48,9 @@ REQUIRED_METHOD_FILES = (
     "tools/upgrade-adoption.py",
     "tools/org-rollout.py",
     "tools/work_packet_authority.py",
+    "tools/engineering-context.py",
+    "tools/engineering-test.py",
+    "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
     "tools/test_org_rollout.py",
     "tools/test_work_packet_authority.py",
@@ -148,6 +152,44 @@ def validate_work_packet_author_authority():
         if token not in authority:
             raise SystemExit(f"FAIL work packet authority helper missing token: {token}")
     print("PASS trusted Work Packet author authority contract")
+
+
+def validate_token_efficiency_contract():
+    rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
+    rule_template = (ROOT / "templates/.cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
+    if rule != rule_template:
+        raise SystemExit("FAIL canonical/template Cursor engineering-system rule drift")
+    if len(rule.splitlines()) > 16:
+        raise SystemExit("FAIL always-applied Cursor rule exceeds compact context budget")
+    if "@AGENTS.md" in rule or "@.engineering/project.yaml" in rule:
+        raise SystemExit("FAIL always-applied Cursor rule force-attaches repository context")
+    for token in ("diff", "cheapest", "verbose", "polling"):
+        if token not in rule:
+            raise SystemExit(f"FAIL compact Cursor rule missing token-efficiency token: {token}")
+
+    ignore = (ROOT / ".cursorignore").read_text(encoding="utf-8")
+    ignore_template = (ROOT / "templates/.cursorignore").read_text(encoding="utf-8")
+    if ignore != ignore_template:
+        raise SystemExit("FAIL canonical/template .cursorignore drift")
+    for token in ("node_modules/", "__pycache__/", "*.log"):
+        if token not in ignore:
+            raise SystemExit(f"FAIL .cursorignore missing safe-noise token: {token}")
+
+    schema = load_json(ROOT / "schemas/tests.schema.json")
+    scenario_props = schema["properties"]["scenarios"]["items"]["properties"]
+    for token in ("cost", "estimated_seconds", "timeout_seconds", "agent_default", "scope"):
+        if token not in scenario_props:
+            raise SystemExit(f"FAIL test manifest schema missing token-efficiency metadata: {token}")
+
+    context_tool = (ROOT / "tools/engineering-context.py").read_text(encoding="utf-8")
+    test_tool = (ROOT / "tools/engineering-test.py").read_text(encoding="utf-8")
+    for token in ("CHANGED_FILE", "AFFECTED_DOMAINS", "CONTEXT_ROUTER=PASS"):
+        if token not in context_tool:
+            raise SystemExit(f"FAIL engineering-context helper missing token: {token}")
+    for token in ("TEST_COST", "SKIP_EXPENSIVE_METADATA_ONLY", "agent-logs"):
+        if token not in test_tool:
+            raise SystemExit(f"FAIL engineering-test helper missing token: {token}")
+    print("PASS token-efficient Cursor context/test routing contract")
 
 
 def validate_resume_template_parity():
@@ -378,6 +420,7 @@ def main():
     validate_baseline_declarations()
     validate_bun_discovery()
     validate_work_packet_author_authority()
+    validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
     validate_session_continuity_templates()
@@ -394,6 +437,9 @@ def main():
 
     import subprocess
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_adopt.py"], cwd=ROOT)

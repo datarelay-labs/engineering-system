@@ -196,6 +196,9 @@ After resolving Git identity and before ordinary work:
 7. Use minimum sufficient reasoning/context; do not request maximum reasoning by default.
 8. Do not preload all references named in the packet.
 9. Do not keep a coding-agent session alive polling CI, review, deployment, or another machine-observable external condition. Record a concise `WAITING_FOR_<CONDITION>` state and yield to coordinator/automation; the next resume re-checks the condition.
+10. For an existing branch/PR, orient from the base diff first (`git diff --name-only`/`git diff --stat`) before broad repository search.
+11. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity.
+12. Prefer a fresh coding-agent session for each new bounded `Next Action`; persistent sessions are for an in-flight action/process, not long-term memory.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
