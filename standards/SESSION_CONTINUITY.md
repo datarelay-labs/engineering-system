@@ -281,7 +281,7 @@ P0b records verified exact-head outcomes against cost, time, rework, and human i
 - Persist only a generated run ID, repo, workstream, task kind, the session profile, timestamps, exposed usage fields, counts, validation IDs, exact-head evidence, and terminal PASS, BLOCK, or FAIL.
 - Do not persist prompts, conversation, source, tool payloads, secrets, logs, or absolute local paths. Additional fields fail closed.
 - Missing provider usage, cache, or cost stays null. Do not estimate.
-- Default output is `.engineering/telemetry/`, bounded to 32 records, easy to disable with a `DISABLED` marker, and gitignored. There is no automatic network export.
+- Default output is `engineering-system/telemetry/` under the repository's absolute Git directory (`git rev-parse --absolute-git-dir`). That location is Git metadata, so generated records stay outside the tracked worktree for canonical repositories, adopted repositories, and linked worktrees. The directory is bounded to 32 records and easy to disable with a `DISABLED` marker. `.cursorignore` and a textual `.gitignore` rule are not the retention boundary. There is no automatic network export.
 - Capture provider, model, reasoning, and toolset at session start. A later change requires a recorded justification. Do not switch profiles silently.
 - Soft task budgets are optional. Exhaustion yields terminal `BLOCK` with disposition `YIELD`. Further retries fail closed.
 

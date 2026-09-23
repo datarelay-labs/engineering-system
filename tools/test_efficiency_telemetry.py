@@ -29,24 +29,79 @@ behavior_eval = importlib.util.module_from_spec(_BEHAVIOR_SPEC)
 sys.modules["behavior_eval_for_telemetry"] = behavior_eval
 _BEHAVIOR_SPEC.loader.exec_module(behavior_eval)
 
-HEAD = "a" * 40
 STARTED = "2026-09-23T00:00:00Z"
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _git_head(root: Path = ROOT) -> str:
+    completed = _git(root, "rev-parse", "HEAD")
+    if completed.returncode != 0 or len(completed.stdout.strip()) != 40:
+        _fail(f"git HEAD unavailable for {root}: {completed.stderr}")
+    return completed.stdout.strip()
+
+
+def _init_repo(path: Path) -> str:
+    path.mkdir(parents=True, exist_ok=True)
+    init = subprocess.run(
+        ["git", "init", "-b", "main", str(path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if init.returncode != 0:
+        _fail(f"git init failed: {init.stderr}")
+    commit = _git(
+        path,
+        "-c",
+        "user.email=telemetry@example.com",
+        "-c",
+        "user.name=Telemetry",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+    )
+    if commit.returncode != 0:
+        _fail(f"git commit failed: {commit.stderr}")
+    return _git_head(path)
 
 
 def _fail(message: str) -> None:
     raise SystemExit(f"FAIL {message}")
 
 
+HEAD = _git_head()
+
+
 def _counts() -> dict[str, int]:
     return {field: 0 for field in telemetry.COUNT_FIELDS}
 
 
-def _validation(outcome: str = "PASS") -> dict:
+def _validation(outcome: str = "PASS", head: str | None = None) -> dict:
     return {
         "ids": ["ENG-TELEMETRY-001"],
-        "exact_head": HEAD,
+        "exact_head": HEAD if head is None else head,
         "evidence_state": "EXACT_HEAD",
         "outcome": outcome,
+    }
+
+
+def _missing_validation() -> dict:
+    return {
+        "ids": ["ENG-TELEMETRY-001"],
+        "exact_head": None,
+        "evidence_state": "MISSING",
+        "outcome": "UNKNOWN",
     }
 
 
@@ -70,6 +125,7 @@ def _record(**overrides):
         budget=budget,
         usage=overrides.pop("usage", None),
         run_id=overrides.pop("run_id", "b" * 32),
+        root=overrides.pop("root", None),
     )
     if overrides:
         _fail(f"unused record overrides: {sorted(overrides)}")
@@ -194,28 +250,89 @@ def test_budget_exhaustion_yields_and_blocks_retries() -> None:
         _fail("exhausted budget did not force BLOCK/YIELD")
 
 
-def test_retention_is_local_bounded_and_gitignored() -> None:
+def _expect_error(code: str, func) -> None:
+    try:
+        func()
+    except telemetry.TelemetryError as exc:
+        if exc.code != code:
+            _fail(f"expected {code} but returned {exc.code}")
+    else:
+        _fail(f"{code} was accepted")
+
+
+def test_exact_head_pass_matches_git() -> None:
+    fake = "f" * 40
+    _expect_error(
+        "EXACT_HEAD_UNVERIFIED",
+        lambda: _record(validation=_validation(head=fake)),
+    )
+    passing = _record()
+    _expect_error(
+        "EXACT_HEAD_UNVERIFIED",
+        lambda: telemetry.build_report([passing], head=fake, evidence_state="EXACT_HEAD"),
+    )
+    mismatched = json.loads(json.dumps(passing))
+    mismatched["validation"]["exact_head"] = fake
+    _expect_error(
+        "EXACT_HEAD_MISMATCH",
+        lambda: telemetry.build_report([mismatched], head=HEAD, evidence_state="EXACT_HEAD"),
+    )
+    _expect_error(
+        "TERMINAL_PASS_REQUIRES_EXACT_HEAD",
+        lambda: _record(validation=_validation("FAIL")),
+    )
+    _expect_error(
+        "TERMINAL_PASS_REQUIRES_EXACT_HEAD",
+        lambda: _record(terminal="PASS", validation=_missing_validation()),
+    )
+    failed = json.loads(json.dumps(passing))
+    failed["validation"]["outcome"] = "FAIL"
+    _expect_error(
+        "TERMINAL_PASS_REQUIRES_EXACT_HEAD",
+        lambda: telemetry.build_report([failed], head=HEAD, evidence_state="EXACT_HEAD"),
+    )
+
+
+def test_nonfinite_numbers_fail_closed() -> None:
+    for value in (float("nan"), float("inf"), float("-inf")):
+        leaked = json.loads(json.dumps(_record()))
+        leaked["usage"]["cost"] = value
+        _expect_error("NONFINITE_NUMBER", lambda leaked=leaked: telemetry.parse_document(leaked))
+    leaked = json.loads(json.dumps(_record()))
+    leaked["usage"]["cost"] = -1
+    _expect_error("NEGATIVE_NUMBER", lambda: telemetry.parse_document(leaked))
+
+
+def test_retention_is_git_local_bounded_and_not_negatable() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        record = _record()
-        try:
-            telemetry.write_record(root, record)
-        except telemetry.TelemetryError as exc:
-            if exc.code != "RETENTION_NOT_GITIGNORED":
-                _fail(f"missing gitignore returned {exc.code}")
-        else:
-            _fail("record was written outside gitignore")
-        (root / ".gitignore").write_text(".engineering/telemetry/\n", encoding="utf-8")
+        _expect_error(
+            "RETENTION_NOT_GIT_LOCAL",
+            lambda: telemetry.write_record(root, _record(terminal="BLOCK", validation=_missing_validation())),
+        )
+        head = _init_repo(root)
+        (root / ".gitignore").write_text(
+            ".engineering/telemetry/\n!.engineering/telemetry/\n!.engineering/telemetry/**\n",
+            encoding="utf-8",
+        )
+        (root / ".engineering" / "telemetry").mkdir(parents=True)
+        record = _record(root=root, validation=_validation(head=head))
         destination = telemetry.write_record(root, record)
         body = destination.read_text(encoding="utf-8")
         if "prompt" in body or "tool_payload" in body or "/home/" in body:
             _fail("persisted record contained prohibited content")
-        if not destination.is_relative_to(root / ".engineering" / "telemetry"):
-            _fail("record escaped the local retention directory")
+        git_dir = telemetry.absolute_git_dir(root)
+        if not destination.is_relative_to(git_dir / "engineering-system" / "telemetry"):
+            _fail("record escaped the git-local retention directory")
+        if destination.is_relative_to(root / ".engineering"):
+            _fail("record was written into the tracked worktree")
+        porcelain = _git(root, "status", "--porcelain", "--untracked-files=all").stdout
+        if destination.name in porcelain:
+            _fail(f"git status exposed generated telemetry: {porcelain}")
         original_max = telemetry.MAX_RECORD_BYTES
         telemetry.MAX_RECORD_BYTES = 10
         try:
-            telemetry.write_record(root, _record(run_id="c" * 32))
+            telemetry.write_record(root, _record(root=root, validation=_validation(head=head), run_id="c" * 32))
         except telemetry.TelemetryError as exc:
             if exc.code != "RETENTION_UNBOUNDED":
                 _fail(f"oversize record returned {exc.code}")
@@ -224,19 +341,47 @@ def test_retention_is_local_bounded_and_gitignored() -> None:
         finally:
             telemetry.MAX_RECORD_BYTES = original_max
         for index in range(telemetry.MAX_RECORDS + 2):
-            written = telemetry.write_record(root, _record(run_id=f"{index:032x}"))
+            written = telemetry.write_record(
+                root,
+                _record(root=root, validation=_validation(head=head), run_id=f"{index:032x}"),
+            )
             os.utime(written, (index + 1, index + 1))
-        kept = list((root / ".engineering" / "telemetry").glob("*.json"))
+        kept = list((git_dir / "engineering-system" / "telemetry").glob("*.json"))
         if len(kept) != telemetry.MAX_RECORDS:
             _fail(f"retention kept {len(kept)} records")
-        (root / ".engineering" / "telemetry" / "DISABLED").write_text("1\n", encoding="utf-8")
+        (git_dir / "engineering-system" / "telemetry" / "DISABLED").write_text("1\n", encoding="utf-8")
         try:
-            telemetry.write_record(root, _record(run_id="d" * 32))
+            telemetry.write_record(root, _record(root=root, validation=_validation(head=head), run_id="d" * 32))
         except telemetry.TelemetryError as exc:
             if exc.code != "TELEMETRY_DISABLED":
                 _fail(f"disabled telemetry returned {exc.code}")
         else:
             _fail("disabled telemetry still wrote a record")
+
+
+def test_linked_worktrees_keep_distinct_git_local_retention() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        parent = Path(tmp)
+        origin = parent / "origin"
+        head = _init_repo(origin)
+        worktree = parent / "linked"
+        added = _git(origin, "worktree", "add", "--detach", str(worktree), "HEAD")
+        if added.returncode != 0:
+            _fail(f"worktree add failed: {added.stderr}")
+        origin_record = telemetry.write_record(
+            origin,
+            _record(root=origin, validation=_validation(head=head), run_id="1" * 32),
+        )
+        linked_record = telemetry.write_record(
+            worktree,
+            _record(root=worktree, validation=_validation(head=head), run_id="2" * 32),
+        )
+        if origin_record.parent == linked_record.parent:
+            _fail("linked worktrees shared one telemetry directory")
+        for repo, destination in ((origin, origin_record), (worktree, linked_record)):
+            porcelain = _git(repo, "status", "--porcelain", "--untracked-files=all").stdout
+            if destination.name in porcelain:
+                _fail(f"linked worktree exposed telemetry: {porcelain}")
 
 
 def test_report_keeps_exact_head_and_unknown_cost() -> None:
@@ -253,7 +398,7 @@ def test_report_keeps_exact_head_and_unknown_cost() -> None:
     try:
         telemetry.build_report([passing], head="b" * 40, evidence_state="EXACT_HEAD")
     except telemetry.TelemetryError as exc:
-        if exc.code != "EXACT_HEAD_MISMATCH":
+        if exc.code != "EXACT_HEAD_UNVERIFIED":
             _fail(f"head mismatch returned {exc.code}")
     else:
         _fail("mismatched exact head was reported as EXACT_HEAD")
@@ -267,7 +412,7 @@ def test_behavior_rollout_gate_includes_efficiency_contract() -> None:
         _fail(f"canonical contract regressed: {behavior_eval.efficiency_contract_reasons(ROOT)}")
     with tempfile.TemporaryDirectory() as tmp:
         reasons = behavior_eval.efficiency_contract_reasons(Path(tmp))
-        if "EFFICIENCY_CONTRACT_REGRESSION" not in reasons or "RETENTION_NOT_IGNORED" not in reasons:
+        if "EFFICIENCY_CONTRACT_REGRESSION" not in reasons or "RETENTION_NOT_GIT_LOCAL" not in reasons:
             _fail(f"incomplete repository did not fail closed: {reasons}")
     catalog = behavior_eval.load_catalog()
     document = {
@@ -293,6 +438,37 @@ def test_behavior_rollout_gate_includes_efficiency_contract() -> None:
         _fail(f"healthy efficiency contract blocked behavior rollout: {gate['reasons']}")
 
 
+def test_validate_record_cli_rejects_fake_exact_head() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        fake = json.loads(json.dumps(_record()))
+        fake["validation"]["exact_head"] = "f" * 40
+        fake_path = directory / "fake.json"
+        fake_path.write_text(json.dumps(fake), encoding="utf-8")
+        rejected = subprocess.run(
+            ["python3", str(TOOL), "validate-record", "--record", str(fake_path), "--root", str(ROOT)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if rejected.returncode == 0 or "EXACT_HEAD_UNVERIFIED" not in rejected.stdout:
+            _fail(f"fake exact-head PASS was accepted: {rejected.stdout} {rejected.stderr}")
+        real_path = directory / "real.json"
+        real_path.write_text(json.dumps(_record()), encoding="utf-8")
+        accepted = subprocess.run(
+            ["python3", str(TOOL), "validate-record", "--record", str(real_path), "--root", str(ROOT)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if accepted.returncode != 0:
+            _fail(f"git-matching exact-head record was rejected: {accepted.stdout} {accepted.stderr}")
+
+
 def test_gate_command_passes_offline() -> None:
     completed = subprocess.run(
         ["python3", str(TOOL), "gate"],
@@ -316,8 +492,12 @@ def main() -> None:
     test_missing_usage_stays_null()
     test_profile_switch_requires_justification()
     test_budget_exhaustion_yields_and_blocks_retries()
-    test_retention_is_local_bounded_and_gitignored()
+    test_exact_head_pass_matches_git()
+    test_nonfinite_numbers_fail_closed()
+    test_retention_is_git_local_bounded_and_not_negatable()
+    test_linked_worktrees_keep_distinct_git_local_retention()
     test_report_keeps_exact_head_and_unknown_cost()
+    test_validate_record_cli_rejects_fake_exact_head()
     test_behavior_rollout_gate_includes_efficiency_contract()
     test_gate_command_passes_offline()
     print("PASS efficiency telemetry")

@@ -180,5 +180,5 @@ scenarios:
     platforms: [linux]
     command: "python3 tools/test_efficiency_telemetry.py"
     invariants:
-      - "telemetry stays local and content-free, and budget exhaustion yields instead of retrying"
+      - "telemetry stays in git-local content-free state, exact-head PASS matches Git, and budget exhaustion yields instead of retrying"
     release_gate: true

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
@@ -18,8 +20,9 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "schemas" / "efficiency-telemetry.schema.json"
-RETENTION_REL = ".engineering/telemetry/"
+GIT_RETENTION_PARTS = ("engineering-system", "telemetry")
 DISABLED_NAME = "DISABLED"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MAX_RECORDS = 32
 MAX_RECORD_BYTES = 4096
 PROFILE_FIELDS = ("provider", "model", "reasoning", "toolset")
@@ -77,8 +80,8 @@ PROHIBITED_KEYS = frozenset(
 )
 SECRET_VALUE_RE = re.compile(r"(?:^|[^A-Za-z0-9])(?:sk-|ghp_|github_pat_|AKIA|Bearer |-----BEGIN)")
 CONTRACT_TOKENS = (
-    ".engineering/telemetry/",
-    "gitignored",
+    "engineering-system/telemetry/",
+    "absolute-git-dir",
     "Do not estimate",
     "YIELD",
     "fail closed",
@@ -116,10 +119,28 @@ def _reject_prohibited(value: Any) -> None:
             raise TelemetryError("PROHIBITED_SECRET")
 
 
+def _reject_nonfinite(value: Any) -> None:
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise TelemetryError("NONFINITE_NUMBER")
+        if value < 0:
+            raise TelemetryError("NEGATIVE_NUMBER")
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _reject_nonfinite(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_nonfinite(item)
+
+
 def parse_document(instance: Any) -> dict[str, Any]:
     if not isinstance(instance, dict):
         raise TelemetryError("SCHEMA_INVALID")
     _reject_prohibited(instance)
+    _reject_nonfinite(instance)
     if any(True for _ in _validator().iter_errors(instance)):
         raise TelemetryError("SCHEMA_INVALID")
     kind = instance.get("kind")
@@ -134,6 +155,13 @@ def _enforce_record(record: dict[str, Any]) -> None:
     validation = record["validation"]
     if validation["evidence_state"] == "EXACT_HEAD" and not validation["exact_head"]:
         raise TelemetryError("EXACT_HEAD_REQUIRED")
+    if record["terminal"] == "PASS":
+        if (
+            validation["outcome"] != "PASS"
+            or validation["evidence_state"] != "EXACT_HEAD"
+            or not validation["exact_head"]
+        ):
+            raise TelemetryError("TERMINAL_PASS_REQUIRES_EXACT_HEAD")
     _enforce_budget_shape(record["budget"], record["terminal"])
 
 
@@ -299,6 +327,7 @@ def build_record(
     budget: TaskBudget | dict[str, Any],
     usage: dict[str, Any] | None = None,
     run_id: str | None = None,
+    root: Path | None = None,
 ) -> dict[str, Any]:
     if isinstance(profile, SessionProfile):
         profile_doc = dict(profile.current)
@@ -327,39 +356,103 @@ def build_record(
         "terminal": terminal,
         "budget": budget_doc,
     }
-    return parse_document(record)
+    parsed = parse_document(record)
+    _verify_exact_head(ROOT if root is None else root, parsed)
+    return parsed
 
 
-def retention_ignored(root: Path) -> bool:
-    path = root / ".gitignore"
-    if not path.is_file():
-        return False
-    wanted = {RETENTION_REL, RETENTION_REL.rstrip("/")}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip() in wanted:
-            return True
-    return False
+def _git_output(root: Path, *args: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL") from exc
+    if completed.returncode != 0:
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL")
+    return completed.stdout.strip()
+
+
+def git_head(root: Path) -> str:
+    try:
+        head = _git_output(root, "rev-parse", "HEAD")
+    except TelemetryError as exc:
+        raise TelemetryError("EXACT_HEAD_UNVERIFIED") from exc
+    if not SHA_RE.fullmatch(head):
+        raise TelemetryError("EXACT_HEAD_UNVERIFIED")
+    return head
+
+
+def absolute_git_dir(root: Path) -> Path:
+    raw = _git_output(root, "rev-parse", "--absolute-git-dir")
+    git_dir = Path(raw).resolve()
+    if not git_dir.is_dir():
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL")
+    return git_dir
+
+
+def retention_directory(root: Path, *, create: bool = False) -> Path:
+    git_dir = absolute_git_dir(root)
+    directory = git_dir.joinpath(*GIT_RETENTION_PARTS)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
+    resolved = directory.resolve()
+    if not resolved.is_relative_to(git_dir):
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL")
+    return resolved
+
+
+def _verify_exact_head(root: Path, record: dict[str, Any]) -> None:
+    if record.get("kind") != "efficiency-telemetry":
+        return
+    validation = record["validation"]
+    if record["terminal"] != "PASS" and validation["evidence_state"] != "EXACT_HEAD":
+        return
+    claimed = validation.get("exact_head")
+    if not isinstance(claimed, str) or claimed != git_head(root):
+        raise TelemetryError("EXACT_HEAD_UNVERIFIED")
+
+
+def _porcelain(root: Path) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL") from exc
+    if completed.returncode != 0:
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL")
+    return completed.stdout
 
 
 def telemetry_enabled(root: Path) -> bool:
-    return not (root / ".engineering" / "telemetry" / DISABLED_NAME).is_file()
+    return not (retention_directory(root) / DISABLED_NAME).is_file()
 
 
 def write_record(root: Path, record: dict[str, Any]) -> Path:
     record = parse_document(record)
     if record.get("kind") != "efficiency-telemetry":
         raise TelemetryError("SCHEMA_INVALID")
-    if not retention_ignored(root):
-        raise TelemetryError("RETENTION_NOT_GITIGNORED")
+    _verify_exact_head(root, record)
     if not telemetry_enabled(root):
         raise TelemetryError("TELEMETRY_DISABLED")
-    directory = root / ".engineering" / "telemetry"
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = retention_directory(root, create=True)
     encoded = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     if len(encoded) > MAX_RECORD_BYTES:
         raise TelemetryError("RETENTION_UNBOUNDED")
     destination = directory / f"{record['run_id']}.json"
     destination.write_bytes(encoded)
+    if destination.name in _porcelain(root) or not destination.resolve().is_relative_to(absolute_git_dir(root)):
+        destination.unlink(missing_ok=True)
+        raise TelemetryError("RETENTION_NOT_GIT_LOCAL")
     files = sorted(directory.glob("*.json"), key=lambda item: (item.stat().st_mtime, item.name))
     while len(files) > MAX_RECORDS:
         files.pop(0).unlink()
@@ -376,15 +469,26 @@ def _worst(statuses: list[str]) -> str:
     return "PASS"
 
 
-def build_report(records: list[dict[str, Any]], *, head: str, evidence_state: str) -> dict[str, Any]:
+def build_report(
+    records: list[dict[str, Any]],
+    *,
+    head: str,
+    evidence_state: str,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    root = ROOT if root is None else root
     parsed = [parse_document(record) for record in records]
     if not parsed:
         raise TelemetryError("REPORT_EMPTY")
     if evidence_state == "EXACT_HEAD":
+        actual = git_head(root)
+        if head != actual:
+            raise TelemetryError("EXACT_HEAD_UNVERIFIED")
         for record in parsed:
             validation = record["validation"]
-            if validation["evidence_state"] != "EXACT_HEAD" or validation["exact_head"] != head:
+            if validation["evidence_state"] != "EXACT_HEAD" or validation["exact_head"] != actual:
                 raise TelemetryError("EXACT_HEAD_MISMATCH")
+            _verify_exact_head(root, record)
     costs = [record["usage"]["cost"] for record in parsed]
     durations = [record["duration_seconds"] for record in parsed]
     rework = 0
@@ -406,6 +510,10 @@ def build_report(records: list[dict[str, Any]], *, head: str, evidence_state: st
         "rework_count": rework,
         "human_interventions": humans,
     }
+    if report["terminal"] == "PASS" and (
+        evidence_state != "EXACT_HEAD" or report["validation_outcome"] != "PASS" or head != git_head(root)
+    ):
+        raise TelemetryError("TERMINAL_PASS_REQUIRES_EXACT_HEAD")
     return parse_document(report)
 
 
@@ -447,19 +555,10 @@ def contract_reasons(root: Path) -> list[str]:
     else:
         if any(token not in text for token in CONTRACT_TOKENS):
             reasons.append("EFFICIENCY_CONTRACT_REGRESSION")
-    ignore_targets = (
-        root / ".gitignore",
-        root / ".cursorignore",
-        root / "templates" / ".cursorignore",
-    )
-    for path in ignore_targets:
-        try:
-            body = path.read_text(encoding="utf-8")
-        except OSError:
-            reasons.append("RETENTION_NOT_IGNORED")
-            continue
-        if RETENTION_REL not in body:
-            reasons.append("RETENTION_NOT_IGNORED")
+    try:
+        retention_directory(root)
+    except TelemetryError:
+        reasons.append("RETENTION_NOT_GIT_LOCAL")
     return list(dict.fromkeys(reasons))
 
 
@@ -473,6 +572,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("gate")
     validate = sub.add_parser("validate-record")
     validate.add_argument("--record", type=Path, required=True)
+    validate.add_argument("--root", type=Path, default=ROOT)
     report = sub.add_parser("report")
     report.add_argument("--root", type=Path, default=ROOT)
     report.add_argument("--head", required=True)
@@ -486,11 +586,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if status == "PASS" else 1
         if args.command == "validate-record":
             instance = json.loads(args.record.read_text(encoding="utf-8"))
-            _emit(parse_document(instance))
+            parsed = parse_document(instance)
+            _verify_exact_head(args.root, parsed)
+            _emit(parsed)
             return 0
-        directory = args.root / ".engineering" / "telemetry"
+        directory = retention_directory(args.root)
         records = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.json"))]
-        _emit(build_report(records, head=args.head, evidence_state=args.evidence_state))
+        _emit(build_report(records, head=args.head, evidence_state=args.evidence_state, root=args.root))
         return 0
     except TelemetryError as exc:
         print(f"FAIL {exc.code}")

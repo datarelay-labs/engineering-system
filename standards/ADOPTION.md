@@ -113,7 +113,7 @@ python tools/adopt.py \
 
 The tool installs only missing generated surfaces by default. It does not overwrite existing project files.
 
-New adoptions also install a conservative `.cursorignore` for dependency/cache/build noise. Existing project `.cursorignore` content is preserved and is never overwritten by managed upgrade. Test scenarios may declare optional `cost`, `estimated_seconds`, `timeout_seconds`, `agent_default`, and `scope` metadata so agents can choose the cheapest safe check deterministically; older manifests remain valid and use conservative level-based cost inference.
+New adoptions also install a conservative `.cursorignore` for dependency/cache/build noise. Existing project `.cursorignore` content is preserved and is never overwritten by managed upgrade. Efficiency telemetry is stored under the adopted repository Git directory (`engineering-system/telemetry/` inside `git rev-parse --absolute-git-dir`), so adoption does not rewrite `.gitignore` to create that boundary. Test scenarios may declare optional `cost`, `estimated_seconds`, `timeout_seconds`, `agent_default`, and `scope` metadata so agents can choose the cheapest safe check deterministically; older manifests remain valid and use conservative level-based cost inference.
 
 For repositories with a known release qualification command, also provide `--release-command`. Provide `--preflight-command` only when the command is a genuinely cheap deterministic release blocker.
 
