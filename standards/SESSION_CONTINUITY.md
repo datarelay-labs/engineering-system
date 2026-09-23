@@ -263,6 +263,47 @@ Never-adopted repositories may continue under the canonical default. Incomplete 
 
 The Work Packet replaces a large handoff; it must not become another large handoff.
 
+## Sufficiency gate and anti-rabbit-hole rule
+
+A Work Packet is not permission to keep improving the same area indefinitely. The coordinator must stop the current workstream when its declared completion contract is satisfied and no known blocking finding remains.
+
+For implementation, hardening, audit, refactor, cleanup, and optimization work:
+
+1. Define the **finish line before deep execution**: required behavior, verification surface, prohibited regressions, and the risk/finding classes that are blocking for this packet.
+2. After each implementation/audit cycle, classify new findings:
+   - **BLOCKING** — violates the completion contract, proves an exploitable/security-boundary failure, data-loss/corruption risk, public-contract regression, mandatory CI/release gate failure, or another explicitly declared packet invariant. Keep it in the active packet.
+   - **FOLLOW_UP** — defense-in-depth, hypothetical hardening without a demonstrated path, cleanup, consistency improvement, optional optimization, or independently releasable work. Record it durably and do not keep the current packet open for it.
+3. Once required evidence passes and no BLOCKING finding remains, mark the packet complete. Do not continue speculative auditing merely because additional improvements are imaginable.
+4. A new audit round after sufficiency requires a new explicit trigger: a regression/failing oracle, incident evidence, a newly demonstrated exploit/path, a release requirement, or an explicit owner request.
+5. Completion of one workstream returns control to roadmap/portfolio priority. Do not immediately reopen the same theme merely because its follow-up backlog is non-empty.
+
+### Default depth budget
+
+Use a soft default for ordinary bounded work:
+
+```text
+implementation -> independent audit -> corrective pass when needed -> verification -> stop
+```
+
+One implementation pass, one independent audit, and at most one ordinary corrective re-audit is the normal depth target. This is a **portfolio/attention budget**, not a safety waiver.
+
+- If the corrective re-audit finds no BLOCKING defect, stop and route remaining findings to follow-up work.
+- If a BLOCKING defect remains, continue only far enough to close that known blocker and verify its regression; do not restart an open-ended search for unrelated weaknesses in the same packet.
+- Critical security, data-integrity, incident, or release-blocking evidence may exceed the soft depth budget, but the exception must name the concrete blocker. “More hardening may exist” is not sufficient.
+- A packet that repeatedly discovers non-blocking improvements has reached diminishing returns for the current scope.
+
+Recommended packet evidence:
+
+```text
+DEPTH_BUDGET=NORMAL
+AUDIT_ROUNDS_USED=1
+BLOCKING_FINDINGS=0
+FOLLOW_UP_FINDINGS=2
+STOP_DECISION=SUFFICIENCY_REACHED
+```
+
+The purpose is to optimize the whole engineering portfolio, not to maximize perfection in whichever subsystem was most recently inspected.
+
 ## Retry and stall circuit breaker
 
 Repeated attempts are not progress by themselves.
