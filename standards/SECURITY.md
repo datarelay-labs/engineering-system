@@ -82,4 +82,3 @@ Efficiency telemetry is not a security audit log. Where agent actions cross mean
 - timestamp and terminal outcome.
 
 Do not retain raw secrets, private keys, unrestricted tool payloads, or full conversation content by default. Audit retention and access should match project risk.
-
