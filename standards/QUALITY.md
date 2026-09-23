@@ -57,6 +57,17 @@ Applicable user-facing products must test success paths plus misuse and recovery
 - stale/generated guidance
 - cross-output consistency
 
+## Architecture and quality entropy
+
+Higher agent throughput must not be allowed to multiply local inconsistencies.
+
+For repositories with meaningful architectural boundaries:
+- encode important layering/dependency/public-boundary invariants as deterministic checks when practical;
+- prefer existing canonical abstractions over near-duplicate helpers/frameworks;
+- treat repeated exceptions, duplicated patterns, boundary violations, and stale compatibility shims as quality debt;
+- periodically convert accumulated drift into small, targeted cleanup Work Packets/PRs rather than mixing broad cleanup into feature work;
+- do not use generated LOC or number of cleanups as the quality metric; use reduced violations, rework, regressions, and review friction.
+
 ## Performance and resilience
 
 Use:

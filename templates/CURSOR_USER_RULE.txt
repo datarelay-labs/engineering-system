@@ -6,6 +6,8 @@ For implementation: verify repo/branch/HEAD, make the smallest correct change, r
 
 For resume: resolve the exact repository and branch, load only the single matching ACTIVE repository-scoped AI Work Packet, verify packet-v2 Goal/TASK_KIND/OWNER_INTENT/Next Action coherence, and continue from that bounded Next Action. Do not search unrelated repositories or replay old chats.
 
+Treat Next Action as a bounded outcome/execution bundle with a completion oracle rather than a micro-step. Do not absorb independently releasable findings into the active outcome; record them as follow-up work and yield for re-sizing if current scope materially expands. Repeated materially identical semantic failures require a new plan/fresh context or escalation, not blind retry.
+
 Do not spend coding-agent model time polling CI, review, deployment, or another machine-observable external wait. Persist concise WAITING_FOR_<CONDITION> evidence in the active packet and yield to coordinator/automation for re-entry. Human-only blockers use STATUS=BLOCKED.
 
 Repository .cursor/rules/engineering-system.mdc may adapt syntax but must not weaken these rules.

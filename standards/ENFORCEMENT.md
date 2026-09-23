@@ -38,6 +38,19 @@ Read only when relevant:
 
 Do not preload every standard, Wiki page, archive, or historical discussion.
 
+## Agent-facing tool contract
+
+Tools intended for AI agents should be designed for reliable selection and bounded context use:
+
+- give tools clear, non-overlapping purposes and stable names/namespaces;
+- prefer typed/machine-readable inputs and stable machine-readable error reasons;
+- default to bounded output with filters, range selection, pagination, or concise summaries;
+- retain a deterministic path to retrieve fuller/raw evidence when needed;
+- avoid exposing broad tool/MCP surfaces when the current task needs only a small subset;
+- treat tool-selection success and task completion as quality signals, not API success alone.
+
+Do not add another tool when an existing task-relevant tool already provides the same authority and oracle.
+
 ## Repository entrypoint
 
 Every adopted repository must contain:

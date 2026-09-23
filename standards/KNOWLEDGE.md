@@ -72,6 +72,18 @@ Escalation requires recorded evidence:
 
 Invalid signals fail closed with `RETRIEVAL=BLOCKED`.
 
+## Canonical exemplar hygiene
+
+Agents learn from repository examples as well as prose. Do not let legacy/generated/deprecated code become an accidental design authority.
+
+For complex repositories where imitation risk is material:
+- point knowledge/index/navigation to representative canonical implementations when practical;
+- mark generated, vendored, deprecated, migration-only, or intentionally legacy areas so they are not treated as preferred examples;
+- when multiple patterns coexist, identify the current preferred contract rather than forcing the agent to infer it from frequency;
+- remove or update stale exemplar references when the preferred architecture changes.
+
+This is routing metadata, not permission to duplicate implementation documentation or load exemplar code into every task.
+
 ## Documentation triggers
 
 Update durable documentation when a change alters:
