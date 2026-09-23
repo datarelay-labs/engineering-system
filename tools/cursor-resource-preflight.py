@@ -36,11 +36,12 @@ ALLOWED_OVERRIDE_KEYS = frozenset(
 KNOWN_PROFILES = frozenset({"large", "medium", "small"})
 PERSIST_HEADER_RE = re.compile(r"(?m)^(\d+) persistent sessions?:")
 PERSIST_SESSION_RE = re.compile(r"(?m)^[ \t]*Session:[ \t]*\S+")
-# Accept only known empty-state wordings: legacy "no persistent sessions" and
-# current CLI "No Cursor-managed persistent sessions." Unexpected tokens between
-# "no" and "persistent sessions" remain unparseable.
+# Accept only known empty-state lines: legacy "no persistent sessions" and
+# current CLI "No Cursor-managed persistent sessions." Optional surrounding
+# horizontal whitespace, case, and a final period are allowed; substring /
+# prefixed / suffixed variants on the same line remain unparseable.
 NO_SESSIONS_RE = re.compile(
-    r"(?i)\bno(?:[ \t]+cursor-managed)?[ \t]+persistent sessions\b"
+    r"(?im)^[ \t]*no(?:[ \t]+cursor-managed)?[ \t]+persistent sessions\.?[ \t]*$"
 )
 REPORT_KEYS = (
     "RESULT",
