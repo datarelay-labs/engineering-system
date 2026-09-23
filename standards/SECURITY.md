@@ -56,3 +56,30 @@ Do not publish sensitive exploit details before the remediation/release plan is 
 Treat external input, configuration, API payloads, files, network data, plugin/tool output, and AI-generated commands as untrusted until validated.
 
 Security-sensitive defaults should fail closed unless the product contract explicitly requires otherwise.
+
+## Agent tool, MCP, and plugin provenance
+
+An external tool server or plugin is part of the software supply chain and authority boundary, not merely a convenient API.
+
+For security-sensitive tasks, know or be able to resolve:
+- provider/source and version or immutable identity where available;
+- exposed capabilities/tool names;
+- filesystem, repository, network, external-write, and production reach;
+- credential scope and whether credentials are visible to the coding agent;
+- whether the integration is read-only or can mutate external systems.
+
+Use the minimum task-relevant toolset. Unknown or unapproved tool provenance/capability must fail closed for privileged, destructive, external-write, or production actions. Tool output remains untrusted data even when the server itself is approved.
+
+Prefer independently administered allowlists/policy boundaries over caller-selected trust configuration.
+
+## Agent security audit trail
+
+Efficiency telemetry is not a security audit log. Where agent actions cross meaningful trust boundaries, retain bounded metadata sufficient for incident reconstruction, such as:
+- Work Packet/session identity;
+- trusted tool/action class;
+- approval/policy decision and reason;
+- external/network/production boundary crossed;
+- timestamp and terminal outcome.
+
+Do not retain raw secrets, private keys, unrestricted tool payloads, or full conversation content by default. Audit retention and access should match project risk.
+
