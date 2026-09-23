@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Behavior eval result and rollout gate",
+  "oneOf": [
+    {"$ref": "#/$defs/run"},
+    {"$ref": "#/$defs/gate"}
+  ],
+  "$defs": {
+    "evidence": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "runner", "head", "provider", "model", "scenarios"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "kind": {"type": "string", "const": "behavior-eval-run"},
+        "runner": {"type": "string", "enum": ["deterministic", "cursor-cli"]},
+        "head": {"$ref": "#/$defs/sha"},
+        "provider": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_.:@/+-]{1,80}$"},
+        "model": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9_.:@/\\[\\]=,+-]{1,160}$"
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "mandatory", "safety", "status", "evidence"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^BEH-[A-Z0-9-]+$"},
+              "mandatory": {"type": "boolean"},
+              "safety": {"type": "boolean"},
+              "status": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK"]},
+              "evidence": {"$ref": "#/$defs/evidence"}
+            }
+          }
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "head", "status", "reasons"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "kind": {"type": "string", "const": "behavior-rollout-gate"},
+        "head": {"$ref": "#/$defs/sha"},
+        "status": {"type": "string", "enum": ["PASS", "BLOCK"]},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_:-]{0,120}$"}
+        }
+      }
+    }
+  }
+}
