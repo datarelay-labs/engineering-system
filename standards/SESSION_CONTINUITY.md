@@ -77,6 +77,19 @@ SIZING_REASON=Same subsystem and validation oracle; one independently verifiable
 
 The goal is a **medium-sized, coherent, independently verifiable handoff**: large enough to avoid handoff/review overhead, small enough to complete implementation plus deterministic validation in one bounded session.
 
+### Initial sizing calibration
+
+Use these as **soft operating defaults**, not hard limits. Structural coupling and a clear completion oracle override raw counts.
+
+- Preferred center: roughly **one hour of competent human engineering work** for the primary outcome.
+- Initial `KEEP` band: roughly **30–120 minutes human-equivalent effort**, one logical outcome, and one coherent validation plan.
+- A change of **a few hundred hand-written lines** is normally still in the target zone when it stays within one outcome. Generated files, lockfiles, snapshots, and mechanical propagation do not determine size by themselves.
+- `BATCH` when a task is materially below that band and adjacent findings share the same subsystem, implementation context, and validation oracle. GitHub Issue count is not a sizing metric; one handoff may reference several small Issues.
+- `SPLIT` when the work is likely to exceed roughly two hours of human-equivalent effort, contains multiple independent outcomes/rollback boundaries, or would consume the useful agent context before targeted validation and review can finish.
+- During execution, if context usage is already high and a distinct implementation subgoal remains, persist the verified state and continue that subgoal in a fresh bounded session rather than forcing the original session through compaction/noise. Finishing the current tightly coupled validation step is preferred over splitting in the middle of an atomic check.
+
+These values are calibration defaults, not universal constants. P0/P1 efficiency telemetry should measure rework, validation failures, context pressure, and handoff overhead; revise the band from observed outcomes rather than increasing task size merely because a model can technically run longer.
+
 ## Required identity fields
 
 Every packet body begins with:
