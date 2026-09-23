@@ -250,6 +250,15 @@ def test_parse_persist_list_accepts_cursor_managed_zero_session_wording() -> Non
     assert preflight.parse_persist_list("0 persistent sessions:\n") == 0
 
 
+def test_parse_persist_list_rejects_unexpected_zero_session_variant() -> None:
+    try:
+        preflight.parse_persist_list("No unexpected words persistent sessions.\n")
+    except preflight.PreflightFailure as exc:
+        assert "unparseable" in str(exc)
+    else:
+        raise AssertionError("unexpected zero-session variant was accepted")
+
+
 def test_parse_persist_list_rejects_no_session_text_with_session_rows() -> None:
     contradictory = "No Cursor-managed persistent sessions.\n  Session: cursor-test-0\n"
     try:
@@ -351,6 +360,7 @@ def main() -> int:
     test_impossible_override_fails_closed()
     test_unparseable_persist_list_fails_closed()
     test_parse_persist_list_accepts_cursor_managed_zero_session_wording()
+    test_parse_persist_list_rejects_unexpected_zero_session_variant()
     test_parse_persist_list_rejects_no_session_text_with_session_rows()
     test_missing_agent_fails_closed_without_stopping_sessions()
     test_tool_never_encodes_session_mutation()
