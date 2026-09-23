@@ -57,6 +57,16 @@ Applicable user-facing products must test success paths plus misuse and recovery
 - stale/generated guidance
 - cross-output consistency
 
+## Bounded hardening and audit depth
+
+Security, reliability, quality, and architecture can always be improved further. A quality process therefore needs a stopping rule as well as a defect-finding rule.
+
+- Translate open-ended requests such as “harden this,” “audit everything,” or “make it robust” into a finite threat/risk surface and explicit completion contract before implementation.
+- Required risk classes and known concrete failures belong in the current packet; speculative defense-in-depth and optional improvements become follow-up work once the required oracle is green.
+- Do not treat the number of newly discovered low-severity opportunities as evidence that the current packet should remain active forever.
+- After the completion contract passes and an independent review finds no blocking defect, additional broad/deeper audit is a new scope decision.
+- Apply the sufficiency/depth-budget contract in `SESSION_CONTINUITY.md`; exceptions require concrete safety, data-integrity, incident, or release-blocking evidence.
+
 ## Architecture and quality entropy
 
 Higher agent throughput must not be allowed to multiply local inconsistencies.
