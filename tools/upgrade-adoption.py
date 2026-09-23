@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from adopt import (
+    KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
     canonical_baseline,
     canonical_version,
@@ -293,6 +294,40 @@ def apply_cursor_resume_adapters(root: Path, planned: dict[str, str]) -> list[st
 def sync_cursor_resume_adapters(root: Path) -> list[str]:
     """Compatibility wrapper for callers outside the upgrade transaction."""
     return apply_cursor_resume_adapters(root, plan_cursor_resume_adapters(root))
+
+
+def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
+    """Install the optional knowledge-contract helper only when the path is missing.
+
+    Identical canonical copies are left unchanged. A different existing file fails
+    closed before any upgrade mutation. `.engineering/knowledge.yaml` is not created.
+    """
+    planned: dict[str, str] = {}
+    for rel in KNOWLEDGE_CONTRACT_MANAGED:
+        source = CANONICAL / rel
+        if not source.is_file():
+            raise SystemExit(f"FAIL canonical {rel} missing")
+        text = source.read_text(encoding="utf-8")
+        path = root / rel
+        if not path.exists():
+            planned[rel] = text
+            continue
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
+    return planned
+
+
+def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
 
 def _span_covered(span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
     start, end = span
@@ -620,6 +655,7 @@ def main() -> int:
     planned_cursor_rule = plan_cursor_rule_update(root)
     planned_cursorignore = plan_cursorignore_install(root)
     planned_resume_adapters = plan_cursor_resume_adapters(root)
+    planned_knowledge_contract = plan_knowledge_contract_install(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -639,6 +675,12 @@ def main() -> int:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=" + ",".join(synced_adapters))
     else:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=<none>")
+
+    installed_knowledge = apply_knowledge_contract_install(root, planned_knowledge_contract)
+    if installed_knowledge:
+        print("KNOWLEDGE_CONTRACT_INSTALLED=" + ",".join(installed_knowledge))
+    else:
+        print("KNOWLEDGE_CONTRACT_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:

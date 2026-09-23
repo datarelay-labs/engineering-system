@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -744,6 +745,200 @@ def test_stale_outside_form_declaration_fails_without_partial_upgrade() -> None:
         assert _managed_upgrade_file_snapshot(target) == before
 
 
+def knowledge_instructions(agents_text: str) -> tuple[str, str]:
+    commands = re.findall(r"`(python3 tools/knowledge-contract\.py [^`]*)`", agents_text)
+    assert commands == [
+        "python3 tools/knowledge-contract.py check",
+        "python3 tools/knowledge-contract.py route",
+    ]
+    return commands[0], commands[1]
+
+
+def run_knowledge_instruction(root: Path, command: str) -> subprocess.CompletedProcess[str]:
+    parts = command.split()
+    assert parts[0] == "python3"
+    parts[0] = sys.executable
+    return run(*parts, cwd=root, check=False)
+
+
+def assert_installed_knowledge_contract(root: Path) -> None:
+    for rel in ("tools/knowledge-contract.py", "schemas/knowledge-index.schema.json"):
+        assert (root / rel).read_text(encoding="utf-8") == (ROOT / rel).read_text(encoding="utf-8"), rel
+    assert not (root / ".engineering" / "knowledge.yaml").exists()
+
+
+def assert_absent_index_instructions(root: Path) -> None:
+    check_cmd, route_cmd = knowledge_instructions((root / "AGENTS.md").read_text(encoding="utf-8"))
+    checked = run_knowledge_instruction(root, check_cmd)
+    assert checked.returncode == 0, checked.stdout
+    assert "KNOWLEDGE_INDEX=ABSENT" in checked.stdout
+    assert "RESULT=PASS" in checked.stdout
+    routed = run_knowledge_instruction(root, route_cmd)
+    assert routed.returncode == 0, routed.stdout
+    assert "RETRIEVAL=LOCAL" in routed.stdout
+    assert not (root / ".engineering" / "knowledge.yaml").exists()
+
+
+def test_optional_knowledge_contract_adoption_and_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-knowledge"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/knowledge\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert_installed_knowledge_contract(target)
+        assert_absent_index_instructions(target)
+
+        for rel in ("tools/knowledge-contract.py", "schemas/knowledge-index.schema.json"):
+            (target / rel).unlink()
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "drop knowledge contract before upgrade")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert (
+            "KNOWLEDGE_CONTRACT_INSTALLED=tools/knowledge-contract.py,schemas/knowledge-index.schema.json"
+            in upgraded.stdout
+        )
+        assert_installed_knowledge_contract(target)
+        assert_absent_index_instructions(target)
+
+        (target / "docs").mkdir()
+        (target / "docs" / "NOTE.md").write_text("canonical\n", encoding="utf-8")
+        index = {
+            "version": 1,
+            "domains": [
+                {"id": "core", "summary": "Product note.", "canonical": ["docs/NOTE.md"]},
+            ],
+        }
+        (target / ".engineering" / "knowledge.yaml").write_text(
+            yaml.safe_dump(index, sort_keys=False),
+            encoding="utf-8",
+        )
+        check_cmd, _route_cmd = knowledge_instructions((target / "AGENTS.md").read_text(encoding="utf-8"))
+        present = run_knowledge_instruction(target, check_cmd)
+        assert present.returncode == 0, present.stdout
+        assert "KNOWLEDGE_INDEX=PRESENT" in present.stdout
+        assert "RESULT=PASS" in present.stdout
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-knowledge"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-knowledge\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        custom = "#!/usr/bin/env python3\nprint('custom')\n"
+        (target / "tools" / "knowledge-contract.py").write_text(custom, encoding="utf-8")
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "custom knowledge contract")
+        before = _managed_upgrade_file_snapshot(target)
+        before_tool = (target / "tools" / "knowledge-contract.py").read_bytes()
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/knowledge-contract.py contains local/custom changes" in failed.stdout
+        assert _managed_upgrade_file_snapshot(target) == before
+        assert (target / "tools" / "knowledge-contract.py").read_bytes() == before_tool
+        assert not (target / ".engineering" / "knowledge.yaml").exists()
+
+
+def test_preexisting_custom_knowledge_contract_fails_closed_before_bootstrap() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-bootstrap"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-bootstrap\n\ngo 1.23\n", encoding="utf-8")
+        tool = target / "tools" / "knowledge-contract.py"
+        tool.parent.mkdir()
+        tool.write_text("#!/usr/bin/env python3\nraise SystemExit(7)\n", encoding="utf-8")
+        commit_all(target)
+        failed = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/knowledge-contract.py contains local/custom changes" in failed.stdout
+        assert "ADOPTION_BOOTSTRAP=PASS" not in failed.stdout
+        assert run("git", "status", "--porcelain", cwd=target).stdout == ""
+        assert not (target / "AGENTS.md").exists()
+        assert not (target / ".engineering" / "project.yaml").exists()
+        assert not (target / ".engineering" / "knowledge.yaml").exists()
+        assert tool.read_text(encoding="utf-8") == "#!/usr/bin/env python3\nraise SystemExit(7)\n"
+
+        tool.write_text((ROOT / "tools" / "knowledge-contract.py").read_text(encoding="utf-8"), encoding="utf-8")
+        commit_all(target, "canonical knowledge contract helper")
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert "tools/knowledge-contract.py" in applied.stdout.split("FILES_PRESERVED=", 1)[-1]
+        assert_installed_knowledge_contract(target)
+        assert_absent_index_instructions(target)
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -779,6 +974,8 @@ def main() -> int:
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()
     test_stale_outside_form_declaration_fails_without_partial_upgrade()
+    test_optional_knowledge_contract_adoption_and_upgrade()
+    test_preexisting_custom_knowledge_contract_fails_closed_before_bootstrap()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

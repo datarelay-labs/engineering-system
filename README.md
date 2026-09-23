@@ -137,7 +137,7 @@ Do not run multi-hour full suites on every PR. Do not continue expensive downstr
 | Security, secrets, dependency/OSS/supply chain | [`standards/SECURITY.md`](standards/SECURITY.md) |
 | Version, artifacts, qualification, upgrade, rollback | [`standards/RELEASE.md`](standards/RELEASE.md) |
 | Operations, observability, backup/restore, incidents, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
-| Product Master/OpenSpec/ADR/Wiki source-of-truth roles | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
+| Product Master/OpenSpec/ADR/Wiki source-of-truth roles and optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
 | AI session continuity and repository-scoped Work Packets | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
 | Automated repository adoption and qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
 | Core/adapters and deterministic enforcement | [`standards/ENFORCEMENT.md`](standards/ENFORCEMENT.md) |

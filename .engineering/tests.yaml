@@ -57,6 +57,14 @@ paths:
     domains: [standards, operations-contract]
   "templates/.github/workflows/engineering-system.yml":
     domains: [adoption]
+  ".engineering/knowledge.yaml":
+    domains: [standards]
+  "tools/knowledge-contract.py":
+    domains: [standards, workflows]
+  "tools/test_knowledge_contract.py":
+    domains: [standards, workflows]
+  "schemas/knowledge-index.schema.json":
+    domains: [schemas]
 
 scenarios:
   - id: ENG-STATIC-001
@@ -70,7 +78,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -181,4 +189,20 @@ scenarios:
     command: "python3 tools/test_efficiency_telemetry.py"
     invariants:
       - "telemetry stays in git-local content-free state, exact-head PASS matches Git, and budget exhaustion yields instead of retrying"
+    release_gate: true
+
+  - id: ENG-KNOWLEDGE-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Knowledge index freshness and retrieval escalation
+    level: static
+    domains: [standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_knowledge_contract.py"
+    invariants:
+      - "optional knowledge index stays backward-compatible and retrieval escalation is evidence-triggered"
     release_gate: true

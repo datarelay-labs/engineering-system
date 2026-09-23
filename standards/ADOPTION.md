@@ -138,6 +138,8 @@ AGENTS.md
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
+Adopted `AGENTS.md` may route optional knowledge freshness through `python3 tools/knowledge-contract.py`. Bootstrap and managed upgrade install that helper and `schemas/knowledge-index.schema.json` when the paths are missing, so the instructed command exists in the adopted repository. A pre-existing different copy fails closed before bootstrap writes any files, and managed upgrade fails closed the same way. `.engineering/knowledge.yaml` stays optional and is never created or rewritten. Repositories whose `AGENTS.md` does not reference the helper remain valid without those files.
+
 For Engineering System >=1.6.0, the generated pull-request workflow also calls the pinned enforcement-reconciliation workflow. If live GitHub rulesets are visible during adoption, `merge_gate_status` is detected automatically; an explicit value that contradicts observable GitHub enforcement is rejected.
 
 Production-oriented 1.6 adoption additionally requires:

@@ -65,6 +65,9 @@ REQUIRED_METHOD_FILES = (
     "tools/efficiency_telemetry.py",
     "tools/test_efficiency_telemetry.py",
     "schemas/efficiency-telemetry.schema.json",
+    "tools/knowledge-contract.py",
+    "tools/test_knowledge_contract.py",
+    "schemas/knowledge-index.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -427,6 +430,50 @@ def validate_adoption_contract():
     print("PASS automated adoption standard/tool contract")
 
 
+def validate_knowledge_contract():
+    schema = load_json(ROOT / "schemas/knowledge-index.schema.json")
+    Draft202012Validator.check_schema(schema)
+    index = load_yaml(ROOT / ".engineering/knowledge.yaml")
+    errors = sorted(Draft202012Validator(schema).iter_errors(index), key=lambda item: list(item.path))
+    if errors:
+        for error in errors:
+            where = ".".join(str(part) for part in error.path) or "<root>"
+            print(f"FAIL .engineering/knowledge.yaml {where}: {error.message}")
+        raise SystemExit(1)
+    tool = (ROOT / "tools/knowledge-contract.py").read_text(encoding="utf-8")
+    for token in ("KNOWLEDGE_INDEX", "FINDINGS_TRUNCATED", "RETRIEVAL", "STALE_GENERATED", "source_sha256"):
+        if token not in tool:
+            raise SystemExit(f"FAIL knowledge contract tool missing token: {token}")
+    standard = (ROOT / "standards/KNOWLEDGE.md").read_text(encoding="utf-8")
+    for token in (".engineering/knowledge.yaml", "RETRIEVAL=LOCAL", "source_sha256"):
+        if token not in standard:
+            raise SystemExit(f"FAIL knowledge standard missing token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        if "knowledge.yaml" not in (ROOT / rel).read_text(encoding="utf-8"):
+            raise SystemExit(f"FAIL {rel} missing optional knowledge index router")
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
+    check_text = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    for rel in ("tools/knowledge-contract.py", "schemas/knowledge-index.schema.json"):
+        if rel not in adopt_text or rel not in check_text:
+            raise SystemExit(f"FAIL adopted knowledge path missing from bootstrap or compliance: {rel}")
+    if "KNOWLEDGE_CONTRACT_MANAGED" not in upgrade_text or "plan_knowledge_contract_install" not in upgrade_text:
+        raise SystemExit("FAIL upgrade-adoption.py missing knowledge contract install")
+    import subprocess
+
+    completed = subprocess.run(
+        ["python3", "tools/knowledge-contract.py", "check"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode or "RESULT=PASS" not in completed.stdout:
+        print(completed.stdout)
+        raise SystemExit("FAIL knowledge freshness check")
+    print("PASS optional knowledge index freshness contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -463,6 +510,7 @@ def main():
     validate_session_continuity_templates()
     validate_actionable_review_gate()
     validate_adoption_contract()
+    validate_knowledge_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -529,6 +577,9 @@ def main():
         raise SystemExit(gate.returncode)
     print("PASS behavior eval regression and deterministic gate")
 
+    completed = subprocess.run(["python3", "tools/test_knowledge_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_efficiency_telemetry.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

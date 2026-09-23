@@ -155,6 +155,15 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
+        if "tools/knowledge-contract.py" in agents_text:
+            for rel in (
+                "tools/knowledge-contract.py",
+                "schemas/knowledge-index.schema.json",
+            ):
+                if not (root / rel).is_file():
+                    failures.append(
+                        f"AGENTS.md references knowledge contract but missing {rel}"
+                    )
 
     if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
         failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
