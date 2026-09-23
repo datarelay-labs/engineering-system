@@ -5,6 +5,8 @@ domains:
     canonical:
       - standards/CORE.md
       - standards/KNOWLEDGE.md
+      - standards/SKILLS.md
+      - standards/SECURITY.md
   - id: design
     summary: Minimal design gate for material changes.
     canonical:

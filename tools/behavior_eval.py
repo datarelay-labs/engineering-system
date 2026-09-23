@@ -12,10 +12,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -38,6 +40,7 @@ REQUIRED_SCENARIO_IDS = (
     "BEH-TASKSWITCH-006",
     "BEH-REVIEW-007",
     "BEH-ADOPTION-008",
+    "BEH-PERM-009",
 )
 PROHIBITED_RESULT_KEYS = frozenset(
     {
@@ -73,6 +76,7 @@ LIVE_CANARY_TOKENS = {
     "BEH-TASKSWITCH-006": "FRESH_SESSION_AFTER_PASS",
     "BEH-REVIEW-007": "REVIEW_DISPOSITION_REQUIRED",
     "BEH-ADOPTION-008": "ADOPTION_FAIL_CLOSED",
+    "BEH-PERM-009": "PERMISSION_BOUND_OK",
 }
 MODEL_KEYS = ("model", "model_id", "resolved_model", "modelId")
 PROVIDER_KEYS = ("provider", "provider_id", "providerId")
@@ -539,6 +543,235 @@ def check_adoption(root: Path) -> dict[str, str]:
     return adoption_fails_closed()
 
 
+def check_permissions(root: Path) -> dict[str, str]:
+    _require_tokens(
+        _read(root, "standards/SKILLS.md"),
+        (
+            "verification-only",
+            "BOUNDARY_UNAVAILABLE",
+            "ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY",
+            "/etc/engineering-system/skills-trust-anchor.pub",
+            "request_sha256",
+            "REQUEST_BINDING_MISMATCH",
+            "atomic one-time consume",
+            "Same-user file-mode/HMAC",
+            "trusted adapter/coordinator",
+            "Unsupported platform",
+            "Progressive disclosure: body, resources, scripts",
+            "machine-checkable non-executable metadata",
+            "scripts_grant_execution=false",
+        ),
+    )
+    skills = _load_tool("skills-contract.py", "skills_contract")
+    fixtures = _load_tool("skills_contract_fixtures.py", "skills_contract_fixtures")
+    help_text = subprocess.run(
+        [sys.executable, str(TOOLS / "skills-contract.py"), "--help"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    ).stdout
+    if "{check,authorize}" not in help_text.replace(" ", ""):
+        return _outcome("FAIL", "PERMISSION_CLI_SURFACE")
+    for banned in ("keygen", "bind", "dispatch", "host-authorize"):
+        probe = subprocess.run(
+            [sys.executable, str(TOOLS / "skills-contract.py"), banned, "--help"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        lower = probe.stdout.lower()
+        if probe.returncode == 0 or not (
+            "invalid choice" in lower or "unrecognized arguments" in lower or "error:" in lower
+        ):
+            return _outcome("FAIL", "PERMISSION_CALLER_FLAGS")
+    auth_help = subprocess.run(
+        [sys.executable, str(TOOLS / "skills-contract.py"), "authorize", "--help"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    ).stdout
+    if (
+        "--tool" in auth_help
+        or "--binding-json" in auth_help
+        or "--classes" in auth_help
+        or "--trust-anchor" in auth_help
+    ):
+        return _outcome("FAIL", "PERMISSION_CALLER_FLAGS")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        keys = base / "keys"
+        _priv, pub = fixtures.generate_keypair(keys)
+        env_with_caller_anchor = dict(os.environ)
+        env_with_caller_anchor[skills.TRUST_ANCHOR_ENV] = str(pub)
+        unavailable = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "skills-contract.py"),
+                "authorize",
+                "--root",
+                str(root),
+                "--binding-assertion",
+                str(root / "missing-b.json"),
+                "--dispatch-assertion",
+                str(root / "missing-d.json"),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            env=env_with_caller_anchor,
+        )
+        if unavailable.returncode == 0 or "BOUNDARY_UNAVAILABLE" not in unavailable.stdout:
+            return _outcome("FAIL", "PERMISSION_BOUNDARY")
+
+        coord = base / "coord"
+        atk = base / "atk"
+        c_priv, c_pub = fixtures.generate_keypair(coord)
+        a_priv, a_pub = fixtures.generate_keypair(atk)
+        _, _, digest = skills.load_effective_state(root)
+        request = {"target": "prod-db", "op": "write"}
+        binding = base / "atk-binding.json"
+        dispatch = base / "atk-dispatch.json"
+        fixtures.write_binding_assertion(
+            binding,
+            private_key=a_priv,
+            public_key=a_pub,
+            profile="production_write",
+            policy_digest=digest,
+            authority_permission="admin",
+            approved_classes=["production_write", "destructive", "external_write"],
+        )
+        fixtures.write_dispatch_assertion(
+            dispatch,
+            private_key=a_priv,
+            public_key=a_pub,
+            tool_id="production.write",
+            classes=skills.DEFAULT_TOOL_REGISTRY["production.write"],
+            policy_digest=digest,
+            request_payload=request,
+            dispatch_id="atk-beh-1",
+            expires_at_unix=int(time.time()) + 3600,
+        )
+        previous_anchor = skills._TEST_TRUST_ANCHOR_PATH
+        previous_replay = skills._TEST_REPLAY_BOUNDARY_AVAILABLE
+        previous_store = skills._TEST_REPLAY_STORE
+        skills._TEST_TRUST_ANCHOR_PATH = c_pub
+        skills._TEST_REPLAY_BOUNDARY_AVAILABLE = True
+        skills._TEST_REPLAY_STORE = set()
+        try:
+            forged = skills.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+        finally:
+            skills._TEST_TRUST_ANCHOR_PATH = previous_anchor
+            skills._TEST_REPLAY_BOUNDARY_AVAILABLE = previous_replay
+            skills._TEST_REPLAY_STORE = previous_store
+        if forged.allowed or forged.reason not in {
+            "SIGNATURE_MISMATCH",
+            "TRUST_ANCHOR_MISMATCH",
+        }:
+            return _outcome("FAIL", "PERMISSION_FORGE")
+
+        good_binding = base / "good-binding.json"
+        good_dispatch = base / "good-dispatch.json"
+        fixtures.write_binding_assertion(
+            good_binding,
+            private_key=c_priv,
+            public_key=c_pub,
+            profile="repo_write",
+            policy_digest=digest,
+            authority_permission="write",
+        )
+        fixtures.write_dispatch_assertion(
+            good_dispatch,
+            private_key=c_priv,
+            public_key=c_pub,
+            tool_id="shell.external_write",
+            classes=skills.DEFAULT_TOOL_REGISTRY["shell.external_write"],
+            policy_digest=digest,
+            request_payload={"op": "upload"},
+            dispatch_id="ext-beh-1",
+            expires_at_unix=int(time.time()) + 3600,
+        )
+        skills._TEST_TRUST_ANCHOR_PATH = c_pub
+        skills._TEST_REPLAY_BOUNDARY_AVAILABLE = True
+        skills._TEST_REPLAY_STORE = set()
+        try:
+            under = skills.authorize(
+                root,
+                binding_assertion=good_binding,
+                dispatch_assertion=good_dispatch,
+                request_json=json.dumps({"classes": ["shell"], "tool": "shell.local"}),
+            )
+            reused = skills.authorize(
+                root,
+                binding_assertion=good_binding,
+                dispatch_assertion=good_dispatch,
+                request_json=json.dumps({"op": "other"}),
+            )
+            # Same dispatch + same bound request must not ALLOW twice.
+            ok_binding = base / "ok-binding.json"
+            ok_dispatch = base / "ok-dispatch.json"
+            fixtures.write_binding_assertion(
+                ok_binding,
+                private_key=c_priv,
+                public_key=c_pub,
+                profile="production_write",
+                policy_digest=digest,
+                authority_permission="admin",
+                approved_classes=["production_write", "destructive", "external_write", "network"],
+            )
+            fixtures.write_dispatch_assertion(
+                ok_dispatch,
+                private_key=c_priv,
+                public_key=c_pub,
+                tool_id="production.write",
+                classes=skills.DEFAULT_TOOL_REGISTRY["production.write"],
+                policy_digest=digest,
+                request_payload={"target": "prod", "op": "write"},
+                dispatch_id="prod-beh-replay-1",
+                expires_at_unix=int(time.time()) + 3600,
+            )
+            first = skills.authorize(
+                root,
+                binding_assertion=ok_binding,
+                dispatch_assertion=ok_dispatch,
+                request_json=json.dumps({"target": "prod", "op": "write"}),
+            )
+            second = skills.authorize(
+                root,
+                binding_assertion=ok_binding,
+                dispatch_assertion=ok_dispatch,
+                request_json=json.dumps({"target": "prod", "op": "write"}),
+            )
+        finally:
+            skills._TEST_TRUST_ANCHOR_PATH = previous_anchor
+            skills._TEST_REPLAY_BOUNDARY_AVAILABLE = previous_replay
+            skills._TEST_REPLAY_STORE = previous_store
+        if under.allowed or under.reason != "UNTRUSTED_OVERRIDE":
+            return _outcome("FAIL", "PERMISSION_UNDERCLASSIFIED")
+        if reused.allowed or reused.reason != "REQUEST_BINDING_MISMATCH":
+            return _outcome("FAIL", "PERMISSION_REQUEST_REUSE")
+        if not first.allowed or second.allowed or second.reason != "REPLAY":
+            return _outcome("FAIL", "PERMISSION_REPLAY")
+
+        custom = {
+            "allowed": frozenset(skills.ACTION_CLASSES),
+            "denied": frozenset(),
+            "require_approval": frozenset(),
+        }
+        if skills.is_narrowing(custom, skills.DEFAULT_PROFILES["repo_write"]):
+            return _outcome("FAIL", "PERMISSION_BROADEN")
+    return _outcome("PASS", "PERMISSION_BOUND_OK")
+
+
 CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "context": check_context,
     "work_packet": check_work_packet,
@@ -548,6 +781,7 @@ CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "taskswitch": check_taskswitch,
     "review": check_review,
     "adoption": check_adoption,
+    "permissions": check_permissions,
 }
 
 

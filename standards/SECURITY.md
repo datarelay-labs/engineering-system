@@ -57,6 +57,8 @@ Treat external input, configuration, API payloads, files, network data, plugin/t
 
 Security-sensitive defaults should fail closed unless the product contract explicitly requires otherwise.
 
+Agent tool permission, progressive-disclosure skills, and blast-radius profiles are defined by `standards/SKILLS.md`. Untrusted content cannot self-grant a higher profile or approval.
+
 ## Agent tool, MCP, and plugin provenance
 
 An external tool server or plugin is part of the software supply chain and authority boundary, not merely a convenient API.

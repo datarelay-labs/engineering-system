@@ -40,6 +40,13 @@ RUNTIME_CONTRACT_MANAGED = (
     "schemas/runtime-contract.schema.json",
 )
 
+# Optional skills/permission-contract execution path. Installed when missing so
+# adopted AGENTS.md instructions resolve. The skills profile itself is never created.
+SKILLS_CONTRACT_MANAGED = (
+    "tools/skills-contract.py",
+    "schemas/skills-contract.schema.json",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -52,6 +59,7 @@ REQUIRED_MANAGED = (
     ".github/workflows/engineering-system.yml",
     *KNOWLEDGE_CONTRACT_MANAGED,
     *RUNTIME_CONTRACT_MANAGED,
+    *SKILLS_CONTRACT_MANAGED,
 )
 
 # Known Cursor resume aliases kept in sync when present or installed as managed adapters.
@@ -860,6 +868,24 @@ def ensure_knowledge_contract_compatible(root: Path) -> None:
         )
 
 
+def ensure_skills_contract_compatible(root: Path) -> None:
+    """Reject an incompatible helper or schema before adoption writes any files.
+
+    A missing path is installed later. A byte-identical canonical copy is preserved.
+    `.engineering/skills.yaml` is not consulted and is never created.
+    """
+    for rel in SKILLS_CONTRACT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def write_missing(root: Path, rel: str, content: str, written: list[str], skipped: list[str]) -> None:
     path = root / rel
     if path.exists():
@@ -1072,6 +1098,7 @@ def main() -> int:
 
     ensure_knowledge_contract_compatible(root)
     ensure_runtime_contract_compatible(root)
+    ensure_skills_contract_compatible(root)
 
     written: list[str] = []
     skipped: list[str] = []
@@ -1101,7 +1128,7 @@ def main() -> int:
     )
     for alias in RESUME_ADAPTER_ALIASES:
         write_missing(root, alias, resume_text, written, skipped)
-    for rel in (*KNOWLEDGE_CONTRACT_MANAGED, *RUNTIME_CONTRACT_MANAGED):
+    for rel in (*KNOWLEDGE_CONTRACT_MANAGED, *RUNTIME_CONTRACT_MANAGED, *SKILLS_CONTRACT_MANAGED):
         write_missing(
             root,
             rel,

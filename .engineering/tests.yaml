@@ -73,6 +73,16 @@ paths:
     domains: [operations-contract, workflows]
   "schemas/runtime-contract.schema.json":
     domains: [schemas]
+  ".engineering/skills.yaml":
+    domains: [ai, standards]
+  "tools/skills-contract.py":
+    domains: [ai, standards, workflows]
+  "tools/test_skills_contract.py":
+    domains: [ai, standards, workflows]
+  "schemas/skills-contract.schema.json":
+    domains: [schemas]
+  "standards/SKILLS.md":
+    domains: [ai, standards]
 
 scenarios:
   - id: ENG-STATIC-001
@@ -86,7 +96,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -229,4 +239,20 @@ scenarios:
     command: "python3 tools/test_runtime_contract.py"
     invariants:
       - "health smoke and e2e commands stay in the existing project and release profiles"
+    release_gate: true
+
+  - id: ENG-SKILLS-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Skills permission binding and path containment
+    level: static
+    domains: [ai, standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_skills_contract.py"
+    invariants:
+      - "trusted binding cannot be self-granted and repository policy may only narrow"
     release_gate: true
