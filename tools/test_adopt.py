@@ -1097,6 +1097,323 @@ def test_runtime_contract_preserves_existing_authority_commands() -> None:
         assert not (target / ".engineering" / "runtime.yaml").exists()
 
 
+def assert_installed_skills_contract(root: Path) -> None:
+    for rel in ("tools/skills-contract.py", "schemas/skills-contract.schema.json"):
+        assert (root / rel).read_text(encoding="utf-8") == (ROOT / rel).read_text(encoding="utf-8"), rel
+    assert not (root / ".engineering" / "skills.yaml").exists()
+    # Test-only fixture minting helper must not be adoption-managed.
+    assert not (root / "tools" / "skills_contract_fixtures.py").exists()
+
+
+def test_optional_skills_contract_adoption_and_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-skills"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/skills\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert_installed_skills_contract(target)
+        agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+        assert "skills.yaml" in agents
+        assert "tools/skills-contract.py" in agents
+        checked = run(
+            sys.executable,
+            str(ROOT / "tools" / "skills-contract.py"),
+            "check",
+            "--root",
+            str(target),
+        )
+        assert checked.returncode == 0, checked.stdout
+        assert "SKILLS_CONTRACT=ABSENT" in checked.stdout
+        assert "RESULT=PASS" in checked.stdout
+
+        for rel in ("tools/skills-contract.py", "schemas/skills-contract.schema.json"):
+            (target / rel).unlink()
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "drop skills contract before upgrade")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert (
+            "SKILLS_CONTRACT_INSTALLED=tools/skills-contract.py,schemas/skills-contract.schema.json"
+            in upgraded.stdout
+        )
+        assert_installed_skills_contract(target)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-skills"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-skills\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        custom = "#!/usr/bin/env python3\nprint('custom-skills')\n"
+        (target / "tools" / "skills-contract.py").write_text(custom, encoding="utf-8")
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        before = run("git", "status", "--porcelain", cwd=target).stdout
+        commit_all(target, "custom skills helper")
+        before_tool = (target / "tools" / "skills-contract.py").read_bytes()
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/skills-contract.py contains local/custom changes" in failed.stdout
+        assert (target / "tools" / "skills-contract.py").read_bytes() == before_tool
+        assert not (target / ".engineering" / "skills.yaml").exists()
+        del before
+
+
+def test_preexisting_custom_skills_contract_fails_closed_before_bootstrap() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-skills-bootstrap"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-skills-boot\n\ngo 1.23\n", encoding="utf-8")
+        tool = target / "tools" / "skills-contract.py"
+        tool.parent.mkdir()
+        tool.write_text("#!/usr/bin/env python3\nraise SystemExit(7)\n", encoding="utf-8")
+        commit_all(target)
+        failed = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/skills-contract.py contains local/custom changes" in failed.stdout
+        assert "ADOPTION_BOOTSTRAP=PASS" not in failed.stdout
+        assert run("git", "status", "--porcelain", cwd=target).stdout == ""
+        assert not (target / "AGENTS.md").exists()
+        assert not (target / ".engineering" / "project.yaml").exists()
+        assert not (target / ".engineering" / "skills.yaml").exists()
+
+        tool.write_text((ROOT / "tools" / "skills-contract.py").read_text(encoding="utf-8"), encoding="utf-8")
+        schema = target / "schemas" / "skills-contract.schema.json"
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text(
+            (ROOT / "schemas" / "skills-contract.schema.json").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        commit_all(target, "canonical skills contract helper")
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert "tools/skills-contract.py" in applied.stdout.split("FILES_PRESERVED=", 1)[-1]
+        assert_installed_skills_contract(target)
+
+
+def test_skills_compliance_reports_missing_referenced_helper() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-skills-compliance"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/skills-compliance\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        (target / "tools" / "skills-contract.py").unlink()
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert "skills contract" in checked.stdout.lower() or "skills-contract.py" in checked.stdout
+
+
+def test_skills_compliance_reports_missing_referenced_schema() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-skills-schema-compliance"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/skills-schema-compliance\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        (target / "schemas" / "skills-contract.schema.json").unlink()
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert (
+            "skills-contract.schema.json" in checked.stdout
+            or "skills contract" in checked.stdout.lower()
+        )
+
+
+def test_byte_identical_skills_contract_preserved_on_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-skills-preserve"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/skills-preserve\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert_installed_skills_contract(target)
+        before_tool = (target / "tools" / "skills-contract.py").read_bytes()
+        before_schema = (target / "schemas" / "skills-contract.schema.json").read_bytes()
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "pin older version with canonical skills contract")
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "SKILLS_CONTRACT_INSTALLED=<none>" in upgraded.stdout
+        assert (target / "tools" / "skills-contract.py").read_bytes() == before_tool
+        assert (target / "schemas" / "skills-contract.schema.json").read_bytes() == before_schema
+        assert not (target / ".engineering" / "skills.yaml").exists()
+
+
+def test_custom_skills_schema_fails_closed_before_upgrade_mutation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-skills-schema"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-skills-schema\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        schema = target / "schemas" / "skills-contract.schema.json"
+        before_schema = schema.read_bytes()
+        before_tool = (target / "tools" / "skills-contract.py").read_bytes()
+        schema.write_text('{"title":"custom-skills-schema"}\n', encoding="utf-8")
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "custom skills schema")
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "skills-contract.schema.json contains local/custom changes" in failed.stdout
+        assert schema.read_bytes() == b'{"title":"custom-skills-schema"}\n'
+        assert (target / "tools" / "skills-contract.py").read_bytes() == before_tool
+        assert not (target / ".engineering" / "skills.yaml").exists()
+        del before_schema
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -1135,6 +1452,12 @@ def main() -> int:
     test_optional_knowledge_contract_adoption_and_upgrade()
     test_preexisting_custom_knowledge_contract_fails_closed_before_bootstrap()
     test_runtime_contract_preserves_existing_authority_commands()
+    test_optional_skills_contract_adoption_and_upgrade()
+    test_preexisting_custom_skills_contract_fails_closed_before_bootstrap()
+    test_skills_compliance_reports_missing_referenced_helper()
+    test_skills_compliance_reports_missing_referenced_schema()
+    test_byte_identical_skills_contract_preserved_on_upgrade()
+    test_custom_skills_schema_fails_closed_before_upgrade_mutation()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

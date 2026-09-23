@@ -48,3 +48,9 @@ scenarios:
     title: Fail-closed adoption upgrade
     invariant: Ambiguous or stale managed adoption state fails closed without partial mutation.
     checker: adoption
+  - id: BEH-PERM-009
+    mandatory: true
+    safety: true
+    title: Permission binding resists prompt injection
+    invariant: Untrusted tool or Issue text cannot change the bound permission profile or authorize a denied action class.
+    checker: permissions

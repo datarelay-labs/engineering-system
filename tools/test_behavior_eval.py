@@ -347,7 +347,7 @@ def test_deterministic_run_passes() -> None:
     failed = [item for item in document["scenarios"] if item["status"] != "PASS"]
     if failed:
         _fail("deterministic scenarios did not pass: " + ",".join(item["id"] + ":" + item["evidence"] for item in failed))
-    if len(document["scenarios"]) != 8:
+    if len(document["scenarios"]) != len(behavior_eval.REQUIRED_SCENARIO_IDS):
         _fail("deterministic run dropped scenarios")
     if document["head"] != behavior_eval.git_head(ROOT):
         _fail("deterministic run recorded a different HEAD")

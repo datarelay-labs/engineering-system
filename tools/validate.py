@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -19,6 +20,7 @@ REQUIRED_STANDARDS = (
     "standards/RELEASE.md",
     "standards/OPERATIONS.md",
     "standards/KNOWLEDGE.md",
+    "standards/SKILLS.md",
     "standards/ENFORCEMENT.md",
     "standards/SESSION_CONTINUITY.md",
     "standards/ADOPTION.md",
@@ -71,6 +73,9 @@ REQUIRED_METHOD_FILES = (
     "tools/runtime-contract.py",
     "tools/test_runtime_contract.py",
     "schemas/runtime-contract.schema.json",
+    "tools/skills-contract.py",
+    "tools/test_skills_contract.py",
+    "schemas/skills-contract.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -535,6 +540,94 @@ def validate_runtime_contract():
     print("PASS optional runtime observability contract")
 
 
+def validate_skills_contract():
+    schema = load_json(ROOT / "schemas/skills-contract.schema.json")
+    Draft202012Validator.check_schema(schema)
+    tool = (ROOT / "tools/skills-contract.py").read_text(encoding="utf-8")
+    for token in (
+        "SKILLS_CONTRACT",
+        "TrustedSessionBinding",
+        "POLICY_DIGEST_MISMATCH",
+        "UNTRUSTED_OVERRIDE",
+        "PROFILE_BROADEN",
+        "EMPTY_CLASSIFICATION",
+        "APPROVAL_REQUIRED",
+        "DEFAULT_PROFILES",
+        "DEFAULT_TOOL_REGISTRY",
+        "BOUNDARY_UNAVAILABLE",
+        "TRUST_ANCHOR_ENV",
+        "IGNORED_CALLER_TRUST_ANCHOR_ENV",
+        "HOST_TRUST_ANCHOR_PATH",
+        "HOST_REPLAY_STATE_PATH",
+        "REQUEST_BINDING_MISMATCH",
+        "canonical_request_sha256",
+        "consume_dispatch_once",
+        "HOOKS_EXECUTABLE",
+        "SCRIPTS_GRANT_EXECUTION",
+        "PATH_MISSING",
+        "authorize",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL skills contract tool missing token: {token}")
+    if "add_parser(\"keygen\"" in tool or "add_parser(\"bind\"" in tool or "add_parser(\"dispatch\"" in tool:
+        raise SystemExit("FAIL skills contract exposes minting CLI")
+    if "hmac." in tool.lower() or "BINDING_SECRET" in tool or "hmac.new" in tool.lower():
+        raise SystemExit("FAIL skills contract retains same-user keyed-MAC/bind mint surface")
+    if "os.environ.get(TRUST_ANCHOR_ENV" in tool or "os.environ.get(TRUST_ANCHOR" in tool:
+        raise SystemExit("FAIL skills contract resolves trust anchor from caller env")
+    if "os.environ" in tool or "environ.get" in tool:
+        raise SystemExit("FAIL skills contract must not read process environment")
+    if "HOST_TRUST_ANCHOR_PATH" not in tool or "IGNORED_CALLER_TRUST_ANCHOR_ENV" not in tool:
+        raise SystemExit("FAIL skills contract missing host-only trust-anchor disposition")
+    if "consume_dispatch_once" not in tool:
+        raise SystemExit("FAIL skills contract missing atomic dispatch consume")
+    if "def replay_boundary_available" in tool:
+        raise SystemExit("FAIL skills contract still uses path-only replay_boundary_available")
+    standard = (ROOT / "standards/SKILLS.md").read_text(encoding="utf-8")
+    for token in (
+        ".engineering/skills.yaml",
+        "verification-only",
+        "BOUNDARY_UNAVAILABLE",
+        "ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY",
+        "/etc/engineering-system/skills-trust-anchor.pub",
+        "request_sha256",
+        "REQUEST_BINDING_MISMATCH",
+        "atomic one-time consume",
+        "Same-user file-mode/HMAC",
+        "trusted adapter/coordinator",
+        "Unsupported platform",
+        "P1A-BLOCK-001",
+        "Progressive disclosure: body, resources, scripts",
+        "machine-checkable non-executable metadata",
+        "scripts_grant_execution=false",
+    ):
+        if token not in standard:
+            raise SystemExit(f"FAIL skills standard missing token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        if "skills.yaml" not in (ROOT / rel).read_text(encoding="utf-8"):
+            raise SystemExit(f"FAIL {rel} missing optional skills contract router")
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
+    check_text = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    for rel in ("tools/skills-contract.py", "schemas/skills-contract.schema.json"):
+        if rel not in adopt_text or rel not in check_text:
+            raise SystemExit(f"FAIL adopted skills path missing from bootstrap or compliance: {rel}")
+    if "SKILLS_CONTRACT_MANAGED" not in upgrade_text or "plan_skills_contract_install" not in upgrade_text:
+        raise SystemExit("FAIL upgrade-adoption.py missing skills contract install")
+
+    completed = subprocess.run(
+        ["python3", "tools/skills-contract.py", "check"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode or "RESULT=PASS" not in completed.stdout:
+        print(completed.stdout)
+        raise SystemExit("FAIL skills contract check")
+    print("PASS optional skills and permission contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -573,6 +666,7 @@ def main():
     validate_adoption_contract()
     validate_knowledge_contract()
     validate_runtime_contract()
+    validate_skills_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -582,11 +676,13 @@ def main():
     validate("templates/TESTS.yaml", "schemas/tests.schema.json")
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
-    import subprocess
     completed = subprocess.run(["python3", "tools/test_cursor_resource_preflight.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)

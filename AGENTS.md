@@ -15,6 +15,7 @@ Read only when the task requires it:
 - one relevant Engineering System standard plus only task-relevant product/spec/ADR/runbook material
 - `.engineering/knowledge.yaml` when present, for domain routing. Freshness is `python3 tools/knowledge-contract.py check`. Retrieval stays local unless `python3 tools/knowledge-contract.py route` reports `RETRIEVAL=ESCALATE`.
 - `.engineering/runtime.yaml` when validating a running worktree. Resolve health, smoke, E2E, and additive capabilities with `python3 tools/runtime-contract.py check`.
+- `.engineering/skills.yaml` when present, for progressive-disclosure skills/hooks and permission profiles. Validate with `python3 tools/skills-contract.py check`. Authorization is verification-only via `python3 tools/skills-contract.py authorize` against host-administered adapter provenance and fails closed as `BOUNDARY_UNAVAILABLE` when that provenance is unavailable; see `standards/SKILLS.md`. No production HMAC/`bind` mint.
 
 Use the minimum sufficient context and reasoning. Expand only when a concrete blocker, failed check, or unresolved design question requires it. Do not preload all standards, Wiki pages, archives, historical discussions, or old agent transcripts.
 
