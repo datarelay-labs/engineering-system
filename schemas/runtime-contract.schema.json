@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Optional runtime and observability contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "authorities", "capabilities"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "authorities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["health", "smoke", "e2e"],
+      "properties": {
+        "health": {"const": "operations.health_command"},
+        "smoke": {"const": "release.public_smoke_command"},
+        "e2e": {"const": "release.operational_e2e_command"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "logs", "browser", "metrics", "traces", "cleanup"],
+      "properties": {
+        "start": {"$ref": "#/$defs/commandCapability"},
+        "cleanup": {"$ref": "#/$defs/commandCapability"},
+        "logs": {"$ref": "#/$defs/evidenceCapability"},
+        "browser": {"$ref": "#/$defs/evidenceCapability"},
+        "metrics": {"$ref": "#/$defs/evidenceCapability"},
+        "traces": {"$ref": "#/$defs/evidenceCapability"}
+      }
+    }
+  },
+  "$defs": {
+    "commandCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["support"],
+      "properties": {
+        "support": {"enum": ["supported", "unsupported"]},
+        "scope": {"const": "worktree"},
+        "command": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "\\S"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"support": {"const": "unsupported"}},
+            "required": ["support"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [{"required": ["command"]}, {"required": ["scope"]}]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"support": {"const": "supported"}},
+            "required": ["support"]
+          },
+          "then": {"required": ["command", "scope"]}
+        }
+      ]
+    },
+    "evidenceCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["support"],
+      "properties": {
+        "support": {"enum": ["supported", "unsupported"]},
+        "scope": {"const": "worktree"},
+        "command": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "\\S"},
+        "fuller_command": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "\\S"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"support": {"const": "unsupported"}},
+            "required": ["support"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["command"]},
+                {"required": ["scope"]},
+                {"required": ["fuller_command"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"support": {"const": "supported"}},
+            "required": ["support"]
+          },
+          "then": {"required": ["command", "fuller_command", "scope"]}
+        }
+      ]
+    }
+  }
+}

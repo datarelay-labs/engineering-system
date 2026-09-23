@@ -104,6 +104,8 @@ operational_e2e_command
 public_smoke_command
 ```
 
+`operational_e2e_command` and `public_smoke_command` remain the only command authorities for operational E2E and public smoke. The optional runtime contract references these fields and must not store a second copy.
+
 A required evidence flag without its corresponding command is invalid. The reusable release contract executes cheap blockers first and stops immediately on failure.
 
 The generated project workflow has two explicit phases:

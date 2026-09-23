@@ -90,6 +90,22 @@ A production profile without a real runbook path or health command is incomplete
 
 These commands are references to project-native behavior; the Engineering System must not invent operational commands merely to fill metadata. Destructive commands such as restore, rollback, or rebuild still require the safety/approval rules in the incident lifecycle.
 
+## Runtime and observability contract
+
+A repository may record an optional machine-readable runtime contract at `.engineering/runtime.yaml`. The file is optional. Repositories without it remain valid, and adoption does not create or rewrite one. Schema: `schemas/runtime-contract.schema.json`.
+
+Health, smoke, and operational E2E have one command authority each:
+
+- health/readiness: `operations.health_command` in `.engineering/project.yaml`
+- public smoke: `release.public_smoke_command` in `.engineering/release.yaml`
+- operational E2E: `release.operational_e2e_command` in `.engineering/release.yaml`
+
+The runtime file stores those field paths and must not store a second copy of the command strings. An empty authority command is unsupported. The contract does not invent a replacement.
+
+Additive capabilities are per-worktree `start`, focused `logs`, `browser` screenshot evidence, `metrics`, `traces`, and `cleanup`. Each entry is explicitly `supported` or `unsupported`. Unsupported entries contain no command. Supported entries require `scope: worktree` and a non-empty bounded command string. Logs, browser, metrics, and traces also require `fuller_command` so complete evidence has a deterministic path. Those strings stay opaque project-owned text. `python3 tools/runtime-contract.py check` validates structure, rejects a second copy of an authority command, and prints bounded findings with deterministic `FULLER` and `RAW` paths. It does not execute commands and it does not apply a shell-syntax or permission policy. Execution permission belongs to a later phase. The contract does not require an observability vendor.
+
+Default checker output is bounded. A truncated report prints `FULLER` and `RAW` commands. A missing runtime file is `RUNTIME_CONTRACT=ABSENT` and still reports authority support from the project and release profiles.
+
 ## Development-host session pressure
 
 Shared development hosts can become unresponsive when many Cursor persistent sessions accumulate. Before creating a new persistent session, run `tools/cursor-resource-preflight.py`. `PASS` and `WARN` (exit 0) may proceed. `BLOCK` refuses only the new session. Do not stop, kill, or mutate existing sessions to recover capacity. Record the preflight `RESULT` and `REASON` as evidence. Host monitoring may alert on `WARN` or `BLOCK`; Telegram or another notifier is not part of this contract.

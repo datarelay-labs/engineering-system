@@ -939,6 +939,164 @@ def test_preexisting_custom_knowledge_contract_fails_closed_before_bootstrap() -
         assert_absent_index_instructions(target)
 
 
+def test_runtime_contract_preserves_existing_authority_commands() -> None:
+    health = "printf health"
+    smoke = "printf smoke"
+    e2e = "printf e2e"
+
+    def assert_authorities(root: Path) -> None:
+        project = load_yaml(root / ".engineering" / "project.yaml")
+        release = load_yaml(root / ".engineering" / "release.yaml")
+        assert project["operations"]["health_command"] == health
+        assert release["public_smoke_command"] == smoke
+        assert release["operational_e2e_command"] == e2e
+        assert not (root / ".engineering" / "runtime.yaml").exists()
+        for rel in ("tools/runtime-contract.py", "schemas/runtime-contract.schema.json"):
+            assert (root / rel).read_text(encoding="utf-8") == (ROOT / rel).read_text(encoding="utf-8"), rel
+        checked = run(
+            sys.executable,
+            str(ROOT / "tools" / "runtime-contract.py"),
+            "check",
+            "--root",
+            str(root),
+            check=False,
+        )
+        assert checked.returncode == 0, checked.stdout
+        assert "RUNTIME_CONTRACT=ABSENT" in checked.stdout
+        assert "HEALTH_AUTHORITY=operations.health_command" in checked.stdout
+        assert f"HEALTH_COMMAND={health}" in checked.stdout
+        assert "SMOKE_AUTHORITY=release.public_smoke_command" in checked.stdout
+        assert f"SMOKE_COMMAND={smoke}" in checked.stdout
+        assert "E2E_AUTHORITY=release.operational_e2e_command" in checked.stdout
+        assert f"E2E_COMMAND={e2e}" in checked.stdout
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-runtime"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/runtime\n\ngo 1.23\n", encoding="utf-8")
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (target / "RUNBOOK.md").write_text("# Operations Runbook\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--operations-mode",
+            "production",
+            "--persistent-state",
+            "--runbook-path",
+            "RUNBOOK.md",
+            "--health-command",
+            health,
+            "--backup-command",
+            "true",
+            "--restore-test-command",
+            "true",
+            "--upgrade-command",
+            "true",
+            "--rollback-command",
+            "true",
+            "--operational-e2e-command",
+            e2e,
+            "--public-smoke-command",
+            smoke,
+            "--full-e2e-passes",
+            "1",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert_authorities(target)
+
+        for rel in ("tools/runtime-contract.py", "schemas/runtime-contract.schema.json"):
+            (target / rel).unlink()
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "drop runtime contract before upgrade")
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert (
+            "RUNTIME_CONTRACT_INSTALLED=tools/runtime-contract.py,schemas/runtime-contract.schema.json"
+            in upgraded.stdout
+        )
+        assert_authorities(target)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-runtime"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/custom-runtime\n\ngo 1.23\n", encoding="utf-8")
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (target / "RUNBOOK.md").write_text("# Operations Runbook\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--operations-mode",
+            "production",
+            "--runbook-path",
+            "RUNBOOK.md",
+            "--health-command",
+            health,
+            "--operational-e2e-command",
+            e2e,
+            "--public-smoke-command",
+            smoke,
+            "--full-e2e-passes",
+            "1",
+        )
+        (target / "tools" / "runtime-contract.py").write_text(
+            "#!/usr/bin/env python3\nprint('custom')\n",
+            encoding="utf-8",
+        )
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "custom runtime contract")
+        before = _managed_upgrade_file_snapshot(target)
+        before_health = load_yaml(project_path)["operations"]["health_command"]
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/runtime-contract.py contains local/custom changes" in failed.stdout
+        assert _managed_upgrade_file_snapshot(target) == before
+        assert load_yaml(project_path)["operations"]["health_command"] == before_health
+        assert not (target / ".engineering" / "runtime.yaml").exists()
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -976,6 +1134,7 @@ def main() -> int:
     test_stale_outside_form_declaration_fails_without_partial_upgrade()
     test_optional_knowledge_contract_adoption_and_upgrade()
     test_preexisting_custom_knowledge_contract_fails_closed_before_bootstrap()
+    test_runtime_contract_preserves_existing_authority_commands()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

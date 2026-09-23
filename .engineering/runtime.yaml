@@ -1,0 +1,18 @@
+version: 1
+authorities:
+  health: operations.health_command
+  smoke: release.public_smoke_command
+  e2e: release.operational_e2e_command
+capabilities:
+  start:
+    support: unsupported
+  logs:
+    support: unsupported
+  browser:
+    support: unsupported
+  metrics:
+    support: unsupported
+  traces:
+    support: unsupported
+  cleanup:
+    support: unsupported

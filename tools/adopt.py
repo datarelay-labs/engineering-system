@@ -32,6 +32,14 @@ KNOWLEDGE_CONTRACT_MANAGED = (
     "schemas/knowledge-index.schema.json",
 )
 
+# Optional runtime-contract execution path. Installed when missing so adopted
+# repositories can resolve health/smoke/E2E authorities. The runtime profile
+# itself is never created.
+RUNTIME_CONTRACT_MANAGED = (
+    "tools/runtime-contract.py",
+    "schemas/runtime-contract.schema.json",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -43,6 +51,7 @@ REQUIRED_MANAGED = (
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
     *KNOWLEDGE_CONTRACT_MANAGED,
+    *RUNTIME_CONTRACT_MANAGED,
 )
 
 # Known Cursor resume aliases kept in sync when present or installed as managed adapters.
@@ -815,6 +824,24 @@ def release_workflow(baseline: str) -> str:
     )
 
 
+def ensure_runtime_contract_compatible(root: Path) -> None:
+    """Reject an incompatible helper or schema before adoption writes any files.
+
+    A missing path is installed later. A byte-identical canonical copy is preserved.
+    `.engineering/runtime.yaml` is not consulted and is never created.
+    """
+    for rel in RUNTIME_CONTRACT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_knowledge_contract_compatible(root: Path) -> None:
     """Reject an incompatible helper or schema before adoption writes any files.
 
@@ -1044,6 +1071,7 @@ def main() -> int:
         native_ci_workflows = []
 
     ensure_knowledge_contract_compatible(root)
+    ensure_runtime_contract_compatible(root)
 
     written: list[str] = []
     skipped: list[str] = []
@@ -1073,7 +1101,7 @@ def main() -> int:
     )
     for alias in RESUME_ADAPTER_ALIASES:
         write_missing(root, alias, resume_text, written, skipped)
-    for rel in KNOWLEDGE_CONTRACT_MANAGED:
+    for rel in (*KNOWLEDGE_CONTRACT_MANAGED, *RUNTIME_CONTRACT_MANAGED):
         write_missing(
             root,
             rel,

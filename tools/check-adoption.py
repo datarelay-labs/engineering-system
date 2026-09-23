@@ -164,6 +164,15 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references knowledge contract but missing {rel}"
                     )
+        if "tools/runtime-contract.py" in agents_text:
+            for rel in (
+                "tools/runtime-contract.py",
+                "schemas/runtime-contract.schema.json",
+            ):
+                if not (root / rel).is_file():
+                    failures.append(
+                        f"AGENTS.md references runtime contract but missing {rel}"
+                    )
 
     if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
         failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
