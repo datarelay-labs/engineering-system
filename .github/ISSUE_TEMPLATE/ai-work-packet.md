@@ -48,12 +48,15 @@ Do not assume one GitHub Issue equals one Cursor job. Batch adjacent small Issue
 - Deterministic test/oracle or required manual evidence:
 - Prohibited regressions/invariants:
 - Terminal evidence required (exact HEAD/runtime/CI as applicable):
+- Blocking finding classes for this packet:
+- Stop condition / sufficiency rule:
+- Depth budget: NORMAL (implementation -> independent audit -> corrective pass if needed -> verification -> stop)
 
 ## Follow-up Discoveries
 
 NONE
 
-Record meaningful out-of-scope findings as linked Issues/Work Packets. Do not silently absorb them into this packet unless the coordinator explicitly re-sizes the active outcome.
+Record meaningful out-of-scope findings as linked Issues/Work Packets. Do not silently absorb them into this packet unless the coordinator explicitly re-sizes the active outcome. Once the completion contract passes and no blocking finding remains, close/complete this packet rather than continuing speculative hardening; non-blocking improvements stay as follow-up work.
 
 ## Constraints
 
