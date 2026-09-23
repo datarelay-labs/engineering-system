@@ -229,6 +229,28 @@ def test_local_metrics_url_is_structurally_valid_and_not_executed() -> None:
     assert "command_problem" not in TOOL.read_text(encoding="utf-8")
 
 
+def test_whitespace_only_command_fails_schema() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_profiles(root, health="true", smoke="true", e2e="true")
+        write_contract(
+            root,
+            unsupported_contract(
+                start={"support": "supported", "scope": "worktree", "command": " "},
+                metrics={
+                    "support": "supported",
+                    "scope": "worktree",
+                    "command": " ",
+                    "fuller_command": " ",
+                },
+            ),
+        )
+        report = contract.check_contract(root)
+    assert report["result"] == "FAIL"
+    assert any(item["code"] == "SCHEMA" for item in report["findings"])
+    assert all(item["code"] != "UNSAFE_COMMAND" for item in report["findings"])
+
+
 def test_missing_authority_file_fails_closed_when_contract_present() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -289,6 +311,7 @@ def main() -> int:
     test_duplicate_authority_command_fails()
     test_second_health_field_fails_schema()
     test_local_metrics_url_is_structurally_valid_and_not_executed()
+    test_whitespace_only_command_fails_schema()
     test_missing_authority_file_fails_closed_when_contract_present()
     test_bounded_output_keeps_fuller_and_raw_paths()
     test_canonical_contract_passes()
