@@ -128,6 +128,53 @@ def test_gate_semantics() -> None:
         _fail("head mismatch did not block")
 
 
+def test_gate_rejects_tampered_benchmark_results() -> None:
+    head = "b" * 40
+    fake = {
+        "schema_version": 1,
+        "kind": "behavior-eval-run",
+        "runner": "deterministic",
+        "head": head,
+        "provider": None,
+        "model": None,
+        "scenarios": [
+            {
+                "id": "BEH-FAKE-999",
+                "mandatory": False,
+                "safety": False,
+                "status": "PASS",
+                "evidence": "CONTEXT_ROUTING_OK",
+            }
+        ],
+    }
+    blocked = behavior_eval.evaluate_gate(fake, expected_head=head, baseline_status="PASS")
+    if blocked["status"] != "BLOCK" or "UNKNOWN_SCENARIO:BEH-FAKE-999" not in blocked["reasons"]:
+        _fail("incomplete unknown benchmark passed the gate")
+    if any(not reason.startswith("MISSING_SCENARIO:") for reason in blocked["reasons"] if reason.startswith("MISSING_")):
+        _fail("missing-scenario reasons drifted")
+    missing = {reason for reason in blocked["reasons"] if reason.startswith("MISSING_SCENARIO:")}
+    if missing != {f"MISSING_SCENARIO:{scenario_id}" for scenario_id in behavior_eval.REQUIRED_SCENARIO_IDS}:
+        _fail("gate did not require every canonical scenario")
+
+    document = _run_document()
+    duplicated = json.loads(json.dumps(document))
+    duplicated["scenarios"].append(json.loads(json.dumps(duplicated["scenarios"][0])))
+    duplicate_gate = behavior_eval.evaluate_gate(
+        duplicated,
+        expected_head=document["head"],
+        baseline_status="PASS",
+    )
+    if duplicate_gate["status"] != "BLOCK" or "DUPLICATE_SCENARIO:BEH-CTX-001" not in duplicate_gate["reasons"]:
+        _fail("duplicate scenario passed the gate")
+
+    mutated = json.loads(json.dumps(document))
+    mutated["scenarios"][0]["mandatory"] = False
+    mutated["scenarios"][0]["safety"] = False
+    mutated_gate = behavior_eval.evaluate_gate(mutated, expected_head=document["head"], baseline_status="PASS")
+    if mutated_gate["status"] != "BLOCK" or "SCENARIO_CONTRACT_MUTATED:BEH-CTX-001" not in mutated_gate["reasons"]:
+        _fail("mutated mandatory and safety flags passed the gate")
+
+
 def test_context_fails_without_unrelated_repository_rule() -> None:
     text = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8").replace(
         "Never scan unrelated repositories",
@@ -230,27 +277,49 @@ def test_live_unavailable_and_metadata_filter() -> None:
         _fail("missing provider did not block")
     if blocked["scenarios"][0]["evidence"] != "PROVIDER_UNAVAILABLE":
         _fail("missing provider evidence drifted")
-    if "Reply with exactly PASS" in encoded or blocked["provider"] is not None:
+    if "CTX_ROUTING_BOUNDED" in encoded or "Invariant:" in encoded or blocked["provider"] is not None:
         _fail("live block persisted prompt or invented a provider")
 
-    def completed(*_args, **_kwargs):
+    captured: dict[str, list[str]] = {}
+
+    def completed(command, **_kwargs):
+        captured["command"] = command
+        token = behavior_eval.LIVE_CANARY_TOKENS["BEH-CTX-001"]
         payload = {
             "provider": "cursor",
             "model": "auto-resolved",
-            "result": "PASS",
-            "prompt": "Reply with exactly PASS",
+            "result": token,
+            "prompt": command[-1],
             "stdout": "class Secret:\n    token = 'hidden'\n",
         }
         return subprocess.CompletedProcess(args=["agent"], returncode=0, stdout=json.dumps(payload), stderr="")
 
     passed = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=completed)
     encoded = json.dumps(passed)
+    prompt = captured["command"][-1]
+    if "BEH-CTX-001" not in prompt or "CTX_ROUTING_BOUNDED" not in prompt:
+        _fail("live canary prompt was not scenario-specific")
+    if "Reply with exactly PASS" in prompt:
+        _fail("live canary still accepts a generic PASS reply")
+    other = behavior_eval.live_prompt(behavior_eval.load_catalog()[1])
+    if other == prompt or "WORK_PACKET_SCOPED" not in other:
+        _fail("live canary prompt did not change with the scenario")
     if passed["provider"] != "cursor" or passed["model"] != "auto-resolved":
         _fail("live metadata was not recorded")
     if passed["scenarios"][0]["status"] != "PASS":
-        _fail("live PASS was not recorded")
-    if "Secret" in encoded or "hidden" in encoded or "prompt" in encoded:
-        _fail("live result persisted prompt or source content")
+        _fail("scenario-specific live PASS was not recorded")
+    if "Secret" in encoded or "hidden" in encoded or "prompt" in encoded or "CTX_ROUTING_BOUNDED" in encoded:
+        _fail("live result persisted prompt, canary text, or source content")
+
+    def generic(*_args, **_kwargs):
+        payload = {"provider": "cursor", "model": "auto-resolved", "result": "PASS"}
+        return subprocess.CompletedProcess(args=["agent"], returncode=0, stdout=json.dumps(payload), stderr="")
+
+    generic_result = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=generic)
+    if generic_result["scenarios"][0]["status"] != "FAIL":
+        _fail("generic PASS reply satisfied a scenario-specific canary")
+    if generic_result["scenarios"][0]["evidence"] != "LIVE_SCENARIO_FAIL":
+        _fail("generic live reply evidence drifted")
 
     def unreadable(*_args, **_kwargs):
         return subprocess.CompletedProcess(args=["agent"], returncode=2, stdout="", stderr="auth failed")
@@ -296,6 +365,7 @@ def main() -> None:
     test_catalog_requires_the_benchmark_set()
     test_result_rejects_prohibited_and_freeform_fields()
     test_gate_semantics()
+    test_gate_rejects_tampered_benchmark_results()
     test_context_fails_without_unrelated_repository_rule()
     test_work_packet_boundaries()
     test_affected_parser_fails_closed()

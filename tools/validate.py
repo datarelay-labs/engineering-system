@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -487,6 +488,43 @@ def main():
     completed = subprocess.run(["python3", "tools/behavior_eval.py", "validate-catalog"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_behavior_eval.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    run = subprocess.run(
+        ["python3", "tools/behavior_eval.py", "run"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if run.returncode:
+        raise SystemExit(run.returncode or 1)
+    head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+    with tempfile.TemporaryDirectory() as tmp:
+        result_path = Path(tmp) / "behavior-eval-run.json"
+        result_path.write_text(run.stdout, encoding="utf-8")
+        gate = subprocess.run(
+            [
+                "python3",
+                "tools/behavior_eval.py",
+                "gate",
+                "--result",
+                str(result_path),
+                "--head",
+                head,
+                "--baseline-status",
+                "PASS",
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    if gate.returncode:
+        print("FAIL behavior eval rollout gate")
+        raise SystemExit(gate.returncode)
+    print("PASS behavior eval regression and deterministic gate")
 
     print("ENGINEERING_SYSTEM_VALIDATION=PASS")
 
