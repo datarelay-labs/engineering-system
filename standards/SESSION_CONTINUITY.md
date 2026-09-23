@@ -133,7 +133,24 @@ Only facts needed to resume now.
 
 ### Next Action
 
-Exactly the next bounded action or phase. Do not embed an entire historical prompt chain.
+State the next **bounded outcome / execution bundle**, not a single shell command, one tiny Issue, or one implementation micro-step. It must be large enough to avoid repeated handoff overhead and small enough to finish implementation plus deterministic validation under the Work Packet sizing contract.
+
+A coding-agent session, PR, or process restart is an execution detail. The durable unit is the intended outcome plus its completion oracle. Do not rewrite the packet after every trivial edit merely because one agent turn or subprocess ended.
+
+### Completion Contract
+
+For non-trivial work, record the smallest observable completion contract that lets an independent verifier decide whether the outcome is done:
+
+- expected observable behavior or state;
+- deterministic test/oracle or explicit manual evidence when deterministic proof is impossible;
+- prohibited regressions or invariants that must remain true;
+- exact-head or runtime evidence required before terminal PASS.
+
+The implementing agent's self-report is never the completion oracle by itself.
+
+### Follow-up Discoveries
+
+Keep tangential discoveries out of the active scope unless the coordinator explicitly re-sizes the packet. Record meaningful out-of-scope bugs, refactors, security findings, or opportunities as linked follow-up Issues/Work Packets with enough evidence to reproduce or triage them. Do not silently absorb them into the current implementation merely because they were discovered nearby.
 
 ### Constraints
 
@@ -245,6 +262,45 @@ After resolving Git identity and before ordinary work:
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
 The Work Packet replaces a large handoff; it must not become another large handoff.
+
+## Retry and stall circuit breaker
+
+Repeated attempts are not progress by themselves.
+
+Classify a failed attempt before retrying:
+
+- **transient infrastructure** — transport/service/rate-limit/temporary runner failure; bounded retry with backoff is allowed;
+- **environment/configuration** — missing dependency, wrong worktree, unavailable runtime, invalid credentials/permissions, or incompatible platform; fix the environment or yield with a concrete blocker;
+- **semantic/deterministic** — the same code/test/design failure reproduces; do not repeatedly rerun or rephrase the same approach. Re-plan, reduce/reshape the outcome, switch to a fresh context when useful, or escalate the missing design decision;
+- **ambiguous tool/model behavior** — preserve evidence and use a deterministic alternative or independent verifier rather than looping.
+
+A task/session budget may stop work earlier. There is no universal retry count, but repeated materially identical semantic failure without new evidence must trigger a strategy change rather than another blind retry.
+
+## Coordinator / worker execution model
+
+The Work Packet/objective is durable; coding-agent sessions are disposable workers.
+
+A coordinator or equivalent outer loop should, when automation exists:
+
+- select only dependency-eligible ACTIVE work;
+- apply Work Packet sizing and WIP/resource admission before starting a worker;
+- keep separate worktrees/state ownership for concurrent workers;
+- reconcile actual Git/PR/CI/runtime state after coordinator or worker restart;
+- distinguish transient retry from semantic re-plan;
+- restart or replace a crashed/stalled worker without inventing new scope;
+- preserve terminal evidence and hand human-required decisions to the owner.
+
+Do not encode a brittle micro-step state machine that requires one agent session to survive the whole workstream. The same outcome may span multiple fresh sessions when context/resource boundaries require it.
+
+## Human-attention and notification budget
+
+Human attention is a constrained engineering resource.
+
+- Notify on meaningful Work Packet transitions, terminal outcomes, or a decision/action that actually requires the owner.
+- Do not notify for every micro-edit, test invocation, short agent session, or intermediate subtask completion.
+- Deduplicate/coalesce repeated notifications for the same Work Packet and state.
+- A worker-level “COMPLETE” signal is handoff evidence only; it is not packet completion authority.
+- Quiet/no-change polling or automation runs should remain quiet unless an actionable condition appears.
 
 ## Trusted Work Packet provenance
 
