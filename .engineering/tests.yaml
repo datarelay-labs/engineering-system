@@ -7,6 +7,8 @@ paths:
     domains: [design]
   "ai/**":
     domains: [ai]
+  "evals/**":
+    domains: [ai]
   "adapters/**":
     domains: [adapters]
   "templates/**":
@@ -68,7 +70,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -147,4 +149,20 @@ scenarios:
     command: "python3 tools/test_org_rollout.py"
     invariants:
       - "org rollout defaults to audit and reuses adopt/upgrade helpers"
+    release_gate: true
+
+  - id: ENG-BEHAVIOR-001
+    cost: cheap
+    estimated_seconds: 8
+    timeout_seconds: 90
+    agent_default: true
+    scope: static
+    name: Behavior eval framework and rollout gate
+    level: static
+    domains: [ai, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_behavior_eval.py"
+    invariants:
+      - "mandatory behavior failures block rollout and eval results omit prompt or source content"
     release_gate: true
