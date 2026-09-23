@@ -137,7 +137,7 @@ release candidate
 | Security, secret, dependency/OSS/supply chain | [`standards/SECURITY.md`](standards/SECURITY.md) |
 | Version, artifact, qualification, upgrade, rollback | [`standards/RELEASE.md`](standards/RELEASE.md) |
 | Operations, observability, backup/restore, incident, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
-| Product Master/OpenSpec/ADR/Wiki source-of-truth 역할 | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
+| Product Master/OpenSpec/ADR/Wiki source-of-truth 역할과 optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
 | AI session continuity와 repository-scoped Work Packet | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
 | Automated repository adoption과 qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
 | Core/adapters와 deterministic enforcement | [`standards/ENFORCEMENT.md`](standards/ENFORCEMENT.md) |

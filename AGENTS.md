@@ -13,6 +13,7 @@ Read only when the task requires it:
 - `.engineering/tests.yaml` for implementation/debugging/testing
 - `.engineering/release.yaml` for release/version/artifact work
 - one relevant Engineering System standard plus only task-relevant product/spec/ADR/runbook material
+- `.engineering/knowledge.yaml` when present, for domain routing. Freshness is `python3 tools/knowledge-contract.py check`. Retrieval stays local unless `python3 tools/knowledge-contract.py route` reports `RETRIEVAL=ESCALATE`.
 
 Use the minimum sufficient context and reasoning. Expand only when a concrete blocker, failed check, or unresolved design question requires it. Do not preload all standards, Wiki pages, archives, historical discussions, or old agent transcripts.
 

@@ -52,6 +52,26 @@ If derived knowledge conflicts with canonical Git content, canonical Git content
 
 Agents should retrieve only the knowledge needed for the current task. Do not load all Wiki pages, all archived specifications, all ADRs, or historical discussions into every task context.
 
+## Optional knowledge index
+
+A repository may keep a small machine-readable domain map at `.engineering/knowledge.yaml`. The file is optional. Repositories without it remain valid, and adoption does not create or rewrite one. Bootstrap and managed upgrade install `tools/knowledge-contract.py` and `schemas/knowledge-index.schema.json` when those paths are missing. A pre-existing different copy fails closed before any adoption or upgrade writes.
+
+The index routes each domain to canonical Git paths. It does not copy normative text. Schema: `schemas/knowledge-index.schema.json`.
+
+`python3 tools/knowledge-contract.py check` validates a present index. It reports missing canonical or derived paths, source-of-truth conflicts where one path is both canonical and derived or generated, and stale generated references whose recorded `source_sha256` does not match the source file. Default output is bounded. A truncated report prints `FULLER` and `RAW` commands that reproduce the complete finding list.
+
+## Retrieval escalation
+
+Local search remains the default. `python3 tools/knowledge-contract.py route` reads only a local signals file and does not call a retrieval vendor, vector database, or network API. No signals means `RETRIEVAL=LOCAL`.
+
+Escalation requires recorded evidence:
+
+- breadth: `files_consulted` >= 25
+- cross-repo: two or more distinct `repos`
+- repeated reread: the same path counted >= 3 in `reread`
+
+Invalid signals fail closed with `RETRIEVAL=BLOCKED`.
+
 ## Documentation triggers
 
 Update durable documentation when a change alters:

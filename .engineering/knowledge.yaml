@@ -1,0 +1,28 @@
+version: 1
+domains:
+  - id: standards
+    summary: Lifecycle rules and source-of-truth roles.
+    canonical:
+      - standards/CORE.md
+      - standards/KNOWLEDGE.md
+  - id: design
+    summary: Minimal design gate for material changes.
+    canonical:
+      - standards/DESIGN.md
+  - id: session-continuity
+    summary: Repository-scoped Work Packet resume contract.
+    canonical:
+      - standards/SESSION_CONTINUITY.md
+  - id: adoption
+    summary: Fail-closed adoption and managed upgrade.
+    canonical:
+      - standards/ADOPTION.md
+  - id: testing
+    summary: Affected-test selection and trigger semantics.
+    canonical:
+      - standards/TESTING.md
+derived:
+  - path: README.md
+    note: Human navigation. Git standards remain canonical.
+  - path: README.ko.md
+    note: Korean navigation. Git standards remain canonical.
