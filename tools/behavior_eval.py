@@ -621,6 +621,17 @@ def benchmark_contract_reasons(scenarios: list[dict[str, Any]]) -> list[str]:
     return reasons
 
 
+def efficiency_contract_reasons(root: Path) -> list[str]:
+    try:
+        module = _load_tool("efficiency_telemetry.py", "efficiency_telemetry_gate")
+        reasons = module.contract_reasons(root)
+    except Exception:
+        return ["EFFICIENCY_CONTRACT_REGRESSION"]
+    if not isinstance(reasons, list) or any(not isinstance(item, str) for item in reasons):
+        return ["EFFICIENCY_CONTRACT_REGRESSION"]
+    return list(reasons)
+
+
 def evaluate_gate(
     run: dict[str, Any],
     *,
@@ -638,6 +649,7 @@ def evaluate_gate(
     elif baseline_status != "PASS":
         reasons.append("MISSING_BASELINE_EVIDENCE")
     reasons.extend(benchmark_contract_reasons(run["scenarios"]))
+    reasons.extend(efficiency_contract_reasons(ROOT))
     document = {
         "schema_version": 1,
         "kind": "behavior-rollout-gate",

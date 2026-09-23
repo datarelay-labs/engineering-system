@@ -62,6 +62,9 @@ REQUIRED_METHOD_FILES = (
     "schemas/behavior-scenario.schema.json",
     "schemas/behavior-result.schema.json",
     "evals/behavior/scenarios.yaml",
+    "tools/efficiency_telemetry.py",
+    "tools/test_efficiency_telemetry.py",
+    "schemas/efficiency-telemetry.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -525,6 +528,15 @@ def main():
         print("FAIL behavior eval rollout gate")
         raise SystemExit(gate.returncode)
     print("PASS behavior eval regression and deterministic gate")
+
+    completed = subprocess.run(["python3", "tools/test_efficiency_telemetry.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/efficiency_telemetry.py", "gate"], cwd=ROOT)
+    if completed.returncode:
+        print("FAIL efficiency telemetry privacy and task-budget gate")
+        raise SystemExit(completed.returncode)
+    print("PASS efficiency telemetry privacy and task-budget gate")
 
     print("ENGINEERING_SYSTEM_VALIDATION=PASS")
 
