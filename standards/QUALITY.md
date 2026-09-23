@@ -57,6 +57,27 @@ Applicable user-facing products must test success paths plus misuse and recovery
 - stale/generated guidance
 - cross-output consistency
 
+## Change risk and verification depth
+
+Change kind describes what is being changed; change risk determines how much independent evidence is required. Risk does **not** determine roadmap priority.
+
+Use `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` as a compact coordinator signal, based on the combination of:
+- production reach/blast radius;
+- security/privilege/trust-boundary impact;
+- persisted-data or migration impact;
+- public API/CLI/config/compatibility impact;
+- reversibility/rollback quality;
+- cross-service or shared-infrastructure scope.
+
+Default behavior:
+
+- `LOW` — targeted deterministic validation and normal diff/review.
+- `MEDIUM` — affected regression plus normal independent review where configured.
+- `HIGH` — fresh-context independent verifier, wider affected qualification, and explicit rollback/compatibility/security evidence as applicable.
+- `CRITICAL` — HIGH requirements plus explicit human approval for destructive/external/prod execution when required by the security/release contract and release/operational evidence appropriate to the change.
+
+These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.
+
 ## Bounded hardening and audit depth
 
 Security, reliability, quality, and architecture can always be improved further. A quality process therefore needs a stopping rule as well as a defect-finding rule.
