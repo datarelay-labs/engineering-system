@@ -25,6 +25,7 @@ When resuming a workstream, resolve this repository first, load only its single 
 - Classify the change and affected domains/contracts/security/operations.
 - Before handing implementation to Cursor/coding agent, apply the canonical Work Packet sizing contract: do not map one GitHub Issue to one Cursor job by default; `BATCH` adjacent micro-issues/findings, `KEEP` one medium-sized coherent outcome, and `SPLIT` unrelated or context-exhausting scope. Preserve enough session context for implementation plus deterministic validation.
 - Treat the Work Packet `Next Action` as the next bounded outcome/execution bundle with a completion oracle, not a micro-step. Keep tangential discoveries in linked follow-up Issues unless the coordinator explicitly re-sizes the active packet; repeated materially identical failures require a strategy change rather than blind retry.
+- Apply the canonical sufficiency gate: once the completion contract passes and no blocking finding remains, stop that workstream and return to roadmap priority. Do not continue open-ended hardening/auditing for non-blocking improvements; record them as follow-up work.
 - For external agent tools/MCP/plugins, follow the canonical security provenance/authority and agent-tool ergonomics rules; expose only the minimum task-relevant toolset.
 - Apply `standards/DESIGN.md` for material design-bearing changes.
 - Apply `standards/OPERATIONS.md` for production-impacting failures and preserve evidence before mutation.
