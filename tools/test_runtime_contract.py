@@ -144,7 +144,7 @@ def test_duplicate_authority_command_fails() -> None:
     assert report["authorities"]["health"]["field"] == "operations.health_command"
 
 
-def test_unsafe_and_second_health_field_fail() -> None:
+def test_second_health_field_fails_schema() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         write_profiles(root)
@@ -152,7 +152,7 @@ def test_unsafe_and_second_health_field_fail() -> None:
             browser={
                 "support": "supported",
                 "scope": "worktree",
-                "command": "sudo shot",
+                "command": "curl -fsS http://127.0.0.1:8080/metrics",
                 "fuller_command": "echo ok",
             }
         )
@@ -163,6 +163,70 @@ def test_unsafe_and_second_health_field_fail() -> None:
     assert any(item["code"] == "SCHEMA" for item in report["findings"])
     assert report["authorities"]["health"]["support"] == "UNSUPPORTED"
     assert report["authorities"]["health"]["command"] == ""
+
+
+def test_local_metrics_url_is_structurally_valid_and_not_executed() -> None:
+    command = "curl -fsS http://127.0.0.1:8080/metrics"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_profiles(root, health="true", smoke="true", e2e="true")
+        write_contract(
+            root,
+            unsupported_contract(
+                metrics={
+                    "support": "supported",
+                    "scope": "worktree",
+                    "command": command,
+                    "fuller_command": 'echo "$METRICS" && curl -fsS http://127.0.0.1:8080/metrics',
+                }
+            ),
+        )
+        import os
+
+        executed: list[object] = []
+
+        def reject(*args: object, **kwargs: object) -> None:
+            executed.append(args)
+            raise AssertionError("runtime command executed")
+
+        saved = (
+            os.system,
+            os.popen,
+            subprocess.run,
+            subprocess.Popen,
+            subprocess.call,
+            subprocess.check_call,
+            subprocess.check_output,
+        )
+        os.system = reject
+        os.popen = reject
+        subprocess.run = reject
+        subprocess.Popen = reject
+        subprocess.call = reject
+        subprocess.check_call = reject
+        subprocess.check_output = reject
+        try:
+            report = contract.check_contract(root)
+        finally:
+            (
+                os.system,
+                os.popen,
+                subprocess.run,
+                subprocess.Popen,
+                subprocess.call,
+                subprocess.check_call,
+                subprocess.check_output,
+            ) = saved
+        assert executed == []
+        assert report["result"] == "PASS", report
+        assert report["findings"] == []
+        assert report["capabilities"]["metrics"]["command"] == command
+        rendered = run_cli("check", "--root", str(root))
+    assert rendered.returncode == 0, rendered.stdout
+    assert f"CAPABILITY_COMMAND=metrics {command}" in rendered.stdout
+    assert "UNSAFE_COMMAND" not in rendered.stdout
+    assert "FINDING_COUNT=0" in rendered.stdout
+    assert "command_problem" not in TOOL.read_text(encoding="utf-8")
 
 
 def test_missing_authority_file_fails_closed_when_contract_present() -> None:
@@ -179,16 +243,16 @@ def test_missing_authority_file_fails_closed_when_contract_present() -> None:
 def test_bounded_output_keeps_fuller_and_raw_paths() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        write_profiles(root, health="make health")
+        write_profiles(root, health="make health", smoke="make smoke")
         write_contract(
             root,
             unsupported_contract(
-                start={"support": "supported", "scope": "worktree", "command": "sudo boot"},
+                start={"support": "supported", "scope": "worktree", "command": "make health"},
                 logs={
                     "support": "supported",
                     "scope": "worktree",
                     "command": "make health",
-                    "fuller_command": "echo https://vendor.example/logs",
+                    "fuller_command": "make smoke",
                 },
             ),
         )
@@ -223,7 +287,8 @@ def main() -> int:
     test_absent_contract_passes_and_reports_authorities()
     test_present_contract_does_not_execute_commands()
     test_duplicate_authority_command_fails()
-    test_unsafe_and_second_health_field_fail()
+    test_second_health_field_fails_schema()
+    test_local_metrics_url_is_structurally_valid_and_not_executed()
     test_missing_authority_file_fails_closed_when_contract_present()
     test_bounded_output_keeps_fuller_and_raw_paths()
     test_canonical_contract_passes()

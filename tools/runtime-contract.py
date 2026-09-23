@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shlex
 import sys
 from pathlib import Path
@@ -30,7 +29,6 @@ AUTHORITY_FIELDS = {
 }
 ADDITIVE = ("start", "logs", "browser", "metrics", "traces", "cleanup")
 EVIDENCE = {"logs", "browser", "metrics", "traces"}
-CREDENTIAL_RE = re.compile(r"(?i)(?:token|password|secret|api[_-]?key)\s*=")
 
 
 def fail_usage(message: str) -> None:
@@ -76,21 +74,6 @@ def authority_value(kind: str, project: dict | None, release: dict | None) -> tu
     if not isinstance(raw, str) or not raw.strip():
         return "UNSUPPORTED", ""
     return "SUPPORTED", raw.strip()
-
-
-def command_problem(raw: str) -> str | None:
-    if any(char in raw for char in "\n\r\x00"):
-        return "UNSAFE_COMMAND"
-    if "://" in raw or "$" in raw or "`" in raw or ";" in raw or ">" in raw or "<" in raw:
-        return "UNSAFE_COMMAND"
-    if "&&" in raw or "||" in raw:
-        return "UNSAFE_COMMAND"
-    parts = raw.split()
-    if "sudo" in parts or any(part == ".." or part.startswith("../") or "/../" in part for part in parts):
-        return "UNSAFE_COMMAND"
-    if CREDENTIAL_RE.search(raw):
-        return "UNSAFE_COMMAND"
-    return None
 
 
 def check_contract(root: Path) -> dict[str, object]:
@@ -142,18 +125,12 @@ def check_contract(root: Path) -> dict[str, object]:
                 if support == "supported":
                     command = str(spec.get("command") or "")
                     entry["command"] = command
-                    problem = command_problem(command)
-                    if problem:
-                        findings.append(finding(problem, name))
-                    elif command in authority_commands:
+                    if command in authority_commands:
                         findings.append(finding("DUPLICATE_AUTHORITY", name))
                     if name in EVIDENCE:
                         fuller = str(spec.get("fuller_command") or "")
                         entry["fuller_command"] = fuller
-                        fuller_problem = command_problem(fuller)
-                        if fuller_problem:
-                            findings.append(finding(fuller_problem, f"{name} fuller_command"))
-                        elif fuller in authority_commands:
+                        if fuller in authority_commands:
                             findings.append(finding("DUPLICATE_AUTHORITY", f"{name} fuller_command"))
                 capabilities[name] = entry
         else:
