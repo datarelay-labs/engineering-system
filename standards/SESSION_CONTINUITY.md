@@ -198,7 +198,7 @@ After resolving Git identity and before ordinary work:
 9. Do not keep a coding-agent session alive polling CI, review, deployment, or another machine-observable external condition. Record a concise `WAITING_FOR_<CONDITION>` state and yield to coordinator/automation; the next resume re-checks the condition.
 10. For an existing branch/PR, orient from the base diff first (`git diff --name-only`/`git diff --stat`) before broad repository search.
 11. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity.
-12. Prefer a fresh coding-agent session for each new bounded `Next Action`; persistent sessions are for an in-flight action/process, not long-term memory.
+12. Prefer a fresh coding-agent session for each new bounded `Next Action` only after `tools/cursor-resource-preflight.py` returns exit 0 (`PASS` or `WARN`). On `BLOCK`, do not create a new persistent session and do not stop, kill, or mutate existing sessions. Resource safety takes precedence over a fresh session. Reuse an already-running matching target session when that reuse is safe and semantically correct. Persistent sessions are for an in-flight action/process, not long-term memory.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -263,6 +263,16 @@ The resume command:
 - uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
 
 The default remains single-agent sequential execution when the owner's project rules require it. A long-lived coding-agent session is not a substitute for durable packet state or external orchestration.
+
+## Persistent-session resource guard
+
+Before any new `agent persist` session, run the canonical preflight:
+
+```bash
+python3 tools/cursor-resource-preflight.py
+```
+
+Host policy may override thresholds without editing a repository, using `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD` or `~/.config/engineering-system/cursor-resource-guard.yaml` (then `/etc/engineering-system/cursor-resource-guard.yaml`). Exit 0 is `PASS` or `WARN` and may proceed. Exit 2 blocks on memory, swap, or session pressure. Exit 3 blocks because memory facts, `agent persist list`, or the override could not be trusted. Neither blocking result may stop or mutate existing Cursor sessions. Unsupported platforms report `BLOCK` instead of guessing. The always-applied Cursor rule stays small; this tool and this standard hold the procedure.
 
 ## GitHub marker and lifecycle
 

@@ -37,6 +37,6 @@ When resuming a workstream, resolve this repository first, load only its single 
 
 For adoption or managed upgrades, follow `standards/ADOPTION.md`, preserve project-specific/stricter rules, and qualify the result deterministically.
 
-Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. Managed upgrades must keep that version/baseline identity aligned with the canonical Engineering System release (currently 1.6.4) rather than assuming same-major pins are current.
+Adopted projects pin `engineering_system.version` and an immutable `engineering_system.baseline` SHA in `.engineering/project.yaml`. Managed upgrades must keep that version/baseline identity aligned with the canonical Engineering System release (currently 1.6.5) rather than assuming same-major pins are current.
 
 Tool-specific adapters may change syntax but must not weaken these rules.

@@ -98,7 +98,7 @@ def test_clean_python_bootstrap() -> None:
 
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
-        assert engineering["version"] == "1.6.4"
+        assert engineering["version"] == "1.6.5"
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -407,7 +407,7 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
 
         upgraded_project = load_yaml(project_path)
-        assert upgraded_project["engineering_system"]["version"] == "1.6.4"
+        assert upgraded_project["engineering_system"]["version"] == "1.6.5"
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
@@ -612,13 +612,13 @@ def test_grant_style_baseline_declarations_upgraded() -> None:
         readme_text = (target / "README.md").read_text(encoding="utf-8")
         assert "Keep project-specific text." in agents_text
         assert (
-            f"Adoption baseline: Engineering System version 1.6.4 at immutable commit `{NEW_BASELINE}`."
+            f"Adoption baseline: Engineering System version 1.6.5 at immutable commit `{NEW_BASELINE}`."
             in agents_text
         )
         assert "1.6.1" not in agents_text
         assert stale_sha not in agents_text
         assert (
-            "The current repository baseline identifies Engineering System **1.6.4** and keeps"
+            "The current repository baseline identifies Engineering System **1.6.5** and keeps"
             in readme_text
         )
         assert "1.6.1" not in readme_text

@@ -1,5 +1,7 @@
 Resume the current engineering workstream from repository-scoped durable state.
 
+Resource guard: before creating a new persistent Cursor session, run `python3 tools/cursor-resource-preflight.py` from the canonical Engineering System checkout, or the host override file named by `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD`. Exit 0 means PASS or WARN and may proceed to `agent persist`. A non-zero result means BLOCK: do not create a new persistent session, and do not stop, kill, or otherwise mutate existing Cursor sessions. Resource safety takes precedence over preferring a fresh session. Reuse an already-running matching target session when that reuse is safe and semantically correct.
+
 Use minimum sufficient context and reasoning. Do not request maximum reasoning by default. Work sequentially; do not use parallel sub-agents unless the active task explicitly requires them.
 
 1. Verify the local execution environment and Git identity:
@@ -39,7 +41,7 @@ Use minimum sufficient context and reasoning. Do not request maximum reasoning b
    - If such a wait is pending, keep `STATUS=ACTIVE`, record `WAITING_FOR_<CONDITION>` plus the observable reference in Current State/Latest Evidence, set the resumable Next Action, and return control to coordinator/automation.
    - If progress requires a human decision, approval, credential, or other non-machine-resolvable action, set `STATUS=BLOCKED` and record the exact required action.
    - A later resume must re-check the external state rather than replay old logs.
-   - After a bounded Next Action finishes or yields, prefer a fresh coding-agent session for the next Next Action. Keep a persistent session only while an in-flight command/process or the same bounded action still needs continuity. Durable state belongs in the Work Packet, not a growing conversation.
+   - After a bounded Next Action finishes or yields, prefer a fresh coding-agent session for the next Next Action only when resource preflight returns exit 0. On BLOCK, do not create a new persistent session and do not stop existing sessions. Keep a persistent session only while an in-flight command/process or the same bounded action still needs continuity. Durable state belongs in the Work Packet, not a growing conversation.
 
 8. Before merge or terminal completion, inspect current actionable review feedback. Fix/revalidate every actionable finding or record a concise evidence-backed disposition.
 

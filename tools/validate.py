@@ -54,6 +54,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_adopt.py",
     "tools/test_org_rollout.py",
     "tools/test_work_packet_authority.py",
+    "tools/cursor-resource-preflight.py",
+    "tools/test_cursor_resource_preflight.py",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -152,6 +154,31 @@ def validate_work_packet_author_authority():
         if token not in authority:
             raise SystemExit(f"FAIL work packet authority helper missing token: {token}")
     print("PASS trusted Work Packet author authority contract")
+
+
+def validate_resource_guard_contract():
+    tool = (ROOT / "tools/cursor-resource-preflight.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    instruction = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    resume = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
+    for token in ("PASS", "WARN", "BLOCK", "agent persist list", "MemAvailable"):
+        if token not in tool:
+            raise SystemExit(f"FAIL resource preflight missing token: {token}")
+    for token in ("os.kill", "persist stop", "SIGKILL"):
+        if token in tool:
+            raise SystemExit(f"FAIL resource preflight encodes session mutation: {token}")
+    for label, text in (
+        ("session continuity", session),
+        ("ChatGPT custom instruction", instruction),
+        ("resume template", resume),
+    ):
+        if "cursor-resource-preflight.py" not in text:
+            raise SystemExit(f"FAIL {label} missing resource preflight command")
+        if "BLOCK" not in text:
+            raise SystemExit(f"FAIL {label} missing BLOCK result")
+    if instruction.index("tools/cursor-resource-preflight.py") > instruction.index("agent persist /work-resume"):
+        raise SystemExit("FAIL ChatGPT handoff runs agent persist before resource preflight")
+    print("PASS Cursor persistent-session resource guard contract")
 
 
 def validate_token_efficiency_contract():
@@ -420,6 +447,7 @@ def main():
     validate_baseline_declarations()
     validate_bun_discovery()
     validate_work_packet_author_authority()
+    validate_resource_guard_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -436,6 +464,9 @@ def main():
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
     import subprocess
+    completed = subprocess.run(["python3", "tools/test_cursor_resource_preflight.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
