@@ -70,7 +70,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -165,4 +165,20 @@ scenarios:
     command: "python3 tools/test_behavior_eval.py"
     invariants:
       - "mandatory behavior failures block rollout and eval results omit prompt or source content"
+    release_gate: true
+
+  - id: ENG-TELEMETRY-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Efficiency telemetry privacy and task budget
+    level: static
+    domains: [ai, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_efficiency_telemetry.py"
+    invariants:
+      - "telemetry stays in git-local content-free state, exact-head PASS matches Git, and budget exhaustion yields instead of retrying"
     release_gate: true
