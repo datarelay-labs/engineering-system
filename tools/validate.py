@@ -68,6 +68,9 @@ REQUIRED_METHOD_FILES = (
     "tools/knowledge-contract.py",
     "tools/test_knowledge_contract.py",
     "schemas/knowledge-index.schema.json",
+    "tools/runtime-contract.py",
+    "tools/test_runtime_contract.py",
+    "schemas/runtime-contract.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -474,6 +477,64 @@ def validate_knowledge_contract():
     print("PASS optional knowledge index freshness contract")
 
 
+def validate_runtime_contract():
+    schema = load_json(ROOT / "schemas/runtime-contract.schema.json")
+    Draft202012Validator.check_schema(schema)
+    contract = load_yaml(ROOT / ".engineering/runtime.yaml")
+    errors = sorted(Draft202012Validator(schema).iter_errors(contract), key=lambda item: list(item.path))
+    if errors:
+        for error in errors:
+            where = ".".join(str(part) for part in error.path) or "<root>"
+            print(f"FAIL .engineering/runtime.yaml {where}: {error.message}")
+        raise SystemExit(1)
+    tool = (ROOT / "tools/runtime-contract.py").read_text(encoding="utf-8")
+    for token in (
+        "RUNTIME_CONTRACT",
+        "FINDINGS_TRUNCATED",
+        "HEALTH_AUTHORITY",
+        "DUPLICATE_AUTHORITY",
+        "operations.health_command",
+        "release.public_smoke_command",
+        "release.operational_e2e_command",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL runtime contract tool missing token: {token}")
+    standard = (ROOT / "standards/OPERATIONS.md").read_text(encoding="utf-8")
+    for token in (
+        ".engineering/runtime.yaml",
+        "operations.health_command",
+        "release.public_smoke_command",
+        "release.operational_e2e_command",
+        "RUNTIME_CONTRACT=ABSENT",
+    ):
+        if token not in standard:
+            raise SystemExit(f"FAIL operations standard missing runtime token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        if "runtime.yaml" not in (ROOT / rel).read_text(encoding="utf-8"):
+            raise SystemExit(f"FAIL {rel} missing optional runtime contract router")
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
+    check_text = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    for rel in ("tools/runtime-contract.py", "schemas/runtime-contract.schema.json"):
+        if rel not in adopt_text or rel not in check_text:
+            raise SystemExit(f"FAIL adopted runtime path missing from bootstrap or compliance: {rel}")
+    if "RUNTIME_CONTRACT_MANAGED" not in upgrade_text or "plan_runtime_contract_install" not in upgrade_text:
+        raise SystemExit("FAIL upgrade-adoption.py missing runtime contract install")
+    import subprocess
+
+    completed = subprocess.run(
+        ["python3", "tools/runtime-contract.py", "check"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode or "RESULT=PASS" not in completed.stdout:
+        print(completed.stdout)
+        raise SystemExit("FAIL runtime contract check")
+    print("PASS optional runtime observability contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -511,6 +572,7 @@ def main():
     validate_actionable_review_gate()
     validate_adoption_contract()
     validate_knowledge_contract()
+    validate_runtime_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")

@@ -13,6 +13,7 @@ import yaml
 from adopt import (
     KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
+    RUNTIME_CONTRACT_MANAGED,
     canonical_baseline,
     canonical_version,
     engineering_workflow,
@@ -321,6 +322,41 @@ def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
 
 
 def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_runtime_contract_install(root: Path) -> dict[str, str]:
+    """Install the optional runtime-contract helper only when the path is missing.
+
+    Identical canonical copies are left unchanged. A different existing file fails
+    closed before any upgrade mutation. `.engineering/runtime.yaml` is not created,
+    and health, smoke, and E2E commands are not rewritten by this helper.
+    """
+    planned: dict[str, str] = {}
+    for rel in RUNTIME_CONTRACT_MANAGED:
+        source = CANONICAL / rel
+        if not source.is_file():
+            raise SystemExit(f"FAIL canonical {rel} missing")
+        text = source.read_text(encoding="utf-8")
+        path = root / rel
+        if not path.exists():
+            planned[rel] = text
+            continue
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
+    return planned
+
+
+def apply_runtime_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
     installed: list[str] = []
     for rel, text in planned.items():
         path = root / rel
@@ -656,6 +692,7 @@ def main() -> int:
     planned_cursorignore = plan_cursorignore_install(root)
     planned_resume_adapters = plan_cursor_resume_adapters(root)
     planned_knowledge_contract = plan_knowledge_contract_install(root)
+    planned_runtime_contract = plan_runtime_contract_install(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -681,6 +718,12 @@ def main() -> int:
         print("KNOWLEDGE_CONTRACT_INSTALLED=" + ",".join(installed_knowledge))
     else:
         print("KNOWLEDGE_CONTRACT_INSTALLED=<none>")
+
+    installed_runtime = apply_runtime_contract_install(root, planned_runtime_contract)
+    if installed_runtime:
+        print("RUNTIME_CONTRACT_INSTALLED=" + ",".join(installed_runtime))
+    else:
+        print("RUNTIME_CONTRACT_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:
