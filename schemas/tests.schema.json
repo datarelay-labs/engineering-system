@@ -68,7 +68,15 @@
             "items": {"type": "string"}
           },
           "origin": {"type": "string"},
-          "release_gate": {"type": "boolean"}
+          "release_gate": {"type": "boolean"},
+          "cost": {"type": "string", "enum": ["cheap", "medium", "expensive"]},
+          "estimated_seconds": {"type": "integer", "minimum": 1},
+          "timeout_seconds": {"type": "integer", "minimum": 1},
+          "agent_default": {"type": "boolean"},
+          "scope": {
+            "type": "string",
+            "enum": ["metadata", "static", "unit", "component", "feature", "integration", "full", "e2e"]
+          }
         }
       }
     }

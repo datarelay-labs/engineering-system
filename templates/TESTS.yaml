@@ -10,6 +10,11 @@ paths:
 
 scenarios:
   - id: CORE-UNIT-001
+    cost: cheap
+    estimated_seconds: 30
+    timeout_seconds: 120
+    agent_default: true
+    scope: unit
     name: Example affected unit test
     level: unit
     domains:
@@ -24,6 +29,11 @@ scenarios:
     release_gate: true
 
   - id: CORE-PREFLIGHT-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
     name: Example cheap release preflight
     level: static
     domains:

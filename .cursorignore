@@ -1,0 +1,17 @@
+# Engineering System managed safe defaults for Cursor context/indexing.
+# Project-specific entries may be appended; managed upgrades never overwrite custom content.
+.git/
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+coverage/
+dist/
+build/
+tmp/
+temp/
+*.log

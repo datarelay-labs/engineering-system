@@ -229,7 +229,7 @@ def test_org_rollout_matrix() -> None:
         assert "OUTCOME=NEEDS_INPUT" in applied.stdout
         assert "ORG_ROLLOUT=PARTIAL" in applied.stdout
         upgraded_project = load_yaml(outdated / ".engineering" / "project.yaml")
-        assert upgraded_project["engineering_system"]["version"] == "1.6.3"
+        assert upgraded_project["engineering_system"]["version"] == "1.6.4"
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         branch = run("git", "branch", "--show-current", cwd=outdated)
         assert branch.stdout.strip().startswith("chore/engineering-system-rollout-")
@@ -434,7 +434,7 @@ def test_override_manifest_exclude_and_adopt() -> None:
         assert "OUTCOME=APPLIED" in applied.stdout
         assert (adoptable / ".engineering" / "project.yaml").is_file()
         project = load_yaml(adoptable / ".engineering" / "project.yaml")
-        assert project["engineering_system"]["version"] == "1.6.3"
+        assert project["engineering_system"]["version"] == "1.6.4"
         assert project["engineering_system"]["baseline"] == NEW_BASELINE
 
 

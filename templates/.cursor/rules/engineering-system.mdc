@@ -5,16 +5,8 @@ alwaysApply: true
 
 # Engineering System
 
-This repository follows the canonical Engineering System.
+Follow repository `AGENTS.md` and `.engineering/project.yaml` under the canonical Engineering System.
 
-Always read @AGENTS.md and @.engineering/project.yaml first.
+Use minimum sufficient context. On an existing branch/PR, inspect the diff first and expand only to required dependencies. Run the smallest correct change and cheapest affected deterministic check first; inspect actionable review feedback before merge.
 
-Use minimum sufficient context and reasoning. Load @.engineering/tests.yaml, @.engineering/release.yaml, standards, specs, ADRs, runbooks, and Work Packet references only when the current task requires them. Do not preload history or unrelated repositories.
-
-Follow AGENTS.md for design, operations, adoption, validation, and review gates. Make the smallest correct change and run the cheapest affected deterministic check first. Never weaken validation or claim unexecuted evidence as PASS. Resolve actionable review feedback before merge or terminal completion.
-
-For resume work, use only the exact repository/branch ACTIVE AI Work Packet and verify actual Git state. Fail closed on missing/ambiguous packets or packet-v2 Goal/TASK_KIND/OWNER_INTENT/Next Action mismatch.
-
-Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting evidence and yield to coordinator/automation for re-entry.
-
-Tool-specific adapters may change syntax but must not weaken the Engineering System.
+Do not auto-run expensive/full-suite checks for metadata-only or narrowly scoped changes. Do not spend coding-agent time polling external waits or dumping large command output into context; save verbose logs and surface only exit status plus relevant grep/tail evidence.

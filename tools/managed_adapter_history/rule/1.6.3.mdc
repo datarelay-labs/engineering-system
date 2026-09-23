@@ -1,0 +1,20 @@
+---
+description: Mandatory Engineering System entry rule
+alwaysApply: true
+---
+
+# Engineering System
+
+This repository follows the canonical Engineering System.
+
+Always read @AGENTS.md and @.engineering/project.yaml first.
+
+Use minimum sufficient context and reasoning. Load @.engineering/tests.yaml, @.engineering/release.yaml, standards, specs, ADRs, runbooks, and Work Packet references only when the current task requires them. Do not preload history or unrelated repositories.
+
+Follow AGENTS.md for design, operations, adoption, validation, and review gates. Make the smallest correct change and run the cheapest affected deterministic check first. Never weaken validation or claim unexecuted evidence as PASS. Resolve actionable review feedback before merge or terminal completion.
+
+For resume work, use only the exact repository/branch ACTIVE AI Work Packet and verify actual Git state. Fail closed on missing/ambiguous packets or packet-v2 Goal/TASK_KIND/OWNER_INTENT/Next Action mismatch.
+
+Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting evidence and yield to coordinator/automation for re-entry.
+
+Tool-specific adapters may change syntax but must not weaken the Engineering System.

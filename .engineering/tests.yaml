@@ -54,6 +54,11 @@ paths:
 
 scenarios:
   - id: ENG-STATIC-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
     name: JSON schemas parse
     level: static
     domains: [schemas]
@@ -63,6 +68,11 @@ scenarios:
     release_gate: true
 
   - id: ENG-STATIC-002
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
     name: Git whitespace validation
     level: static
     domains: [standards, design, ai, adapters, templates, schemas, workflows, session-continuity]
@@ -72,6 +82,11 @@ scenarios:
     release_gate: true
 
   - id: ENG-ADOPTION-001
+    cost: medium
+    estimated_seconds: 20
+    timeout_seconds: 180
+    agent_default: true
+    scope: integration
     name: Automated adoption bootstrap regression
     level: integration
     domains: [adoption]
@@ -83,6 +98,11 @@ scenarios:
     release_gate: true
 
   - id: ENG-SESSION-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
     name: Work Packet author permission regression
     level: integration
     domains: [session-continuity]
@@ -94,6 +114,11 @@ scenarios:
     release_gate: true
 
   - id: ENG-ADOPTION-002
+    cost: medium
+    estimated_seconds: 15
+    timeout_seconds: 180
+    agent_default: true
+    scope: integration
     name: Organization-wide rollout regression
     level: integration
     domains: [adoption, adoption-upgrade]
