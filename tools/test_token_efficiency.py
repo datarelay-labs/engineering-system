@@ -117,9 +117,56 @@ def test_expensive_metadata_only_is_not_auto_run():
     assert "TEST_RESULT=" not in result.stdout
 
 
+def test_explicit_unresolved_base_fails_closed():
+    repo = fixture()
+    for tool, success_marker in (
+        (CONTEXT, "CONTEXT_ROUTER=PASS"),
+        (TEST, "TEST_SELECTION=PLAN"),
+    ):
+        result = run(sys.executable, str(tool), "--root", str(repo), "--base", "does-not-exist", check=False)
+        assert result.returncode != 0
+        assert "unresolved base: does-not-exist" in result.stdout
+        assert success_marker not in result.stdout
+        assert "TEST_RESULT=PASS" not in result.stdout
+
+
+def test_explicit_base_without_merge_base_fails_closed():
+    repo = fixture()
+    git(repo, "checkout", "--orphan", "unrelated")
+    (repo / "other.txt").write_text("unrelated\n", encoding="utf-8")
+    commit(repo, "unrelated")
+    git(repo, "checkout", "feature")
+    for tool, success_marker in (
+        (CONTEXT, "CONTEXT_ROUTER=PASS"),
+        (TEST, "TEST_SELECTION=PLAN"),
+    ):
+        result = run(sys.executable, str(tool), "--root", str(repo), "--base", "unrelated", check=False)
+        assert result.returncode != 0
+        assert "git diff failed for base: unrelated" in result.stdout
+        assert success_marker not in result.stdout
+        assert "TEST_RESULT=PASS" not in result.stdout
+
+
+def test_dirty_worktree_is_unioned_with_committed_diff():
+    repo = fixture()
+    git(repo, "mv", "src/demo.py", "src/renamed.py")
+    (repo / "src" / "untracked.py").write_text("VALUE = 3\n", encoding="utf-8")
+    (repo / ".engineering" / "notes.yaml").write_text("x: 1\n", encoding="utf-8")
+    context = run(sys.executable, str(CONTEXT), "--root", str(repo), "--base", "main")
+    for path in ("src/demo.py", "src/renamed.py", "src/untracked.py", ".engineering/notes.yaml"):
+        assert f"CHANGED_FILE={path}" in context.stdout
+    assert "AFFECTED_DOMAINS=config,core" in context.stdout
+    selected = run(sys.executable, str(TEST), "--root", str(repo), "--base", "main")
+    assert "TEST_DOMAINS=config,core" in selected.stdout
+    assert "TEST_SELECTION=PLAN" in selected.stdout
+
+
 def main() -> int:
     test_diff_first_context_and_cheapest_selection()
     test_expensive_metadata_only_is_not_auto_run()
+    test_explicit_unresolved_base_fails_closed()
+    test_explicit_base_without_merge_base_fails_closed()
+    test_dirty_worktree_is_unioned_with_committed_diff()
     print("TOKEN_EFFICIENCY_TESTS=PASS")
     return 0
 

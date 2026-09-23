@@ -10,19 +10,33 @@ from pathlib import Path
 import yaml
 
 
-def git(root: Path, *args: str) -> str:
+def fail_context(message: str) -> None:
+    raise SystemExit(f"CONTEXT_ROUTER=FAIL {message}")
+
+
+def run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.check_output(
+        return subprocess.run(
             ["git", "-C", str(root), *args],
             text=True,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args=["git", *args], returncode=127, stdout="")
+
+
+def git(root: Path, *args: str) -> str:
+    completed = run_git(root, *args)
+    if completed.returncode != 0:
         return ""
+    return completed.stdout.strip()
 
 
 def resolve_base(root: Path, explicit: str) -> str:
     if explicit:
+        if not git(root, "rev-parse", "--verify", "--quiet", f"{explicit}^{{commit}}"):
+            fail_context(f"unresolved base: {explicit}")
         return explicit
     symbolic = git(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     candidates = [symbolic, "origin/main", "origin/master", "main", "master", "HEAD^"]
@@ -32,20 +46,45 @@ def resolve_base(root: Path, explicit: str) -> str:
     return ""
 
 
-def changed_files(root: Path, base: str) -> list[str]:
-    if base:
-        text = git(root, "diff", "--name-only", f"{base}...HEAD")
-        if text:
-            return sorted({line for line in text.splitlines() if line.strip()})
-    text = git(root, "status", "--porcelain")
-    found = []
-    for line in text.splitlines():
+def committed_paths(root: Path, base: str) -> set[str]:
+    completed = run_git(root, "diff", "--name-status", "--find-renames", f"{base}...HEAD")
+    if completed.returncode != 0:
+        fail_context(f"git diff failed for base: {base}")
+    found: set[str] = set()
+    for line in completed.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        found.update(part for part in parts[1:] if part)
+    return found
+
+
+def worktree_paths(root: Path) -> set[str]:
+    completed = run_git(root, "status", "--porcelain", "--untracked-files=all")
+    if completed.returncode != 0:
+        fail_context("git status failed")
+    found: set[str] = set()
+    for line in completed.stdout.splitlines():
+        if len(line) < 4:
+            continue
         value = line[3:].strip()
         if " -> " in value:
-            value = value.split(" -> ", 1)[1]
-        if value:
-            found.append(value)
-    return sorted(set(found))
+            old, new = value.split(" -> ", 1)
+            if old.strip():
+                found.add(old.strip())
+            if new.strip():
+                found.add(new.strip())
+        elif value:
+            found.add(value)
+    return found
+
+
+def changed_files(root: Path, base: str) -> list[str]:
+    found: set[str] = set()
+    if base:
+        found.update(committed_paths(root, base))
+    found.update(worktree_paths(root))
+    return sorted(found)
 
 
 def matches(pattern: str, path: str) -> bool:

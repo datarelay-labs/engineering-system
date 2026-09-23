@@ -2,6 +2,8 @@
 """Regression tests for deterministic Engineering System adoption bootstrap."""
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -443,6 +445,34 @@ def test_custom_cursorignore_preserved_on_upgrade() -> None:
         assert (target / ".cursorignore").read_text(encoding="utf-8") == "# custom\nprivate-generated/\n"
 
 
+def test_supported_managed_cursor_rule_history_is_upgradeable() -> None:
+    expected = {
+        "1.5.0.mdc": "051b2798360b1519d86f5575f98dd1f38d077b7bc866eef80a9e9619f0701626",
+        "1.5.1.mdc": "7d13a513dceae8cc96a285044079a3a25cff5422d919a71d9a03cbec771ab506",
+        "1.6.0.mdc": "48b933abedf8baeea2ebcce433eb0e1b8de2c82e8727ab23316830b89e6d1503",
+        "1.6.0-cursor-rule-routing.mdc": "af8e76084880d2effefb50336a8e02777892d04932852ac5784b47d318196553",
+        "1.6.0-work-packet-intent.mdc": "81edcc3137ca63ee5074b0edd0315d3b2ae863fe5b8643d68faacfa5e07eac2a",
+        "1.6.3.mdc": "01a357b466549a3bf2e7495fca78ef9a2aaead3b895f3583186e7fa8874732e5",
+    }
+    history = ROOT / "tools" / "managed_adapter_history" / "rule"
+    assert {path.name for path in history.glob("*.mdc")} == set(expected)
+    spec = importlib.util.spec_from_file_location("upgrade_adoption", UPGRADE)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    canonical = (ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp)
+        rule = target / ".cursor/rules/engineering-system.mdc"
+        rule.parent.mkdir(parents=True)
+        for name, digest in expected.items():
+            text = (history / name).read_text(encoding="utf-8")
+            assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest
+            assert text != canonical
+            rule.write_text(text, encoding="utf-8")
+            assert module.plan_cursor_rule_update(target) == canonical
+
+
 def test_custom_cursor_rule_fails_closed_before_upgrade_mutation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-custom-rule"
@@ -743,6 +773,7 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_custom_cursorignore_preserved_on_upgrade()
+    test_supported_managed_cursor_rule_history_is_upgradeable()
     test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
     test_custom_resume_adapter_fails_closed()
     test_grant_style_baseline_declarations_upgraded()
