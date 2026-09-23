@@ -2,6 +2,7 @@
 """Deterministic regressions for token-efficient context and test routing."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -14,10 +15,11 @@ CONTEXT = ROOT / "tools" / "engineering-context.py"
 TEST = ROOT / "tools" / "engineering-test.py"
 
 
-def run(*args: str, cwd: Path | None = None, check: bool = True):
+def run(*args: str, cwd: Path | None = None, check: bool = True, env: dict[str, str] | None = None):
     return subprocess.run(
         list(args),
         cwd=cwd,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -147,6 +149,107 @@ def test_explicit_base_without_merge_base_fails_closed():
         assert "TEST_RESULT=PASS" not in result.stdout
 
 
+def test_special_character_paths_keep_exact_names():
+    repo = fixture()
+    git(repo, "checkout", "main")
+    (repo / "src" / "a file.py").write_text("a\n", encoding="utf-8")
+    (repo / "src" / 'committed"quote.py').write_text("q\n", encoding="utf-8")
+    commit(repo, "add special names")
+    git(repo, "checkout", "feature")
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "main", "-m", "merge special names")
+    git(repo, "mv", "src/a file.py", "src/b file.py")
+    (repo / "src" / 'committed"quote.py').write_text("changed\n", encoding="utf-8")
+    commit(repo, "rename spaced path")
+    git(repo, "mv", "src/b file.py", "src/c file.py")
+    (repo / "src" / "untracked file.py").write_text("u\n", encoding="utf-8")
+    (repo / "src" / 'odd"name.py').write_text("o\n", encoding="utf-8")
+    (repo / "src" / "from -> to.py").write_text("n\n", encoding="utf-8")
+    expected = (
+        "src/demo.py",
+        "src/a file.py",
+        "src/b file.py",
+        "src/c file.py",
+        'src/committed"quote.py',
+        "src/untracked file.py",
+        'src/odd"name.py',
+        "src/from -> to.py",
+    )
+    context = run(sys.executable, str(CONTEXT), "--root", str(repo), "--base", "main")
+    for path in expected:
+        assert f"CHANGED_FILE={path}\n" in context.stdout
+    assert 'CHANGED_FILE="' not in context.stdout
+    assert "CHANGED_FILE=src/from\n" not in context.stdout
+    assert "CHANGED_FILE=to.py\n" not in context.stdout
+    assert "AFFECTED_DOMAINS=core" in context.stdout
+    selected = run(sys.executable, str(TEST), "--root", str(repo), "--base", "main")
+    assert "TEST_DOMAINS=core" in selected.stdout
+    assert "TEST_SELECTION=PLAN" in selected.stdout
+
+
+def write_base_probe(repo: Path):
+    manifest = {
+        "version": 1,
+        "paths": {"src/**": {"domains": ["core"]}},
+        "scenarios": [
+            {
+                "id": "PRINT-BASE",
+                "name": "print resolved base",
+                "level": "static",
+                "domains": ["core"],
+                "command": (
+                    "python3 -c \"import os; "
+                    "print(os.environ.get('ENGINEERING_BASE_REF', '<unset>'))\""
+                ),
+                "cost": "cheap",
+                "estimated_seconds": 1,
+                "timeout_seconds": 30,
+                "agent_default": True,
+            }
+        ],
+    }
+    (repo / ".engineering" / "tests.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+
+def test_child_command_uses_resolved_base_not_stale_env():
+    repo = fixture()
+    git(repo, "branch", "other-base", "main")
+    write_base_probe(repo)
+    env = os.environ.copy()
+    env["ENGINEERING_BASE_REF"] = "stale-inherited"
+    result = run(
+        sys.executable,
+        str(TEST),
+        "--root",
+        str(repo),
+        "--base",
+        "other-base",
+        "--run",
+        env=env,
+    )
+    assert "TEST_BASE=other-base" in result.stdout
+    assert "TEST_RESULT=PASS" in result.stdout
+    observed = (repo / ".engineering" / "agent-logs" / "PRINT-BASE.log").read_text(encoding="utf-8").strip()
+    assert observed == "other-base"
+
+
+def test_unresolved_base_clears_inherited_base_ref():
+    repo = Path(tempfile.mkdtemp()) / "repo"
+    repo.mkdir()
+    git(repo, "init", "-b", "only")
+    (repo / ".engineering").mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    write_base_probe(repo)
+    commit(repo, "only")
+    env = os.environ.copy()
+    env["ENGINEERING_BASE_REF"] = "stale-inherited"
+    result = run(sys.executable, str(TEST), "--root", str(repo), "--run", env=env)
+    assert "TEST_BASE=<none>" in result.stdout
+    assert "TEST_RESULT=PASS" in result.stdout
+    observed = (repo / ".engineering" / "agent-logs" / "PRINT-BASE.log").read_text(encoding="utf-8").strip()
+    assert observed == "<unset>"
+
+
 def test_dirty_worktree_is_unioned_with_committed_diff():
     repo = fixture()
     git(repo, "mv", "src/demo.py", "src/renamed.py")
@@ -167,6 +270,9 @@ def main() -> int:
     test_explicit_unresolved_base_fails_closed()
     test_explicit_base_without_merge_base_fails_closed()
     test_dirty_worktree_is_unioned_with_committed_diff()
+    test_special_character_paths_keep_exact_names()
+    test_child_command_uses_resolved_base_not_stale_env()
+    test_unresolved_base_clears_inherited_base_ref()
     print("TOKEN_EFFICIENCY_TESTS=PASS")
     return 0
 

@@ -26,6 +26,69 @@ def run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=["git", *args], returncode=127, stdout="")
 
 
+def run_git_bytes(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args=["git", *args], returncode=127, stdout=b"")
+
+
+def decode_git_path(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def nul_records(payload: bytes) -> list[bytes]:
+    if not payload:
+        return []
+    records = payload.split(b"\0")
+    if records and records[-1] == b"":
+        records.pop()
+    return records
+
+
+def parse_status_z(payload: bytes) -> set[str]:
+    found: set[str] = set()
+    records = nul_records(payload)
+    index = 0
+    while index < len(records):
+        entry = records[index]
+        if len(entry) < 4 or entry[2:3] != b" ":
+            fail_context("malformed git status output")
+        status = entry[:2]
+        paths = [decode_git_path(entry[3:])]
+        index += 1
+        if b"R" in status or b"C" in status:
+            if index >= len(records):
+                fail_context("malformed git status output")
+            paths.append(decode_git_path(records[index]))
+            index += 1
+        found.update(path for path in paths if path)
+    return found
+
+
+def parse_name_status_z(payload: bytes) -> set[str]:
+    found: set[str] = set()
+    records = nul_records(payload)
+    index = 0
+    while index < len(records):
+        status = records[index]
+        if not status:
+            fail_context("malformed git diff output")
+        path_count = 2 if status[:1] in (b"R", b"C") else 1
+        if index + 1 + path_count > len(records):
+            fail_context("malformed git diff output")
+        for offset in range(1, 1 + path_count):
+            path = decode_git_path(records[index + offset])
+            if path:
+                found.add(path)
+        index += 1 + path_count
+    return found
+
+
 def git(root: Path, *args: str) -> str:
     completed = run_git(root, *args)
     if completed.returncode != 0:
@@ -47,36 +110,17 @@ def resolve_base(root: Path, explicit: str) -> str:
 
 
 def committed_paths(root: Path, base: str) -> set[str]:
-    completed = run_git(root, "diff", "--name-status", "--find-renames", f"{base}...HEAD")
+    completed = run_git_bytes(root, "diff", "-z", "--name-status", "--find-renames", f"{base}...HEAD")
     if completed.returncode != 0:
         fail_context(f"git diff failed for base: {base}")
-    found: set[str] = set()
-    for line in completed.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        found.update(part for part in parts[1:] if part)
-    return found
+    return parse_name_status_z(completed.stdout or b"")
 
 
 def worktree_paths(root: Path) -> set[str]:
-    completed = run_git(root, "status", "--porcelain", "--untracked-files=all")
+    completed = run_git_bytes(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     if completed.returncode != 0:
         fail_context("git status failed")
-    found: set[str] = set()
-    for line in completed.stdout.splitlines():
-        if len(line) < 4:
-            continue
-        value = line[3:].strip()
-        if " -> " in value:
-            old, new = value.split(" -> ", 1)
-            if old.strip():
-                found.add(old.strip())
-            if new.strip():
-                found.add(new.strip())
-        elif value:
-            found.add(value)
-    return found
+    return parse_status_z(completed.stdout or b"")
 
 
 def changed_files(root: Path, base: str) -> list[str]:
