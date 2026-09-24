@@ -300,15 +300,69 @@ def _authorize(root: Path, request: dict[str, Any], effect: dict[str, Any]) -> t
 
 
 def _stop_group(proc: subprocess.Popen[bytes], stdout: object) -> None:
-    if proc.poll() is None:
-        try:
-            getattr(os, "killpg")(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            proc.kill()
-    proc.wait(timeout=2)
+    try:
+        getattr(os, "killpg")(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.wait(timeout=2)
     close = getattr(stdout, "close", None)
     if close is not None:
-        close()
+        try:
+            close()
+        except OSError:
+            pass
+
+
+TRUSTED_BIN_DIRS = (Path("/usr/bin"), Path("/bin"))
+TRUSTED_ROOTS = (Path("/usr"), Path("/bin"))
+
+
+def _trusted_argv(argv: list[str]) -> list[str] | None:
+    if not argv:
+        return None
+    program = argv[0]
+    if not program or program.startswith("-") or (program.startswith(".") or "/" in program[1:] and not program.startswith("/")):
+        return None
+    candidate: Path | None
+    if program.startswith("/"):
+        candidate = Path(program)
+    else:
+        candidate = None
+        for directory in TRUSTED_BIN_DIRS:
+            probe = directory / program
+            if probe.exists():
+                candidate = probe
+                break
+        if candidate is None:
+            return None
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError:
+        return None
+    if not resolved.is_file():
+        return None
+    if not any(resolved == root or root in resolved.parents for root in TRUSTED_ROOTS):
+        return None
+    rest = list(argv[1:])
+    if resolved.name == "python" or resolved.name.startswith("python"):
+        if "-I" not in rest:
+            if "-E" not in rest:
+                rest.insert(0, "-E")
+            if "-s" not in rest:
+                rest.insert(1 if rest and rest[0] == "-E" else 0, "-s")
+    return [str(resolved), *rest]
+
+
+def _execution_environment() -> dict[str, str]:
+    return {
+        "PATH": "/usr/bin:/bin",
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
 
 
 def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
@@ -390,6 +444,9 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         return "EXECUTION_FAILED", "COMMAND_PARSE", b""
     if not argv:
         return "EXECUTION_FAILED", "COMMAND_EMPTY", b""
+    trusted = _trusted_argv(argv)
+    if trusted is None:
+        return "EXECUTION_FAILED", "EXECUTABLE_UNTRUSTED", b""
     checked_out = _materialize_subject_tree(root, subject_head)
     if checked_out is None:
         return "EXECUTION_FAILED", "SUBJECT_TREE", b""
@@ -397,12 +454,13 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
-            argv,
+            trusted,
             cwd=work,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             shell=False,
             start_new_session=True,
+            env=_execution_environment(),
         )
         stdout = proc.stdout
         if stdout is None:
@@ -455,7 +513,6 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
                     status = "limit"
                     break
         if status in {"limit", "timeout"}:
-            _stop_group(proc, stdout)
             if status == "limit":
                 return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
             return "TIMEOUT", "TIMEOUT", b""
@@ -466,7 +523,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             return "EXECUTION_FAILED", f"EXIT_{code}", output
         return "CAPTURED", "OK", output
     finally:
-        if proc is not None and proc.poll() is None:
+        if proc is not None:
             _stop_group(proc, proc.stdout)
         _release_subject_tree(temporary)
 
@@ -478,33 +535,88 @@ def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Pat
     return _INCIDENT._retention_destination(Path(git_dir), incident_id, capture_id)
 
 
-def _retention_precheck(root: Path, incident_id: str, capture_id: str, kind: str) -> dict[str, str] | None:
-    try:
-        destination = _retention_destination(root, incident_id, capture_id)
-        if destination.is_symlink():
-            raise _INCIDENT.EvidenceBlocked("RETENTION_PATH_ESCAPE")
-        if destination.is_file():
+def _stored_result(record: dict[str, Any], kind: str, capture_id: str) -> dict[str, str] | None:
+    state = str(record.get("result") or "")
+    if state in {"", "RESERVED"}:
+        return None
+    evidence_ref = ""
+    if state == "CAPTURED":
+        incident_id = str(record.get("incident_id") or "")
+        if incident_id:
+            evidence_ref = _retention_ref(incident_id, capture_id)
+    return _result(
+        state,
+        "ALREADY_CAPTURED" if state == "CAPTURED" else str(record.get("reason") or state),
+        kind=str(record.get("evidence_kind") or kind),
+        capture_id=capture_id,
+        evidence_ref=evidence_ref,
+        content_digest=str(record.get("content_digest") or ""),
+        executed=False,
+    )
+
+
+def _await_capture(destination: Path, kind: str, capture_id: str) -> dict[str, str]:
+    deadline = time.monotonic() + 5
+    while True:
+        if destination.is_symlink() or not destination.is_file():
+            return _result("UNAVAILABLE", "RETENTION_UNTRUSTED", kind=kind, capture_id=capture_id)
+        try:
             record = json.loads(destination.read_text(encoding="utf-8"))
-            return _result(
-                str(record.get("result") or "CAPTURED"),
-                "ALREADY_CAPTURED",
-                kind=str(record.get("evidence_kind") or kind),
-                capture_id=capture_id,
-                evidence_ref=_retention_ref(incident_id, capture_id),
-                content_digest=str(record.get("content_digest") or ""),
-                executed=False,
-            )
-        _INCIDENT._enforce_bounds(destination, b"{}")
-    except _INCIDENT.EvidenceBlocked as exc:
-        return _result("UNAVAILABLE", exc.reason, kind=kind, capture_id=capture_id)
-    return None
+        except (OSError, json.JSONDecodeError):
+            record = {"result": "RESERVED"}
+        if not isinstance(record, dict):
+            record = {"result": "RESERVED"}
+        stored = _stored_result(record, kind, capture_id)
+        if stored is not None:
+            return stored
+        if time.monotonic() >= deadline:
+            return _result("UNAVAILABLE", "RESERVATION_PENDING", kind=kind, capture_id=capture_id)
+        time.sleep(0.02)
 
 
-def _write_private(root: Path, incident_id: str, capture_id: str, record: dict[str, Any]) -> str:
+def _claim_capture(root: Path, incident_id: str, capture_id: str, kind: str) -> dict[str, str] | Path:
     destination = _retention_destination(root, incident_id, capture_id)
+    if destination.is_symlink():
+        raise _INCIDENT.EvidenceBlocked("RETENTION_PATH_ESCAPE")
+    if destination.exists():
+        return _await_capture(destination, kind, capture_id)
+    _INCIDENT._enforce_bounds(destination, b"{}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "kind": "runtime-evidence",
+            "incident_id": incident_id,
+            "capture_id": capture_id,
+            "evidence_kind": kind,
+            "result": "RESERVED",
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    try:
+        descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return _await_capture(destination, kind, capture_id)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    return destination
+
+
+def _finalize_capture(destination: Path, record: dict[str, Any]) -> str:
+    if destination.is_symlink() or not destination.is_file():
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
     payload = json.dumps(record, sort_keys=True).encode("utf-8")
-    _INCIDENT._enforce_bounds(destination, payload)
-    _INCIDENT._write_record(destination, payload)
+    if len(payload) > _INCIDENT.MAX_RECORD_BYTES:
+        raise _INCIDENT.EvidenceBlocked("RECORD_TOO_LARGE")
+    temporary = destination.with_name(f".{destination.name}.partial")
+    temporary.write_bytes(payload)
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, destination)
+    os.chmod(destination, 0o600)
+    incident_id = str(record.get("incident_id") or "")
+    capture_id = str(record.get("capture_id") or "")
     return _retention_ref(incident_id, capture_id)
 
 
@@ -564,42 +676,52 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
     if gate != "ALLOW":
         return _result(gate, reason, kind=kind, capture_id=capture_id)
 
-    existing = _retention_precheck(root, incident_id, capture_id, kind)
-    if existing is not None:
-        return existing
+    try:
+        claim = _claim_capture(root, incident_id, capture_id, kind)
+    except _INCIDENT.EvidenceBlocked as exc:
+        if exc.reason == "CAPTURE_ID_COLLISION":
+            try:
+                return _await_capture(_retention_destination(root, incident_id, capture_id), kind, capture_id)
+            except _INCIDENT.EvidenceBlocked as nested:
+                return _result("UNAVAILABLE", nested.reason, kind=kind, capture_id=capture_id)
+        return _result("UNAVAILABLE", exc.reason, kind=kind, capture_id=capture_id)
+    if isinstance(claim, dict):
+        return claim
 
     status, exec_reason, output = _execute_once(root, subject_head, command)
     digest = hashlib.sha256(output).hexdigest() if output else ""
-    executed = exec_reason not in {"COMMAND_PARSE", "COMMAND_EMPTY", "SUBJECT_TREE"}
-    if status != "CAPTURED":
-        return _result(status, exec_reason, kind=kind, capture_id=capture_id, content_digest=digest, executed=executed)
-    if SENSITIVE_RE.search(output.decode("utf-8", errors="replace")):
-        return _result(
-            "BLOCKED_SENSITIVE_OUTPUT",
-            "SENSITIVE_OUTPUT",
-            kind=kind,
-            capture_id=capture_id,
-            content_digest=digest,
-            executed=True,
-        )
-    record = {
+    executed = exec_reason not in {"COMMAND_PARSE", "COMMAND_EMPTY", "SUBJECT_TREE", "EXECUTABLE_UNTRUSTED"}
+    terminal = {
         "schema_version": 1,
         "kind": "runtime-evidence",
         "incident_id": incident_id,
         "capture_id": capture_id,
         "evidence_kind": kind,
         "subject_head": subject_head,
-        "result": "CAPTURED",
+        "result": status,
+        "reason": exec_reason,
         "content_digest": digest,
-        "raw_output": output.decode("utf-8", errors="replace"),
         "mitigation_authority": "NONE",
     }
+    if status == "CAPTURED" and not SENSITIVE_RE.search(output.decode("utf-8", errors="replace")):
+        terminal["raw_output"] = output.decode("utf-8", errors="replace")
     try:
-        evidence_ref = _write_private(root, incident_id, capture_id, record)
+        evidence_ref = _finalize_capture(claim, terminal)
     except _INCIDENT.EvidenceBlocked as exc:
         return _result(
             "UNAVAILABLE",
             exc.reason,
+            kind=kind,
+            capture_id=capture_id,
+            content_digest=digest,
+            executed=executed,
+        )
+    if status != "CAPTURED":
+        return _result(status, exec_reason, kind=kind, capture_id=capture_id, content_digest=digest, executed=executed)
+    if "raw_output" not in terminal:
+        return _result(
+            "BLOCKED_SENSITIVE_OUTPUT",
+            "SENSITIVE_OUTPUT",
             kind=kind,
             capture_id=capture_id,
             content_digest=digest,

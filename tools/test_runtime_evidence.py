@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -596,6 +598,121 @@ def test_replace_ref_cannot_rewrite_subject_head() -> None:
             clear_trust()
 
 
+def test_caller_environment_cannot_inject_execution() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        marker = base / "injected"
+        fake = base / "bin"
+        fake.mkdir()
+        injected = fake / "python3"
+        injected.write_text(f"#!/bin/sh\necho injected > {marker}\n", encoding="utf-8")
+        injected.chmod(0o755)
+        evil = base / "evil"
+        evil.mkdir()
+        (evil / "sitecustomize.py").write_text(
+            f"open({str(marker)!r}, 'w').write('site')\n",
+            encoding="utf-8",
+        )
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        saved = {key: os.environ.get(key) for key in ("PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP")}
+        os.environ["PATH"] = str(fake) + os.pathsep + (saved["PATH"] or "/usr/bin:/bin")
+        os.environ["PYTHONPATH"] = str(evil)
+        os.environ["PYTHONHOME"] = str(evil)
+        os.environ["PYTHONSTARTUP"] = str(evil / "sitecustomize.py")
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["raw_output"] == "ok\n"
+            assert not marker.exists()
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            clear_trust()
+
+
+def test_descendant_cannot_survive_leader_exit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        pidfile = base / "child.pid"
+        sentinel = base / "child-alive"
+        script = (
+            "import os, time, pathlib\n"
+            f"pidfile=pathlib.Path({str(pidfile)!r})\n"
+            f"sentinel=pathlib.Path({str(sentinel)!r})\n"
+            "read_fd, write_fd = os.pipe()\n"
+            "if os.fork() == 0:\n"
+            "    os.close(read_fd)\n"
+            "    pidfile.write_text(str(os.getpid()))\n"
+            "    os.write(write_fd, b'1')\n"
+            "    time.sleep(30)\n"
+            "    sentinel.write_text('yes')\n"
+            "    os._exit(0)\n"
+            "os.close(write_fd)\n"
+            "os.read(read_fd, 1)\n"
+            "os._exit(0)\n"
+        )
+        command = "python3 leader.py"
+        head = init_repo(repo, command, extra={"leader.py": script})
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            assert pidfile.exists()
+            pid = int(pidfile.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and Path(f"/proc/{pid}").exists():
+                time.sleep(0.05)
+            assert not Path(f"/proc/{pid}").exists()
+            assert not sentinel.exists()
+        finally:
+            clear_trust()
+
+
+def test_concurrent_same_capture_executes_once() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        counter = base / "effects"
+        script = (
+            "from pathlib import Path\n"
+            f"Path({str(counter)!r}).open('a').write('1')\n"
+            "print('ok')\n"
+        )
+        command = "python3 effect.py"
+        head = init_repo(repo, command, extra={"effect.py": script})
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        results: list[dict[str, str]] = []
+
+        def run() -> None:
+            results.append(collect(repo, request))
+
+        try:
+            first = threading.Thread(target=run)
+            second = threading.Thread(target=run)
+            first.start()
+            second.start()
+            first.join()
+            second.join()
+            assert len(results) == 2
+            assert sum(item["EXECUTED"] == "YES" for item in results) == 1
+            assert counter.read_text(encoding="utf-8") == "1"
+        finally:
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -615,6 +732,9 @@ def main() -> int:
     test_subject_tree_does_not_mutate_git_or_run_hooks()
     test_symlink_subject_tree_does_not_execute()
     test_replace_ref_cannot_rewrite_subject_head()
+    test_caller_environment_cannot_inject_execution()
+    test_descendant_cannot_survive_leader_exit()
+    test_concurrent_same_capture_executes_once()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
