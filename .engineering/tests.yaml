@@ -59,6 +59,12 @@ paths:
     domains: [session-continuity]
   "schemas/coordinator-decision.schema.json":
     domains: [schemas, session-continuity]
+  "tools/worker_adapter.py":
+    domains: [session-continuity, workflows]
+  "tools/test_worker_adapter.py":
+    domains: [session-continuity]
+  "schemas/worker-adapter-result.schema.json":
+    domains: [schemas, session-continuity]
   "tools/org-rollout.py":
     domains: [adoption, adoption-upgrade]
   "tools/test_org_rollout.py":
@@ -217,6 +223,24 @@ scenarios:
       - "the same coordinator facts always emit the same bounded decision"
       - "PAUSED BLOCKED and COMPLETE never launch a worker"
       - "resource BLOCK yields and does not stop unrelated sessions"
+    release_gate: true
+
+  - id: ENG-WORKER-ADAPTER-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Trusted worker external-write adapter
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_worker_adapter.py"
+    invariants:
+      - "external writes authorize only when the bound intent revision still matches"
+      - "a stale Issue write authorizes zero mutations"
+      - "resource BLOCK does not stop unrelated sessions"
     release_gate: true
 
   - id: ENG-VERIFIER-001
