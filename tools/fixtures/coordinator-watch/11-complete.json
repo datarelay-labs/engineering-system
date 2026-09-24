@@ -1,0 +1,64 @@
+{
+  "packet": {
+    "repository": "datarelay-labs/engineering-system",
+    "workstream": "p2-coordinator",
+    "status": "COMPLETE",
+    "priority": "HIGH",
+    "intent_revision": 3,
+    "change_risk": "HIGH",
+    "task_kind": "DEVELOPMENT",
+    "dependencies": [
+      {
+        "workstream": "p1c",
+        "status": "COMPLETE"
+      }
+    ]
+  },
+  "worker": {
+    "present": false
+  },
+  "git": {
+    "head": "UNKNOWN",
+    "dirty": false,
+    "unpushed": false,
+    "yielded_for_audit": false
+  },
+  "resource": {
+    "result": "PASS"
+  },
+  "admission": {
+    "decision": "ALLOW"
+  },
+  "mutation": {
+    "ambiguous": false
+  },
+  "failure": {
+    "class": "NONE",
+    "identical_semantic_count": 0
+  },
+  "publication": {
+    "coordinator_audit": "UNKNOWN"
+  },
+  "pr": {
+    "exists": false
+  },
+  "ci": {
+    "state": "UNKNOWN"
+  },
+  "review": {
+    "actionable_open": false,
+    "state": "UNKNOWN"
+  },
+  "wait": {
+    "external": false,
+    "retry_count": 0,
+    "retry_budget": 3
+  },
+  "gates": {
+    "org_rollout": "NOT_REQUIRED"
+  },
+  "watch": {
+    "watch_class": "work_packet_state",
+    "observed_at": "2026-09-24T16:00:00Z"
+  }
+}

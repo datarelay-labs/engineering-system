@@ -66,6 +66,9 @@ REQUIRED_METHOD_FILES = (
     "tools/coordinator.py",
     "tools/test_coordinator.py",
     "schemas/coordinator-decision.schema.json",
+    "tools/coordinator_watch.py",
+    "tools/test_coordinator_watch.py",
+    "schemas/coordinator-watch.schema.json",
     "tools/worker_adapter.py",
     "tools/test_worker_adapter.py",
     "schemas/worker-adapter-result.schema.json",
@@ -384,6 +387,66 @@ def validate_coordinator_contract():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing coordinator token: {token}")
     print("PASS pure coordinator planner contract")
+
+
+def validate_coordinator_watch_contract():
+    tool = (ROOT / "tools/coordinator_watch.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    enforcement = (ROOT / "standards/ENFORCEMENT.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/coordinator-watch.schema.json")
+    results = set(schema["properties"]["result"]["enum"])
+    for token in (
+        "evaluate",
+        "--facts",
+        "--watch-state",
+        "NO_CHANGE",
+        "RECHECK_LATER",
+        "WAKE_COORDINATOR",
+        "RESUME_ADMITTED_WORKER",
+        "NOTIFY_OWNER",
+        "CLOSE_WATCH",
+        "BLOCK_RECONCILIATION",
+        "STOPS_UNRELATED_SESSIONS",
+        "EXECUTION_FORBIDDEN",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL coordinator watch missing token: {token}")
+    if results != {
+        "NO_CHANGE",
+        "RECHECK_LATER",
+        "WAKE_COORDINATOR",
+        "RESUME_ADMITTED_WORKER",
+        "NOTIFY_OWNER",
+        "CLOSE_WATCH",
+        "BLOCK_RECONCILIATION",
+    }:
+        raise SystemExit("FAIL coordinator watch schema drifted from evaluator results")
+    for forbidden in ("import subprocess", "subprocess.", "os.system", "os.kill", "shell=True", "SIGKILL", "urllib", "socket"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL coordinator watch encodes a side effect: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("enforcement", enforcement),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "coordinator_watch.py" not in text:
+            raise SystemExit(f"FAIL {label} missing coordinator watch command")
+    for token in (
+        "Bounded coordinator watch",
+        "coordinator_watch.py evaluate",
+        "RECHECK_LATER",
+        "WAKE_COORDINATOR",
+        "RESUME_ADMITTED_WORKER",
+        "BLOCK_RECONCILIATION",
+        "CLOSE_WATCH",
+        "progress_evidence=true",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing coordinator watch token: {token}")
+    print("PASS bounded coordinator watch contract")
 
 
 def validate_worker_adapter_contract():
@@ -985,6 +1048,7 @@ def main():
     validate_work_admission_contract()
     validate_independent_verifier_contract()
     validate_coordinator_contract()
+    validate_coordinator_watch_contract()
     validate_worker_adapter_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
@@ -1019,6 +1083,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_coordinator.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_coordinator_watch.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_worker_adapter.py"], cwd=ROOT)
