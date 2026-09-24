@@ -59,6 +59,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_work_packet_authority.py",
     "tools/cursor-resource-preflight.py",
     "tools/test_cursor_resource_preflight.py",
+    "tools/work_admission.py",
+    "tools/test_work_admission.py",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
     "schemas/behavior-scenario.schema.json",
@@ -200,6 +202,56 @@ def validate_resource_guard_contract():
         raise SystemExit("FAIL ChatGPT handoff runs agent persist before resource preflight")
     print("PASS Cursor persistent-session resource guard contract")
 
+
+def validate_work_admission_contract():
+    tool = (ROOT / "tools/work_admission.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    for token in (
+        "admit",
+        "size",
+        "release",
+        "ALLOW",
+        "DENY",
+        "WIP_LIMIT",
+        "SHARED_WORKTREE",
+        "OVERLAPPING_CLAIM",
+        "STALE_INTENT_REVISION",
+        "OVERLAPPING_PATHS",
+        "SHARED_RUNTIME",
+        "HOST_BUDGET",
+        "AMBIGUOUS_CLAIM",
+        "INSUFFICIENT_OWNERSHIP",
+        "BATCH",
+        "KEEP",
+        "SPLIT",
+        "MUTATES_EXISTING_SESSIONS",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL work admission tool missing token: {token}")
+    for forbidden in ("os.kill", "persist stop", "SIGKILL"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL work admission encodes session mutation: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "work_admission.py" not in text:
+            raise SystemExit(f"FAIL {label} missing work admission command")
+    if "obey DENY" not in agents or "obey DENY" not in agents_template:
+        raise SystemExit("FAIL AGENTS missing work admission DENY obedience")
+    for token in (
+        "Parallel-work admission and WIP ownership",
+        "work_admission.py admit",
+        "work_admission.py size",
+        "work_admission.py release",
+        "dirty, unpushed, or ambiguous",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing admission token: {token}")
+    print("PASS parallel-work admission and WIP ownership contract")
 
 def validate_token_efficiency_contract():
     rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
@@ -658,6 +710,7 @@ def main():
     validate_bun_discovery()
     validate_work_packet_author_authority()
     validate_resource_guard_contract()
+    validate_work_admission_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -680,6 +733,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
