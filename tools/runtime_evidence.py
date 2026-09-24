@@ -461,7 +461,108 @@ def _inline_or_subject_script(rest: list[str], work: Path, inline_flags: set[str
     return False
 
 
+AWK_PROGRAMS = frozenset({"awk", "gawk", "nawk", "mawk"})
+CURL_FLAGS = frozenset({"--fail", "--silent", "--show-error", "--head", "--location", "--http1.1", "--http1.0", "--http2"})
+CURL_VALUE_FLAGS = frozenset({"-m", "--max-time", "--connect-timeout", "--retry"})
+
+
+def _awk_code_bound(rest: list[str], work: Path) -> bool:
+    saw_program = False
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg == "--":
+            index += 1
+            break
+        if arg in {"-f", "-E"}:
+            if index + 1 >= len(rest) or not _subject_code_path(rest[index + 1], work):
+                return False
+            saw_program = True
+            index += 2
+            continue
+        if arg.startswith("--file="):
+            if not _subject_code_path(arg.split("=", 1)[1], work):
+                return False
+            saw_program = True
+            index += 1
+            continue
+        if arg == "-e":
+            if index + 1 >= len(rest) or not rest[index + 1]:
+                return False
+            saw_program = True
+            index += 2
+            continue
+        if arg.startswith("--source="):
+            if not arg.split("=", 1)[1]:
+                return False
+            saw_program = True
+            index += 1
+            continue
+        if arg in {"-F", "-v"}:
+            if index + 1 >= len(rest):
+                return False
+            index += 2
+            continue
+        if arg.startswith("-F") and len(arg) > 2:
+            index += 1
+            continue
+        if arg.startswith("-"):
+            return False
+        if not saw_program:
+            if not arg:
+                return False
+            saw_program = True
+            index += 1
+            continue
+        index += 1
+    while index < len(rest):
+        if not rest[index]:
+            return False
+        index += 1
+    return saw_program
+
+
+def _curl_data_bound(rest: list[str]) -> bool:
+    saw_target = False
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg == "--":
+            index += 1
+            break
+        if arg in CURL_FLAGS:
+            index += 1
+            continue
+        if arg in CURL_VALUE_FLAGS:
+            if index + 1 >= len(rest) or not rest[index + 1].isdigit():
+                return False
+            index += 2
+            continue
+        if arg.startswith("-") and not arg.startswith("--"):
+            if len(arg) == 1 or any(char not in "fsSIL" for char in arg[1:]):
+                return False
+            index += 1
+            continue
+        if arg.startswith("-"):
+            return False
+        if not arg or "\x00" in arg:
+            return False
+        saw_target = True
+        index += 1
+    while index < len(rest):
+        if not rest[index] or "\x00" in rest[index]:
+            return False
+        saw_target = True
+        index += 1
+    return saw_target
+
+
 def _executable_arguments_bound(argv: list[str], work: Path) -> bool:
+    """Allow only recognized command shapes.
+
+    Unknown tools fail closed. A trusted binary path does not make its
+    arguments safe to execute.
+    """
     name = Path(argv[0]).name
     if name in LAUNCHERS:
         return False
@@ -472,7 +573,11 @@ def _executable_arguments_bound(argv: list[str], work: Path) -> bool:
         return _shell_code_bound(rest, work)
     if name in {"perl", "ruby", "node", "php", "lua"}:
         return _inline_or_subject_script(rest, work, {"-e", "-c"})
-    return True
+    if name in AWK_PROGRAMS:
+        return _awk_code_bound(rest, work)
+    if name == "curl":
+        return _curl_data_bound(rest)
+    return False
 
 
 def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:

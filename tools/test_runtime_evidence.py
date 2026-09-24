@@ -773,6 +773,92 @@ def test_inline_command_may_contain_data_paths() -> None:
             clear_trust()
 
 
+def test_external_awk_program_does_not_execute() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        program = base / "external.awk"
+        marker = base / "awk-ran"
+        program.write_text('BEGIN { print "ORIGINAL" }\n', encoding="utf-8")
+        command = f"awk -f {program} /dev/null"
+        head = init_repo(repo, command)
+        program.write_text(
+            "BEGIN { print \"MUTABLE_AWK\" > \"" + str(marker) + "\" }\n",
+            encoding="utf-8",
+        )
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_subject_awk_program_executes() -> None:
+    command = "awk -f check.awk /dev/null"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"check.awk": 'BEGIN { print "AWK_OK" }\n'})
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["raw_output"] == "AWK_OK\n"
+        finally:
+            clear_trust()
+
+
+def test_unknown_program_file_semantics_fail_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        script = base / "external.sed"
+        marker = base / "sed-ran"
+        script.write_text(f"w {marker}\n", encoding="utf-8")
+        command = f"sed -f {script} /etc/hostname"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_approved_data_url_still_executes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        live = base / "live.txt"
+        live.write_text("LIVE_DATA\n", encoding="utf-8")
+        command = f"curl -fsS file://{live}"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["raw_output"] == "LIVE_DATA\n"
+        finally:
+            clear_trust()
+
+
 def test_launcher_indirection_does_not_execute() -> None:
     command = "env python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
@@ -817,6 +903,10 @@ def main() -> int:
     test_traversal_script_does_not_execute()
     test_inline_command_may_contain_data_paths()
     test_launcher_indirection_does_not_execute()
+    test_external_awk_program_does_not_execute()
+    test_subject_awk_program_executes()
+    test_unknown_program_file_semantics_fail_closed()
+    test_approved_data_url_still_executes()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
