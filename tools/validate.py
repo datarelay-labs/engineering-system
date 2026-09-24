@@ -63,6 +63,9 @@ REQUIRED_METHOD_FILES = (
     "tools/test_work_admission.py",
     "tools/independent_verifier.py",
     "tools/test_independent_verifier.py",
+    "tools/coordinator.py",
+    "tools/test_coordinator.py",
+    "schemas/coordinator-decision.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
     "schemas/behavior-scenario.schema.json",
@@ -304,6 +307,78 @@ def validate_independent_verifier_contract():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing verifier token: {token}")
     print("PASS independent verifier terminal-evidence contract")
+
+
+def validate_coordinator_contract():
+    tool = (ROOT / "tools/coordinator.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    enforcement = (ROOT / "standards/ENFORCEMENT.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/coordinator-decision.schema.json")
+    decisions = set(schema["properties"]["decision"]["enum"])
+    for token in (
+        "plan",
+        "--facts",
+        "ADMIT_IMPLEMENTATION",
+        "RESUME_WORKER",
+        "STALE_WORKER",
+        "AUDIT_DIRTY_TREE",
+        "AUTHORIZE_PUBLICATION",
+        "WAIT_EXACT_HEAD_CI",
+        "AUDIT_REVIEW",
+        "MERGE_READY",
+        "YIELD_RESOURCE",
+        "RECONCILE_AMBIGUOUS",
+        "REPLAN_SEMANTIC_FAILURE",
+        "NOOP_PAUSED",
+        "NOOP_COMPLETE",
+        "BLOCK_HUMAN",
+        "STOPS_UNRELATED_SESSIONS",
+        "EXECUTION_FORBIDDEN",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL coordinator planner missing token: {token}")
+    if decisions != {
+        "NOOP_COMPLETE",
+        "NOOP_PAUSED",
+        "BLOCK_HUMAN",
+        "WAIT_EXTERNAL",
+        "RECONCILE_AMBIGUOUS",
+        "ADMIT_IMPLEMENTATION",
+        "RESUME_WORKER",
+        "AUDIT_DIRTY_TREE",
+        "AUTHORIZE_PUBLICATION",
+        "WAIT_EXACT_HEAD_CI",
+        "AUDIT_REVIEW",
+        "MERGE_READY",
+        "REPLAN_SEMANTIC_FAILURE",
+        "YIELD_RESOURCE",
+        "STALE_WORKER",
+    }:
+        raise SystemExit("FAIL coordinator decision schema drifted from planner decisions")
+    for forbidden in ("import subprocess", "subprocess.", "os.system", "os.kill", "shell=True", "SIGKILL"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL coordinator planner encodes a side effect: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("enforcement", enforcement),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "coordinator.py" not in text:
+            raise SystemExit(f"FAIL {label} missing coordinator planner command")
+    for token in (
+        "Pure coordinator planner",
+        "coordinator.py plan --facts",
+        "RECONCILE_AMBIGUOUS",
+        "YIELD_RESOURCE",
+        "identical WAIT",
+        "progress_evidence=true",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing coordinator token: {token}")
+    print("PASS pure coordinator planner contract")
 
 
 def validate_token_efficiency_contract():
@@ -809,6 +884,7 @@ def main():
     validate_resource_guard_contract()
     validate_work_admission_contract()
     validate_independent_verifier_contract()
+    validate_coordinator_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -838,6 +914,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_independent_verifier.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_coordinator.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)

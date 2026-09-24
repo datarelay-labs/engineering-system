@@ -423,6 +423,33 @@ A coordinator or equivalent outer loop should, when automation exists:
 
 Do not encode a brittle micro-step state machine that requires one agent session to survive the whole workstream. The same outcome may span multiple fresh sessions when context/resource boundaries require it.
 
+## Pure coordinator planner
+
+The coordinator core is a pure function from structured facts to one bounded next action. It does not launch workers, poll, mutate GitHub, merge, send notifications, or stop sessions.
+
+```bash
+python3 tools/coordinator.py plan --facts <facts.json>
+```
+
+Contract:
+
+- the same facts always emit the same decision;
+- unknown or missing observational facts stay UNKNOWN and cannot satisfy a PASS, ALLOW, or exact-head gate;
+- only `STATUS=ACTIVE` with complete dependencies, admission `ALLOW`, and resource `PASS` or `WARN` can emit `ADMIT_IMPLEMENTATION`;
+- `PAUSED` emits `NOOP_PAUSED`, `BLOCKED` emits `BLOCK_HUMAN`, and `COMPLETE` emits `NOOP_COMPLETE`; none of those launch a worker;
+- `PRIORITY` is scheduling evidence only; `CHANGE_RISK` changes verification depth, and HIGH or CRITICAL `MERGE_READY` requires coordinator audit PASS for the current intent revision;
+- a worker whose starting intent revision differs from the packet emits `STALE_WORKER` and must not finalize or publish;
+- `RESUME_WORKER` requires `progress_evidence=true`. A matching active worker without that evidence emits `WAIT_EXTERNAL`. Process liveness is not progress, and the planner does not invent elapsed stall time;
+- resource `BLOCK` emits `YIELD_RESOURCE` and never stops or mutates unrelated sessions;
+- ambiguous mutation facts emit `RECONCILE_AMBIGUOUS` before any retry;
+- semantic failure emits `REPLAN_SEMANTIC_FAILURE` instead of repeating the same attempt;
+- CI and review gates bind to the exact pull request head; stale or unknown CI cannot merge;
+- notification intent uses `repository|workstream|intent_revision|decision_class|subject_version` and suppresses identical WAIT repeats and worker resume micro-steps;
+- org rollout or canary authorization stays a separate gate and is not implied by merge readiness;
+- the planner performs no model call, process spawn, GitHub mutation, merge, Telegram send, or schedule.
+
+`plan` returns exit 0 when it emits a decision. Exit 3 is reserved for malformed or execution-keyed facts. The decision schema is `schemas/coordinator-decision.schema.json`.
+
 ## Human-attention and notification budget
 
 Human attention is a constrained engineering resource.

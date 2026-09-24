@@ -51,6 +51,14 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_independent_verifier.py":
     domains: [session-continuity]
+  "tools/coordinator.py":
+    domains: [session-continuity, workflows]
+  "tools/test_coordinator.py":
+    domains: [session-continuity]
+  "tools/fixtures/coordinator/**":
+    domains: [session-continuity]
+  "schemas/coordinator-decision.schema.json":
+    domains: [schemas, session-continuity]
   "tools/org-rollout.py":
     domains: [adoption, adoption-upgrade]
   "tools/test_org_rollout.py":
@@ -191,6 +199,24 @@ scenarios:
       - "second workers fail closed on ownership overlap or host budget pressure"
       - "handoff sizing chooses BATCH KEEP or SPLIT deterministically"
       - "unrelated sessions are never mutated to create capacity"
+    release_gate: true
+
+  - id: ENG-COORDINATOR-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Pure coordinator planner
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_coordinator.py"
+    invariants:
+      - "the same coordinator facts always emit the same bounded decision"
+      - "PAUSED BLOCKED and COMPLETE never launch a worker"
+      - "resource BLOCK yields and does not stop unrelated sessions"
     release_gate: true
 
   - id: ENG-VERIFIER-001
