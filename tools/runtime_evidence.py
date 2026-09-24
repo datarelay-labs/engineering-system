@@ -315,28 +315,72 @@ def _stop_group(proc: subprocess.Popen[bytes], stdout: object) -> None:
         close()
 
 
-def _subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
-    temporary = tempfile.TemporaryDirectory(prefix="runtime-evidence-exec-")
-    work = Path(temporary.name) / "tree"
-    added = subprocess.run(
-        ["git", "-C", str(root), "worktree", "add", "--detach", str(work), subject_head],
-        stdout=subprocess.DEVNULL,
+def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=",
+            *args,
+        ],
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
+        text=text,
+        env=env,
     )
-    if added.returncode != 0:
+
+
+def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
+    """Copy committed blobs into a private directory.
+
+    Uses read-only object lookup. Does not register a worktree, checkout, or
+    run repository hooks, filters, or other local configuration.
+    """
+    listed = _git_readonly(root, "ls-tree", "-r", "-z", "--full-tree", subject_head)
+    if listed.returncode != 0:
+        return None
+    temporary = tempfile.TemporaryDirectory(prefix="runtime-evidence-exec-")
+    work = Path(temporary.name) / "tree"
+    try:
+        work.mkdir()
+        base = work.resolve()
+        for entry in listed.stdout.split(b"\0"):
+            if not entry:
+                continue
+            meta, separator, path = entry.partition(b"\t")
+            if separator != b"\t":
+                raise ValueError("tree entry")
+            mode, kind, oid = meta.split()
+            if kind != b"blob" or mode in {b"120000", b"160000"}:
+                raise ValueError("unsupported tree entry")
+            relative = path.decode("utf-8", "surrogateescape")
+            if relative.startswith("/") or "\x00" in relative:
+                raise ValueError("tree path")
+            destination = (work / relative).resolve()
+            if destination != base and base not in destination.parents:
+                raise ValueError("tree path")
+            blob = _git_readonly(root, "cat-file", "blob", oid.decode("ascii"))
+            if blob.returncode != 0:
+                raise ValueError("blob")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(blob.stdout)
+            destination.chmod(0o755 if mode == b"100755" else 0o644)
+    except (OSError, UnicodeError, ValueError):
         temporary.cleanup()
         return None
     return temporary, work
 
 
-def _release_subject_tree(root: Path, temporary: tempfile.TemporaryDirectory[str], work: Path) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), "worktree", "remove", "--force", str(work)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+def _release_subject_tree(temporary: tempfile.TemporaryDirectory[str]) -> None:
     temporary.cleanup()
 
 
@@ -347,7 +391,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         return "EXECUTION_FAILED", "COMMAND_PARSE", b""
     if not argv:
         return "EXECUTION_FAILED", "COMMAND_EMPTY", b""
-    checked_out = _subject_tree(root, subject_head)
+    checked_out = _materialize_subject_tree(root, subject_head)
     if checked_out is None:
         return "EXECUTION_FAILED", "SUBJECT_TREE", b""
     temporary, work = checked_out
@@ -425,7 +469,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     finally:
         if proc is not None and proc.poll() is None:
             _stop_group(proc, proc.stdout)
-        _release_subject_tree(root, temporary, work)
+        _release_subject_tree(temporary)
 
 
 def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Path:

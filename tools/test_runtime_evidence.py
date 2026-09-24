@@ -484,6 +484,82 @@ def test_bounded_stop_terminates_descendants() -> None:
             clear_trust()
 
 
+def _git_file_set(repo: Path) -> set[str]:
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
+    return {str(path.relative_to(git_dir)) for path in git_dir.rglob("*") if path.is_file()}
+
+
+def test_subject_tree_does_not_mutate_git_or_run_hooks() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        marker = base / "hooked"
+        head = init_repo(repo, command)
+        hook = repo / ".git" / "hooks" / "post-checkout"
+        hook.write_text(f"#!/bin/sh\necho hook >> {marker}\n", encoding="utf-8")
+        hook.chmod(0o755)
+        smudge = base / "smudge.sh"
+        smudge.write_text(
+            f"#!/bin/sh\necho smudge >> {marker}\nprintf '%s\\n' \"print('SMUDGED')\"\n",
+            encoding="utf-8",
+        )
+        smudge.chmod(0o755)
+        git(repo, "config", "core.hooksPath", str(hook.parent))
+        git(repo, "config", "filter.evil.clean", "cat")
+        git(repo, "config", "filter.evil.smudge", str(smudge))
+        (repo / ".gitattributes").write_text("* filter=evil\n", encoding="utf-8")
+        git(repo, "add", ".gitattributes")
+        git(repo, "commit", "-m", "attributes")
+        head = git(repo, "rev-parse", "HEAD")
+        before = _git_file_set(repo)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["raw_output"] == "ok\n"
+            assert "SMUDGED" not in private["raw_output"]
+            assert not marker.exists()
+            assert not (repo / ".git" / "worktrees").exists()
+            added = _git_file_set(repo) - before
+            assert added == {f"engineering-system/incidents/{INCIDENT}/{CAPTURE}.json"}
+            assert not (before - _git_file_set(repo))
+        finally:
+            clear_trust()
+    source = (ROOT / "tools" / "runtime_evidence.py").read_text(encoding="utf-8")
+    assert "worktree add" not in source
+    assert "worktree remove" not in source
+
+
+def test_symlink_subject_tree_does_not_execute() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.py"
+        outside.write_text("print('DIRTY_SCRIPT_RAN')\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "health.py").unlink()
+        (repo / "health.py").symlink_to(outside)
+        git(repo, "add", "health.py")
+        git(repo, "commit", "-m", "symlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED"
+            assert report["REASON"] == "SUBJECT_TREE"
+            assert report["EXECUTED"] == "NO"
+            assert "DIRTY_SCRIPT_RAN" not in "\n".join(report.values())
+        finally:
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -500,6 +576,8 @@ def main() -> int:
     test_retention_symlink_and_bounds_fail_closed()
     test_dirty_executable_content_cannot_run()
     test_bounded_stop_terminates_descendants()
+    test_subject_tree_does_not_mutate_git_or_run_hooks()
+    test_symlink_subject_tree_does_not_execute()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
