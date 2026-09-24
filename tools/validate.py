@@ -86,6 +86,8 @@ REQUIRED_METHOD_FILES = (
     "tools/incident-evidence.py",
     "tools/test_incident_evidence.py",
     "schemas/incident-evidence.schema.json",
+    "tools/runtime_evidence.py",
+    "tools/test_runtime_evidence.py",
     "tools/skills-contract.py",
     "tools/test_skills_contract.py",
     "schemas/skills-contract.schema.json",
@@ -826,6 +828,42 @@ def validate_incident_evidence():
     print("PASS incident packet and core evidence contract")
 
 
+def validate_runtime_evidence():
+    tool = (ROOT / "tools/runtime_evidence.py").read_text(encoding="utf-8")
+    for token in (
+        "collect",
+        "production.read",
+        "BOUNDARY_UNAVAILABLE",
+        "STALE_HEAD",
+        "COMMAND_HASH_MISMATCH",
+        "BLOCKED_SENSITIVE_OUTPUT",
+        "MITIGATION_AUTHORITY",
+        "shell=False",
+        "engineering-system/incidents",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL runtime evidence tool missing token: {token}")
+    for banned in ("shell=True", "os.system", "os.kill", "persist stop", "urlopen"):
+        if banned in tool:
+            raise SystemExit(f"FAIL runtime evidence tool contains banned token: {banned}")
+    standard = (ROOT / "standards/OPERATIONS.md").read_text(encoding="utf-8")
+    for token in (
+        "tools/runtime_evidence.py",
+        "production.read",
+        "MITIGATION_AUTHORITY=NONE",
+    ):
+        if token not in standard:
+            raise SystemExit(f"FAIL operations standard missing runtime evidence token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if "tools/runtime_evidence.py collect" not in text:
+            raise SystemExit(f"FAIL {rel} missing runtime evidence router")
+    completed = subprocess.run(["python3", "tools/test_runtime_evidence.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    print("PASS runtime evidence contract")
+
+
 def validate_skills_contract():
     schema = load_json(ROOT / "schemas/skills-contract.schema.json")
     Draft202012Validator.check_schema(schema)
@@ -957,6 +995,7 @@ def main():
     validate_knowledge_contract()
     validate_runtime_contract()
     validate_incident_evidence()
+    validate_runtime_evidence()
     validate_skills_contract()
     validate_action_pins()
 

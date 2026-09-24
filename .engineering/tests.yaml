@@ -109,6 +109,10 @@ paths:
     domains: [operations-contract, workflows]
   "schemas/incident-evidence.schema.json":
     domains: [schemas]
+  "tools/runtime_evidence.py":
+    domains: [operations-contract, workflows]
+  "tools/test_runtime_evidence.py":
+    domains: [operations-contract, workflows]
   "standards/SKILLS.md":
     domains: [ai, standards]
 
@@ -371,4 +375,20 @@ scenarios:
     command: "python3 tools/test_incident_evidence.py"
     invariants:
       - "incident packets grant no execution authority and core evidence capture stays read-only and redacted"
+    release_gate: true
+
+  - id: ENG-RUNTIME-EVIDENCE-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Authorized read-only runtime evidence
+    level: static
+    domains: [operations-contract, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_runtime_evidence.py"
+    invariants:
+      - "runtime evidence runs one canonical read command after signed production.read authorization and grants no mitigation authority"
     release_gate: true
