@@ -61,6 +61,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_cursor_resource_preflight.py",
     "tools/work_admission.py",
     "tools/test_work_admission.py",
+    "tools/independent_verifier.py",
+    "tools/test_independent_verifier.py",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
     "schemas/behavior-scenario.schema.json",
@@ -252,6 +254,54 @@ def validate_work_admission_contract():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing admission token: {token}")
     print("PASS parallel-work admission and WIP ownership contract")
+
+
+def validate_independent_verifier_contract():
+    tool = (ROOT / "tools/independent_verifier.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    quality = (ROOT / "standards/QUALITY.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    for token in (
+        "verify",
+        "PASS",
+        "DENY",
+        "SAME_ACTOR",
+        "VERIFIER_REQUIRED",
+        "HEAD_MISMATCH",
+        "ORACLE_NOT_PASS",
+        "REVIEW_OPEN",
+        "MUTABLE_MISSING",
+        "STALE_MUTABLE",
+        "HUMAN_APPROVAL_MISSING",
+        "EXECUTION_FORBIDDEN",
+        "EXECUTES_REQUEST_COMMANDS",
+        "subject_head",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL independent verifier missing token: {token}")
+    for forbidden in ("import subprocess", "subprocess.", "os.system", "shell=True"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL independent verifier encodes command execution: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("QUALITY.md", quality),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "independent_verifier.py" not in text:
+            raise SystemExit(f"FAIL {label} missing independent verifier command")
+    for token in (
+        "Independent verifier for terminal evidence",
+        "exact 40-char subject HEAD",
+        "SAME_ACTOR",
+        "EXECUTION_FORBIDDEN",
+        "STALE_MUTABLE",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing verifier token: {token}")
+    print("PASS independent verifier terminal-evidence contract")
+
 
 def validate_token_efficiency_contract():
     rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
@@ -711,6 +761,7 @@ def main():
     validate_work_packet_author_authority()
     validate_resource_guard_contract()
     validate_work_admission_contract()
+    validate_independent_verifier_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -736,6 +787,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_independent_verifier.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
