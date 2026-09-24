@@ -138,11 +138,12 @@ def _forbidden_key(payload: Any) -> str | None:
 
 def _git(root: Path, *args: str) -> str | None:
     completed = subprocess.run(
-        ["git", "-C", str(root), *args],
+        ["git", "-C", str(root), "--no-replace-objects", *args],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
+        env={**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"},
     )
     if completed.returncode != 0:
         return None
@@ -203,12 +204,7 @@ def _format(report: dict[str, str]) -> str:
 
 
 def _git_blob(root: Path, rev: str, path: str) -> bytes | None:
-    completed = subprocess.run(
-        ["git", "-C", str(root), "show", f"{rev}:{path}"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    completed = _git_readonly(root, "show", f"{rev}:{path}")
     if completed.returncode != 0:
         return None
     return completed.stdout
@@ -320,11 +316,13 @@ def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.Comp
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
     return subprocess.run(
         [
             "git",
             "-C",
             str(root),
+            "--no-replace-objects",
             "-c",
             "core.hooksPath=/dev/null",
             "-c",
@@ -342,8 +340,9 @@ def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.Comp
 def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
     """Copy committed blobs into a private directory.
 
-    Uses read-only object lookup. Does not register a worktree, checkout, or
-    run repository hooks, filters, or other local configuration.
+    Uses read-only object lookup and ignores repository replace refs. Does not
+    register a worktree, checkout, or run repository hooks, filters, or other
+    local configuration.
     """
     listed = _git_readonly(root, "ls-tree", "-r", "-z", "--full-tree", subject_head)
     if listed.returncode != 0:

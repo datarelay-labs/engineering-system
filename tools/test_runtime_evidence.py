@@ -560,6 +560,42 @@ def test_symlink_subject_tree_does_not_execute() -> None:
             clear_trust()
 
 
+def test_replace_ref_cannot_rewrite_subject_head() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        original = init_repo(repo, command)
+        (repo / "health.py").write_text("print('REPLACED')\n", encoding="utf-8")
+        git(repo, "add", "health.py")
+        git(repo, "commit", "-m", "replaced")
+        replacement = git(repo, "rev-parse", "HEAD")
+        git(repo, "reset", "--hard", original)
+        git(repo, "replace", original, replacement)
+        request, pub = signed(repo, base, effect(original, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["subject_head"] == original
+            assert private["raw_output"] == "ok\n"
+            assert "REPLACED" not in private["raw_output"]
+            assert git(repo, "rev-parse", "HEAD") == original
+            listed = subprocess.run(
+                ["git", "-C", str(repo), "replace", "-l"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+            assert original in listed.stdout.split()
+        finally:
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -578,6 +614,7 @@ def main() -> int:
     test_bounded_stop_terminates_descendants()
     test_subject_tree_does_not_mutate_git_or_run_hooks()
     test_symlink_subject_tree_does_not_execute()
+    test_replace_ref_cannot_rewrite_subject_head()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
