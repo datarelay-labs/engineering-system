@@ -414,7 +414,7 @@ The Work Packet/objective is durable; coding-agent sessions are disposable worke
 A coordinator or equivalent outer loop should, when automation exists:
 
 - select only dependency-eligible ACTIVE work;
-- apply Work Packet sizing and WIP/resource admission before starting a worker;
+- apply Work Packet sizing (`tools/work_admission.py size`) and WIP/resource admission (`tools/work_admission.py admit`) before starting a worker;
 - keep separate worktrees/state ownership for concurrent workers;
 - reconcile actual Git/PR/CI/runtime state after coordinator or worker restart;
 - distinguish transient retry from semantic re-plan;
@@ -502,6 +502,40 @@ python3 tools/cursor-resource-preflight.py
 ```
 
 Host policy may override thresholds without editing a repository, using `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD` or `~/.config/engineering-system/cursor-resource-guard.yaml` (then `/etc/engineering-system/cursor-resource-guard.yaml`). Exit 0 is `PASS` or `WARN` and may proceed. Exit 2 blocks on memory, swap, or session pressure. Exit 3 blocks because memory facts, `agent persist list`, or the override could not be trusted. Neither blocking result may stop or mutate existing Cursor sessions. Unsupported platforms report `BLOCK` instead of guessing. The always-applied Cursor rule stays small; this tool and this standard hold the procedure.
+
+## Parallel-work admission and WIP ownership
+
+Default execution remains sequential. A second worker may start only when a coordinator proves independence from packet/claim/worktree/resource facts.
+
+Use the canonical oracle:
+
+```bash
+python3 tools/work_admission.py admit --request-json <facts.json>
+python3 tools/work_admission.py size --request-json <sizing.json>
+python3 tools/work_admission.py release --request-json <release.json>
+```
+
+Admission identity is `repository + workstream + intent_revision`, scoped to a dedicated worktree when concurrent. Machine-readable claims must record owned paths and any shared runtime id with an explicit isolation flag.
+
+`admit` returns `ALLOW` only when all of the following hold:
+
+- host resource preflight facts are `PASS` or `WARN` (never invent capacity by stopping unrelated sessions);
+- active claim count is below the configured WIP limit (default `1`, so parallelism is off unless raised);
+- no shared worktree with an active claim;
+- no overlapping claim identity or conflicting intent revision on the same workstream;
+- no overlapping owned paths;
+- no shared mutable runtime unless every concurrent claimant marks that runtime isolated;
+- no ambiguous proposed or active claim.
+
+Otherwise `admit` returns `DENY` with an explicit class such as `WIP_LIMIT`, `SHARED_WORKTREE`, `OVERLAPPING_CLAIM`, `STALE_INTENT_REVISION`, `OVERLAPPING_PATHS`, `SHARED_RUNTIME`, `HOST_BUDGET`, or `AMBIGUOUS_CLAIM`. Exit `3` is reserved for malformed/untrusted facts.
+
+`size` emits deterministic `BATCH` / `KEEP` / `SPLIT` from structured sizing signals (primary outcome count, adjacent shared oracle, unrelated domains/gates/rollback, effort band, and context budget). File/LOC/Issue counts are inputs only when encoded as those signals; they are not the sizing authority.
+
+`release` reconciles ownership safely:
+
+- `release-claim` allows COMPLETE / ABANDON / SUPERSEDED / RELEASED claims;
+- `cleanup-worktree` additionally refuses dirty, unpushed, or ambiguous state;
+- neither action may stop or mutate unrelated Cursor sessions to reclaim capacity.
 
 ## Efficiency telemetry and task budget
 

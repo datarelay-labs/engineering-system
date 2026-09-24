@@ -43,6 +43,10 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_cursor_resource_preflight.py":
     domains: [session-continuity]
+  "tools/work_admission.py":
+    domains: [session-continuity, workflows]
+  "tools/test_work_admission.py":
+    domains: [session-continuity]
   "tools/org-rollout.py":
     domains: [adoption, adoption-upgrade]
   "tools/test_org_rollout.py":
@@ -159,6 +163,24 @@ scenarios:
     command: "python3 tools/test_cursor_resource_preflight.py"
     invariants:
       - "new persistent Cursor sessions fail closed under host resource pressure"
+    release_gate: true
+
+  - id: ENG-ADMISSION-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Parallel-work admission and handoff sizing
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_work_admission.py"
+    invariants:
+      - "second workers fail closed on ownership overlap or host budget pressure"
+      - "handoff sizing chooses BATCH KEEP or SPLIT deterministically"
+      - "unrelated sessions are never mutated to create capacity"
     release_gate: true
 
   - id: ENG-ADOPTION-002
