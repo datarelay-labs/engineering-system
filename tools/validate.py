@@ -77,6 +77,9 @@ REQUIRED_METHOD_FILES = (
     "tools/runtime-contract.py",
     "tools/test_runtime_contract.py",
     "schemas/runtime-contract.schema.json",
+    "tools/incident-evidence.py",
+    "tools/test_incident_evidence.py",
+    "schemas/incident-evidence.schema.json",
     "tools/skills-contract.py",
     "tools/test_skills_contract.py",
     "schemas/skills-contract.schema.json",
@@ -642,6 +645,50 @@ def validate_runtime_contract():
     print("PASS optional runtime observability contract")
 
 
+def validate_incident_evidence():
+    schema = load_json(ROOT / "schemas/incident-evidence.schema.json")
+    Draft202012Validator.check_schema(schema)
+    tool = (ROOT / "tools/incident-evidence.py").read_text(encoding="utf-8")
+    for token in (
+        "check-packet",
+        "capture",
+        "AUTHORITY",
+        "SAFETY_EFFECT",
+        "NARROW",
+        "ROOT_CAUSE",
+        "UNPROVEN",
+        "RETENTION_COUNT_BOUND",
+        "RETENTION_SIZE_BOUND",
+        "INCIDENT_ID_INVALID",
+        "engineering-system/incidents",
+        "parse_persist_list",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL incident evidence tool missing token: {token}")
+    for banned in ("shell=True", "os.system", "os.kill", "persist stop", "urlopen"):
+        if banned in tool:
+            raise SystemExit(f"FAIL incident evidence tool contains banned token: {banned}")
+    standard = (ROOT / "standards/OPERATIONS.md").read_text(encoding="utf-8")
+    for token in (
+        "tools/incident-evidence.py",
+        "AUTHORITY=NONE",
+        "SAFETY_FREEZE=ON",
+        "SAFETY_EFFECT=NARROW",
+        "ROOT_CAUSE=UNPROVEN",
+        "engineering-system/incidents",
+    ):
+        if token not in standard:
+            raise SystemExit(f"FAIL operations standard missing incident token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if "tools/incident-evidence.py" not in text or "SAFETY_FREEZE=ON" not in text:
+            raise SystemExit(f"FAIL {rel} missing incident evidence router")
+    completed = subprocess.run(["python3", "tools/test_incident_evidence.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    print("PASS incident packet and core evidence contract")
+
+
 def validate_skills_contract():
     schema = load_json(ROOT / "schemas/skills-contract.schema.json")
     Draft202012Validator.check_schema(schema)
@@ -770,6 +817,7 @@ def main():
     validate_adoption_contract()
     validate_knowledge_contract()
     validate_runtime_contract()
+    validate_incident_evidence()
     validate_skills_contract()
     validate_action_pins()
 
