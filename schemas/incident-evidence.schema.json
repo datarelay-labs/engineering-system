@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Incident core evidence bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "incident_id",
+    "capture_id",
+    "captured_at",
+    "repository",
+    "git",
+    "host",
+    "memory",
+    "swap",
+    "load",
+    "psi_memory",
+    "psi_io",
+    "sessions",
+    "pressure_facts",
+    "overall",
+    "authority"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "incident-evidence"},
+    "incident_id": {"$ref": "#/$defs/incidentId"},
+    "capture_id": {"$ref": "#/$defs/captureId"},
+    "captured_at": {"$ref": "#/$defs/utcTimestamp"},
+    "repository": {"$ref": "#/$defs/repository"},
+    "git": {"$ref": "#/$defs/git"},
+    "host": {"$ref": "#/$defs/host"},
+    "memory": {"$ref": "#/$defs/memory"},
+    "swap": {"$ref": "#/$defs/swap"},
+    "load": {"$ref": "#/$defs/load"},
+    "psi_memory": {"$ref": "#/$defs/psi"},
+    "psi_io": {"$ref": "#/$defs/psi"},
+    "sessions": {"$ref": "#/$defs/sessions"},
+    "pressure_facts": {
+      "type": "array",
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "LOW_MEM_AVAILABLE",
+          "MATERIAL_SWAP_USE",
+          "ELEVATED_MEMORY_PRESSURE",
+          "ELEVATED_IO_PRESSURE",
+          "HIGH_PERSISTENT_SESSION_COUNT"
+        ]
+      }
+    },
+    "overall": {"enum": ["COMPLETE", "PARTIAL"]},
+    "authority": {"const": "NONE"}
+  },
+  "$defs": {
+    "incidentId": {
+      "type": "string",
+      "pattern": "^INC-[0-9]{8}-[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 80
+    },
+    "captureId": {
+      "type": "string",
+      "pattern": "^CAP-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "sourceState": {
+      "enum": ["CAPTURED", "UNAVAILABLE", "UNSUPPORTED", "REDACTED"]
+    },
+    "repository": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason", "identity"],
+          "properties": {
+            "state": {"const": "CAPTURED"},
+            "reason": {"const": "OK"},
+            "identity": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+              "maxLength": 200
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason"],
+          "properties": {
+            "state": {"enum": ["UNAVAILABLE", "REDACTED"]},
+            "reason": {"$ref": "#/$defs/reason"}
+          }
+        }
+      ]
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "head", "ref_state"],
+      "properties": {
+        "state": {"const": "CAPTURED"},
+        "reason": {
+          "enum": [
+            "OK",
+            "BRANCH_REDACTED",
+            "CHANGED_FILE_COUNT_UNBOUNDED",
+            "GIT_STATUS_UNAVAILABLE",
+            "GIT_PARTIAL"
+          ]
+        },
+        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "ref_state": {"enum": ["branch", "detached"]},
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._@+/-]+$"
+        },
+        "dirty": {"type": "boolean"},
+        "changed_file_count": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "ref_state": {"const": "branch"},
+              "reason": {"enum": ["OK", "CHANGED_FILE_COUNT_UNBOUNDED", "GIT_STATUS_UNAVAILABLE"]}
+            },
+            "required": ["ref_state", "reason"]
+          },
+          "then": {"required": ["branch"]}
+        },
+        {
+          "if": {
+            "properties": {"ref_state": {"const": "detached"}},
+            "required": ["ref_state"]
+          },
+          "then": {"not": {"required": ["branch"]}}
+        },
+        {
+          "if": {
+            "properties": {"reason": {"enum": ["BRANCH_REDACTED", "GIT_PARTIAL"]}},
+            "required": ["reason"]
+          },
+          "then": {"not": {"required": ["branch"]}}
+        },
+        {
+          "if": {
+            "properties": {"reason": {"enum": ["OK", "BRANCH_REDACTED"]}},
+            "required": ["reason"]
+          },
+          "then": {"required": ["dirty", "changed_file_count"]}
+        },
+        {
+          "if": {
+            "properties": {"reason": {"const": "CHANGED_FILE_COUNT_UNBOUNDED"}},
+            "required": ["reason"]
+          },
+          "then": {
+            "required": ["dirty"],
+            "not": {"required": ["changed_file_count"]}
+          }
+        },
+        {
+          "if": {
+            "properties": {"reason": {"const": "GIT_STATUS_UNAVAILABLE"}},
+            "required": ["reason"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["dirty"]},
+                {"required": ["changed_file_count"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"reason": {"const": "GIT_PARTIAL"}},
+            "required": ["reason"]
+          },
+          "then": {"not": {"required": ["changed_file_count"]}}
+        }
+      ]
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "support"],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9._-]+$"
+        },
+        "support": {"enum": ["SUPPORTED", "UNSUPPORTED"]}
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"$ref": "#/$defs/sourceState"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "total_bytes": {"type": "integer", "minimum": 1},
+        "available_bytes": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"state": {"const": "CAPTURED"}},
+            "required": ["state"]
+          },
+          "then": {"required": ["total_bytes", "available_bytes"]}
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
+            "required": ["state"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["total_bytes"]},
+                {"required": ["available_bytes"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "swap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"$ref": "#/$defs/sourceState"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "configured": {"type": "boolean"},
+        "total_bytes": {"type": "integer", "minimum": 0},
+        "used_bytes": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"state": {"const": "CAPTURED"}},
+            "required": ["state"]
+          },
+          "then": {"required": ["configured", "total_bytes", "used_bytes"]}
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
+            "required": ["state"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["configured"]},
+                {"required": ["total_bytes"]},
+                {"required": ["used_bytes"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"$ref": "#/$defs/sourceState"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "avg_1m": {"type": "number", "minimum": 0},
+        "avg_5m": {"type": "number", "minimum": 0},
+        "avg_15m": {"type": "number", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"state": {"const": "CAPTURED"}},
+            "required": ["state"]
+          },
+          "then": {"required": ["avg_1m", "avg_5m", "avg_15m"]}
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
+            "required": ["state"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["avg_1m"]},
+                {"required": ["avg_5m"]},
+                {"required": ["avg_15m"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "psi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"$ref": "#/$defs/sourceState"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "some_avg10": {"type": "number", "minimum": 0},
+        "full_avg10": {"type": "number", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"state": {"const": "CAPTURED"}},
+            "required": ["state"]
+          },
+          "then": {"required": ["some_avg10", "full_avg10"]}
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
+            "required": ["state"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["some_avg10"]},
+                {"required": ["full_avg10"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"$ref": "#/$defs/sourceState"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "persistent_count": {"type": "integer", "minimum": 0, "maximum": 100000}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"state": {"const": "CAPTURED"}},
+            "required": ["state"]
+          },
+          "then": {"required": ["persistent_count"]}
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
+            "required": ["state"]
+          },
+          "then": {"not": {"required": ["persistent_count"]}}
+        }
+      ]
+    }
+  }
+}

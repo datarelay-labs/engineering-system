@@ -51,6 +51,14 @@ detect -> stabilize -> preserve evidence -> understand/root cause -> regression 
 
 Meaningful incidents should record impact, timeline, root cause, why controls missed it, corrective actions, and verification.
 
+An Incident Packet is a repository-scoped GitHub Issue for current incident control state. It is distinct from an AI Work Packet. `python3 tools/incident-evidence.py check-packet --packet-file <file>` accepts one valid packet and rejects missing, unknown, or contradictory header state. The checker reports `AUTHORITY=NONE`. `SAFETY_FREEZE=ON` reports `SAFETY_EFFECT=NARROW` and only narrows execution. `SAFETY_FREEZE=OFF` or `N/A` reports `SAFETY_EFFECT=NONE`. Neither state grants production, destructive, or mitigation authority. Evidence capture success does not authorize mitigation.
+
+Before mutation, capture the core pre-mutation bundle with `python3 tools/incident-evidence.py capture --root <repo> --incident-id <INC-id>` from the canonical Engineering System checkout. The bundle records Git HEAD, branch or detached state, dirty flag, and changed-file count; Linux memory, swap, load, and PSI when those sources are available; and the aggregate Cursor persistent-session count from the fixed read-only preflight path. It does not record environment variables, secrets, command lines, chat or session identifiers, absolute workspaces, raw remote URLs, file names, or file contents. Unsupported or unavailable sources stay explicit. A missing nonessential source yields `PARTIAL` and does not invent zeros. Failure to establish Git identity or the retention boundary yields `BLOCK` and writes no bundle.
+
+The artifact is written only under `<git-dir>/engineering-system/incidents/<incident-id>/<capture-id>.json`. User-facing output cites the Git-local relative reference. Retention has fixed count and size bounds. Reaching a bound fails closed and does not delete existing evidence. Observable pressure facts may include low available memory, material swap use, elevated memory or I/O PSI, and a high persistent-session count. Those facts are not a root cause. The report includes `ROOT_CAUSE=UNPROVEN`.
+
+This core capture does not run project health, smoke, E2E, logs, container inspection, or deployment commands. Those remain later, separately authorized work. The capture does not stop or mutate Cursor sessions.
+
 ## Disaster recovery
 
 For systems whose loss would materially affect users, define the minimum viable rebuild/restore path and dependencies. Test only to the level justified by project risk.
