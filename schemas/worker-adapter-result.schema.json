@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trusted worker external-write result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result",
+    "reason",
+    "authorizes_write",
+    "writes",
+    "issue_mutated",
+    "request_digest",
+    "stops_unrelated_sessions",
+    "spawns_process",
+    "mints_authority",
+    "sends_notification"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "result": {
+      "enum": [
+        "APPLIED",
+        "NO_CHANGE",
+        "STALE_WORKER",
+        "AUTHORITY_DENIED",
+        "RESOURCE_BLOCKED",
+        "RECONCILE_AMBIGUOUS",
+        "TRANSIENT_RETRYABLE",
+        "FAILED_SEMANTIC"
+      ]
+    },
+    "reason": {"type": "string", "minLength": 1},
+    "authorizes_write": {"type": "boolean"},
+    "writes": {"type": "integer", "minimum": 0, "maximum": 1},
+    "issue_mutated": {"const": false},
+    "request_digest": {"type": "string", "minLength": 1},
+    "stops_unrelated_sessions": {"const": false},
+    "spawns_process": {"const": false},
+    "mints_authority": {"const": false},
+    "sends_notification": {"const": false}
+  }
+}

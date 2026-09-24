@@ -450,6 +450,18 @@ Contract:
 
 `plan` returns exit 0 when it emits a decision. Exit 3 is reserved for malformed or execution-keyed facts. The decision schema is `schemas/coordinator-decision.schema.json`.
 
+## Trusted worker external-write adapter
+
+The planner stays decision-only. External Issue/PR writes and publication effects go through the trusted adapter, which authorizes at most one typed effect and does not itself perform the mutation:
+
+```bash
+python3 tools/worker_adapter.py evaluate --request-json <facts.json>
+```
+
+Immediately before a write, re-read the authoritative Work Packet and compare it with the bound `target_repo`, `workstream`, `intent_revision`, `subject_head`, `branch`, and `requested_action`. The request digest also covers the concrete mutation target and content. A trusted effect is accepted only when `skills-contract` `authorize` verifies host-signed binding and dispatch assertions for that exact digest and `network.post` / `external_write`. Caller-supplied permission, `trusted_dispatch.result=PASS`, or a matching hash without that verification cannot authorize a write. A missing host trust boundary fails closed and does not authorize. `author_association` does not authorize.
+
+A revision, target, or head mismatch returns `STALE_WORKER` and authorizes zero writes, including the case where a worker prepared an Issue body under an older intent revision. An unknown mutation result returns `RECONCILE_AMBIGUOUS` and must not be retried blindly. The same applied digest returns `NO_CHANGE`. Resource `BLOCK` returns `RESOURCE_BLOCKED` and never stops unrelated sessions. The result schema is `schemas/worker-adapter-result.schema.json`.
+
 ## Human-attention and notification budget
 
 Human attention is a constrained engineering resource.

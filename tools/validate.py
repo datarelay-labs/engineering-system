@@ -66,6 +66,9 @@ REQUIRED_METHOD_FILES = (
     "tools/coordinator.py",
     "tools/test_coordinator.py",
     "schemas/coordinator-decision.schema.json",
+    "tools/worker_adapter.py",
+    "tools/test_worker_adapter.py",
+    "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
     "schemas/behavior-scenario.schema.json",
@@ -379,6 +382,65 @@ def validate_coordinator_contract():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing coordinator token: {token}")
     print("PASS pure coordinator planner contract")
+
+
+def validate_worker_adapter_contract():
+    tool = (ROOT / "tools/worker_adapter.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    enforcement = (ROOT / "standards/ENFORCEMENT.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/worker-adapter-result.schema.json")
+    results = set(schema["properties"]["result"]["enum"])
+    for token in (
+        "evaluate",
+        "APPLIED",
+        "NO_CHANGE",
+        "STALE_WORKER",
+        "AUTHORITY_DENIED",
+        "RESOURCE_BLOCKED",
+        "RECONCILE_AMBIGUOUS",
+        "authorize_work_packet_author_permission",
+        "external_write",
+        "resolve_trust_anchor",
+        "concrete mutation",
+        "STOPS_UNRELATED_SESSIONS",
+        "MINTS_AUTHORITY",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL worker adapter missing token: {token}")
+    if results != {
+        "APPLIED",
+        "NO_CHANGE",
+        "STALE_WORKER",
+        "AUTHORITY_DENIED",
+        "RESOURCE_BLOCKED",
+        "RECONCILE_AMBIGUOUS",
+        "TRANSIENT_RETRYABLE",
+        "FAILED_SEMANTIC",
+    }:
+        raise SystemExit("FAIL worker adapter result schema drifted")
+    for forbidden in ("import subprocess", "subprocess.", "os.system", "os.kill", "shell=True"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL worker adapter encodes a side effect: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("enforcement", enforcement),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "worker_adapter.py" not in text:
+            raise SystemExit(f"FAIL {label} missing worker adapter command")
+    for token in (
+        "Trusted worker external-write adapter",
+        "worker_adapter.py evaluate --request-json",
+        "STALE_WORKER",
+        "author_association",
+        "concrete mutation",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing worker adapter token: {token}")
+    print("PASS trusted worker external-write adapter contract")
 
 
 def validate_token_efficiency_contract():
@@ -885,6 +947,7 @@ def main():
     validate_work_admission_contract()
     validate_independent_verifier_contract()
     validate_coordinator_contract()
+    validate_worker_adapter_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -917,6 +980,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_coordinator.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_worker_adapter.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
