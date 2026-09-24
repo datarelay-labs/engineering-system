@@ -400,6 +400,32 @@ def test_stale_observation_after_no_change_preserves_schedule() -> None:
     assert accepted_newer["next_watch_state"]["next_eligible_check_at"] == "2026-09-24T17:20:00Z"
 
 
+def test_closed_watch_older_observation_preserves_state() -> None:
+    closed = evaluate(load_fixture("11-complete.json"), EMPTY)
+    assert closed["result"] == "CLOSE_WATCH"
+    durable = dict(closed["next_watch_state"])
+    durable["next_eligible_check_at"] = "2026-09-24T16:25:00Z"
+    durable["consecutive_transient_failures"] = 2
+    assert durable["terminal_state"] == "CLOSED"
+    assert durable["last_observation_at"] == "2026-09-24T16:00:00Z"
+    older = load_fixture("11-complete.json")
+    older["watch"]["observed_at"] = "2026-09-24T15:50:00Z"
+    replayed = evaluate(older, durable)
+    assert_inert(replayed)
+    assert replayed["result"] == "CLOSE_WATCH"
+    assert replayed["closes_watch"] is True
+    assert replayed["notification_disposition"] == "SUPPRESS"
+    assert replayed["notification_suppress_reason"] == "DEDUP"
+    assert replayed["wakes_coordinator"] is False
+    assert replayed["resumes_worker"] is False
+    assert replayed["coordinator_decision"] == durable["last_decision"]
+    assert replayed["notification_key"] == durable["last_decision_key"]
+    assert replayed["next_watch_state"] == durable
+    assert replayed["next_eligible_check_at"] == "2026-09-24T16:25:00Z"
+    assert replayed["next_watch_state"]["last_observation_at"] == "2026-09-24T16:00:00Z"
+    assert replayed["next_watch_state"]["last_transition_at"] == durable["last_transition_at"]
+
+
 def test_transient_retry_budget_exhausts() -> None:
     facts = load_fixture("01-ci-pending.json")
     facts["failure"]["class"] = "TRANSIENT"
@@ -485,6 +511,7 @@ def main() -> int:
     test_subject_override_cannot_mask_head_advance()
     test_older_observation_does_not_regress_transition()
     test_stale_observation_after_no_change_preserves_schedule()
+    test_closed_watch_older_observation_preserves_state()
     test_transient_retry_budget_exhausts()
     test_distinct_wake_transitions_have_distinct_keys()
     test_source_has_no_side_effects()

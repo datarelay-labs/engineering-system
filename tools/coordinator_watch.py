@@ -740,36 +740,22 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
         if identity["watch_class"] != watch["watch_class"]:
             raise WatchFactsError("watch_state.watch_class does not match facts.watch.watch_class")
     if state["terminal_state"] == "CLOSED":
-        closed_identity = identity or {
-            "target_repo": packet["repository"],
-            "workstream": packet["workstream"],
-            "intent_revision": packet["intent_revision"],
-            "watch_class": watch["watch_class"],
-            "subject_version": subject,
-        }
+        closed_subject = str(identity["subject_version"]) if identity is not None else subject
         return _emit(
             facts,
             watch,
             state,
             result="CLOSE_WATCH",
             reason="watch is already closed",
-            coordinator_decision="CLOSED",
-            subject=closed_identity["subject_version"],
+            coordinator_decision=str(state["last_decision"] or "CLOSED"),
+            subject=closed_subject,
             digest=state["last_observation_digest"] or "CLOSED",
             suppress="DEDUP",
             notification="SUPPRESS",
             terminal_state="CLOSED",
-            next_eligible=None,
+            next_eligible=state.get("next_eligible_check_at"),
             unchanged=True,
-            identity_override={
-                "target_repo": closed_identity["target_repo"],
-                "workstream": closed_identity["workstream"],
-                "intent_revision": closed_identity["intent_revision"],
-                "watch_class": closed_identity["watch_class"],
-                "subject_version": closed_identity["subject_version"],
-                "terminal_state": "CLOSED",
-                "next_eligible_check_at": None,
-            },
+            preserve_durable=True,
         )
     stale_revision = (identity is not None and identity["intent_revision"] != packet["intent_revision"]) or (
         watch["intent_revision"] is not None and watch["intent_revision"] != packet["intent_revision"]
