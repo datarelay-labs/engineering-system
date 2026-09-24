@@ -23,6 +23,7 @@ import os
 import re
 import select
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -302,90 +303,129 @@ def _authorize(root: Path, request: dict[str, Any], effect: dict[str, Any]) -> t
     return "AUTHORIZATION_DENIED", decision.reason
 
 
-def _stop_process(proc: subprocess.Popen[bytes], stdout: object) -> None:
+def _stop_group(proc: subprocess.Popen[bytes], stdout: object) -> None:
     if proc.poll() is None:
-        proc.kill()
+        try:
+            getattr(os, "killpg")(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            proc.kill()
     proc.wait(timeout=2)
     close = getattr(stdout, "close", None)
     if close is not None:
         close()
 
 
-def _execute_once(root: Path, command: str) -> tuple[str, str, bytes]:
+def _subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
+    temporary = tempfile.TemporaryDirectory(prefix="runtime-evidence-exec-")
+    work = Path(temporary.name) / "tree"
+    added = subprocess.run(
+        ["git", "-C", str(root), "worktree", "add", "--detach", str(work), subject_head],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if added.returncode != 0:
+        temporary.cleanup()
+        return None
+    return temporary, work
+
+
+def _release_subject_tree(root: Path, temporary: tempfile.TemporaryDirectory[str], work: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "worktree", "remove", "--force", str(work)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    temporary.cleanup()
+
+
+def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str, bytes]:
     try:
         argv = shlex.split(command)
     except ValueError:
         return "EXECUTION_FAILED", "COMMAND_PARSE", b""
     if not argv:
         return "EXECUTION_FAILED", "COMMAND_EMPTY", b""
-    proc = subprocess.Popen(
-        argv,
-        cwd=root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        shell=False,
-    )
-    stdout = proc.stdout
-    if stdout is None:
-        _stop_process(proc, stdout)
-        return "EXECUTION_FAILED", "OUTPUT_PIPE", b""
-    fd = stdout.fileno()
-    os.set_blocking(fd, False)
-    chunks: list[bytes] = []
-    total = 0
-    deadline = time.monotonic() + TIMEOUT_SECONDS
+    checked_out = _subject_tree(root, subject_head)
+    if checked_out is None:
+        return "EXECUTION_FAILED", "SUBJECT_TREE", b""
+    temporary, work = checked_out
+    proc: subprocess.Popen[bytes] | None = None
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=work,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            shell=False,
+            start_new_session=True,
+        )
+        stdout = proc.stdout
+        if stdout is None:
+            _stop_group(proc, stdout)
+            return "EXECUTION_FAILED", "OUTPUT_PIPE", b""
+        fd = stdout.fileno()
+        os.set_blocking(fd, False)
+        chunks: list[bytes] = []
+        total = 0
+        deadline = time.monotonic() + TIMEOUT_SECONDS
 
-    def absorb(block: bytes) -> bool:
-        nonlocal total
-        if total + len(block) > OUTPUT_LIMIT_BYTES:
-            return False
-        chunks.append(block)
-        total += len(block)
-        return True
+        def absorb(block: bytes) -> bool:
+            nonlocal total
+            if total + len(block) > OUTPUT_LIMIT_BYTES:
+                return False
+            chunks.append(block)
+            total += len(block)
+            return True
 
-    status = ""
-    while not status:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            status = "timeout"
-            break
-        readable, _, _ = select.select([fd], [], [], min(0.2, remaining))
-        if not readable:
-            if proc.poll() is not None:
-                status = "exited"
-            continue
-        try:
-            block = os.read(fd, 1024)
-        except BlockingIOError:
-            continue
-        if not block:
-            status = "exited"
-            break
-        if not absorb(block):
-            status = "limit"
-            break
-    if status == "exited":
-        while True:
+        status = ""
+        while not status:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                status = "timeout"
+                break
+            readable, _, _ = select.select([fd], [], [], min(0.2, remaining))
+            if not readable:
+                if proc.poll() is not None:
+                    status = "exited"
+                continue
             try:
                 block = os.read(fd, 1024)
             except BlockingIOError:
-                break
+                continue
             if not block:
+                status = "exited"
                 break
             if not absorb(block):
                 status = "limit"
                 break
-    if status in {"limit", "timeout"}:
-        _stop_process(proc, stdout)
-        if status == "limit":
-            return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
-        return "TIMEOUT", "TIMEOUT", b""
-    code = proc.wait(timeout=2)
-    stdout.close()
-    output = b"".join(chunks)
-    if code != 0:
-        return "EXECUTION_FAILED", f"EXIT_{code}", output
-    return "CAPTURED", "OK", output
+        if status == "exited":
+            while True:
+                try:
+                    block = os.read(fd, 1024)
+                except BlockingIOError:
+                    break
+                if not block:
+                    break
+                if not absorb(block):
+                    status = "limit"
+                    break
+        if status in {"limit", "timeout"}:
+            _stop_group(proc, stdout)
+            if status == "limit":
+                return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
+            return "TIMEOUT", "TIMEOUT", b""
+        code = proc.wait(timeout=2)
+        stdout.close()
+        output = b"".join(chunks)
+        if code != 0:
+            return "EXECUTION_FAILED", f"EXIT_{code}", output
+        return "CAPTURED", "OK", output
+    finally:
+        if proc is not None and proc.poll() is None:
+            _stop_group(proc, proc.stdout)
+        _release_subject_tree(root, temporary, work)
 
 
 def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Path:
@@ -485,10 +525,11 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
     if existing is not None:
         return existing
 
-    status, exec_reason, output = _execute_once(root, command)
+    status, exec_reason, output = _execute_once(root, subject_head, command)
     digest = hashlib.sha256(output).hexdigest() if output else ""
+    executed = exec_reason not in {"COMMAND_PARSE", "COMMAND_EMPTY", "SUBJECT_TREE"}
     if status != "CAPTURED":
-        return _result(status, exec_reason, kind=kind, capture_id=capture_id, content_digest=digest, executed=True)
+        return _result(status, exec_reason, kind=kind, capture_id=capture_id, content_digest=digest, executed=executed)
     if SENSITIVE_RE.search(output.decode("utf-8", errors="replace")):
         return _result(
             "BLOCKED_SENSITIVE_OUTPUT",

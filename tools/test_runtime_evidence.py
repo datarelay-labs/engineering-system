@@ -35,7 +35,7 @@ def git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def init_repo(root: Path, command: str, *, logs: str | None = None) -> str:
+def init_repo(root: Path, command: str, *, logs: str | None = None, extra: dict[str, str] | None = None) -> str:
     root.mkdir(parents=True)
     (root / "health.py").write_text(
         "from pathlib import Path\nPath('runs').open('a').write('1')\nprint('ok')\n",
@@ -47,6 +47,11 @@ def init_repo(root: Path, command: str, *, logs: str | None = None) -> str:
         "operations:\n  health_command: " + json.dumps(command) + "\n",
         encoding="utf-8",
     )
+    if extra:
+        for name, content in extra.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
     if logs is not None:
         (engineering / "runtime.yaml").write_text(logs, encoding="utf-8")
         schema_dir = root / "schemas"
@@ -143,7 +148,7 @@ def test_exact_head_health_executes_once() -> None:
             assert report["EXECUTED"] == "YES"
             assert report["MITIGATION_AUTHORITY"] == "NONE"
             assert "ok" not in "\n".join(report.values())
-            assert runs(repo) == 1
+            assert runs(repo) == 0
             private = Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]
             body = json.loads(private.read_text(encoding="utf-8"))
             assert body["raw_output"] == "ok\n"
@@ -151,7 +156,7 @@ def test_exact_head_health_executes_once() -> None:
             again = collect(repo, request)
             assert again["RESULT"] == "CAPTURED"
             assert again["EXECUTED"] == "NO"
-            assert runs(repo) == 1
+            assert runs(repo) == 0
         finally:
             clear_trust()
 
@@ -308,7 +313,9 @@ def test_dirty_metadata_cannot_replace_committed_command() -> None:
         try:
             report = collect(repo, request)
             assert report["RESULT"] == "CAPTURED"
-            assert runs(repo) == 1
+            private = json.loads((Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8"))
+            assert private["raw_output"] == "ok\n"
+            assert runs(repo) == 0
             assert not (repo / "dirty-ran").exists()
             denied = effect(head, command)
             denied["command_sha256"] = hashlib.sha256(dirty.encode()).hexdigest()
@@ -316,7 +323,7 @@ def test_dirty_metadata_cannot_replace_committed_command() -> None:
             assert mismatch["RESULT"] == "AUTHORIZATION_DENIED"
             assert mismatch["REASON"] == "COMMAND_HASH_MISMATCH"
             assert mismatch["EXECUTED"] == "NO"
-            assert runs(repo) == 1
+            assert runs(repo) == 0
         finally:
             clear_trust()
 
@@ -391,6 +398,92 @@ def test_retention_symlink_and_bounds_fail_closed() -> None:
             clear_trust()
 
 
+def test_dirty_executable_content_cannot_run() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        marker = base / "dirty-ran"
+        head = init_repo(repo, command)
+        (repo / "helper.py").write_text("MARKER='committed'\n", encoding="utf-8")
+        (repo / "health.py").write_text(
+            "import helper\nprint(helper.MARKER)\n",
+            encoding="utf-8",
+        )
+        git(repo, "add", "health.py", "helper.py")
+        git(repo, "commit", "-m", "helper")
+        head = git(repo, "rev-parse", "HEAD")
+        (repo / "helper.py").write_text("MARKER='DIRTY_SCRIPT_RAN'\n", encoding="utf-8")
+        (repo / "health.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\nprint('DIRTY_SCRIPT_RAN')\n",
+            encoding="utf-8",
+        )
+        (repo / "only-dirty.txt").write_text("DIRTY_SCRIPT_RAN\n", encoding="utf-8")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED"
+            assert report["EXECUTED"] == "YES"
+            private = json.loads((Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8"))
+            assert private["raw_output"] == "committed\n"
+            assert "DIRTY_SCRIPT_RAN" not in private["raw_output"]
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_bounded_stop_terminates_descendants() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        pidfile = base / "grandchild.pid"
+        sentinel = base / "grandchild-alive"
+        script = (
+            "import os,sys,time,pathlib\n"
+            f"pidfile=pathlib.Path({str(pidfile)!r})\n"
+            f"sentinel=pathlib.Path({str(sentinel)!r})\n"
+            "if os.fork()==0:\n"
+            "    if os.fork()==0:\n"
+            "        pidfile.write_text(str(os.getpid()))\n"
+            "        time.sleep(30)\n"
+            "        sentinel.write_text('yes')\n"
+            "        os._exit(0)\n"
+            "    os._exit(0)\n"
+            "deadline=time.time()+5\n"
+            "while not pidfile.exists():\n"
+            "    if time.time()>deadline:\n"
+            "        os._exit(1)\n"
+            "    time.sleep(0.01)\n"
+            "sys.stdout.write('x'*64)\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(30)\n"
+        )
+        command = "python3 spawn.py"
+        head = init_repo(repo, command, extra={"spawn.py": script})
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        previous_limit = runtime_evidence.OUTPUT_LIMIT_BYTES
+        runtime_evidence.OUTPUT_LIMIT_BYTES = 8
+        started = time.monotonic()
+        try:
+            report = collect(repo, request)
+            elapsed = time.monotonic() - started
+            assert report["RESULT"] == "OUTPUT_UNBOUNDED", report
+            assert report["EXECUTED"] == "YES"
+            assert elapsed < 3
+            assert pidfile.exists()
+            pid = int(pidfile.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and Path(f"/proc/{pid}").exists():
+                time.sleep(0.05)
+            assert not Path(f"/proc/{pid}").exists()
+            assert not sentinel.exists()
+        finally:
+            runtime_evidence.OUTPUT_LIMIT_BYTES = previous_limit
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -405,6 +498,8 @@ def main() -> int:
     test_dirty_metadata_cannot_replace_committed_command()
     test_output_bound_terminates_before_completion()
     test_retention_symlink_and_bounds_fail_closed()
+    test_dirty_executable_content_cannot_run()
+    test_bounded_stop_terminates_descendants()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
