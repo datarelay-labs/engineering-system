@@ -257,6 +257,118 @@ def test_existing_coordinator_regressions_remain_green() -> None:
         assert "PASS" in completed.stdout, script
 
 
+def test_ci_watch_cannot_resume_worker() -> None:
+    facts = load_fixture("06-worker-progress.json")
+    facts["watch"]["watch_class"] = "exact_head_ci"
+    result = evaluate(facts, EMPTY)
+    assert_inert(result)
+    assert result["result"] == "BLOCK_RECONCILIATION"
+    assert result["result"] != "RESUME_ADMITTED_WORKER"
+    assert result["coordinator_decision"] != "RESUME_WORKER"
+    assert result["resumes_worker"] is False
+    assert result["wakes_coordinator"] is False
+    assert result["retries_action"] is False
+    assert result["watch_class"] == "exact_head_ci"
+
+
+def test_subject_override_cannot_mask_head_advance() -> None:
+    original = "a" * 40
+    injected = "b" * 40
+    advanced = "c" * 40
+    facts = load_fixture("06-worker-progress.json")
+    facts["git"]["head"] = original
+    facts["watch"]["subject_version"] = injected
+    try:
+        evaluate(facts, EMPTY)
+    except Exception as exc:
+        assert "subject" in str(exc).lower()
+    else:
+        raise AssertionError("caller subject_version override was accepted")
+    current = load_fixture("06-worker-progress.json")
+    current["git"]["head"] = original
+    first = evaluate(current, EMPTY)
+    assert_inert(first)
+    assert first["next_watch_state"]["subject_version"] == original
+    current["git"]["head"] = advanced
+    current["watch"]["observed_at"] = "2026-09-24T16:10:00Z"
+    moved = evaluate(current, first["next_watch_state"])
+    assert_inert(moved)
+    assert moved["result"] == "CLOSE_WATCH"
+    assert moved["coordinator_decision"] == "STALE_WATCH"
+    poisoned = dict(first["next_watch_state"])
+    poisoned["subject_version"] = injected
+    retained = load_fixture("06-worker-progress.json")
+    retained["git"]["head"] = advanced
+    retained["watch"]["subject_version"] = injected
+    retained["watch"]["observed_at"] = "2026-09-24T16:20:00Z"
+    try:
+        evaluate(retained, poisoned)
+    except Exception as exc:
+        assert "subject" in str(exc).lower()
+    else:
+        raise AssertionError("retained subject override bypassed stale-subject closure")
+
+
+def test_older_observation_does_not_regress_transition() -> None:
+    pending = evaluate(load_fixture("01-ci-pending.json"), EMPTY)
+    passed = load_fixture("02-ci-pass-exact.json")
+    passed["watch"]["observed_at"] = "2026-09-24T16:10:00Z"
+    woken = evaluate(passed, pending["next_watch_state"])
+    assert woken["result"] == "WAKE_COORDINATOR"
+    assert woken["coordinator_decision"] == "AUDIT_REVIEW"
+    assert woken["next_watch_state"]["last_transition_at"] == "2026-09-24T16:10:00Z"
+    older = load_fixture("01-ci-pending.json")
+    older["watch"]["observed_at"] = "2026-09-24T16:05:00Z"
+    replayed = evaluate(older, woken["next_watch_state"])
+    assert_inert(replayed)
+    assert replayed["result"] == "NO_CHANGE"
+    assert replayed["coordinator_decision"] == "AUDIT_REVIEW"
+    assert replayed["coordinator_decision"] != "WAIT_EXACT_HEAD_CI"
+    assert replayed["next_watch_state"]["last_transition_at"] == "2026-09-24T16:10:00Z"
+    assert replayed["wakes_coordinator"] is False
+    assert replayed["resumes_worker"] is False
+
+
+def test_transient_retry_budget_exhausts() -> None:
+    facts = load_fixture("01-ci-pending.json")
+    facts["failure"]["class"] = "TRANSIENT"
+    facts["wait"]["retry_count"] = 0
+    facts["wait"]["retry_budget"] = 3
+    state = EMPTY
+    seen = []
+    for index in range(5):
+        facts["watch"]["observed_at"] = f"2026-09-24T16:{index:02d}:00Z"
+        result = evaluate(json.loads(json.dumps(facts)), state)
+        assert_inert(result)
+        seen.append(result)
+        state = result["next_watch_state"]
+        assert result["resumes_worker"] is False
+    assert [item["result"] for item in seen[:3]] == ["RECHECK_LATER", "RECHECK_LATER", "RECHECK_LATER"]
+    assert seen[2]["next_watch_state"]["consecutive_transient_failures"] == 3
+    assert seen[3]["result"] == "NOTIFY_OWNER"
+    assert seen[3]["coordinator_decision"] == "BLOCK_HUMAN"
+    assert seen[3]["result"] != "RECHECK_LATER"
+    assert seen[4]["result"] == "NO_CHANGE"
+    assert seen[4]["result"] != "RECHECK_LATER"
+
+
+def test_distinct_wake_transitions_have_distinct_keys() -> None:
+    pending = evaluate(load_fixture("01-ci-pending.json"), EMPTY)
+    audit = evaluate(load_fixture("02-ci-pass-exact.json"), pending["next_watch_state"])
+    opened = evaluate(load_fixture("04-review-open.json"), EMPTY)
+    ready = evaluate(load_fixture("04-review-clear.json"), opened["next_watch_state"])
+    assert audit["result"] == "WAKE_COORDINATOR"
+    assert audit["coordinator_decision"] == "AUDIT_REVIEW"
+    assert ready["result"] == "WAKE_COORDINATOR"
+    assert ready["coordinator_decision"] == "MERGE_READY"
+    assert audit["notification_key"] != ready["notification_key"]
+    assert "AUDIT_REVIEW" in audit["notification_key"]
+    assert "MERGE_READY" in ready["notification_key"]
+    repeated = evaluate(load_fixture("04-review-clear.json"), ready["next_watch_state"])
+    assert repeated["result"] == "NO_CHANGE"
+    assert repeated["notification_key"] == ready["notification_key"]
+
+
 def test_cli_evaluate_roundtrip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         facts_path = Path(tmp) / "facts.json"
@@ -298,6 +410,11 @@ def main() -> int:
     test_repeated_owner_notify_is_deduplicated()
     test_complete_packet_closes_watch()
     test_malformed_facts_and_execution_keys_fail_closed()
+    test_ci_watch_cannot_resume_worker()
+    test_subject_override_cannot_mask_head_advance()
+    test_older_observation_does_not_regress_transition()
+    test_transient_retry_budget_exhausts()
+    test_distinct_wake_transitions_have_distinct_keys()
     test_source_has_no_side_effects()
     test_cli_evaluate_roundtrip()
     test_existing_coordinator_regressions_remain_green()

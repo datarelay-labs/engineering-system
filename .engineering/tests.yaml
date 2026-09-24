@@ -253,6 +253,7 @@ scenarios:
       - "identical CI pending observations recheck without notification"
       - "exact-head CI or review transitions wake the coordinator"
       - "stale intent, missing progress, and resource or WIP blocks do not resume a worker"
+      - "watch class, subject override, observation order, transient budget, and wake keys fail closed"
     release_gate: true
 
   - id: ENG-WORKER-ADAPTER-001

@@ -262,7 +262,7 @@ def _observation_digest(facts: dict[str, Any], decision_name: str) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _notification_key(facts: dict[str, Any], result: str, subject: str) -> str:
+def _notification_key(facts: dict[str, Any], result: str, subject: str, coordinator_decision: str) -> str:
     packet = facts["packet"]
     return "|".join(
         (
@@ -270,6 +270,7 @@ def _notification_key(facts: dict[str, Any], result: str, subject: str) -> str:
             packet["workstream"],
             str(packet["intent_revision"]),
             result,
+            coordinator_decision,
             subject,
         )
     )
@@ -285,6 +286,30 @@ def _resume_allowed(facts: dict[str, Any]) -> bool:
         and facts["resource"]["result"] in {"PASS", "WARN"}
         and facts["admission"]["decision"] == "ALLOW"
     )
+
+
+def _resume_in_scope(watch: dict[str, Any]) -> bool:
+    return watch["watch_class"] == "worker_progress_or_yield"
+
+
+def _observation_is_older(watch: dict[str, Any], state: dict[str, Any]) -> bool:
+    boundary = str(state.get("last_transition_at") or "")
+    if not boundary:
+        return False
+    observed = _parse_time(watch["observed_at"], "watch.observed_at")
+    prior = _parse_time(boundary, "watch_state.last_transition_at")
+    return observed < prior
+
+
+def _bind_transient_retry(payload: dict[str, Any], facts: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """Use the persisted watch counter as the authoritative transient retry count."""
+    if facts["failure"]["class"] != "TRANSIENT":
+        return payload
+    bound = dict(payload)
+    wait = dict(bound.get("wait") or {})
+    wait["retry_count"] = max(int(state["consecutive_transient_failures"]), int(facts["wait"]["retry_count"]))
+    bound["wait"] = wait
+    return bound
 
 
 def _backoff_seconds(state: dict[str, Any], unchanged: bool) -> int:
@@ -324,24 +349,47 @@ def _persist(
     terminal_state: str,
     next_eligible: str | None,
     unchanged: bool,
+    preserve_durable: bool = False,
 ) -> dict[str, Any]:
-    transition_at = state["last_transition_at"] if unchanged and state["last_transition_at"] else watch["observed_at"]
-    if result != "NO_CHANGE":
-        transition_at = watch["observed_at"]
+    identity = state.get("identity") or {}
+    if preserve_durable:
+        transition_at = str(state["last_transition_at"] or watch["observed_at"])
+        failures = int(state["consecutive_transient_failures"])
+        stored_next = state.get("next_eligible_check_at")
+        stored_digest = str(state["last_observation_digest"] or digest)
+        stored_decision = str(state["last_decision"] or coordinator_decision)
+        stored_key = str(state["last_decision_key"] or notification_key)
+        stored_subject = str(identity.get("subject_version") or subject)
+        stored_class = str(identity.get("watch_class") or watch["watch_class"])
+        stored_revision = identity.get("intent_revision") or facts["packet"]["intent_revision"]
+        stored_terminal = str(state.get("terminal_state") or terminal_state)
+    else:
+        transition_at = state["last_transition_at"] if unchanged and state["last_transition_at"] else watch["observed_at"]
+        if result != "NO_CHANGE":
+            transition_at = watch["observed_at"]
+        failures = _transient_count(facts, state)
+        stored_next = next_eligible
+        stored_digest = digest
+        stored_decision = coordinator_decision
+        stored_key = notification_key
+        stored_subject = subject
+        stored_class = watch["watch_class"]
+        stored_revision = facts["packet"]["intent_revision"]
+        stored_terminal = terminal_state
     return {
         "schema_version": 1,
-        "target_repo": facts["packet"]["repository"],
-        "workstream": facts["packet"]["workstream"],
-        "intent_revision": facts["packet"]["intent_revision"],
-        "watch_class": watch["watch_class"],
-        "subject_version": subject,
-        "last_observation_digest": digest,
-        "last_decision": coordinator_decision,
-        "last_decision_key": notification_key,
+        "target_repo": str(identity.get("target_repo") or facts["packet"]["repository"]),
+        "workstream": str(identity.get("workstream") or facts["packet"]["workstream"]),
+        "intent_revision": stored_revision,
+        "watch_class": stored_class,
+        "subject_version": stored_subject,
+        "last_observation_digest": stored_digest,
+        "last_decision": stored_decision,
+        "last_decision_key": stored_key,
         "last_transition_at": transition_at,
-        "consecutive_transient_failures": _transient_count(facts, state),
-        "next_eligible_check_at": next_eligible,
-        "terminal_state": terminal_state,
+        "consecutive_transient_failures": failures,
+        "next_eligible_check_at": stored_next,
+        "terminal_state": stored_terminal,
     }
 
 
@@ -361,11 +409,16 @@ def _emit(
     next_eligible: str | None = None,
     unchanged: bool = False,
     identity_override: dict[str, Any] | None = None,
+    preserve_durable: bool = False,
 ) -> dict[str, Any]:
     if result not in RESULTS:
         raise WatchFactsError(f"internal re-entry result is unknown: {result}")
-    key = _notification_key(facts, result, subject)
-    if result == "NO_CHANGE" and state["last_decision_key"]:
+    key = _notification_key(facts, result, subject, coordinator_decision)
+    reported_decision = coordinator_decision
+    if preserve_durable and state["last_decision"]:
+        reported_decision = str(state["last_decision"])
+        key = _notification_key(facts, result, subject, reported_decision)
+    if (result == "NO_CHANGE" or preserve_durable) and state["last_decision_key"]:
         key = state["last_decision_key"]
     persisted = _persist(
         facts,
@@ -373,12 +426,13 @@ def _emit(
         state,
         subject=subject,
         result=result,
-        coordinator_decision=coordinator_decision,
+        coordinator_decision=reported_decision,
         digest=digest,
         notification_key=key,
         terminal_state=terminal_state,
         next_eligible=next_eligible,
         unchanged=unchanged,
+        preserve_durable=preserve_durable,
     )
     if identity_override is not None:
         persisted.update(identity_override)
@@ -386,7 +440,7 @@ def _emit(
         "schema_version": 1,
         "result": result,
         "reason": reason,
-        "coordinator_decision": coordinator_decision,
+        "coordinator_decision": reported_decision,
         "watch_class": watch["watch_class"],
         "notification_disposition": notification,
         "notification_key": key,
@@ -479,7 +533,7 @@ def _map_decision(
             next_eligible=None,
         )
     if name == "RECONCILE_AMBIGUOUS":
-        notify_key = _notification_key(facts, "BLOCK_RECONCILIATION", subject)
+        notify_key = _notification_key(facts, "BLOCK_RECONCILIATION", subject, name)
         duplicate = state["last_decision_key"] == notify_key
         return _emit(
             facts,
@@ -495,7 +549,7 @@ def _map_decision(
             next_eligible=None,
         )
     if name == "BLOCK_HUMAN":
-        notify_key = _notification_key(facts, "NOTIFY_OWNER", subject)
+        notify_key = _notification_key(facts, "NOTIFY_OWNER", subject, name)
         if state["last_decision_key"] == notify_key:
             return _emit(
                 facts,
@@ -525,6 +579,20 @@ def _map_decision(
             next_eligible=None,
         )
     if name == "RESUME_WORKER":
+        if not _resume_in_scope(watch):
+            return _emit(
+                facts,
+                watch,
+                state,
+                result="BLOCK_RECONCILIATION",
+                reason=f"watch class {watch['watch_class']} cannot authorize worker resume",
+                coordinator_decision="OUT_OF_SCOPE",
+                subject=subject,
+                digest=digest,
+                suppress="NONE",
+                notification="SUPPRESS",
+                next_eligible=None,
+            )
         if not _resume_allowed(facts):
             return _emit(
                 facts,
@@ -643,7 +711,13 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
     except PlannerFactsError:
         raise
     packet = facts["packet"]
-    subject = watch["subject_version"] or subject_version(facts)
+    derived_subject = subject_version(facts)
+    if watch["subject_version"] is not None and watch["subject_version"] != derived_subject:
+        raise WatchFactsError(
+            "watch.subject_version does not match the coordinator-derived subject",
+            deny_class="SUBJECT_OVERRIDE",
+        )
+    subject = derived_subject
     identity = state["identity"]
     if identity is not None:
         if identity["target_repo"] != packet["repository"] or identity["workstream"] != packet["workstream"]:
@@ -694,6 +768,24 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
             subject=subject,
             reason="stale watch identity cannot act and must be reconciled against the current packet",
         )
+    if _observation_is_older(watch, state):
+        if not state["last_decision"] or not state["last_observation_digest"] or not state["last_decision_key"]:
+            raise WatchFactsError("older observation cannot roll back an incomplete watch state")
+        return _emit(
+            facts,
+            watch,
+            state,
+            result="NO_CHANGE",
+            reason="observation is older than the durable watch transition and does not roll state backward",
+            coordinator_decision=str(state["last_decision"]),
+            subject=subject,
+            digest=str(state["last_observation_digest"]),
+            suppress="DEDUP",
+            notification="SUPPRESS",
+            next_eligible=state.get("next_eligible_check_at"),
+            unchanged=True,
+            preserve_durable=True,
+        )
     if facts["mutation"]["ambiguous"] or facts["failure"]["class"] == "AMBIGUOUS_MUTATION":
         return _map_decision(
             facts,
@@ -702,7 +794,7 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
             {"decision": "RECONCILE_AMBIGUOUS", "reason": "ambiguous mutation"},
             subject,
         )
-    decision = plan(planner_payload)
+    decision = plan(_bind_transient_retry(planner_payload, facts, state))
     return _map_decision(facts, watch, state, decision, subject)
 
 
