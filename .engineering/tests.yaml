@@ -67,6 +67,12 @@ paths:
     domains: [session-continuity]
   "schemas/coordinator-watch.schema.json":
     domains: [schemas, session-continuity]
+  "tools/coordinator_watch_host.py":
+    domains: [session-continuity, workflows]
+  "tools/test_coordinator_watch_host.py":
+    domains: [session-continuity]
+  "schemas/coordinator-watch-host.schema.json":
+    domains: [schemas, session-continuity]
   "tools/worker_adapter.py":
     domains: [session-continuity, workflows]
   "tools/test_worker_adapter.py":
@@ -255,6 +261,25 @@ scenarios:
       - "stale intent, missing progress, and resource or WIP blocks do not resume a worker"
       - "watch class, subject override, observation order, transient budget, and wake keys fail closed"
       - "an observation older than the latest accepted observation does not change durable watch state"
+    release_gate: true
+
+  - id: ENG-COORDINATOR-WATCH-HOST-001
+    cost: cheap
+    estimated_seconds: 8
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Coordinator watch run-once host
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_coordinator_watch_host.py"
+    invariants:
+      - "a held lock yields without a second evaluation or typed action"
+      - "exact-head CI wakes once and a replay or restart does not duplicate it"
+      - "stale revision, stale subject, resource or WIP denial, and missing trusted dispatch deliver zero actions"
+      - "owner notices are verified INFO deliveries and identical state is deduplicated"
     release_gate: true
 
   - id: ENG-WORKER-ADAPTER-001

@@ -64,6 +64,8 @@ Coordinator reconciliation for that classification is `python3 tools/coordinator
 
 A bounded watch re-entry is `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator calls the planner and emits one result. It does not spawn processes, call GitHub, merge, send Telegram, or start/stop Cursor. Ambiguous mutation facts yield `BLOCK_RECONCILIATION` and authorize no retry. A watch class cannot emit another class's authority. Caller subject overrides, observations older than the latest accepted observation, and an exhausted transient retry budget fail closed. Notification keys include the coordinator decision. Host scheduling and delivery stay outside this evaluator.
 
+The run-once host is `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. It locks one watch, calls the evaluator, and delivers at most one already-authorized typed action after a fresh reconciliation read. Caller commands and URLs fail closed. A held lock, stale revision, stale subject, resource or WIP denial, ambiguous prior outcome, or missing trusted dispatch yields zero actions and does not stop unrelated sessions.
+
 Immediately before an Issue/PR write or publication effect, classify it with `python3 tools/worker_adapter.py evaluate --request-json <facts.json>`. Proceed only on `APPLIED`. `STALE_WORKER` authorizes no write. `RECONCILE_AMBIGUOUS` must be reconciled before another attempt. The adapter does not mint dispatch authority or stop unrelated sessions.
 
 ## Agent-facing tool contract

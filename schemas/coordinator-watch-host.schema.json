@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Coordinator watch host run-once result",
+  "$id": "https://github.com/datarelay-labs/engineering-system/schemas/coordinator-watch-host.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result",
+    "reason",
+    "watch_result",
+    "actions_delivered",
+    "wakes",
+    "resumes",
+    "notifications",
+    "notification_level",
+    "notification_delivery",
+    "lock",
+    "next_eligible_check_at",
+    "stops_unrelated_sessions",
+    "mutates_existing_sessions",
+    "spawns_process",
+    "mutates_github",
+    "executes_command",
+    "busy_loop",
+    "sleeps",
+    "cadence"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "result": {
+      "enum": [
+        "NO_ACTION",
+        "DELIVERED",
+        "DEDUP",
+        "LOCK_HELD",
+        "STALE_RECONCILE",
+        "RESOURCE_BLOCKED",
+        "RECONCILE_AMBIGUOUS",
+        "AUTHORITY_DENIED"
+      ]
+    },
+    "reason": {"type": "string", "minLength": 1},
+    "watch_result": {"type": "string", "minLength": 1},
+    "actions_delivered": {"type": "integer", "minimum": 0, "maximum": 1},
+    "wakes": {"type": "integer", "minimum": 0, "maximum": 1},
+    "resumes": {"type": "integer", "minimum": 0, "maximum": 1},
+    "notifications": {"type": "integer", "minimum": 0, "maximum": 1},
+    "notification_level": {"enum": ["NONE", "INFO"]},
+    "notification_delivery": {"enum": ["NONE", "VERIFIED", "DEDUP", "DENIED"]},
+    "lock": {"enum": ["ACQUIRED", "HELD"]},
+    "next_eligible_check_at": {"type": ["string", "null"]},
+    "stops_unrelated_sessions": {"const": false},
+    "mutates_existing_sessions": {"const": false},
+    "spawns_process": {"const": false},
+    "mutates_github": {"const": false},
+    "executes_command": {"const": false},
+    "busy_loop": {"const": false},
+    "sleeps": {"const": false},
+    "cadence": {"const": "EXTERNAL"}
+  }
+}

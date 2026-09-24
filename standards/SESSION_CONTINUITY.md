@@ -481,6 +481,32 @@ Contract:
 
 `evaluate` returns exit 0 when it emits a result. Exit 3 is reserved for malformed or execution-keyed facts. The result schema is `schemas/coordinator-watch.schema.json`.
 
+## Coordinator watch host
+
+The host is a run-once adapter around the watch evaluator. An external scheduler owns cadence. The host does not sleep, busy-loop, or keep a coding agent alive to poll.
+
+```bash
+python3 tools/coordinator_watch_host.py run-once --request <request.json>
+```
+
+One request declares one watch class and the paths for its lock, watch state, action ledger, collected facts, and authoritative refetch. `work_budget` must be 1.
+
+Contract:
+
+- a single-instance lock is acquired before evaluation; if the lock is already owned, the run yields and does not evaluate or deliver;
+- fact documents are read-only JSON for the declared watch class; caller command, shell, endpoint, or URL fields fail closed;
+- the host calls `coordinator_watch.py` and does not reimplement its decisions;
+- `NO_CHANGE`, `RECHECK_LATER`, and `CLOSE_WATCH` persist bounded watch state and deliver no typed action;
+- `WAKE_COORDINATOR` and `RESUME_ADMITTED_WORKER` are delivered only after a fresh read of authoritative packet, subject, resource, and admission facts, and only when `worker_adapter.py` returns `APPLIED` for the exact host-built effect;
+- `NOTIFY_OWNER` uses that same host-signed dispatch boundary for one bounded `INFO` notice; `COMPLETE` is reserved for whole Work Packet completion and is not emitted by a watch pass;
+- a changed intent revision or subject, a resource `BLOCK`, or an admission `DENY` before delivery yields zero actions and does not stop or mutate unrelated sessions;
+- an ambiguous prior action outcome blocks retry; the same applied key or a consumed dispatch is deduplicated;
+- missing or invalid trusted dispatch denies the external or worker effect;
+- persisted watch state and the action ledger store bounded metadata only;
+- the host performs no GitHub mutation, merge, caller-selected command, session stop, or model call.
+
+`run-once` returns exit 0 when it emits a result. Exit 3 is reserved for malformed or execution-keyed requests. The result schema is `schemas/coordinator-watch-host.schema.json`.
+
 ## Trusted worker external-write adapter
 
 The planner stays decision-only. External Issue/PR writes and publication effects go through the trusted adapter, which authorizes at most one typed effect and does not itself perform the mutation:
