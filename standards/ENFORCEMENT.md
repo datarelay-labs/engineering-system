@@ -60,6 +60,8 @@ Retry policy:
 
 This rule composes with approval, permission, and replay protections; it does not replace them.
 
+Coordinator reconciliation for that classification is `python3 tools/coordinator.py plan --facts <facts.json>`. The planner reads structured facts and emits one bounded decision. Ambiguous mutation facts yield `RECONCILE_AMBIGUOUS` before retry. The planner itself does not spawn processes, mutate GitHub, merge, send messages, or stop sessions.
+
 ## Agent-facing tool contract
 
 Tools intended for AI agents should be designed for reliable selection and bounded context use:
