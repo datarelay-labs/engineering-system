@@ -51,6 +51,21 @@ _INCIDENT = _load_module("incident_evidence", "incident-evidence.py")
 
 TIMEOUT_SECONDS = 5
 OUTPUT_LIMIT_BYTES = 4096
+# Pre-execution subject checkout stays inside a fixed ceiling. The reproduced
+# unbounded case copied 2500 one-kibibyte blobs (2_560_000 bytes, about 15s)
+# before the command deadline started.
+MAX_SUBJECT_FILES = 128
+MAX_SUBJECT_BYTES = 1_048_576
+MAX_SUBJECT_SECONDS = 2
+IDENTITY_FIELDS = (
+    "incident_id",
+    "evidence_kind",
+    "subject_head",
+    "canonical_field_or_capability",
+    "command_sha256",
+    "target_repo",
+    "retention_subject",
+)
 EVIDENCE_KINDS = frozenset({"health", "logs", "metrics", "traces"})
 EXCLUDED_KINDS = frozenset(
     {
@@ -572,30 +587,40 @@ def _executable_arguments_bound(argv: list[str], work: Path) -> bool:
     return False
 
 
-def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+def _git_readonly(
+    root: Path,
+    *args: str,
+    text: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
     env["GIT_NO_REPLACE_OBJECTS"] = "1"
-    return subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "--no-replace-objects",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=",
-            *args,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        text=text,
-        env=env,
-    )
+    command = [
+        "git",
+        "-C",
+        str(root),
+        "--no-replace-objects",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=",
+        *args,
+    ]
+    try:
+        return subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=text,
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, "" if text else b"", "" if text else b"")
 
 
 def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
@@ -603,19 +628,35 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
 
     Uses read-only object lookup and ignores repository replace refs. Does not
     register a worktree, checkout, or run repository hooks, filters, or other
-    local configuration.
+    local configuration. File count, byte count, and elapsed time are capped
+    before the command deadline starts.
     """
-    listed = _git_readonly(root, "ls-tree", "-r", "-z", "--full-tree", subject_head)
-    if listed.returncode != 0:
+    deadline = time.monotonic() + MAX_SUBJECT_SECONDS
+    if time.monotonic() >= deadline:
+        return None
+    listed = _git_readonly(
+        root,
+        "ls-tree",
+        "-r",
+        "-z",
+        "--full-tree",
+        subject_head,
+        timeout=deadline - time.monotonic(),
+    )
+    if listed.returncode != 0 or not isinstance(listed.stdout, bytes):
+        return None
+    entries = [entry for entry in listed.stdout.split(b"\0") if entry]
+    if len(entries) > MAX_SUBJECT_FILES:
         return None
     temporary = tempfile.TemporaryDirectory(prefix="runtime-evidence-exec-")
     work = Path(temporary.name) / "tree"
+    total = 0
     try:
         work.mkdir()
         base = work.resolve()
-        for entry in listed.stdout.split(b"\0"):
-            if not entry:
-                continue
+        for entry in entries:
+            if time.monotonic() >= deadline:
+                raise ValueError("tree deadline")
             meta, separator, path = entry.partition(b"\t")
             if separator != b"\t":
                 raise ValueError("tree entry")
@@ -628,9 +669,16 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
             destination = (work / relative).resolve()
             if destination != base and base not in destination.parents:
                 raise ValueError("tree path")
-            blob = _git_readonly(root, "cat-file", "blob", oid.decode("ascii"))
-            if blob.returncode != 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("tree deadline")
+            blob = _git_readonly(root, "cat-file", "blob", oid.decode("ascii"), timeout=remaining)
+            if blob.returncode != 0 or not isinstance(blob.stdout, bytes):
                 raise ValueError("blob")
+            size = len(blob.stdout)
+            if size > MAX_SUBJECT_BYTES or total + size > MAX_SUBJECT_BYTES:
+                raise ValueError("tree bytes")
+            total += size
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(blob.stdout)
             destination.chmod(0o755 if mode == b"100755" else 0o644)
@@ -690,28 +738,32 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             total += len(block)
             return True
 
+        pipe_open = True
         status = ""
         while not status:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 status = "timeout"
                 break
-            readable, _, _ = select.select([fd], [], [], min(0.2, remaining))
-            if not readable:
-                if proc.poll() is not None:
-                    status = "exited"
-                continue
-            try:
-                block = os.read(fd, 1024)
-            except BlockingIOError:
-                continue
-            if not block:
+            exited = proc.poll() is not None
+            if pipe_open:
+                readable, _, _ = select.select([fd], [], [], 0 if exited else min(0.2, remaining))
+                if readable:
+                    try:
+                        block = os.read(fd, 1024)
+                    except BlockingIOError:
+                        continue
+                    if block:
+                        if not absorb(block):
+                            status = "limit"
+                            break
+                        continue
+                    pipe_open = False
+            if exited or proc.poll() is not None:
                 status = "exited"
                 break
-            if not absorb(block):
-                status = "limit"
-                break
-        if status == "exited":
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        if status == "exited" and pipe_open:
             while True:
                 try:
                     block = os.read(fd, 1024)
@@ -726,12 +778,17 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             if status == "limit":
                 return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
             return "TIMEOUT", "TIMEOUT", b""
-        code = proc.wait(timeout=2)
+        try:
+            code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            return "TIMEOUT", "TIMEOUT", b""
         stdout.close()
         output = b"".join(chunks)
         if code != 0:
             return "EXECUTION_FAILED", f"EXIT_{code}", output
         return "CAPTURED", "OK", output
+    except subprocess.TimeoutExpired:
+        return "TIMEOUT", "TIMEOUT", b""
     finally:
         if proc is not None:
             _stop_group(proc, proc.stdout)
@@ -745,19 +802,38 @@ def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Pat
     return _INCIDENT._retention_destination(Path(git_dir), incident_id, capture_id)
 
 
-def _stored_result(record: dict[str, Any], kind: str, capture_id: str) -> dict[str, str] | None:
+def _identity_matches(record: dict[str, Any], effect: dict[str, Any]) -> bool:
+    return all(record.get(field) == effect.get(field) for field in IDENTITY_FIELDS)
+
+
+def _stored_result(
+    record: dict[str, Any],
+    kind: str,
+    capture_id: str,
+    effect: dict[str, Any],
+) -> dict[str, str] | None:
     state = str(record.get("result") or "")
     if state in {"", "RESERVED"}:
         return None
+    if not _identity_matches(record, effect):
+        return _result("UNAVAILABLE", "RETENTION_IDENTITY_MISMATCH", kind=kind, capture_id=capture_id)
+    if state == "CAPTURED":
+        raw = record.get("raw_output")
+        if not isinstance(raw, str) or SENSITIVE_RE.search(raw):
+            return _result(
+                "BLOCKED_SENSITIVE_OUTPUT",
+                "SENSITIVE_OUTPUT",
+                kind=kind,
+                capture_id=capture_id,
+                content_digest=str(record.get("content_digest") or ""),
+            )
     evidence_ref = ""
     if state == "CAPTURED":
-        incident_id = str(record.get("incident_id") or "")
-        if incident_id:
-            evidence_ref = _retention_ref(incident_id, capture_id)
+        evidence_ref = _retention_ref(str(effect["incident_id"]), capture_id)
     return _result(
         state,
         "ALREADY_CAPTURED" if state == "CAPTURED" else str(record.get("reason") or state),
-        kind=str(record.get("evidence_kind") or kind),
+        kind=kind,
         capture_id=capture_id,
         evidence_ref=evidence_ref,
         content_digest=str(record.get("content_digest") or ""),
@@ -765,7 +841,7 @@ def _stored_result(record: dict[str, Any], kind: str, capture_id: str) -> dict[s
     )
 
 
-def _await_capture(destination: Path, kind: str, capture_id: str) -> dict[str, str]:
+def _await_capture(destination: Path, kind: str, capture_id: str, effect: dict[str, Any]) -> dict[str, str]:
     deadline = time.monotonic() + 5
     while True:
         if destination.is_symlink() or not destination.is_file():
@@ -776,7 +852,7 @@ def _await_capture(destination: Path, kind: str, capture_id: str) -> dict[str, s
             record = {"result": "RESERVED"}
         if not isinstance(record, dict):
             record = {"result": "RESERVED"}
-        stored = _stored_result(record, kind, capture_id)
+        stored = _stored_result(record, kind, capture_id, effect)
         if stored is not None:
             return stored
         if time.monotonic() >= deadline:
@@ -784,12 +860,18 @@ def _await_capture(destination: Path, kind: str, capture_id: str) -> dict[str, s
         time.sleep(0.02)
 
 
-def _claim_capture(root: Path, incident_id: str, capture_id: str, kind: str) -> dict[str, str] | Path:
+def _claim_capture(
+    root: Path,
+    incident_id: str,
+    capture_id: str,
+    kind: str,
+    effect: dict[str, Any],
+) -> dict[str, str] | Path:
     destination = _retention_destination(root, incident_id, capture_id)
     if destination.is_symlink():
         raise _INCIDENT.EvidenceBlocked("RETENTION_PATH_ESCAPE")
     if destination.exists():
-        return _await_capture(destination, kind, capture_id)
+        return _await_capture(destination, kind, capture_id, effect)
     _INCIDENT._enforce_bounds(destination, b"{}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
@@ -806,7 +888,7 @@ def _claim_capture(root: Path, incident_id: str, capture_id: str, kind: str) -> 
     try:
         descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
-        return _await_capture(destination, kind, capture_id)
+        return _await_capture(destination, kind, capture_id, effect)
     try:
         os.write(descriptor, payload)
     finally:
@@ -814,16 +896,64 @@ def _claim_capture(root: Path, incident_id: str, capture_id: str, kind: str) -> 
     return destination
 
 
-def _finalize_capture(destination: Path, record: dict[str, Any]) -> str:
+def _partial_destination(destination: Path) -> Path:
+    name = destination.name
+    if (
+        not name.endswith(".json")
+        or name.startswith(".")
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+    ):
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
+    parent = destination.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
     if destination.is_symlink() or not destination.is_file():
         raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
+    try:
+        if destination.resolve().parent != parent.resolve():
+            raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
+    except OSError as exc:
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED") from exc
+    temporary = parent / f".{name}.partial"
+    if temporary.parent != parent or temporary.name != f".{name}.partial":
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
+    return temporary
+
+
+def _write_exclusive_nofollow(path: Path, payload: bytes) -> None:
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED") from exc
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
+            view = view[written:]
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _finalize_capture(destination: Path, record: dict[str, Any]) -> str:
+    temporary = _partial_destination(destination)
     payload = json.dumps(record, sort_keys=True).encode("utf-8")
     if len(payload) > _INCIDENT.MAX_RECORD_BYTES:
         raise _INCIDENT.EvidenceBlocked("RECORD_TOO_LARGE")
-    temporary = destination.with_name(f".{destination.name}.partial")
-    temporary.write_bytes(payload)
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, destination)
+    try:
+        _write_exclusive_nofollow(temporary, payload)
+        os.replace(temporary, destination)
+    except OSError as exc:
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED") from exc
+    if destination.is_symlink() or not destination.is_file():
+        raise _INCIDENT.EvidenceBlocked("RETENTION_UNTRUSTED")
     os.chmod(destination, 0o600)
     incident_id = str(record.get("incident_id") or "")
     capture_id = str(record.get("capture_id") or "")
@@ -887,18 +1017,31 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
         return _result(gate, reason, kind=kind, capture_id=capture_id)
 
     try:
-        claim = _claim_capture(root, incident_id, capture_id, kind)
+        claim = _claim_capture(root, incident_id, capture_id, kind, effect)
     except _INCIDENT.EvidenceBlocked as exc:
         if exc.reason == "CAPTURE_ID_COLLISION":
             try:
-                return _await_capture(_retention_destination(root, incident_id, capture_id), kind, capture_id)
+                return _await_capture(
+                    _retention_destination(root, incident_id, capture_id),
+                    kind,
+                    capture_id,
+                    effect,
+                )
             except _INCIDENT.EvidenceBlocked as nested:
                 return _result("UNAVAILABLE", nested.reason, kind=kind, capture_id=capture_id)
         return _result("UNAVAILABLE", exc.reason, kind=kind, capture_id=capture_id)
     if isinstance(claim, dict):
         return claim
 
-    status, exec_reason, output = _execute_once(root, subject_head, command)
+    try:
+        status, exec_reason, output = _execute_once(root, subject_head, command)
+    except subprocess.TimeoutExpired:
+        status, exec_reason, output = "TIMEOUT", "TIMEOUT", b""
+    except OSError:
+        status, exec_reason, output = "EXECUTION_FAILED", "EXECUTION_FAILED", b""
+    if status == "CAPTURED" and SENSITIVE_RE.search(output.decode("utf-8", errors="replace")):
+        status = "BLOCKED_SENSITIVE_OUTPUT"
+        exec_reason = "SENSITIVE_OUTPUT"
     digest = hashlib.sha256(output).hexdigest() if output else ""
     executed = exec_reason not in {
         "COMMAND_PARSE",
@@ -914,12 +1057,16 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
         "capture_id": capture_id,
         "evidence_kind": kind,
         "subject_head": subject_head,
+        "canonical_field_or_capability": field,
+        "command_sha256": command_sha,
+        "target_repo": target_repo,
+        "retention_subject": retention_subject,
         "result": status,
         "reason": exec_reason,
         "content_digest": digest,
         "mitigation_authority": "NONE",
     }
-    if status == "CAPTURED" and not SENSITIVE_RE.search(output.decode("utf-8", errors="replace")):
+    if status == "CAPTURED":
         terminal["raw_output"] = output.decode("utf-8", errors="replace")
     try:
         evidence_ref = _finalize_capture(claim, terminal)
@@ -934,15 +1081,6 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
         )
     if status != "CAPTURED":
         return _result(status, exec_reason, kind=kind, capture_id=capture_id, content_digest=digest, executed=executed)
-    if "raw_output" not in terminal:
-        return _result(
-            "BLOCKED_SENSITIVE_OUTPUT",
-            "SENSITIVE_OUTPUT",
-            kind=kind,
-            capture_id=capture_id,
-            content_digest=digest,
-            executed=True,
-        )
     return _result(
         "CAPTURED",
         "OK",

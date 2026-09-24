@@ -136,6 +136,17 @@ def runs(root: Path) -> int:
     return len(path.read_text(encoding="utf-8")) if path.exists() else 0
 
 
+def private_record(repo: Path, capture: str = CAPTURE) -> dict:
+    path = (
+        Path(git(repo, "rev-parse", "--absolute-git-dir"))
+        / "engineering-system"
+        / "incidents"
+        / INCIDENT
+        / f"{capture}.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_exact_head_health_executes_once() -> None:
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
@@ -276,8 +287,19 @@ def test_sensitive_output_is_not_published() -> None:
         try:
             report = collect(repo, request)
             assert report["RESULT"] == "BLOCKED_SENSITIVE_OUTPUT"
+            assert report["REASON"] == "SENSITIVE_OUTPUT"
             assert secret not in "\n".join(report.values())
             assert report["EVIDENCE_REF"] == ""
+            stored = private_record(repo)
+            assert stored["result"] == "BLOCKED_SENSITIVE_OUTPUT"
+            assert stored["reason"] == "SENSITIVE_OUTPUT"
+            assert "raw_output" not in stored
+            assert secret not in json.dumps(stored)
+            again = collect(repo, request)
+            assert again["RESULT"] == "BLOCKED_SENSITIVE_OUTPUT"
+            assert again["REASON"] == "SENSITIVE_OUTPUT"
+            assert again["EXECUTED"] == "NO"
+            assert secret not in "\n".join(again.values())
         finally:
             clear_trust()
 
@@ -967,6 +989,223 @@ def test_shell_startup_file_does_not_execute() -> None:
             clear_trust()
 
 
+def test_finalization_partial_symlink_is_not_followed() -> None:
+    import incident_evidence
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        retention = base / "retention"
+        retention.mkdir()
+        destination = retention / f"{CAPTURE}.json"
+        destination.write_text('{"result":"RESERVED"}\n', encoding="utf-8")
+        outside = base / "outside.json"
+        outside.write_text("ORIGINAL\n", encoding="utf-8")
+        partial = destination.with_name(f".{destination.name}.partial")
+        partial.symlink_to(outside)
+        record = {
+            "schema_version": 1,
+            "kind": "runtime-evidence",
+            "incident_id": INCIDENT,
+            "capture_id": CAPTURE,
+            "result": "CAPTURED",
+            "reason": "OK",
+            "raw_output": "SECRET_PARTIAL\n",
+        }
+        blocked = False
+        try:
+            runtime_evidence._finalize_capture(destination, record)
+        except incident_evidence.EvidenceBlocked as exc:
+            blocked = exc.reason == "RETENTION_UNTRUSTED"
+        assert blocked
+        assert outside.read_text(encoding="utf-8") == "ORIGINAL\n"
+        assert destination.is_file() and not destination.is_symlink()
+        assert "SECRET_PARTIAL" not in destination.read_text(encoding="utf-8")
+        assert partial.is_symlink()
+
+
+def test_stored_capture_reconciliation_binds_request_identity() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        marker = base / "ran"
+        head = init_repo(
+            repo,
+            command,
+            extra={"health.py": f"from pathlib import Path\nPath({str(marker)!r}).write_text('1')\nprint('ok')\n"},
+        )
+        payload = effect(head, command)
+        git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
+        retention = git_dir / "engineering-system" / "incidents" / INCIDENT
+        retention.mkdir(parents=True)
+        foreign = dict(payload)
+        foreign["subject_head"] = "b" * 40
+        foreign.update(
+            {
+                "schema_version": 1,
+                "kind": "runtime-evidence",
+                "capture_id": CAPTURE,
+                "result": "CAPTURED",
+                "reason": "OK",
+                "raw_output": "FOREIGN\n",
+                "mitigation_authority": "NONE",
+            }
+        )
+        (retention / f"{CAPTURE}.json").write_text(json.dumps(foreign), encoding="utf-8")
+        request, pub = signed(repo, base, payload)
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "UNAVAILABLE", report
+            assert report["REASON"] == "RETENTION_IDENTITY_MISMATCH"
+            assert report["EXECUTED"] == "NO"
+            assert report["EVIDENCE_REF"] == ""
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_planted_captured_without_raw_output_stays_blocked() -> None:
+    command = "python3 health.py"
+    capture = "CAP-20260924T000001Z-abcdef13"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        marker = base / "ran"
+        head = init_repo(
+            repo,
+            command,
+            extra={"health.py": f"from pathlib import Path\nPath({str(marker)!r}).write_text('1')\nprint('ok')\n"},
+        )
+        payload = effect(head, command, capture=capture)
+        git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
+        retention = git_dir / "engineering-system" / "incidents" / INCIDENT
+        retention.mkdir(parents=True)
+        planted = dict(payload)
+        planted.update(
+            {
+                "schema_version": 1,
+                "kind": "runtime-evidence",
+                "capture_id": capture,
+                "result": "CAPTURED",
+                "reason": "OK",
+                "mitigation_authority": "NONE",
+            }
+        )
+        (retention / f"{capture}.json").write_text(json.dumps(planted), encoding="utf-8")
+        request, pub = signed(repo, base, payload)
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "BLOCKED_SENSITIVE_OUTPUT", report
+            assert report["REASON"] == "SENSITIVE_OUTPUT"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_subject_tree_materialization_is_bounded() -> None:
+    assert runtime_evidence.MAX_SUBJECT_FILES < 2500
+    assert runtime_evidence.MAX_SUBJECT_BYTES < 2_560_000
+    assert runtime_evidence.MAX_SUBJECT_SECONDS <= 2
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        blob_dir = repo / "blobs"
+        blob_dir.mkdir()
+        for index in range(runtime_evidence.MAX_SUBJECT_FILES):
+            (blob_dir / f"{index}.txt").write_text("x", encoding="utf-8")
+        git(repo, "add", "blobs")
+        git(repo, "commit", "-m", "blobs")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        started = time.monotonic()
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "SUBJECT_TREE"
+            assert report["EXECUTED"] == "NO"
+            assert time.monotonic() - started < 2
+            assert private_record(repo)["result"] == "EXECUTION_FAILED"
+        finally:
+            clear_trust()
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"blob.txt": "y" * 64})
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        previous = runtime_evidence.MAX_SUBJECT_BYTES
+        runtime_evidence.MAX_SUBJECT_BYTES = 32
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "SUBJECT_TREE"
+            assert report["EXECUTED"] == "NO"
+        finally:
+            runtime_evidence.MAX_SUBJECT_BYTES = previous
+            clear_trust()
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        previous = runtime_evidence.MAX_SUBJECT_SECONDS
+        runtime_evidence.MAX_SUBJECT_SECONDS = 0
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "SUBJECT_TREE"
+            assert report["EXECUTED"] == "NO"
+            assert private_record(repo)["result"] == "EXECUTION_FAILED"
+        finally:
+            runtime_evidence.MAX_SUBJECT_SECONDS = previous
+            clear_trust()
+
+
+def test_stdout_eof_before_exit_is_terminal() -> None:
+    command = 'python3 -c "import os,time; os.close(1); os.close(2); time.sleep(3); os._exit(0)"'
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        started = time.monotonic()
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert time.monotonic() - started < 5
+            assert private_record(repo)["result"] == "CAPTURED"
+        finally:
+            clear_trust()
+    command = 'python3 -c "import os,time; os.close(1); os.close(2); time.sleep(30); os._exit(0)"'
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        previous = runtime_evidence.TIMEOUT_SECONDS
+        runtime_evidence.TIMEOUT_SECONDS = 0.4
+        started = time.monotonic()
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "TIMEOUT", report
+            assert report["EXECUTED"] == "YES"
+            assert time.monotonic() - started < 2
+            assert private_record(repo)["result"] == "TIMEOUT"
+        finally:
+            runtime_evidence.TIMEOUT_SECONDS = previous
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -1001,6 +1240,11 @@ def main() -> int:
     test_awk_include_does_not_execute()
     test_python_module_option_does_not_execute()
     test_shell_startup_file_does_not_execute()
+    test_finalization_partial_symlink_is_not_followed()
+    test_stored_capture_reconciliation_binds_request_identity()
+    test_planted_captured_without_raw_output_stays_blocked()
+    test_subject_tree_materialization_is_bounded()
+    test_stdout_eof_before_exit_is_terminal()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 
