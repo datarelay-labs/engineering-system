@@ -713,6 +713,84 @@ def test_concurrent_same_capture_executes_once() -> None:
             clear_trust()
 
 
+def test_absolute_mutable_script_does_not_execute() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        mutable = base / "mutable.py"
+        mutable.write_text("print('ORIGINAL')\n", encoding="utf-8")
+        command = f"python3 {mutable}"
+        head = init_repo(repo, command)
+        mutable.write_text("print('MUTABLE_RAN')\n", encoding="utf-8")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert "MUTABLE_RAN" not in "\n".join(report.values())
+        finally:
+            clear_trust()
+
+
+def test_traversal_script_does_not_execute() -> None:
+    command = "python3 ../outside.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.py"
+        outside.write_text("print('ESCAPED')\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert "ESCAPED" not in "\n".join(report.values())
+        finally:
+            clear_trust()
+
+
+def test_inline_command_may_contain_data_paths() -> None:
+    command = "python3 -c \"print('/usr/bin')\""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            private = json.loads(
+                (Path(git(repo, "rev-parse", "--absolute-git-dir")) / report["EVIDENCE_REF"]).read_text(encoding="utf-8")
+            )
+            assert private["raw_output"] == "/usr/bin\n"
+        finally:
+            clear_trust()
+
+
+def test_launcher_indirection_does_not_execute() -> None:
+    command = "env python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert runs(repo) == 0
+        finally:
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -735,6 +813,10 @@ def main() -> int:
     test_caller_environment_cannot_inject_execution()
     test_descendant_cannot_survive_leader_exit()
     test_concurrent_same_capture_executes_once()
+    test_absolute_mutable_script_does_not_execute()
+    test_traversal_script_does_not_execute()
+    test_inline_command_may_contain_data_paths()
+    test_launcher_indirection_does_not_execute()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 

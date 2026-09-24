@@ -365,6 +365,116 @@ def _execution_environment() -> dict[str, str]:
     }
 
 
+LAUNCHERS = frozenset(
+    {
+        "env",
+        "nice",
+        "nohup",
+        "timeout",
+        "stdbuf",
+        "xargs",
+        "sudo",
+        "doas",
+        "ionice",
+        "taskset",
+        "watch",
+        "flock",
+        "setsid",
+        "chrt",
+        "numactl",
+        "time",
+        "busybox",
+    }
+)
+SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh", "ash", "fish"})
+
+
+def _subject_code_path(raw: str, work: Path) -> bool:
+    if not raw or raw.startswith(("/", "~")) or "\x00" in raw:
+        return False
+    path = Path(raw)
+    if path.is_absolute() or any(part == ".." for part in path.parts):
+        return False
+    base = work.resolve()
+    try:
+        candidate = (work / path).resolve()
+    except OSError:
+        return False
+    if candidate != base and base not in candidate.parents:
+        return False
+    return candidate.is_file() and not candidate.is_symlink()
+
+
+def _python_code_bound(rest: list[str], work: Path) -> bool:
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg == "--":
+            if index + 1 >= len(rest):
+                return False
+            return _subject_code_path(rest[index + 1], work)
+        if arg == "-c":
+            return index + 1 < len(rest)
+        if arg == "-m" or (arg.startswith("-m") and arg != "-m"):
+            return False
+        if arg in {"-W", "-X"}:
+            index += 2
+            continue
+        if arg.startswith("-W") or arg.startswith("-X"):
+            index += 1
+            continue
+        if arg.startswith("-") and arg != "-":
+            index += 1
+            continue
+        return _subject_code_path(arg, work)
+    return False
+
+
+def _shell_code_bound(rest: list[str], work: Path) -> bool:
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in {"-c", "--command"}:
+            return index + 1 < len(rest)
+        if arg.startswith("-") and not arg.startswith("--") and arg != "-":
+            if "c" in arg[1:]:
+                return index + 1 < len(rest)
+            index += 1
+            continue
+        if arg.startswith("--"):
+            index += 1
+            continue
+        return _subject_code_path(arg, work)
+    return False
+
+
+def _inline_or_subject_script(rest: list[str], work: Path, inline_flags: set[str]) -> bool:
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in inline_flags:
+            return index + 1 < len(rest)
+        if arg.startswith("-") and arg != "-":
+            index += 1
+            continue
+        return _subject_code_path(arg, work)
+    return False
+
+
+def _executable_arguments_bound(argv: list[str], work: Path) -> bool:
+    name = Path(argv[0]).name
+    if name in LAUNCHERS:
+        return False
+    rest = argv[1:]
+    if name == "python" or name.startswith("python"):
+        return _python_code_bound(rest, work)
+    if name in SHELLS:
+        return _shell_code_bound(rest, work)
+    if name in {"perl", "ruby", "node", "php", "lua"}:
+        return _inline_or_subject_script(rest, work, {"-e", "-c"})
+    return True
+
+
 def _git_readonly(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -451,6 +561,9 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     if checked_out is None:
         return "EXECUTION_FAILED", "SUBJECT_TREE", b""
     temporary, work = checked_out
+    if not _executable_arguments_bound(trusted, work):
+        _release_subject_tree(temporary)
+        return "EXECUTION_FAILED", "CODE_UNBOUND", b""
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
@@ -690,7 +803,13 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
 
     status, exec_reason, output = _execute_once(root, subject_head, command)
     digest = hashlib.sha256(output).hexdigest() if output else ""
-    executed = exec_reason not in {"COMMAND_PARSE", "COMMAND_EMPTY", "SUBJECT_TREE", "EXECUTABLE_UNTRUSTED"}
+    executed = exec_reason not in {
+        "COMMAND_PARSE",
+        "COMMAND_EMPTY",
+        "SUBJECT_TREE",
+        "EXECUTABLE_UNTRUSTED",
+        "CODE_UNBOUND",
+    }
     terminal = {
         "schema_version": 1,
         "kind": "runtime-evidence",
