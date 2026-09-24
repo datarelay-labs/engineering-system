@@ -325,8 +325,79 @@ def test_older_observation_does_not_regress_transition() -> None:
     assert replayed["coordinator_decision"] == "AUDIT_REVIEW"
     assert replayed["coordinator_decision"] != "WAIT_EXACT_HEAD_CI"
     assert replayed["next_watch_state"]["last_transition_at"] == "2026-09-24T16:10:00Z"
+    assert replayed["next_watch_state"] == woken["next_watch_state"]
+    assert replayed["next_eligible_check_at"] == woken["next_watch_state"]["next_eligible_check_at"]
     assert replayed["wakes_coordinator"] is False
     assert replayed["resumes_worker"] is False
+
+
+def test_stale_observation_after_no_change_preserves_schedule() -> None:
+    notified_facts = load_fixture("10-blocked.json")
+    notified_facts["watch"]["observed_at"] = "2026-09-24T16:00:00Z"
+    notified = evaluate(notified_facts, EMPTY)
+    assert notified["result"] == "NOTIFY_OWNER"
+    assert notified["next_watch_state"]["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert notified["next_watch_state"]["last_observation_at"] == "2026-09-24T16:00:00Z"
+
+    quiet_facts = load_fixture("10-blocked.json")
+    quiet_facts["watch"]["observed_at"] = "2026-09-24T16:20:00Z"
+    quiet = evaluate(quiet_facts, notified["next_watch_state"])
+    assert quiet["result"] == "NO_CHANGE"
+    durable = quiet["next_watch_state"]
+    assert durable["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert durable["last_observation_at"] == "2026-09-24T16:20:00Z"
+    assert durable["next_eligible_check_at"] == "2026-09-24T16:25:00Z"
+
+    delayed = load_fixture("10-blocked.json")
+    delayed["watch"]["observed_at"] = "2026-09-24T16:10:00Z"
+    stale = evaluate(delayed, durable)
+    assert_inert(stale)
+    assert stale["result"] == "NO_CHANGE"
+    assert stale["wakes_coordinator"] is False
+    assert stale["resumes_worker"] is False
+    assert stale["next_watch_state"] == durable
+    assert stale["next_eligible_check_at"] == "2026-09-24T16:25:00Z"
+    assert stale["notification_key"] == quiet["notification_key"]
+
+    equal_facts = load_fixture("10-blocked.json")
+    equal_facts["watch"]["observed_at"] = "2026-09-24T16:20:00Z"
+    equal = evaluate(equal_facts, durable)
+    assert equal["result"] == "NO_CHANGE"
+    assert equal["next_watch_state"]["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert equal["next_watch_state"]["last_observation_at"] == "2026-09-24T16:20:00Z"
+    assert equal["next_watch_state"]["next_eligible_check_at"] == "2026-09-24T17:10:00Z"
+    assert equal["next_watch_state"]["consecutive_transient_failures"] == durable["consecutive_transient_failures"]
+
+    newer_facts = load_fixture("10-blocked.json")
+    newer_facts["watch"]["observed_at"] = "2026-09-24T16:30:00Z"
+    newer = evaluate(newer_facts, durable)
+    assert newer["result"] == "NO_CHANGE"
+    assert newer["next_watch_state"]["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert newer["next_watch_state"]["last_observation_at"] == "2026-09-24T16:30:00Z"
+    assert newer["next_watch_state"]["next_eligible_check_at"] == "2026-09-24T17:20:00Z"
+
+    legacy = dict(durable)
+    legacy.pop("last_observation_at")
+    legacy_older = load_fixture("10-blocked.json")
+    legacy_older["watch"]["observed_at"] = "2026-09-24T15:50:00Z"
+    preserved = evaluate(legacy_older, legacy)
+    assert preserved["result"] == "NO_CHANGE"
+    assert preserved["next_watch_state"] == legacy
+    assert "last_observation_at" not in preserved["next_watch_state"]
+    legacy_equal = load_fixture("10-blocked.json")
+    legacy_equal["watch"]["observed_at"] = "2026-09-24T16:00:00Z"
+    accepted_equal = evaluate(legacy_equal, legacy)
+    assert accepted_equal["result"] == "NO_CHANGE"
+    assert accepted_equal["next_watch_state"]["last_observation_at"] == "2026-09-24T16:00:00Z"
+    assert accepted_equal["next_watch_state"]["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert accepted_equal["next_watch_state"]["next_eligible_check_at"] == "2026-09-24T16:50:00Z"
+    legacy_newer = load_fixture("10-blocked.json")
+    legacy_newer["watch"]["observed_at"] = "2026-09-24T16:30:00Z"
+    accepted_newer = evaluate(legacy_newer, legacy)
+    assert accepted_newer["result"] == "NO_CHANGE"
+    assert accepted_newer["next_watch_state"]["last_observation_at"] == "2026-09-24T16:30:00Z"
+    assert accepted_newer["next_watch_state"]["last_transition_at"] == "2026-09-24T16:00:00Z"
+    assert accepted_newer["next_watch_state"]["next_eligible_check_at"] == "2026-09-24T17:20:00Z"
 
 
 def test_transient_retry_budget_exhausts() -> None:
@@ -413,6 +484,7 @@ def main() -> int:
     test_ci_watch_cannot_resume_worker()
     test_subject_override_cannot_mask_head_advance()
     test_older_observation_does_not_regress_transition()
+    test_stale_observation_after_no_change_preserves_schedule()
     test_transient_retry_budget_exhausts()
     test_distinct_wake_transitions_have_distinct_keys()
     test_source_has_no_side_effects()

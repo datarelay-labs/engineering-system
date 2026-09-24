@@ -254,6 +254,7 @@ scenarios:
       - "exact-head CI or review transitions wake the coordinator"
       - "stale intent, missing progress, and resource or WIP blocks do not resume a worker"
       - "watch class, subject override, observation order, transient budget, and wake keys fail closed"
+      - "an observation older than the latest accepted observation does not change durable watch state"
     release_gate: true
 
   - id: ENG-WORKER-ADAPTER-001

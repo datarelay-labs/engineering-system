@@ -86,6 +86,7 @@ STATE_KEYS = frozenset(
         "last_decision",
         "last_decision_key",
         "last_transition_at",
+        "last_observation_at",
         "consecutive_transient_failures",
         "next_eligible_check_at",
         "terminal_state",
@@ -227,7 +228,7 @@ def _parse_state(raw: Any) -> dict[str, Any]:
         failures = data.get("consecutive_transient_failures")
         if isinstance(failures, bool) or not isinstance(failures, int) or failures < 0:
             raise WatchFactsError("watch_state.consecutive_transient_failures must be an integer >= 0")
-    for label in ("last_transition_at", "next_eligible_check_at"):
+    for label in ("last_transition_at", "last_observation_at", "next_eligible_check_at"):
         if label in data and data.get(label) not in (None, ""):
             _parse_time(_require_str(data.get(label), f"watch_state.{label}"), f"watch_state.{label}")
     return {
@@ -236,6 +237,7 @@ def _parse_state(raw: Any) -> dict[str, Any]:
         "last_decision": str(data.get("last_decision") or ""),
         "last_decision_key": str(data.get("last_decision_key") or ""),
         "last_transition_at": data.get("last_transition_at") or "",
+        "last_observation_at": data.get("last_observation_at") or "",
         "consecutive_transient_failures": failures,
         "next_eligible_check_at": data.get("next_eligible_check_at"),
         "terminal_state": terminal,
@@ -292,12 +294,25 @@ def _resume_in_scope(watch: dict[str, Any]) -> bool:
     return watch["watch_class"] == "worker_progress_or_yield"
 
 
+def _observation_boundary(state: dict[str, Any]) -> str:
+    """Latest accepted observation, with schema-v1 fallback to the transition time."""
+    stamped: list[tuple[datetime, str]] = []
+    for label in ("last_observation_at", "last_transition_at"):
+        value = str(state.get(label) or "")
+        if value:
+            stamped.append((_parse_time(value, f"watch_state.{label}"), value))
+    if not stamped:
+        return ""
+    stamped.sort(key=lambda item: item[0])
+    return stamped[-1][1]
+
+
 def _observation_is_older(watch: dict[str, Any], state: dict[str, Any]) -> bool:
-    boundary = str(state.get("last_transition_at") or "")
+    boundary = _observation_boundary(state)
     if not boundary:
         return False
     observed = _parse_time(watch["observed_at"], "watch.observed_at")
-    prior = _parse_time(boundary, "watch_state.last_transition_at")
+    prior = _parse_time(boundary, "watch_state.observation_boundary")
     return observed < prior
 
 
@@ -363,6 +378,7 @@ def _persist(
         stored_class = str(identity.get("watch_class") or watch["watch_class"])
         stored_revision = identity.get("intent_revision") or facts["packet"]["intent_revision"]
         stored_terminal = str(state.get("terminal_state") or terminal_state)
+        stored_observation_at = str(state.get("last_observation_at") or "")
     else:
         transition_at = state["last_transition_at"] if unchanged and state["last_transition_at"] else watch["observed_at"]
         if result != "NO_CHANGE":
@@ -376,7 +392,8 @@ def _persist(
         stored_class = watch["watch_class"]
         stored_revision = facts["packet"]["intent_revision"]
         stored_terminal = terminal_state
-    return {
+        stored_observation_at = watch["observed_at"]
+    persisted = {
         "schema_version": 1,
         "target_repo": str(identity.get("target_repo") or facts["packet"]["repository"]),
         "workstream": str(identity.get("workstream") or facts["packet"]["workstream"]),
@@ -391,6 +408,9 @@ def _persist(
         "next_eligible_check_at": stored_next,
         "terminal_state": stored_terminal,
     }
+    if stored_observation_at:
+        persisted["last_observation_at"] = stored_observation_at
+    return persisted
 
 
 def _emit(
@@ -776,7 +796,7 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
             watch,
             state,
             result="NO_CHANGE",
-            reason="observation is older than the durable watch transition and does not roll state backward",
+            reason="observation is older than the latest accepted observation and does not change durable watch state",
             coordinator_decision=str(state["last_decision"]),
             subject=subject,
             digest=str(state["last_observation_digest"]),

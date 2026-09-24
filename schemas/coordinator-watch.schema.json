@@ -104,6 +104,7 @@
         "last_decision": {"type": "string", "minLength": 1},
         "last_decision_key": {"type": "string", "minLength": 1},
         "last_transition_at": {"type": "string", "minLength": 1},
+        "last_observation_at": {"type": "string", "minLength": 1},
         "consecutive_transient_failures": {"type": "integer", "minimum": 0},
         "next_eligible_check_at": {"type": ["string", "null"]},
         "terminal_state": {"enum": ["OPEN", "CLOSED"]}

@@ -470,7 +470,7 @@ Contract:
 - resource `BLOCK` or WIP admission `DENY` does not resume a worker and does not mutate unrelated sessions;
 - a changed intent revision or subject version closes the stale watch and does not act;
 - caller `watch.subject_version` is accepted only when it equals the coordinator-derived subject; a mismatch is rejected and is not persisted;
-- an observation older than `last_transition_at` emits `NO_CHANGE` and leaves the durable transition timestamp unchanged;
+- an observation older than the latest accepted observation (`last_observation_at`, or `last_transition_at` when schema-v1 state omits that field) emits `NO_CHANGE` and does not change any durable watch state; an equal or newer timestamp is accepted and advances `last_observation_at`;
 - `consecutive_transient_failures` is the authoritative transient retry count and exhausts at `wait.retry_budget` into `BLOCK_HUMAN` / `NOTIFY_OWNER`;
 - notification keys are `repository|workstream|intent_revision|result|coordinator_decision|subject_version`, so distinct coordinator decisions do not share one wake key;
 - ambiguous mutation facts emit `BLOCK_RECONCILIATION` and do not retry;
