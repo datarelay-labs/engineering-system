@@ -73,7 +73,7 @@ Default behavior:
 
 - `LOW` — targeted deterministic validation and normal diff/review.
 - `MEDIUM` — affected regression plus normal independent review where configured.
-- `HIGH` — fresh-context independent verifier, wider affected qualification, and explicit rollback/compatibility/security evidence as applicable.
+- `HIGH` — fresh-context independent verifier, wider affected qualification, and explicit rollback/compatibility/security evidence as applicable. Use `python3 tools/independent_verifier.py verify` so implementer identity/context cannot satisfy terminal PASS alone.
 - `CRITICAL` — HIGH requirements plus explicit human approval for destructive/external/prod execution when required by the security/release contract and release/operational evidence appropriate to the change.
 
 These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.

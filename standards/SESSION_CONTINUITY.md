@@ -537,6 +537,28 @@ Otherwise `admit` returns `DENY` with an explicit class such as `WIP_LIMIT`, `SH
 - `cleanup-worktree` additionally refuses dirty, unpushed, or ambiguous state;
 - neither action may stop or mutate unrelated Cursor sessions to reclaim capacity.
 
+## Independent verifier for terminal evidence
+
+For risk-appropriate terminal PASS, a coordinator evaluates structured evidence with a provider-neutral verifier. The implementer's self-report is never the completion oracle by itself.
+
+```bash
+python3 tools/independent_verifier.py verify --request-json <evidence.json>
+```
+
+Contract:
+
+- bind verification to an exact 40-char subject HEAD; different-HEAD or missing subject identity fails closed;
+- `CHANGE_RISK=HIGH|CRITICAL` requires a verifier actor whose `identity` and `context_id` are both distinct from the implementer;
+- `CHANGE_RISK=LOW|MEDIUM` stay aligned with `standards/QUALITY.md` verification depth (targeted/affected evidence and review); a distinct fresh-context verifier actor is not mandatory at those depths;
+- every declared completion-oracle evidence record must be `PASS` on the same subject HEAD; `FAIL` / `BLOCK` / `NOT_RUN` / unexecuted cannot be promoted;
+- actionable review findings must be `FIXED`, `EVIDENCE_DISPOSITION`, or `NOT_ACTIONABLE`;
+- HIGH/CRITICAL require mutable CI/review/runtime evidence that carries current `subject_id` + `version_id` (not a historical generic PASS);
+- request `expected_mutable` declares the required subject/version contract; each mutable evidence item must match it, and CI `version_id` must equal the subject HEAD (stale/unrelated CI DENYs as `STALE_MUTABLE`);
+- CRITICAL additionally requires present human approval when marked required;
+- the verifier evaluates JSON facts only and refuses request keys that imply command execution (`command`, `shell`, `argv`, `execute`, …).
+
+`verify` returns `PASS` or `DENY` with an explicit class such as `SAME_ACTOR`, `VERIFIER_REQUIRED`, `HEAD_MISMATCH`, `ORACLE_NOT_PASS`, `REVIEW_OPEN`, `MUTABLE_MISSING`, `STALE_MUTABLE`, `HUMAN_APPROVAL_MISSING`, or `EXECUTION_FORBIDDEN`. Exit `3` is reserved for malformed/untrusted facts.
+
 ## Efficiency telemetry and task budget
 
 P0b records verified exact-head outcomes against cost, time, rework, and human intervention. Collection is provider-neutral, local, and off unless a repository writes a record.
