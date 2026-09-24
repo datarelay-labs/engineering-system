@@ -450,6 +450,37 @@ Contract:
 
 `plan` returns exit 0 when it emits a decision. Exit 3 is reserved for malformed or execution-keyed facts. The decision schema is `schemas/coordinator-decision.schema.json`.
 
+## Bounded coordinator watch
+
+The watch evaluator is a pure function from structured facts plus durable watch state to one re-entry result. It calls the planner. It does not poll, spawn processes, call GitHub, merge, send notifications, or start/stop Cursor. Host scheduling and delivery are a separate later adapter.
+
+```bash
+python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>
+```
+
+Watch classes are `work_packet_state`, `exact_head_ci`, `review_state`, `worker_progress_or_yield`, and `resource_admission`. Identity is `repository + workstream + intent_revision + watch_class + subject_version`.
+
+Contract:
+
+- the same facts and watch state always emit the same result;
+- identical CI pending observations emit `RECHECK_LATER` with notification suppressed and a bounded backoff timestamp;
+- an exact-head CI or review transition that changes the planner decision emits `WAKE_COORDINATOR`;
+- CI PASS bound to a different head does not wake merge;
+- `RESUME_ADMITTED_WORKER` requires planner `RESUME_WORKER`, watch class `worker_progress_or_yield`, `progress_evidence=true`, the same intent revision, resource `PASS` or `WARN`, and admission `ALLOW`; any other watch class fails closed with `BLOCK_RECONCILIATION` and does not resume a worker;
+- resource `BLOCK` or WIP admission `DENY` does not resume a worker and does not mutate unrelated sessions;
+- a changed intent revision or subject version closes the stale watch and does not act;
+- caller `watch.subject_version` is accepted only when it equals the coordinator-derived subject; a mismatch is rejected and is not persisted;
+- an observation older than the latest accepted observation (`last_observation_at`, or `last_transition_at` when schema-v1 state omits that field) emits `NO_CHANGE` and does not change any durable watch state; an equal or newer timestamp is accepted and advances `last_observation_at`;
+- `consecutive_transient_failures` is the authoritative transient retry count and exhausts at `wait.retry_budget` into `BLOCK_HUMAN` / `NOTIFY_OWNER`;
+- notification keys are `repository|workstream|intent_revision|result|coordinator_decision|subject_version`, so distinct coordinator decisions do not share one wake key;
+- ambiguous mutation facts emit `BLOCK_RECONCILIATION` and do not retry;
+- `BLOCK_HUMAN` emits `NOTIFY_OWNER` once; an identical owner-notify key is deduplicated;
+- `COMPLETE` emits `CLOSE_WATCH`;
+- malformed facts, unknown keys, and execution keys fail closed;
+- the evaluator performs no subprocess, network, GitHub mutation, merge, Telegram send, or session stop.
+
+`evaluate` returns exit 0 when it emits a result. Exit 3 is reserved for malformed or execution-keyed facts. The result schema is `schemas/coordinator-watch.schema.json`.
+
 ## Trusted worker external-write adapter
 
 The planner stays decision-only. External Issue/PR writes and publication effects go through the trusted adapter, which authorizes at most one typed effect and does not itself perform the mutation:

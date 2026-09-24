@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Coordinator watch re-entry result",
+  "$id": "https://github.com/datarelay-labs/engineering-system/schemas/coordinator-watch.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result",
+    "reason",
+    "coordinator_decision",
+    "watch_class",
+    "notification_disposition",
+    "notification_key",
+    "notification_suppress_reason",
+    "resumes_worker",
+    "wakes_coordinator",
+    "closes_watch",
+    "retries_action",
+    "stops_unrelated_sessions",
+    "mutates_existing_sessions",
+    "spawns_process",
+    "mutates_github",
+    "sends_notification",
+    "next_eligible_check_at",
+    "next_watch_state",
+    "repository",
+    "workstream",
+    "intent_revision"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "result": {
+      "enum": [
+        "NO_CHANGE",
+        "RECHECK_LATER",
+        "WAKE_COORDINATOR",
+        "RESUME_ADMITTED_WORKER",
+        "NOTIFY_OWNER",
+        "CLOSE_WATCH",
+        "BLOCK_RECONCILIATION"
+      ]
+    },
+    "reason": {"type": "string", "minLength": 1},
+    "coordinator_decision": {"type": "string", "minLength": 1},
+    "watch_class": {
+      "enum": [
+        "work_packet_state",
+        "exact_head_ci",
+        "review_state",
+        "worker_progress_or_yield",
+        "resource_admission"
+      ]
+    },
+    "notification_disposition": {"enum": ["SEND", "SUPPRESS"]},
+    "notification_key": {"type": "string", "minLength": 1},
+    "notification_suppress_reason": {
+      "enum": ["NONE", "DEDUP", "IDENTICAL_WAIT", "QUIET_WAIT"]
+    },
+    "resumes_worker": {"type": "boolean"},
+    "wakes_coordinator": {"type": "boolean"},
+    "closes_watch": {"type": "boolean"},
+    "retries_action": {"const": false},
+    "stops_unrelated_sessions": {"const": false},
+    "mutates_existing_sessions": {"const": false},
+    "spawns_process": {"const": false},
+    "mutates_github": {"const": false},
+    "sends_notification": {"const": false},
+    "next_eligible_check_at": {"type": ["string", "null"]},
+    "next_watch_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_repo",
+        "workstream",
+        "intent_revision",
+        "watch_class",
+        "subject_version",
+        "last_observation_digest",
+        "last_decision",
+        "last_decision_key",
+        "last_transition_at",
+        "consecutive_transient_failures",
+        "next_eligible_check_at",
+        "terminal_state"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "target_repo": {"type": "string", "minLength": 3},
+        "workstream": {"type": "string", "minLength": 1},
+        "intent_revision": {"type": "integer", "minimum": 1},
+        "watch_class": {
+          "enum": [
+            "work_packet_state",
+            "exact_head_ci",
+            "review_state",
+            "worker_progress_or_yield",
+            "resource_admission"
+          ]
+        },
+        "subject_version": {"type": "string", "minLength": 1},
+        "last_observation_digest": {"type": "string", "minLength": 1},
+        "last_decision": {"type": "string", "minLength": 1},
+        "last_decision_key": {"type": "string", "minLength": 1},
+        "last_transition_at": {"type": "string", "minLength": 1},
+        "last_observation_at": {"type": "string", "minLength": 1},
+        "consecutive_transient_failures": {"type": "integer", "minimum": 0},
+        "next_eligible_check_at": {"type": ["string", "null"]},
+        "terminal_state": {"enum": ["OPEN", "CLOSED"]}
+      }
+    },
+    "repository": {"type": "string", "minLength": 3},
+    "workstream": {"type": "string", "minLength": 1},
+    "intent_revision": {"type": "integer", "minimum": 1}
+  }
+}

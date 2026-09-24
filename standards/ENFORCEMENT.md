@@ -62,6 +62,8 @@ This rule composes with approval, permission, and replay protections; it does no
 
 Coordinator reconciliation for that classification is `python3 tools/coordinator.py plan --facts <facts.json>`. The planner reads structured facts and emits one bounded decision. Ambiguous mutation facts yield `RECONCILE_AMBIGUOUS` before retry. The planner itself does not spawn processes, mutate GitHub, merge, send messages, or stop sessions.
 
+A bounded watch re-entry is `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator calls the planner and emits one result. It does not spawn processes, call GitHub, merge, send Telegram, or start/stop Cursor. Ambiguous mutation facts yield `BLOCK_RECONCILIATION` and authorize no retry. A watch class cannot emit another class's authority. Caller subject overrides, observations older than the latest accepted observation, and an exhausted transient retry budget fail closed. Notification keys include the coordinator decision. Host scheduling and delivery stay outside this evaluator.
+
 Immediately before an Issue/PR write or publication effect, classify it with `python3 tools/worker_adapter.py evaluate --request-json <facts.json>`. Proceed only on `APPLIED`. `STALE_WORKER` authorizes no write. `RECONCILE_AMBIGUOUS` must be reconciled before another attempt. The adapter does not mint dispatch authority or stop unrelated sessions.
 
 ## Agent-facing tool contract

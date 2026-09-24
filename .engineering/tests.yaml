@@ -59,6 +59,14 @@ paths:
     domains: [session-continuity]
   "schemas/coordinator-decision.schema.json":
     domains: [schemas, session-continuity]
+  "tools/coordinator_watch.py":
+    domains: [session-continuity, workflows]
+  "tools/test_coordinator_watch.py":
+    domains: [session-continuity]
+  "tools/fixtures/coordinator-watch/**":
+    domains: [session-continuity]
+  "schemas/coordinator-watch.schema.json":
+    domains: [schemas, session-continuity]
   "tools/worker_adapter.py":
     domains: [session-continuity, workflows]
   "tools/test_worker_adapter.py":
@@ -227,6 +235,26 @@ scenarios:
       - "the same coordinator facts always emit the same bounded decision"
       - "PAUSED BLOCKED and COMPLETE never launch a worker"
       - "resource BLOCK yields and does not stop unrelated sessions"
+    release_gate: true
+
+  - id: ENG-COORDINATOR-WATCH-001
+    cost: cheap
+    estimated_seconds: 8
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Bounded coordinator watch re-entry
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_coordinator_watch.py"
+    invariants:
+      - "identical CI pending observations recheck without notification"
+      - "exact-head CI or review transitions wake the coordinator"
+      - "stale intent, missing progress, and resource or WIP blocks do not resume a worker"
+      - "watch class, subject override, observation order, transient budget, and wake keys fail closed"
+      - "an observation older than the latest accepted observation does not change durable watch state"
     release_gate: true
 
   - id: ENG-WORKER-ADAPTER-001
