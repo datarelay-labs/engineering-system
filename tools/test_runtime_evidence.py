@@ -877,6 +877,96 @@ def test_launcher_indirection_does_not_execute() -> None:
             clear_trust()
 
 
+def test_perl_search_path_module_does_not_execute() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        module_dir = base / "ext"
+        module_dir.mkdir()
+        module = module_dir / "Evil.pm"
+        marker = base / "perl-ran"
+        module.write_text("1;\n", encoding="utf-8")
+        command = f"perl -I{module_dir} -MEvil -e1"
+        head = init_repo(repo, command)
+        module.write_text(
+            f'open my $fh, ">", "{marker}"; print $fh "YES\\n"; close $fh; 1;\n',
+            encoding="utf-8",
+        )
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_awk_include_does_not_execute() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        library = base / "lib.awk"
+        marker = base / "awk-include-ran"
+        library.write_text('BEGIN { print "ORIGINAL" }\n', encoding="utf-8")
+        command = f"awk -i {library} -e 'BEGIN {{ print \"ok\" }}'"
+        head = init_repo(repo, command)
+        library.write_text(
+            "BEGIN { print \"INCLUDED\" > \"" + str(marker) + "\" }\n",
+            encoding="utf-8",
+        )
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
+def test_python_module_option_does_not_execute() -> None:
+    command = "python3 -m Evil"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+        finally:
+            clear_trust()
+
+
+def test_shell_startup_file_does_not_execute() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        startup = base / "rc.sh"
+        marker = base / "rc-ran"
+        startup.write_text(f"echo RAN > {marker}\n", encoding="utf-8")
+        command = f"bash --rcfile={startup} -c 'echo ok'"
+        head = init_repo(repo, command)
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
+            assert not marker.exists()
+        finally:
+            clear_trust()
+
+
 def main() -> int:
     test_exact_head_health_executes_once()
     test_request_command_is_rejected()
@@ -907,6 +997,10 @@ def main() -> int:
     test_subject_awk_program_executes()
     test_unknown_program_file_semantics_fail_closed()
     test_approved_data_url_still_executes()
+    test_perl_search_path_module_does_not_execute()
+    test_awk_include_does_not_execute()
+    test_python_module_option_does_not_execute()
+    test_shell_startup_file_does_not_execute()
     print("RUNTIME_EVIDENCE_TESTS=PASS")
     return 0
 

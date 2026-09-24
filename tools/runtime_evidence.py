@@ -405,6 +405,9 @@ def _subject_code_path(raw: str, work: Path) -> bool:
     return candidate.is_file() and not candidate.is_symlink()
 
 
+PYTHON_SAFE_FLAGS = frozenset({"-E", "-s", "-S", "-B", "-b", "-q", "-u", "-v", "-O", "-OO", "-I"})
+
+
 def _python_code_bound(rest: list[str], work: Path) -> bool:
     index = 0
     while index < len(rest):
@@ -414,18 +417,22 @@ def _python_code_bound(rest: list[str], work: Path) -> bool:
                 return False
             return _subject_code_path(rest[index + 1], work)
         if arg == "-c":
-            return index + 1 < len(rest)
-        if arg == "-m" or (arg.startswith("-m") and arg != "-m"):
+            return index + 1 < len(rest) and bool(rest[index + 1])
+        if arg == "-m" or arg.startswith("-m"):
             return False
         if arg in {"-W", "-X"}:
+            if index + 1 >= len(rest):
+                return False
             index += 2
             continue
-        if arg.startswith("-W") or arg.startswith("-X"):
+        if (arg.startswith("-W") or arg.startswith("-X")) and len(arg) > 2:
             index += 1
             continue
-        if arg.startswith("-") and arg != "-":
+        if arg in PYTHON_SAFE_FLAGS:
             index += 1
             continue
+        if arg.startswith("-"):
+            return False
         return _subject_code_path(arg, work)
     return False
 
@@ -435,28 +442,13 @@ def _shell_code_bound(rest: list[str], work: Path) -> bool:
     while index < len(rest):
         arg = rest[index]
         if arg in {"-c", "--command"}:
-            return index + 1 < len(rest)
-        if arg.startswith("-") and not arg.startswith("--") and arg != "-":
-            if "c" in arg[1:]:
-                return index + 1 < len(rest)
-            index += 1
-            continue
-        if arg.startswith("--"):
-            index += 1
-            continue
-        return _subject_code_path(arg, work)
-    return False
-
-
-def _inline_or_subject_script(rest: list[str], work: Path, inline_flags: set[str]) -> bool:
-    index = 0
-    while index < len(rest):
-        arg = rest[index]
-        if arg in inline_flags:
-            return index + 1 < len(rest)
-        if arg.startswith("-") and arg != "-":
-            index += 1
-            continue
+            return index + 1 < len(rest) and bool(rest[index + 1])
+        if arg == "--":
+            if index + 1 >= len(rest):
+                return False
+            return _subject_code_path(rest[index + 1], work)
+        if arg.startswith("-"):
+            return False
         return _subject_code_path(arg, work)
     return False
 
@@ -474,6 +466,8 @@ def _awk_code_bound(rest: list[str], work: Path) -> bool:
         if arg == "--":
             index += 1
             break
+        if arg == "-i" or arg.startswith("--include"):
+            return False
         if arg in {"-f", "-E"}:
             if index + 1 >= len(rest) or not _subject_code_path(rest[index + 1], work):
                 return False
@@ -571,8 +565,6 @@ def _executable_arguments_bound(argv: list[str], work: Path) -> bool:
         return _python_code_bound(rest, work)
     if name in SHELLS:
         return _shell_code_bound(rest, work)
-    if name in {"perl", "ruby", "node", "php", "lua"}:
-        return _inline_or_subject_script(rest, work, {"-e", "-c"})
     if name in AWK_PROGRAMS:
         return _awk_code_bound(rest, work)
     if name == "curl":
