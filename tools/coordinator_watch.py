@@ -295,16 +295,11 @@ def _resume_in_scope(watch: dict[str, Any]) -> bool:
 
 
 def _observation_boundary(state: dict[str, Any]) -> str:
-    """Latest accepted observation, with schema-v1 fallback to the transition time."""
-    stamped: list[tuple[datetime, str]] = []
-    for label in ("last_observation_at", "last_transition_at"):
-        value = str(state.get(label) or "")
-        if value:
-            stamped.append((_parse_time(value, f"watch_state.{label}"), value))
-    if not stamped:
-        return ""
-    stamped.sort(key=lambda item: item[0])
-    return stamped[-1][1]
+    """Latest accepted observation, or the transition time when schema-v1 omits it."""
+    observed = str(state.get("last_observation_at") or "")
+    if observed:
+        return observed
+    return str(state.get("last_transition_at") or "")
 
 
 def _observation_is_older(watch: dict[str, Any], state: dict[str, Any]) -> bool:
