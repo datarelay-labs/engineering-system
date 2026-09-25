@@ -121,6 +121,16 @@ paths:
     domains: [ai, standards, workflows]
   "schemas/skills-contract.schema.json":
     domains: [schemas]
+  "tools/verification-contract.py":
+    domains: [standards, workflows]
+  "tools/test_verification_contract.py":
+    domains: [standards, workflows]
+  "schemas/verification-contract.schema.json":
+    domains: [schemas]
+  "schemas/trust-evidence-receipt.schema.json":
+    domains: [schemas]
+  "schemas/trust-evidence-boundary.schema.json":
+    domains: [schemas]
   "tools/incident-evidence.py":
     domains: [operations-contract, workflows]
   "tools/test_incident_evidence.py":
@@ -146,7 +156,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -448,4 +458,20 @@ scenarios:
     command: "python3 tools/test_runtime_evidence.py"
     invariants:
       - "runtime evidence runs one canonical read command after signed production.read authorization and grants no mitigation authority"
+    release_gate: true
+
+  - id: ENG-TRUST-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Trust evidence map and exact-head assessment
+    level: static
+    domains: [standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_verification_contract.py"
+    invariants:
+      - "verification maps reference existing ids only and T5 performs no mutation"
     release_gate: true

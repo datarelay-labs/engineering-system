@@ -97,6 +97,11 @@ REQUIRED_METHOD_FILES = (
     "tools/skills-contract.py",
     "tools/test_skills_contract.py",
     "schemas/skills-contract.schema.json",
+    "tools/verification-contract.py",
+    "tools/test_verification_contract.py",
+    "schemas/verification-contract.schema.json",
+    "schemas/trust-evidence-receipt.schema.json",
+    "schemas/trust-evidence-boundary.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -1100,6 +1105,71 @@ def validate_skills_contract():
     print("PASS optional skills and permission contract")
 
 
+def validate_verification_contract():
+    for rel in (
+        "schemas/verification-contract.schema.json",
+        "schemas/trust-evidence-receipt.schema.json",
+        "schemas/trust-evidence-boundary.schema.json",
+    ):
+        Draft202012Validator.check_schema(load_json(ROOT / rel))
+    tool = (ROOT / "tools/verification-contract.py").read_text(encoding="utf-8")
+    for token in (
+        "VERIFICATION_CONTRACT",
+        "EXTERNAL_MUTATION",
+        "EXECUTES_COMMANDS",
+        "independent_verifier",
+        "evaluate(",
+        "AUTOMATION_ELIGIBLE",
+        "STALE_HEAD",
+        "UNKNOWN_EVIDENCE",
+        "MISSING_RUNTIME",
+        "SELF_REPORT_ONLY",
+        "UNTRUSTED_RECEIPT",
+        "UNTRUSTED_BOUNDARY",
+        "TrustedCoordinatorBoundary",
+        "DIGEST_VERIFIED",
+        "external_digest",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL verification contract tool missing token: {token}")
+    for banned in ("subprocess", "os.system", "urlopen", "shell=True", "probe_failures", "verifier_request"):
+        if banned in tool:
+            raise SystemExit(f"FAIL verification contract tool contains banned token: {banned}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if "tools/verification-contract.py" not in text or "verification.yaml" not in text:
+            raise SystemExit(f"FAIL {rel} missing verification contract router")
+    adopt_text = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    upgrade_text = (ROOT / "tools/upgrade-adoption.py").read_text(encoding="utf-8")
+    check_text = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    for rel in (
+        "tools/verification-contract.py",
+        "tools/independent_verifier.py",
+        "schemas/verification-contract.schema.json",
+        "schemas/trust-evidence-receipt.schema.json",
+        "schemas/trust-evidence-boundary.schema.json",
+    ):
+        if rel not in adopt_text or rel not in check_text:
+            raise SystemExit(f"FAIL adopted verification path missing from bootstrap or compliance: {rel}")
+    start = adopt_text.index("VERIFICATION_CONTRACT_MANAGED = (")
+    block = adopt_text[start : adopt_text.index(")", start)]
+    if "verification.yaml" in block:
+        raise SystemExit("FAIL adoption managed set must not create verification.yaml")
+    if "plan_verification_contract_install" not in upgrade_text:
+        raise SystemExit("FAIL upgrade-adoption.py missing verification contract install")
+    completed = subprocess.run(
+        ["python3", "tools/verification-contract.py", "check"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode or "VERIFICATION_CONTRACT=ABSENT" not in completed.stdout or "RESULT=PASS" not in completed.stdout:
+        print(completed.stdout)
+        raise SystemExit("FAIL verification contract check")
+    print("PASS optional verification and trust evidence contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -1147,6 +1217,7 @@ def main():
     validate_incident_evidence()
     validate_runtime_evidence()
     validate_skills_contract()
+    validate_verification_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -1181,6 +1252,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)

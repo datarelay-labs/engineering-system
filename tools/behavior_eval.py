@@ -41,6 +41,7 @@ REQUIRED_SCENARIO_IDS = (
     "BEH-REVIEW-007",
     "BEH-ADOPTION-008",
     "BEH-PERM-009",
+    "BEH-TRUST-010",
 )
 PROHIBITED_RESULT_KEYS = frozenset(
     {
@@ -77,6 +78,7 @@ LIVE_CANARY_TOKENS = {
     "BEH-REVIEW-007": "REVIEW_DISPOSITION_REQUIRED",
     "BEH-ADOPTION-008": "ADOPTION_FAIL_CLOSED",
     "BEH-PERM-009": "PERMISSION_BOUND_OK",
+    "BEH-TRUST-010": "TRUST_EVIDENCE_FAIL_CLOSED",
 }
 MODEL_KEYS = ("model", "model_id", "resolved_model", "modelId")
 PROVIDER_KEYS = ("provider", "provider_id", "providerId")
@@ -772,6 +774,33 @@ def check_permissions(root: Path) -> dict[str, str]:
     return _outcome("PASS", "PERMISSION_BOUND_OK")
 
 
+def check_trust(root: Path) -> dict[str, str]:
+    """Production contract drift only. Test fixtures are not a runtime dependency."""
+    text = _read(root, "tools/verification-contract.py")
+    for banned in ("subprocess", "os.system", "urlopen", "shell=True", "probe_failures", "verifier_request"):
+        if banned in text:
+            return _outcome("FAIL", "TRUST_EXECUTION")
+    if "evaluate(" not in text or "independent_verifier" not in text:
+        return _outcome("FAIL", "TRUST_VERIFIER_REUSE")
+    if "AUTOMATION_ELIGIBLE" not in text or "EXTERNAL_MUTATION" not in text:
+        return _outcome("FAIL", "TRUST_VERIFIER_REUSE")
+    if "Implementer-produced output is never terminal evidence." not in text:
+        return _outcome("FAIL", "TRUST_VERIFIER_REUSE")
+    if "TrustedCoordinatorBoundary" not in text:
+        return _outcome("FAIL", "TRUST_VERIFIER_REUSE")
+    if not (root / "tools" / "independent_verifier.py").is_file():
+        return _outcome("FAIL", "TRUST_VERIFIER_REUSE")
+    module = _load_tool("verification-contract.py", "verification_contract")
+    checked = module.check_contract(root)
+    if checked.get("result") != "PASS":
+        return _outcome("FAIL", "TRUST_MAP_INVALID")
+    injected = {"version": 1, "automation_eligible": [], "features": [{"id": "runtime-health", "command": "printf injected"}]}
+    found = module.problems(root, injected)
+    if not any(str(item).startswith("EXECUTION_FORBIDDEN") for item in found):
+        return _outcome("FAIL", "TRUST_FAIL_OPEN")
+    return _outcome("PASS", "TRUST_EVIDENCE_FAIL_CLOSED")
+
+
 CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "context": check_context,
     "work_packet": check_work_packet,
@@ -782,6 +811,7 @@ CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "review": check_review,
     "adoption": check_adoption,
     "permissions": check_permissions,
+    "trust": check_trust,
 }
 
 

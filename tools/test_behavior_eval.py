@@ -341,6 +341,14 @@ def test_unknown_scenario_and_duplicate_catalog() -> None:
         _fail("unknown scenario was accepted")
 
 
+def test_trust_checker_does_not_import_verification_fixtures() -> None:
+    text = TOOL.read_text(encoding="utf-8")
+    if "test_verification_contract" in text:
+        _fail("behavior eval depends on verification test fixtures")
+    if "probe_failures(" in text:
+        _fail("behavior eval executes verification probe fixtures")
+
+
 def test_deterministic_run_passes() -> None:
     document = behavior_eval.run_deterministic(ROOT)
     encoded = json.dumps(document)
@@ -373,6 +381,7 @@ def main() -> None:
     test_wait_and_review_contract_tokens()
     test_live_unavailable_and_metadata_filter()
     test_unknown_scenario_and_duplicate_catalog()
+    test_trust_checker_does_not_import_verification_fixtures()
     test_deterministic_run_passes()
     print("PASS behavior eval framework")
 

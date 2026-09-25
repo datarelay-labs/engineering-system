@@ -182,6 +182,18 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references skills contract but missing {rel}"
                     )
+        if "tools/verification-contract.py" in agents_text:
+            for rel in (
+                "tools/verification-contract.py",
+                "tools/independent_verifier.py",
+                "schemas/verification-contract.schema.json",
+                "schemas/trust-evidence-receipt.schema.json",
+                "schemas/trust-evidence-boundary.schema.json",
+            ):
+                if not (root / rel).is_file():
+                    failures.append(
+                        f"AGENTS.md references verification contract but missing {rel}"
+                    )
 
     if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
         failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")

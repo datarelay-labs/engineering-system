@@ -1414,6 +1414,113 @@ def test_custom_skills_schema_fails_closed_before_upgrade_mutation() -> None:
         del before_schema
 
 
+def test_fresh_adoption_installs_verification_t4_dependency() -> None:
+    required = (
+        "tools/verification-contract.py",
+        "tools/independent_verifier.py",
+        "schemas/verification-contract.schema.json",
+        "schemas/trust-evidence-receipt.schema.json",
+        "schemas/trust-evidence-boundary.schema.json",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-verification"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/verification\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        for rel in required:
+            assert (target / rel).read_text(encoding="utf-8") == (ROOT / rel).read_text(encoding="utf-8"), rel
+        assert not (target / ".engineering" / "verification.yaml").exists()
+        assert not (target / "tools" / "test_verification_contract.py").exists()
+        assert not (target / "tools" / "test_independent_verifier.py").exists()
+        checked = run(sys.executable, str(CHECK), "--root", str(target))
+        assert checked.returncode == 0, checked.stdout
+        (target / "tools" / "independent_verifier.py").unlink()
+        missing = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+        assert missing.returncode != 0
+        assert "independent_verifier.py" in missing.stdout
+        assert not (target / ".engineering" / "verification.yaml").exists()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-verification-divergent"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/verification-divergent\n\ngo 1.23\n", encoding="utf-8")
+        (target / "tools").mkdir()
+        (target / "tools" / "independent_verifier.py").write_text("print('custom')\n", encoding="utf-8")
+        commit_all(target)
+        failed = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/independent_verifier.py contains local/custom changes" in failed.stdout
+        assert not (target / ".engineering" / "verification.yaml").exists()
+        assert not (target / "tools" / "verification-contract.py").exists()
+        assert (target / "tools" / "independent_verifier.py").read_text(encoding="utf-8") == "print('custom')\n"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-verification-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/verification-upgrade\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        custom = "#!/usr/bin/env python3\nprint('custom-verifier')\n"
+        (target / "tools" / "independent_verifier.py").write_text(custom, encoding="utf-8")
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "custom independent verifier")
+        before_tool = (target / "tools" / "independent_verifier.py").read_bytes()
+        failed = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/independent_verifier.py contains local/custom changes" in failed.stdout
+        assert (target / "tools" / "independent_verifier.py").read_bytes() == before_tool
+        assert not (target / ".engineering" / "verification.yaml").exists()
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -1458,6 +1565,7 @@ def main() -> int:
     test_skills_compliance_reports_missing_referenced_schema()
     test_byte_identical_skills_contract_preserved_on_upgrade()
     test_custom_skills_schema_fails_closed_before_upgrade_mutation()
+    test_fresh_adoption_installs_verification_t4_dependency()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
