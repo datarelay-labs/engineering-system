@@ -553,6 +553,7 @@ def check_permissions(root: Path) -> dict[str, str]:
             "BOUNDARY_UNAVAILABLE",
             "ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY",
             "/etc/engineering-system/skills-trust-anchor.pub",
+            "/usr/bin/openssl",
             "request_sha256",
             "REQUEST_BINDING_MISMATCH",
             "atomic one-time consume",

@@ -10,13 +10,13 @@ import base64
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-OPENSSL = shutil.which("openssl") or "openssl"
+# Test fixtures sign with the same fixed host binary production verification uses.
+OPENSSL = "/usr/bin/openssl"
 
 
 def sha256_file(path: Path) -> str:

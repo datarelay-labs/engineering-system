@@ -1054,6 +1054,10 @@ def validate_skills_contract():
         raise SystemExit("FAIL skills contract resolves trust anchor from caller env")
     if "os.environ" in tool or "environ.get" in tool:
         raise SystemExit("FAIL skills contract must not read process environment")
+    if "shutil.which" in tool:
+        raise SystemExit("FAIL skills contract resolves verifier from caller PATH")
+    if 'HOST_OPENSSL_PATH = Path("/usr/bin/openssl")' not in tool or "resolve_openssl_verifier" not in tool:
+        raise SystemExit("FAIL skills contract missing fixed openssl verifier")
     if "HOST_TRUST_ANCHOR_PATH" not in tool or "IGNORED_CALLER_TRUST_ANCHOR_ENV" not in tool:
         raise SystemExit("FAIL skills contract missing host-only trust-anchor disposition")
     if "consume_dispatch_once" not in tool:
@@ -1067,6 +1071,7 @@ def validate_skills_contract():
         "BOUNDARY_UNAVAILABLE",
         "ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY",
         "/etc/engineering-system/skills-trust-anchor.pub",
+        "/usr/bin/openssl",
         "request_sha256",
         "REQUEST_BINDING_MISMATCH",
         "atomic one-time consume",

@@ -59,6 +59,7 @@ It does **not** expose `keygen`, `bind`, `dispatch`, or any same-user HMAC/file-
 Authorize treats host-administered adapter provenance as required configuration:
 
 - Trust-anchor pubkey only from `/etc/engineering-system/skills-trust-anchor.pub` after root ownership/mode checks (parent included).
+- Ed25519 verification executes only `/usr/bin/openssl` after the same root-owned, non-group/world-writable provenance checks. Caller PATH, environment, repository files, packet text, and CLI arguments cannot select the verifier. If that fixed verifier is absent or fails provenance, verification fails closed and `authorize` returns `BOUNDARY_UNAVAILABLE` with no PATH fallback.
 - Caller CLI args, request JSON, repository config, and environment variables including `ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY` must not select the production trust anchor.
 - If that trusted external provenance is absent or fails checks, authorize fails closed as `BOUNDARY_UNAVAILABLE`.
 - **Unsupported platform / host enforcement:** `authorize` is enforced on Linux with OpenSSL available. On non-Linux hosts, or when OpenSSL is unavailable, authorize fails closed as `BOUNDARY_UNAVAILABLE` rather than silently degrading authority. Adoption may still install the helper/schema broadly; enforcement remains fail-closed where the host cannot prove adapter provenance.
