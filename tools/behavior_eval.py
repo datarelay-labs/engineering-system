@@ -74,7 +74,7 @@ LIVE_CANARY_TOKENS = {
     "BEH-AFFECTED-003": "AFFECTED_PATHS_EXACT",
     "BEH-RESOURCE-004": "RESOURCE_BLOCK_NO_KILL",
     "BEH-WAIT-005": "WAIT_YIELD_NO_POLL",
-    "BEH-TASKSWITCH-006": "FRESH_SESSION_AFTER_PASS",
+    "BEH-TASKSWITCH-006": "PROJECT_SESSION_REUSE",
     "BEH-REVIEW-007": "REVIEW_DISPOSITION_REQUIRED",
     "BEH-ADOPTION-008": "ADOPTION_FAIL_CLOSED",
     "BEH-PERM-009": "PERMISSION_BOUND_OK",
@@ -468,13 +468,33 @@ def check_wait(root: Path) -> dict[str, str]:
 
 
 def check_taskswitch(root: Path) -> dict[str, str]:
+    resume = _read(root, ".cursor/commands/resume.md")
+    session = _read(root, "standards/SESSION_CONTINUITY.md")
+    for label, text in (("resume", resume), ("session continuity", session)):
+        if "fresh coding-agent session" in text or "preferring a fresh session" in text:
+            return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
+        if label == "resume" and "Prefer a fresh" in text:
+            return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
     _require_tokens(
-        _read(root, ".cursor/commands/resume.md"),
+        resume,
         (
-            "fresh coding-agent session",
+            "/clear",
+            "/work-resume",
+            "reusable project",
             "exit 0",
             "do not create a new persistent session",
             "do not stop",
+            "dirty, unpushed, or ambiguous",
+        ),
+    )
+    _require_tokens(
+        session,
+        (
+            "/clear",
+            "/work-resume",
+            "reusable project",
+            "do not create",
+            "dirty, unpushed, or ambiguous",
         ),
     )
     preflight = _load_tool("cursor-resource-preflight.py", "cursor_resource_preflight")
