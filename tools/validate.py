@@ -1226,6 +1226,16 @@ def validate_security_profile():
         "UNKNOWN",
         "40-hex",
         "tools/security-profile.py",
+        "allow-no-tests",
+        "write-all",
+        "GITHUB_TOKEN",
+        "audited repository",
+        "privileged_tools",
+        "commondir",
+        "symlink",
+        "unreadable",
+        "engineering-system.yml",
+        "scope",
     ):
         if token not in security:
             raise SystemExit(f"FAIL SECURITY.md missing security profile token: {token}")
