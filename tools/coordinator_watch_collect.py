@@ -26,6 +26,8 @@ BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CI_FROM_GITHUB = {"success": "PASS", "pending": "PENDING", "failure": "FAIL", "error": "FAIL"}
 TRUSTED_GH = Path("/usr/bin/gh")
+# Production fixed path. Tests may retarget this seam; caller PATH is never searched.
+_TRUSTED_GH_PATH = TRUSTED_GH
 TRUSTED_GIT = Path("/usr/bin/git")
 TRUSTED_AGENT = Path("/usr/bin/agent")
 WORKTREE_PIN = Path("/etc/engineering-system/coordinator-watch-worktree")
@@ -98,7 +100,7 @@ def resolve_trusted_executable(production: Path, override: Path | None) -> Path 
 
 
 def resolve_trusted_gh() -> Path | None:
-    return resolve_trusted_executable(TRUSTED_GH, _TEST_TRUSTED_GH)
+    return resolve_trusted_executable(_TRUSTED_GH_PATH, _TEST_TRUSTED_GH)
 
 
 def _bounded_env() -> dict[str, str]:

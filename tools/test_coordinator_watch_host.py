@@ -952,11 +952,17 @@ def test_path_shadow_gh_is_never_executed() -> None:
             encoding="utf-8",
         )
         script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        absent_gh = Path("/usr/bin/gh-coordinator-watch-absent")
+        assert not absent_gh.exists()
         previous_path = os.environ.get("PATH", "")
         previous_gh = collect._TEST_TRUSTED_GH
+        previous_fixed = collect._TRUSTED_GH_PATH
         os.environ["PATH"] = str(shadow) + os.pathsep + previous_path
+        collect._TRUSTED_GH_PATH = absent_gh
         collect._TEST_TRUSTED_GH = None
         try:
+            assert collect._TEST_TRUSTED_GH is None
+            assert collect.resolve_trusted_gh() is None
             try:
                 collect_authoritative(
                     repository=REPO,
@@ -965,13 +971,14 @@ def test_path_shadow_gh_is_never_executed() -> None:
                     watch_class=facts["watch"]["watch_class"],
                 )
             except collect.CollectError as exc:
-                assert "trusted gh" in exc.reason
+                assert exc.reason == "trusted gh provenance is unavailable"
             else:
                 raise AssertionError("PATH gh was accepted")
+            assert not log.exists()
         finally:
             os.environ["PATH"] = previous_path
+            collect._TRUSTED_GH_PATH = previous_fixed
             collect._TEST_TRUSTED_GH = previous_gh
-        assert not log.exists()
         state = gh_state(base, facts, BRANCH, ci="pending", bodies=[render_body(facts, BRANCH)])
         with fake_gh(base, state), host_env(base):
             result = run_once(request_for(facts))
