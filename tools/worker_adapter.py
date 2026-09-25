@@ -43,6 +43,9 @@ def _load_skills_contract():
 _SKILLS = _load_skills_contract()
 authorize = _SKILLS.authorize
 canonical_request_sha256 = _SKILLS.canonical_request_sha256
+consume_dispatch_once = _SKILLS.consume_dispatch_once
+finalize_dispatch = _SKILLS.finalize_dispatch
+reserve_dispatch = _SKILLS.reserve_dispatch
 resolve_trust_anchor = _SKILLS.resolve_trust_anchor
 verify_signed_json = _SKILLS.verify_signed_json
 
@@ -288,7 +291,12 @@ def _parse_verification(raw: Any) -> dict[str, Path] | None:
     }
 
 
-def _authorize_concrete_effect(verification: dict[str, Path] | None, effect: dict[str, Any]) -> str:
+def _authorize_concrete_effect(
+    verification: dict[str, Path] | None,
+    effect: dict[str, Any],
+    *,
+    consume_replay: bool = True,
+) -> str:
     """Return ALLOW, REPLAY, or a denial reason. Caller JSON cannot grant this."""
     if verification is None:
         return "trusted verification assertions are missing; caller-supplied permission or dispatch facts are not authority"
@@ -317,6 +325,7 @@ def _authorize_concrete_effect(verification: dict[str, Path] | None, effect: dic
             binding_assertion=binding,
             dispatch_assertion=dispatch,
             request_json=json.dumps(effect),
+            consume_replay=consume_replay,
         )
     except SystemExit:
         return "trusted authorize path failed closed"
@@ -384,7 +393,7 @@ def _emit(result: str, reason: str, digest: str, *, authorize_write: bool) -> di
     }
 
 
-def evaluate(payload: dict[str, Any]) -> dict[str, Any]:
+def evaluate(payload: dict[str, Any], *, consume_replay: bool = True) -> dict[str, Any]:
     """Classify one external-write request. The same facts always match."""
     data = _require_mapping(payload, "request")
     forbidden = _contains_forbidden_key(data)
@@ -496,7 +505,7 @@ def evaluate(payload: dict[str, Any]) -> dict[str, Any]:
             digest,
             authorize_write=False,
         )
-    gate = _authorize_concrete_effect(verification, effect)
+    gate = _authorize_concrete_effect(verification, effect, consume_replay=consume_replay)
     if gate == "REPLAY":
         return _emit(
             "NO_CHANGE",

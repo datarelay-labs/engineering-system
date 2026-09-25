@@ -69,6 +69,9 @@ REQUIRED_METHOD_FILES = (
     "tools/coordinator_watch.py",
     "tools/test_coordinator_watch.py",
     "schemas/coordinator-watch.schema.json",
+    "tools/coordinator_watch_host.py",
+    "tools/test_coordinator_watch_host.py",
+    "schemas/coordinator-watch-host.schema.json",
     "tools/worker_adapter.py",
     "tools/test_worker_adapter.py",
     "schemas/worker-adapter-result.schema.json",
@@ -447,6 +450,88 @@ def validate_coordinator_watch_contract():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing coordinator watch token: {token}")
     print("PASS bounded coordinator watch contract")
+
+
+def validate_coordinator_watch_host_contract():
+    tool = (ROOT / "tools/coordinator_watch_host.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    enforcement = (ROOT / "standards/ENFORCEMENT.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/coordinator-watch-host.schema.json")
+    results = set(schema["properties"]["result"]["enum"])
+    for token in (
+        "run-once",
+        "--request",
+        "LOCK_HELD",
+        "WAKE_COORDINATOR",
+        "RESUME_ADMITTED_WORKER",
+        "NOTIFY_OWNER",
+        "work_budget",
+        "EXECUTION_FORBIDDEN",
+        "INFO",
+        "collect_authoritative",
+        "send_effect",
+        "consume_replay",
+        "reserve_dispatch",
+        "finalize_dispatch",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL coordinator watch host missing token: {token}")
+    effects = (ROOT / "tools/coordinator_watch_effects.py").read_text(encoding="utf-8")
+    collector = (ROOT / "tools/coordinator_watch_collect.py").read_text(encoding="utf-8")
+    for token in ("api.telegram.org", "send_github_comment", "shell=False"):
+        if token not in effects:
+            raise SystemExit(f"FAIL coordinator watch effects missing token: {token}")
+    if "shell=True" in effects or "shell=True" in collector:
+        raise SystemExit("FAIL coordinator watch delivery encodes a caller shell")
+    for token in ("issue\", \"view", "collect_authoritative", "/usr/bin/gh"):
+        if token not in collector:
+            raise SystemExit(f"FAIL coordinator watch collector missing token: {token}")
+    if "resolve_trusted_gh" not in effects:
+        raise SystemExit("FAIL coordinator watch effects do not use the trusted gh binary")
+    if results != {
+        "NO_ACTION",
+        "DELIVERED",
+        "DEDUP",
+        "LOCK_HELD",
+        "STALE_RECONCILE",
+        "RESOURCE_BLOCKED",
+        "RECONCILE_AMBIGUOUS",
+        "AUTHORITY_DENIED",
+    }:
+        raise SystemExit("FAIL coordinator watch host schema drifted from host results")
+    for forbidden in (
+        "import subprocess",
+        "subprocess.",
+        "os.system",
+        "os.kill",
+        "shell=True",
+        "urllib",
+        "socket",
+        "time.sleep",
+        "while ",
+    ):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL coordinator watch host encodes a side effect: {forbidden}")
+    for label, text in (
+        ("session continuity", session),
+        ("enforcement", enforcement),
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+    ):
+        if "coordinator_watch_host.py" not in text:
+            raise SystemExit(f"FAIL {label} missing coordinator watch host command")
+    for token in (
+        "Coordinator watch host",
+        "coordinator_watch_host.py run-once",
+        "work_budget",
+        "NOTIFY_OWNER",
+        "INFO",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing coordinator watch host token: {token}")
+    print("PASS coordinator watch host contract")
 
 
 def validate_worker_adapter_contract():
@@ -1049,6 +1134,7 @@ def main():
     validate_independent_verifier_contract()
     validate_coordinator_contract()
     validate_coordinator_watch_contract()
+    validate_coordinator_watch_host_contract()
     validate_worker_adapter_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
@@ -1086,6 +1172,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_coordinator_watch.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_coordinator_watch_host.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_worker_adapter.py"], cwd=ROOT)

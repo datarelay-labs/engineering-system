@@ -36,19 +36,23 @@ def trust_anchor(pub: Path, *, replay: bool | None = None):
     previous_anchor = contract._TEST_TRUST_ANCHOR_PATH
     previous_replay = contract._TEST_REPLAY_BOUNDARY_AVAILABLE
     previous_store = contract._TEST_REPLAY_STORE
+    previous_reservations = contract._TEST_DISPATCH_RESERVATIONS
     contract._TEST_TRUST_ANCHOR_PATH = pub
     if replay is True:
         contract._TEST_REPLAY_BOUNDARY_AVAILABLE = True
         contract._TEST_REPLAY_STORE = set()
+        contract._TEST_DISPATCH_RESERVATIONS = {}
     elif replay is False:
         contract._TEST_REPLAY_BOUNDARY_AVAILABLE = False
         contract._TEST_REPLAY_STORE = None
+        contract._TEST_DISPATCH_RESERVATIONS = None
     try:
         yield
     finally:
         contract._TEST_TRUST_ANCHOR_PATH = previous_anchor
         contract._TEST_REPLAY_BOUNDARY_AVAILABLE = previous_replay
         contract._TEST_REPLAY_STORE = previous_store
+        contract._TEST_DISPATCH_RESERVATIONS = previous_reservations
 
 
 def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -634,6 +638,42 @@ def test_repo_policy_cannot_broaden() -> None:
         assert any(item["code"] == "PROFILE_BROADEN" for item in report["findings"])
 
 
+def test_dispatch_reservation_is_effect_bound() -> None:
+    import threading
+
+    contract._TEST_REPLAY_BOUNDARY_AVAILABLE = True
+    contract._TEST_REPLAY_STORE = set()
+    contract._TEST_DISPATCH_RESERVATIONS = {}
+    try:
+        effect = "cd" * 32
+        barrier = threading.Barrier(2)
+        results: dict[str, str] = {}
+
+        def attempt(name: str) -> None:
+            barrier.wait()
+            results[name] = contract.reserve_dispatch("race-dispatch", effect, name)
+
+        threads = [
+            threading.Thread(target=attempt, args=("attempt-a",)),
+            threading.Thread(target=attempt, args=("attempt-b",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(results.values()) == ["conflict", "reserved"]
+        owner = next(name for name, value in results.items() if value == "reserved")
+        assert contract.consume_dispatch_once("race-dispatch") == "replay"
+        assert contract.finalize_dispatch("race-dispatch", effect, owner) == "ok"
+        other = "attempt-b" if owner == "attempt-a" else "attempt-a"
+        assert contract.finalize_dispatch("race-dispatch", effect, other) == "conflict"
+        assert contract.reserve_dispatch("race-dispatch", "ee" * 32, "attempt-c") == "conflict"
+    finally:
+        contract._TEST_REPLAY_BOUNDARY_AVAILABLE = None
+        contract._TEST_REPLAY_STORE = None
+        contract._TEST_DISPATCH_RESERVATIONS = None
+
+
 def main() -> int:
     test_production_cli_is_verification_only()
     test_authorize_without_host_trust_anchor_is_boundary_unavailable()
@@ -648,6 +688,7 @@ def main() -> int:
     test_self_minted_readonly_assertions_denied_on_production_cli()
     test_unsupported_platform_authorize_is_boundary_unavailable()
     test_repo_policy_cannot_broaden()
+    test_dispatch_reservation_is_effect_bound()
     print("SKILLS_CONTRACT_TESTS=PASS")
     return 0
 

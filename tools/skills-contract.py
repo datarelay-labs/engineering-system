@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +59,8 @@ OPENSSL = shutil.which("openssl") or ""
 _TEST_TRUST_ANCHOR_PATH: Path | None = None
 _TEST_REPLAY_BOUNDARY_AVAILABLE: bool | None = None
 _TEST_REPLAY_STORE: set[str] | None = None
+_TEST_DISPATCH_RESERVATIONS: dict[str, dict[str, str]] | None = None
+_REPLAY_LOCK = threading.Lock()
 
 ACTION_CLASSES = frozenset(
     {
@@ -659,6 +664,69 @@ def _safe_dispatch_token(dispatch_id: str) -> str | None:
     return token
 
 
+def _effect_binding(effect_sha256: str, attempt_id: str) -> tuple[str, str] | None:
+    effect = effect_sha256.strip().lower()
+    attempt = _safe_dispatch_token(attempt_id)
+    if attempt is None or len(effect) != 64 or any(ch not in "0123456789abcdef" for ch in effect):
+        return None
+    return effect, attempt
+
+
+def _dispatch_marker(token: str) -> Path:
+    return HOST_REPLAY_STATE_PATH / f"dispatch-{token}"
+
+
+def _legacy_consumed_marker(token: str) -> Path:
+    return HOST_REPLAY_STATE_PATH / f"consumed-{token}"
+
+
+def _read_dispatch_record(path: Path) -> dict[str, str] | None:
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return {"state": "consumed"}
+    try:
+        raw = os.read(fd, 4096)
+    finally:
+        os.close(fd)
+    text = raw.decode("utf-8", errors="replace")
+    if text == "consumed\n":
+        return {"state": "consumed", "effect_sha256": "", "attempt_id": ""}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"state": "consumed", "effect_sha256": "", "attempt_id": ""}
+    if not isinstance(parsed, dict):
+        return {"state": "consumed", "effect_sha256": "", "attempt_id": ""}
+    state = str(parsed.get("state") or "")
+    if state not in {"reserved", "consumed"}:
+        return {"state": "consumed", "effect_sha256": "", "attempt_id": ""}
+    return {
+        "state": state,
+        "effect_sha256": str(parsed.get("effect_sha256") or ""),
+        "attempt_id": str(parsed.get("attempt_id") or ""),
+    }
+
+
+def _binding_matches(record: dict[str, str], effect: str, attempt: str) -> bool:
+    return record.get("effect_sha256") == effect and record.get("attempt_id") == attempt
+
+
+def _test_reservations() -> dict[str, dict[str, str]] | None:
+    global _TEST_DISPATCH_RESERVATIONS
+    if _TEST_REPLAY_BOUNDARY_AVAILABLE is not True or _TEST_REPLAY_STORE is None:
+        return None
+    if _TEST_DISPATCH_RESERVATIONS is None:
+        _TEST_DISPATCH_RESERVATIONS = {}
+    return _TEST_DISPATCH_RESERVATIONS
+
+
+def _production_replay_ready() -> bool:
+    return _host_path_provenance_ok(HOST_REPLAY_STATE_PATH, expect_file=False) and HOST_REPLAY_STATE_PATH.is_dir()
+
+
 def consume_dispatch_once(dispatch_id: str) -> str:
     """Atomically consume a high-risk dispatch_id for one-time authorize.
 
@@ -666,6 +734,7 @@ def consume_dispatch_once(dispatch_id: str) -> str:
     enough: production requires an exclusive create under the host replay-state
     directory. If that trusted consume primitive cannot run, return unavailable
     (caller gets ``BOUNDARY_UNAVAILABLE``) rather than a repo-local nonce store.
+    A dispatch already reserved for an effect is taken and is not consumed again.
     """
     token = _safe_dispatch_token(dispatch_id)
     if token is None:
@@ -675,29 +744,168 @@ def consume_dispatch_once(dispatch_id: str) -> str:
         return "unavailable"
     if _TEST_REPLAY_BOUNDARY_AVAILABLE is True:
         store = _TEST_REPLAY_STORE
-        if store is None:
+        reservations = _test_reservations()
+        if store is None or reservations is None:
             return "unavailable"
-        if token in store:
-            return "replay"
-        store.add(token)
+        with _REPLAY_LOCK:
+            if token in store or token in reservations:
+                return "replay"
+            store.add(token)
+            reservations[token] = {"state": "consumed", "effect_sha256": "", "attempt_id": ""}
         return "ok"
 
-    if not _host_path_provenance_ok(HOST_REPLAY_STATE_PATH, expect_file=False):
+    if not _production_replay_ready():
         return "unavailable"
-    if not HOST_REPLAY_STATE_PATH.is_dir():
-        return "unavailable"
-    marker = HOST_REPLAY_STATE_PATH / f"consumed-{token}"
+    if _legacy_consumed_marker(token).exists() or _dispatch_marker(token).exists():
+        return "replay"
+    marker = _dispatch_marker(token)
     try:
-        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644)
         try:
-            os.write(fd, b"consumed\n")
+            os.write(fd, b'{"state":"consumed"}\n')
         finally:
             os.close(fd)
         return "ok"
     except FileExistsError:
         return "replay"
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return "replay"
+        return "unavailable"
+
+
+def reserve_dispatch(dispatch_id: str, effect_sha256: str, attempt_id: str) -> str:
+    """Atomically reserve one dispatch for one effect digest and executor attempt.
+
+    Returns ``reserved``, ``owned_reserved``, ``owned_consumed``, ``conflict``,
+    or ``unavailable``. Another effect or attempt cannot take the reservation.
+    """
+    token = _safe_dispatch_token(dispatch_id)
+    binding = _effect_binding(effect_sha256, attempt_id)
+    if token is None or binding is None:
+        return "unavailable"
+    effect, attempt = binding
+
+    if _TEST_REPLAY_BOUNDARY_AVAILABLE is False:
+        return "unavailable"
+    if _TEST_REPLAY_BOUNDARY_AVAILABLE is True:
+        store = _TEST_REPLAY_STORE
+        reservations = _test_reservations()
+        if store is None or reservations is None:
+            return "unavailable"
+        with _REPLAY_LOCK:
+            current = reservations.get(token)
+            if token in store:
+                if current is not None and current.get("state") == "consumed" and _binding_matches(current, effect, attempt):
+                    return "owned_consumed"
+                return "conflict"
+            if current is None:
+                reservations[token] = {
+                    "state": "reserved",
+                    "effect_sha256": effect,
+                    "attempt_id": attempt,
+                }
+                return "reserved"
+            if _binding_matches(current, effect, attempt):
+                return "owned_consumed" if current.get("state") == "consumed" else "owned_reserved"
+            return "conflict"
+
+    if not _production_replay_ready():
+        return "unavailable"
+    if _legacy_consumed_marker(token).exists():
+        return "conflict"
+    payload = json.dumps(
+        {"state": "reserved", "effect_sha256": effect, "attempt_id": attempt},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    marker = _dispatch_marker(token)
+    try:
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644)
+        try:
+            os.write(fd, payload)
+        finally:
+            os.close(fd)
+        return "reserved"
+    except FileExistsError:
+        record = _read_dispatch_record(marker)
+        if record is None:
+            return "unavailable"
+        if _binding_matches(record, effect, attempt):
+            return "owned_consumed" if record.get("state") == "consumed" else "owned_reserved"
+        return "conflict"
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return "conflict"
+        return "unavailable"
+
+
+def finalize_dispatch(dispatch_id: str, effect_sha256: str, attempt_id: str) -> str:
+    """Mark an owned reservation consumed. A different owner cannot finalize it."""
+    token = _safe_dispatch_token(dispatch_id)
+    binding = _effect_binding(effect_sha256, attempt_id)
+    if token is None or binding is None:
+        return "unavailable"
+    effect, attempt = binding
+
+    if _TEST_REPLAY_BOUNDARY_AVAILABLE is False:
+        return "unavailable"
+    if _TEST_REPLAY_BOUNDARY_AVAILABLE is True:
+        store = _TEST_REPLAY_STORE
+        reservations = _test_reservations()
+        if store is None or reservations is None:
+            return "unavailable"
+        with _REPLAY_LOCK:
+            current = reservations.get(token)
+            if current is None or not _binding_matches(current, effect, attempt):
+                return "conflict"
+            if token in store and current.get("state") != "consumed":
+                return "conflict"
+            current["state"] = "consumed"
+            store.add(token)
+        return "ok"
+
+    if not _production_replay_ready():
+        return "unavailable"
+    marker = _dispatch_marker(token)
+    try:
+        fd = os.open(str(marker), os.O_RDWR | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return "conflict"
     except OSError:
         return "unavailable"
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        raw = os.read(fd, 4096)
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            return "conflict"
+        if not isinstance(parsed, dict):
+            return "conflict"
+        record = {
+            "state": str(parsed.get("state") or ""),
+            "effect_sha256": str(parsed.get("effect_sha256") or ""),
+            "attempt_id": str(parsed.get("attempt_id") or ""),
+        }
+        if not _binding_matches(record, effect, attempt):
+            return "conflict"
+        if record["state"] == "consumed":
+            return "ok"
+        if record["state"] != "reserved":
+            return "conflict"
+        payload = json.dumps(
+            {"state": "consumed", "effect_sha256": effect, "attempt_id": attempt},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, payload)
+        os.fsync(fd)
+        return "ok"
+    except OSError:
+        return "unavailable"
+    finally:
+        os.close(fd)
 
 
 def authorize(
@@ -706,8 +914,13 @@ def authorize(
     binding_assertion: Path,
     dispatch_assertion: Path,
     request_json: str = "",
+    consume_replay: bool = True,
 ) -> Decision:
-    """Verification-only authorization against a host-administered trust anchor."""
+    """Verification-only authorization against a host-administered trust anchor.
+
+    ``consume_replay`` defaults to consuming a high-risk dispatch id. The watch
+    host passes False, then consumes only after a durable effect receipt.
+    """
     if not sys.platform.startswith("linux"):
         return Decision(False, "BOUNDARY_UNAVAILABLE")
     if not OPENSSL:
@@ -758,13 +971,14 @@ def authorize(
             return Decision(False, "REPLAY_CONTRACT_INCOMPLETE")
         if int(time.time()) >= expires:
             return Decision(False, "DISPATCH_EXPIRED")
-        consumed = consume_dispatch_once(str(dispatch_id))
-        if consumed == "unavailable":
-            return Decision(False, "BOUNDARY_UNAVAILABLE")
-        if consumed == "replay":
-            return Decision(False, "REPLAY")
-        if consumed != "ok":
-            return Decision(False, "BOUNDARY_UNAVAILABLE")
+        if consume_replay:
+            consumed = consume_dispatch_once(str(dispatch_id))
+            if consumed == "unavailable":
+                return Decision(False, "BOUNDARY_UNAVAILABLE")
+            if consumed == "replay":
+                return Decision(False, "REPLAY")
+            if consumed != "ok":
+                return Decision(False, "BOUNDARY_UNAVAILABLE")
     profiles, _, digest = load_effective_state(root)
     if binding_payload.get("policy_digest") != digest:
         return Decision(False, "POLICY_DIGEST_MISMATCH")
