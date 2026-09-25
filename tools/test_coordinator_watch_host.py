@@ -152,7 +152,20 @@ def render_body(facts: dict, branch: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def gh_state(base: Path, facts: dict, branch: str, *, bodies: list[str] | None = None, ci: str = "success", pr: bool = True, sha: str = SHA, sha_queue: list[str] | None = None) -> dict:
+def gh_state(base: Path, facts: dict, branch: str, *, bodies: list[str] | None = None, ci: str = "success", pr: bool = True, sha: str | None = None, sha_queue: list[str] | None = None) -> dict:
+    if sha is None:
+        pinned = collect._TEST_WORKTREE
+        if pinned is not None:
+            completed = subprocess.run(
+                ["/usr/bin/git", "-C", str(pinned), "rev-parse", "HEAD"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode == 0 and len(completed.stdout.strip()) == 40:
+                sha = completed.stdout.strip().lower()
+        if sha is None:
+            sha = SHA
     body = render_body(facts, branch)
     return {
         "bodies": bodies if bodies is not None else [body, body, body, body],
@@ -210,11 +223,11 @@ HEALTHY_MEMINFO = "MemTotal: 2000000 kB\nMemAvailable: 1500000 kB\nSwapTotal: 0 
 STARVED_MEMINFO = "MemTotal: 2000000 kB\nMemAvailable: 1 kB\nSwapTotal: 0 kB\n"
 
 
-def init_observed_worktree(path: Path, *, dirty: bool, unpushed: bool) -> None:
+def init_observed_worktree(path: Path, *, dirty: bool, unpushed: bool, branch: str = BRANCH) -> None:
     remote = path.parent / "remotes" / "datarelay-labs" / "engineering-system.git"
     remote.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["/usr/bin/git", "init", "--bare", "-b", "main", str(remote)], check=True, capture_output=True)
-    subprocess.run(["/usr/bin/git", "init", "-b", "main", str(path)], check=True, capture_output=True)
+    subprocess.run(["/usr/bin/git", "init", "--bare", "-b", branch, str(remote)], check=True, capture_output=True)
+    subprocess.run(["/usr/bin/git", "init", "-b", branch, str(path)], check=True, capture_output=True)
     subprocess.run(["/usr/bin/git", "-C", str(path), "remote", "add", "origin", str(remote)], check=True, capture_output=True)
     (path / "README").write_text("base\n", encoding="utf-8")
     git = ["/usr/bin/git", "-C", str(path), "-c", "user.email=watch@example.com", "-c", "user.name=watch"]
@@ -270,10 +283,11 @@ def observed_machine(
     session: bool,
     claim: bool,
     meminfo: list[str],
+    local_branch: str = BRANCH,
 ) -> Iterator[Path]:
     worktree = base / "worktree"
     worktree.mkdir()
-    init_observed_worktree(worktree, dirty=dirty, unpushed=unpushed)
+    init_observed_worktree(worktree, dirty=dirty, unpushed=unpushed, branch=local_branch)
     agent = base / "agent"
     write_agent(agent, worktree, present=session)
     claim_dir = base / "claims"
@@ -460,6 +474,56 @@ def test_progress_resumes_once() -> None:
         assert result["resumes"] == 1
         assert result["mutates_github"] is True
         assert comment_count(base) == 1
+
+
+def _assert_unbound_session_does_not_resume(base: Path, facts: dict, state: dict) -> None:
+    with fake_gh(base, state):
+        collected = collect_authoritative(
+            repository=REPO,
+            workstream=WORKSTREAM,
+            issue_id=TARGET,
+            watch_class=facts["watch"]["watch_class"],
+        )
+        with host_env(base):
+            result = run_once(request_for(facts))
+    worker = collected["facts"]["worker"]
+    assert worker.get("present") is not True
+    assert worker.get("progress_evidence") is not True
+    assert collected["facts"]["git"].get("dirty") is not True
+    assert collected["facts"]["git"].get("unpushed") is not True
+    assert result["watch_result"] != "RESUME_ADMITTED_WORKER"
+    assert result["result"] != "DELIVERED"
+    assert result["resumes"] == 0
+    assert result["actions_delivered"] == 0
+    assert comment_count(base) == 0
+
+
+def test_wrong_branch_session_does_not_resume() -> None:
+    facts = load_fixture("06-worker-progress.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        with observed_machine(
+            base,
+            dirty=True,
+            unpushed=True,
+            session=True,
+            claim=True,
+            meminfo=[HEALTHY_MEMINFO],
+            local_branch="main",
+        ):
+            state = gh_state(base, facts, BRANCH, pr=False)
+            _assert_unbound_session_does_not_resume(base, facts, state)
+
+
+def test_wrong_head_session_does_not_resume() -> None:
+    facts = load_fixture("06-worker-progress.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        with observed_machine(
+            base, dirty=True, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+        ):
+            state = gh_state(base, facts, BRANCH, pr=False, sha=OTHER)
+            _assert_unbound_session_does_not_resume(base, facts, state)
 
 
 def test_liveness_without_progress_does_not_resume() -> None:
@@ -999,6 +1063,8 @@ def main_tests() -> int:
     test_unchanged_wait_takes_no_action()
     test_exact_head_ci_wakes_once_and_replay_dedups()
     test_progress_resumes_once()
+    test_wrong_branch_session_does_not_resume()
+    test_wrong_head_session_does_not_resume()
     test_liveness_without_progress_does_not_resume()
     test_revision_change_before_action_delivers_nothing()
     test_subject_change_before_action_delivers_nothing()

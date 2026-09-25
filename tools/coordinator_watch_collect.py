@@ -243,9 +243,20 @@ def _origin_matches(worktree: Path, repository: str) -> bool:
     return bool(url and repository in url.strip())
 
 
-def _observe_git(worktree: Path, repository: str) -> tuple[bool | None, bool | None]:
-    """Return dirty, unpushed. Unobserved values stay None, never a passing false."""
+def _worktree_bound(worktree: Path, repository: str, branch: str, head: str) -> bool:
+    """True only when the pinned worktree is the authoritative branch at its exact HEAD."""
     if not _origin_matches(worktree, repository):
+        return False
+    local_branch = _git_stdout(worktree, ["rev-parse", "--abbrev-ref", "HEAD"])
+    local_head = _git_stdout(worktree, ["rev-parse", "HEAD"])
+    if local_branch is None or local_head is None:
+        return False
+    return local_branch.strip() == branch and local_head.strip().lower() == head.lower()
+
+
+def _observe_git(worktree: Path, repository: str, branch: str, head: str) -> tuple[bool | None, bool | None]:
+    """Return dirty, unpushed. A branch or HEAD mismatch stays unobserved."""
+    if not _worktree_bound(worktree, repository, branch, head):
         return None, None
     status = _git_stdout(worktree, ["status", "--porcelain", "--untracked-files=all"])
     dirty = None if status is None else bool(status.strip())
@@ -388,17 +399,54 @@ def _observe_admission(resource: str, repository: str, workstream: str, intent_r
     return {"decision": "UNKNOWN"}
 
 
+def _bound_claim_revision(repository: str, workstream: str) -> int | None:
+    """Intent revision from one active claim. Packet text is not a source."""
+    directory = _claim_dir()
+    if directory is None:
+        return None
+    try:
+        paths = sorted(directory.iterdir())
+    except OSError:
+        return None
+    revisions: list[int] = []
+    for path in paths:
+        if path.is_symlink() or not path.is_file() or path.suffix != ".json":
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("repository") != repository or payload.get("workstream") != workstream:
+            continue
+        status = str(payload.get("status") or "").upper()
+        if status not in ACTIVE_CLAIM_STATUSES:
+            continue
+        if payload.get("ambiguous") is True:
+            return None
+        revision = payload.get("intent_revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            return None
+        revisions.append(revision)
+    if len(revisions) != 1:
+        return None
+    return revisions[0]
+
+
 def _observe_worker(
     sessions: list[dict[str, str]] | None,
     worktree: Path | None,
     repository: str,
-    intent_revision: int,
+    workstream: str,
+    branch: str,
+    head: str,
     dirty: bool | None,
 ) -> dict[str, Any] | None:
-    """Return worker facts from a persist-list observation. None means unobserved."""
+    """Return worker facts only when the session worktree is the authoritative branch at HEAD."""
     if sessions is None:
         return None
-    if worktree is None:
+    if worktree is None or not _worktree_bound(worktree, repository, branch, head):
         return {"present": False}
     matched = False
     for session in sessions:
@@ -407,15 +455,18 @@ def _observe_worker(
             same = workspace.resolve() == worktree.resolve()
         except OSError:
             same = False
-        if same and _origin_matches(worktree, repository):
+        if same:
             matched = True
             break
     if not matched:
         return {"present": False}
+    starting = _bound_claim_revision(repository, workstream)
+    if starting is None:
+        return {"present": False}
     return {
         "present": True,
         "status": "ACTIVE",
-        "starting_intent_revision": intent_revision,
+        "starting_intent_revision": starting,
         "progress_evidence": dirty is True,
     }
 
@@ -473,8 +524,10 @@ def collect_authoritative(
         pr_state = ""
     worktree = _pinned_worktree()
     sessions = _observe_sessions()
-    dirty, unpushed = _observe_git(worktree, repository) if worktree is not None else (None, None)
-    worker = _observe_worker(sessions, worktree, repository, intent_revision, dirty)
+    dirty, unpushed = (
+        _observe_git(worktree, repository, branch, sha) if worktree is not None else (None, None)
+    )
+    worker = _observe_worker(sessions, worktree, repository, workstream, branch, sha, dirty)
     resource = _observe_resource(None if sessions is None else len(sessions))
     admission = _observe_admission(resource, repository, workstream, intent_revision)
     observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
