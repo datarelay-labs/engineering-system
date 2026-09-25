@@ -136,6 +136,83 @@ def test_authorize_without_host_trust_anchor_is_boundary_unavailable() -> None:
         assert "REASON=BOUNDARY_UNAVAILABLE" in result.stdout
 
 
+def test_path_shadow_verifier_is_never_executed() -> None:
+    """A PATH-prepended openssl that exits 0 must not decide signature validity."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        sentinel = base / "sentinel"
+        fake_bin = base / "bin"
+        fake_bin.mkdir()
+        fake = fake_bin / "openssl"
+        fake.write_text(
+            "#!/bin/sh\n"
+            f"echo executed > {json.dumps(str(sentinel))}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        os.chmod(fake, 0o755)
+        public_key = base / "not-a-key"
+        probe = """
+import importlib.util
+import sys
+from pathlib import Path
+
+tool = Path(sys.argv[1])
+public_key = Path(sys.argv[2])
+public_key.write_text("not-a-key\\n", encoding="utf-8")
+spec = importlib.util.spec_from_file_location("skills_contract_shadow", tool)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+sys.modules["skills_contract_shadow"] = module
+spec.loader.exec_module(module)
+result = module.ed25519_verify(public_key, b"untrusted-message", "AAAA")
+resolved = module.resolve_openssl_verifier()
+print(f"VERIFY_RESULT={result}")
+print(f"RESOLVED_OPENSSL={resolved}")
+"""
+        env = dict(os.environ)
+        env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+        completed = subprocess.run(
+            [sys.executable, "-c", probe, str(TOOL), str(public_key)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            env=env,
+            cwd=str(ROOT),
+        )
+        assert completed.returncode == 0, completed.stdout
+        assert "VERIFY_RESULT=False" in completed.stdout, completed.stdout
+        assert "RESOLVED_OPENSSL=/usr/bin/openssl" in completed.stdout, completed.stdout
+        assert not sentinel.exists()
+        source = TOOL.read_text(encoding="utf-8")
+        assert "shutil.which" not in source
+        assert 'HOST_OPENSSL_PATH = Path("/usr/bin/openssl")' in source
+
+
+def test_missing_trusted_verifier_fails_closed() -> None:
+    previous = contract._TEST_VERIFIER_AVAILABLE
+    contract._TEST_VERIFIER_AVAILABLE = False
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            public_key = Path(tmp) / "not-a-key"
+            public_key.write_text("not-a-key\n", encoding="utf-8")
+            assert contract.ed25519_verify(public_key, b"untrusted-message", "AAAA") is False
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            write_schema(root)
+            decision = contract.authorize(
+                root,
+                binding_assertion=root / "missing-binding.json",
+                dispatch_assertion=root / "missing-dispatch.json",
+            )
+        assert decision.allowed is False
+        assert decision.reason == "BOUNDARY_UNAVAILABLE"
+        assert contract.resolve_openssl_verifier() == ""
+    finally:
+        contract._TEST_VERIFIER_AVAILABLE = previous
+
+
 def test_caller_env_trust_anchor_does_not_alter_authorization() -> None:
     """Round 5: caller env/repo paths must not select the production trust anchor."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -677,6 +754,8 @@ def test_dispatch_reservation_is_effect_bound() -> None:
 def main() -> int:
     test_production_cli_is_verification_only()
     test_authorize_without_host_trust_anchor_is_boundary_unavailable()
+    test_path_shadow_verifier_is_never_executed()
+    test_missing_trusted_verifier_fails_closed()
     test_caller_env_trust_anchor_does_not_alter_authorization()
     test_missing_body_and_hook_kind_and_digest()
     test_authorize_with_fixture_assertions()

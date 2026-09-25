@@ -22,7 +22,6 @@ import hashlib
 import json
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,10 +52,14 @@ IGNORED_CALLER_TRUST_ANCHOR_ENV = "ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY"
 TRUST_ANCHOR_ENV = IGNORED_CALLER_TRUST_ANCHOR_ENV
 HOST_TRUST_ANCHOR_PATH = Path("/etc/engineering-system/skills-trust-anchor.pub")
 HOST_REPLAY_STATE_PATH = Path("/etc/engineering-system/skills-replay-state")
-OPENSSL = shutil.which("openssl") or ""
+# Fixed host verifier. Never resolved from PATH, environment, repo files, or CLI.
+HOST_OPENSSL_PATH = Path("/usr/bin/openssl")
 
 # Test-only library seams (never CLI/env/repo). Production authorize subprocess ignores these.
+# ``_TEST_VERIFIER_AVAILABLE=False`` only forces the fixed verifier unavailable.
+# It cannot select a different executable.
 _TEST_TRUST_ANCHOR_PATH: Path | None = None
+_TEST_VERIFIER_AVAILABLE: bool | None = None
 _TEST_REPLAY_BOUNDARY_AVAILABLE: bool | None = None
 _TEST_REPLAY_STORE: set[str] | None = None
 _TEST_DISPATCH_RESERVATIONS: dict[str, dict[str, str]] | None = None
@@ -329,8 +332,26 @@ def canonical_payload_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def resolve_openssl_verifier() -> str:
+    """Return the fixed host OpenSSL path, or empty when it is unavailable.
+
+    Production resolution is only ``/usr/bin/openssl`` after root-owned,
+    non-writable provenance checks. Caller PATH, environment, repository
+    files, packet text, and CLI arguments are ignored. There is no fallback.
+    """
+    if _TEST_VERIFIER_AVAILABLE is False:
+        return ""
+    path = HOST_OPENSSL_PATH
+    if not _host_path_provenance_ok(path, expect_file=True):
+        return ""
+    if not os.access(path, os.X_OK):
+        return ""
+    return str(path)
+
+
 def ed25519_verify(public_key: Path, message: bytes, signature_b64: str) -> bool:
-    if not OPENSSL:
+    openssl = resolve_openssl_verifier()
+    if not openssl:
         return False
     try:
         signature = base64.b64decode(signature_b64, validate=True)
@@ -343,7 +364,7 @@ def ed25519_verify(public_key: Path, message: bytes, signature_b64: str) -> bool
         sig.write_bytes(signature)
         completed = subprocess.run(
             [
-                OPENSSL,
+                openssl,
                 "pkeyutl",
                 "-verify",
                 "-pubin",
@@ -923,7 +944,7 @@ def authorize(
     """
     if not sys.platform.startswith("linux"):
         return Decision(False, "BOUNDARY_UNAVAILABLE")
-    if not OPENSSL:
+    if not resolve_openssl_verifier():
         return Decision(False, "BOUNDARY_UNAVAILABLE")
     anchor = resolve_trust_anchor()
     if anchor is None:
