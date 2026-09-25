@@ -3,6 +3,10 @@
 
 This tool only reads host memory, swap, and `agent persist list`. It never
 stops, kills, attaches to, or otherwise mutates existing Cursor sessions.
+`ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD` names the preflight executable for
+callers and is never read as YAML. Threshold overrides come from `--config`,
+`ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG`, or the default user and
+system YAML paths. A missing or malformed explicit override fails closed.
 
 Exit status:
   0  PASS or WARN; a new persistent session may proceed
@@ -43,6 +47,7 @@ PERSIST_SESSION_RE = re.compile(r"(?m)^[ \t]*Session:[ \t]*\S+")
 NO_SESSIONS_RE = re.compile(
     r"(?im)^[ \t]*no(?:[ \t]+cursor-managed)?[ \t]+persistent sessions\.?[ \t]*$"
 )
+RESOURCE_GUARD_CONFIG_ENV = "ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG"
 REPORT_KEYS = (
     "RESULT",
     "EXIT_CODE",
@@ -313,7 +318,7 @@ def discover_config(explicit: str | None, host_config: bool) -> Path | None:
         return path
     if not host_config:
         return None
-    env_path = os.environ.get("ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD", "").strip()
+    env_path = os.environ.get(RESOURCE_GUARD_CONFIG_ENV, "").strip()
     if env_path:
         path = Path(env_path)
         if not path.is_file():
