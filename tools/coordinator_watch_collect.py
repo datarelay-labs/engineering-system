@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from work_admission import AdmissionFactsError, canonicalize_worktree
+
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 ISSUE_RE = re.compile(r"^[0-9]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -399,10 +401,28 @@ def _observe_admission(resource: str, repository: str, workstream: str, intent_r
     return {"decision": "UNKNOWN"}
 
 
-def _bound_claim_revision(repository: str, workstream: str) -> int | None:
-    """Intent revision from one active claim. Packet text is not a source."""
+def _canonical_claim_worktree(payload: dict[str, Any]) -> str | None:
+    """Canonical claim worktree, or None when missing, invalid, or not already canonical."""
+    raw = payload.get("worktree")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        canonical = canonicalize_worktree(raw)
+    except AdmissionFactsError:
+        return None
+    if raw.strip().replace("\\", "/") != canonical:
+        return None
+    return canonical
+
+
+def _bound_claim_revision(repository: str, workstream: str, worktree: Path) -> int | None:
+    """Intent revision from the one active claim for this pinned worktree."""
     directory = _claim_dir()
     if directory is None:
+        return None
+    try:
+        pinned = canonicalize_worktree(str(worktree))
+    except AdmissionFactsError:
         return None
     try:
         paths = sorted(directory.iterdir())
@@ -428,6 +448,11 @@ def _bound_claim_revision(repository: str, workstream: str) -> int | None:
         revision = payload.get("intent_revision")
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
             return None
+        claim_worktree = _canonical_claim_worktree(payload)
+        if claim_worktree is None:
+            return None
+        if claim_worktree != pinned:
+            continue
         revisions.append(revision)
     if len(revisions) != 1:
         return None
@@ -460,7 +485,7 @@ def _observe_worker(
             break
     if not matched:
         return {"present": False}
-    starting = _bound_claim_revision(repository, workstream)
+    starting = _bound_claim_revision(repository, workstream, worktree)
     if starting is None:
         return {"present": False}
     return {

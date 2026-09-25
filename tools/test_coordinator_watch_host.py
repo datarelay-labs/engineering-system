@@ -37,6 +37,7 @@ from coordinator_watch_host import (  # noqa: E402
 )
 import skills_contract  # noqa: E402
 import skills_contract_fixtures as fixtures  # noqa: E402
+from work_admission import canonicalize_worktree  # noqa: E402
 
 FIXTURES = ROOT / "tools" / "fixtures" / "coordinator-watch"
 SCHEMA = json.loads((ROOT / "schemas" / "coordinator-watch-host.schema.json").read_text(encoding="utf-8"))
@@ -257,7 +258,7 @@ def write_agent(path: Path, worktree: Path, *, present: bool) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
-def write_claim(directory: Path) -> None:
+def write_claim(directory: Path, worktree: Path) -> None:
     directory.mkdir()
     (directory / "claim.json").write_text(
         json.dumps(
@@ -266,7 +267,11 @@ def write_claim(directory: Path) -> None:
                 "repository": REPO,
                 "workstream": WORKSTREAM,
                 "intent_revision": 3,
+                "worktree": canonicalize_worktree(str(worktree)),
+                "owned_paths": ["tools/"],
                 "status": "ACTIVE",
+                "dirty": False,
+                "unpushed": False,
                 "ambiguous": False,
             }
         ),
@@ -284,6 +289,7 @@ def observed_machine(
     claim: bool,
     meminfo: list[str],
     local_branch: str = BRANCH,
+    claim_worktree: Path | None = None,
 ) -> Iterator[Path]:
     worktree = base / "worktree"
     worktree.mkdir()
@@ -292,7 +298,7 @@ def observed_machine(
     write_agent(agent, worktree, present=session)
     claim_dir = base / "claims"
     if claim:
-        write_claim(claim_dir)
+        write_claim(claim_dir, claim_worktree or worktree)
     previous = (
         collect._TEST_WORKTREE,
         collect._TEST_TRUSTED_AGENT,
@@ -524,6 +530,42 @@ def test_wrong_head_session_does_not_resume() -> None:
         ):
             state = gh_state(base, facts, BRANCH, pr=False, sha=OTHER)
             _assert_unbound_session_does_not_resume(base, facts, state)
+
+
+def test_different_claim_worktree_does_not_resume() -> None:
+    facts = load_fixture("06-worker-progress.json")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        other = base / "other-worktree"
+        other.mkdir()
+        with observed_machine(
+            base,
+            dirty=True,
+            unpushed=False,
+            session=True,
+            claim=True,
+            meminfo=[HEALTHY_MEMINFO],
+            claim_worktree=other,
+        ):
+            state = gh_state(base, facts, BRANCH, pr=False)
+            with fake_gh(base, state):
+                collected = collect_authoritative(
+                    repository=REPO,
+                    workstream=WORKSTREAM,
+                    issue_id=TARGET,
+                    watch_class=facts["watch"]["watch_class"],
+                )
+                with host_env(base):
+                    result = run_once(request_for(facts))
+        worker = collected["facts"]["worker"]
+        assert collected["facts"]["git"].get("dirty") is True
+        assert worker.get("present") is not True
+        assert worker.get("progress_evidence") is not True
+        assert result["watch_result"] != "RESUME_ADMITTED_WORKER"
+        assert result["result"] != "DELIVERED"
+        assert result["resumes"] == 0
+        assert result["actions_delivered"] == 0
+        assert comment_count(base) == 0
 
 
 def test_liveness_without_progress_does_not_resume() -> None:
@@ -1065,6 +1107,7 @@ def main_tests() -> int:
     test_progress_resumes_once()
     test_wrong_branch_session_does_not_resume()
     test_wrong_head_session_does_not_resume()
+    test_different_claim_worktree_does_not_resume()
     test_liveness_without_progress_does_not_resume()
     test_revision_change_before_action_delivers_nothing()
     test_subject_change_before_action_delivers_nothing()
