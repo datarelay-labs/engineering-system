@@ -287,6 +287,12 @@ repositories:
     operations_mode: nonproduction
 ```
 
+## Security profile audit
+
+Repository security-profile classification is a separate read-only audit. Run it from a canonical Engineering System checkout with `python3 tools/security-profile.py`. It does not change ordinary adoption failure semantics and must not be required for `ENGINEERING_SYSTEM_ADOPTION=PASS`.
+
+Missing GitHub-native controls, including CodeQL, do not by themselves fail adoption. Empty and pre-product repositories report `DEFERRED` security controls instead of a fabricated pass. The auditor does not enable security settings, rewrite workflows, or roll controls out to an organization.
+
 ## Fail-closed cases
 
 Stop and report the smallest missing decision when:

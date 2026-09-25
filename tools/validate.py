@@ -102,6 +102,9 @@ REQUIRED_METHOD_FILES = (
     "schemas/verification-contract.schema.json",
     "schemas/trust-evidence-receipt.schema.json",
     "schemas/trust-evidence-boundary.schema.json",
+    "tools/security-profile.py",
+    "tools/test_security_profile.py",
+    "schemas/security-profile.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -1175,6 +1178,78 @@ def validate_verification_contract():
     print("PASS optional verification and trust evidence contract")
 
 
+def validate_security_profile():
+    Draft202012Validator.check_schema(load_json(ROOT / "schemas/security-profile.schema.json"))
+    tool = (ROOT / "tools/security-profile.py").read_text(encoding="utf-8")
+    for token in (
+        "NEEDS_INPUT",
+        "EQUIVALENT_EXTERNAL",
+        "UNAVAILABLE",
+        "DEFERRED",
+        "classify",
+        "audit",
+        '"mutation": "NONE"',
+        '"network": "NONE"',
+        "FULL_SHA_RE",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL security profile tool missing token: {token}")
+    for banned in (
+        "subprocess",
+        "urlopen",
+        "urllib",
+        "requests",
+        "os.system",
+        "shell=True",
+        "api.github.com",
+        "socket",
+    ):
+        if banned in tool:
+            raise SystemExit(f"FAIL security profile tool contains banned token: {banned}")
+    if 'return ("classify", "audit")' not in tool:
+        raise SystemExit("FAIL security profile tool exposes commands other than classify and audit")
+    security = (ROOT / "standards/SECURITY.md").read_text(encoding="utf-8")
+    for token in (
+        "production-code",
+        "development-code",
+        "docs-site",
+        "empty-preproduct",
+        "NEEDS_INPUT",
+        "REQUIRED_PASS",
+        "REQUIRED_FAIL",
+        "RECOMMENDED_PASS",
+        "RECOMMENDED_GAP",
+        "EQUIVALENT_EXTERNAL",
+        "DEFERRED",
+        "UNAVAILABLE",
+        "NOT_APPLICABLE",
+        "UNKNOWN",
+        "40-hex",
+        "tools/security-profile.py",
+    ):
+        if token not in security:
+            raise SystemExit(f"FAIL SECURITY.md missing security profile token: {token}")
+    adoption = (ROOT / "standards/ADOPTION.md").read_text(encoding="utf-8")
+    for token in (
+        "tools/security-profile.py",
+        "does not change ordinary adoption failure semantics",
+        "ENGINEERING_SYSTEM_ADOPTION=PASS",
+        "CodeQL",
+        "DEFERRED",
+    ):
+        if token not in adoption:
+            raise SystemExit(f"FAIL ADOPTION.md missing security profile token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if "tools/security-profile.py classify" not in text or "does not mutate GitHub settings" not in text:
+            raise SystemExit(f"FAIL {rel} missing security profile router")
+    if "security-profile" in (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8"):
+        raise SystemExit("FAIL security profile must not change adoption compliance")
+    if "security-profile" in (ROOT / "tools/adopt.py").read_text(encoding="utf-8"):
+        raise SystemExit("FAIL security profile must not become an adoption managed file")
+    print("PASS read-only security profile contract")
+
+
 def validate_action_pins():
     failures = []
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
@@ -1223,6 +1298,7 @@ def main():
     validate_runtime_evidence()
     validate_skills_contract()
     validate_verification_contract()
+    validate_security_profile()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -1260,6 +1336,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_security_profile.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)

@@ -84,3 +84,26 @@ Efficiency telemetry is not a security audit log. Where agent actions cross mean
 - timestamp and terminal outcome.
 
 Do not retain raw secrets, private keys, unrestricted tool payloads, or full conversation content by default. Audit retention and access should match project risk.
+
+## Repository security profiles
+
+`python3 tools/security-profile.py classify --root <repo>` and `python3 tools/security-profile.py audit --root <repo> [--github-fixture <json>]` are a read-only, network-free auditor. They do not enable, disable, or otherwise mutate GitHub settings, workflows, or organization policy.
+
+Profile precedence:
+
+1. conflicting required facts => `NEEDS_INPUT`
+2. explicit adopted production posture plus executable code or workflows => `production-code`
+3. no executable/build/deploy surface plus explicit `operations.pre_product: true` => `empty-preproduct`
+4. docs/site build or deploy with no material runtime/product code => `docs-site`
+5. remaining code-bearing non-production repositories => `development-code`
+6. insufficient distinguishing facts => `NEEDS_INPUT`
+
+Explicit production posture is `operations.production_oriented: true` or `project.maturity: production`. Those signals must not disagree. `operations.pre_product: true` is the explicit bootstrap/pre-product marker and conflicts with production posture or any executable, build, deploy, or docs surface.
+
+Control states are `REQUIRED_PASS`, `REQUIRED_FAIL`, `RECOMMENDED_PASS`, `RECOMMENDED_GAP`, `EQUIVALENT_EXTERNAL`, `DEFERRED`, `UNAVAILABLE`, `NOT_APPLICABLE`, and `UNKNOWN`.
+
+Production-code repositories require secret scanning, push protection, Dependabot security updates, CodeQL or equivalent SAST, known repository visibility, and immutable pins on sensitive workflows. Development-code repositories recommend the GitHub-native controls and still require sensitive-workflow pins. Docs-site repositories must not fail solely because CodeQL is absent. Empty/preproduct repositories record `DEFERRED` rather than a fabricated pass. Inaccessible GitHub facts and missing visibility are `UNAVAILABLE`. Unknown visibility or provenance never becomes `PASS`.
+
+Sensitive workflows are those that perform security, release, publish, deploy, pages, signing/provenance, credentialed external write, or production-infrastructure mutation. Remote `uses:` values on those paths must be `owner/repo[/path]@` plus a full 40-hex SHA. `./...` is local. Tag, branch, malformed, and unsupported refs are explicit failures.
+
+`EQUIVALENT_EXTERNAL` requires fixture evidence with control id, provider/source, immutable or version identity, evidence reference, timestamp, repository binding, and `approval_state: approved`. README prose, comments, and tool claims do not qualify. Unknown privileged tool, MCP, or plugin provenance fails closed when a privileged tool is declared.
