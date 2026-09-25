@@ -33,8 +33,8 @@ scenarios:
   - id: BEH-TASKSWITCH-006
     mandatory: true
     safety: true
-    title: Fresh session only after resource PASS
-    invariant: A new bounded task uses a fresh session only when resource preflight allows it.
+    title: Reuse the project persistent session
+    invariant: A Work Packet or Next Action transition reuses the project persistent session. A new persistent session is created only for a missing, unusable, or admitted-parallel worker, and only when resource preflight allows it.
     checker: taskswitch
   - id: BEH-REVIEW-007
     mandatory: true

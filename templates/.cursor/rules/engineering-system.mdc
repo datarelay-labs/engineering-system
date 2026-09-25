@@ -10,3 +10,5 @@ Follow repository `AGENTS.md` and `.engineering/project.yaml` under the canonica
 Use minimum sufficient context. On an existing branch/PR, inspect the diff first and expand only to required dependencies. Run the smallest correct change and cheapest affected deterministic check first; inspect actionable review feedback before merge.
 
 Do not auto-run expensive/full-suite checks for metadata-only or narrowly scoped changes. Do not spend coding-agent time polling external waits or dumping large command output into context; save verbose logs and surface only exit status plus relevant grep/tail evidence.
+
+Reuse one healthy project persistent Cursor session across Work Packets. Reset context with `/clear` then `/work-resume`; create a new persistent session only when none is healthy, the current one is unusable, or admitted parallel work needs an isolated worker.

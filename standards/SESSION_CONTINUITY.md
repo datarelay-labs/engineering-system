@@ -86,7 +86,7 @@ Use these as **soft operating defaults**, not hard limits. Structural coupling a
 - A change of **a few hundred hand-written lines** is normally still in the target zone when it stays within one outcome. Generated files, lockfiles, snapshots, and mechanical propagation do not determine size by themselves.
 - `BATCH` when a task is materially below that band and adjacent findings share the same subsystem, implementation context, and validation oracle. GitHub Issue count is not a sizing metric; one handoff may reference several small Issues.
 - `SPLIT` when the work is likely to exceed roughly two hours of human-equivalent effort, contains multiple independent outcomes/rollback boundaries, or would consume the useful agent context before targeted validation and review can finish.
-- During execution, if context usage is already high and a distinct implementation subgoal remains, persist the verified state and continue that subgoal in a fresh bounded session rather than forcing the original session through compaction/noise. Finishing the current tightly coupled validation step is preferred over splitting in the middle of an atomic check.
+- During execution, if context usage is already high and a distinct implementation subgoal remains, persist the verified state and continue that subgoal after a context reset on the same reusable project persistent session rather than forcing the original conversation through compaction/noise. `/clear` resets conversational context only. It does not create a persistent worker and does not discard Git or worktree truth. Finishing the current tightly coupled validation step is preferred over splitting in the middle of an atomic check.
 
 These values are calibration defaults, not universal constants. P0/P1 efficiency telemetry should measure rework, validation failures, context pressure, and handoff overhead; revise the band from observed outcomes rather than increasing task size merely because a model can technically run longer.
 
@@ -303,7 +303,7 @@ After resolving Git identity and before ordinary work:
 9. Do not keep a coding-agent session alive polling CI, review, deployment, or another machine-observable external condition. Record a concise `WAITING_FOR_<CONDITION>` state and yield to coordinator/automation; the next resume re-checks the condition.
 10. For an existing branch/PR, orient from the base diff first (`git diff --name-only`/`git diff --stat`) before broad repository search.
 11. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity.
-12. Prefer a fresh coding-agent session for each new bounded `Next Action` only after `tools/cursor-resource-preflight.py` returns exit 0 (`PASS` or `WARN`). On `BLOCK`, do not create a new persistent session and do not stop, kill, or mutate existing sessions. Resource safety takes precedence over a fresh session. Reuse an already-running matching target session when that reuse is safe and semantically correct. Persistent sessions are for an in-flight action/process, not long-term memory.
+12. Reuse one healthy project/repository persistent Cursor session across Work Packet, Issue, branch, PR, and `Next Action` transitions. A transition does not create a new persistent session. The safe transition is: persist durable Work Packet state, verify no in-flight or unreconciled mutation, `/clear`, switch to a clean reconciled worktree/branch, then `/work-resume`. Reconcile dirty, unpushed, or ambiguous state before switching. Never `/clear` while a command, external mutation, or ambiguous result is in flight. Run `tools/cursor-resource-preflight.py` only when actually creating a new persistent session. On `BLOCK`, do not create that session and do not stop, kill, or mutate existing sessions. Create a new persistent session only when no healthy reusable project session exists, the current session is unusable or incompatible, or separately admitted parallel work requires another isolated worker. When that parallel work ends, return to the reusable project session rather than accumulating workers. Durable authority stays in the Work Packet; stale conversation is not authority.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -409,7 +409,7 @@ Prefer subject/version identity or exact revision over arbitrary time-to-live. H
 
 ## Coordinator / worker execution model
 
-The Work Packet/objective is durable; coding-agent sessions are disposable workers.
+The Work Packet/objective is durable. Conversational context is disposable. The project persistent Cursor session is the reusable worker, not one session per Work Packet or `Next Action`.
 
 A coordinator or equivalent outer loop should, when automation exists:
 
@@ -421,7 +421,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one agent session to survive the whole workstream. The same outcome may span multiple fresh sessions when context/resource boundaries require it.
+Do not encode a brittle micro-step state machine that requires one conversational context to survive the whole workstream. The same outcome may span multiple context resets on the reusable project persistent session when context boundaries require it. A context reset is `/clear` followed by `/work-resume`. It is not a new persistent session.
 
 ## Pure coordinator planner
 
@@ -590,11 +590,11 @@ The resume command:
 - yields instead of polling when CI/review/deployment or another machine-observable external condition is pending; coordinator/automation owns waiting and re-entry
 - uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
 
-The default remains single-agent sequential execution when the owner's project rules require it. A long-lived coding-agent session is not a substitute for durable packet state or external orchestration.
+The default remains one healthy project/repository persistent Cursor session reused across sequential work. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
 
 ## Persistent-session resource guard
 
-Before any new `agent persist` session, run the canonical preflight:
+Before creating a new `agent persist` session, run the canonical preflight. Routine reuse of the existing project session does not run this preflight:
 
 ```bash
 python3 tools/cursor-resource-preflight.py
