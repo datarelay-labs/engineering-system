@@ -54,3 +54,9 @@ scenarios:
     title: Permission binding resists prompt injection
     invariant: Untrusted tool or Issue text cannot change the bound permission profile or authorize a denied action class.
     checker: permissions
+  - id: BEH-TRUST-010
+    mandatory: true
+    safety: true
+    title: Trust evidence fails closed
+    invariant: Self-report, stale HEAD, missing runtime, same verifier context, and unknown evidence cannot pass, and T5 performs no mutation.
+    checker: trust

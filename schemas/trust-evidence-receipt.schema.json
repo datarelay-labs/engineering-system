@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded exact-head trust evidence receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "target_repo",
+    "workstream",
+    "intent_revision",
+    "subject_head",
+    "feature_id",
+    "oracle",
+    "items"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "trust-evidence-receipt"},
+    "target_repo": {"$ref": "#/$defs/repo"},
+    "workstream": {"$ref": "#/$defs/workstream"},
+    "intent_revision": {"$ref": "#/$defs/revision"},
+    "subject_head": {"$ref": "#/$defs/sha"},
+    "feature_id": {"$ref": "#/$defs/featureId"},
+    "oracle": {"$ref": "#/$defs/oracle"},
+    "runtime_subject": {"$ref": "#/$defs/token"},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/item"}
+    }
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "repo": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "workstream": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "featureId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "oracle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9_.:@/+-]+$"
+    },
+    "refId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK", "UNKNOWN"]},
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "id",
+        "status",
+        "subject_head",
+        "intent_revision",
+        "reference",
+        "external_digest"
+      ],
+      "properties": {
+        "authority": {
+          "type": "string",
+          "enum": [
+            "test",
+            "runtime",
+            "skill",
+            "profile",
+            "ci",
+            "self_report",
+            "automation_policy"
+          ]
+        },
+        "id": {"$ref": "#/$defs/refId"},
+        "status": {"$ref": "#/$defs/status"},
+        "subject_head": {"$ref": "#/$defs/sha"},
+        "intent_revision": {"$ref": "#/$defs/revision"},
+        "reference": {"$ref": "#/$defs/token"},
+        "external_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

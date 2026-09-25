@@ -30,7 +30,8 @@
               "taskswitch",
               "review",
               "adoption",
-              "permissions"
+              "permissions",
+              "trust"
             ]
           }
         }

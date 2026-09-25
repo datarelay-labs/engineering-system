@@ -47,6 +47,16 @@ SKILLS_CONTRACT_MANAGED = (
     "schemas/skills-contract.schema.json",
 )
 
+# Optional verification-contract helper, schemas, and the reused T4 verifier.
+# `.engineering/verification.yaml` is never created. Test fixtures are not installed.
+VERIFICATION_CONTRACT_MANAGED = (
+    "tools/verification-contract.py",
+    "tools/independent_verifier.py",
+    "schemas/verification-contract.schema.json",
+    "schemas/trust-evidence-receipt.schema.json",
+    "schemas/trust-evidence-boundary.schema.json",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -60,6 +70,7 @@ REQUIRED_MANAGED = (
     *KNOWLEDGE_CONTRACT_MANAGED,
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
+    *VERIFICATION_CONTRACT_MANAGED,
 )
 
 # Known Cursor resume aliases kept in sync when present or installed as managed adapters.
@@ -868,6 +879,24 @@ def ensure_knowledge_contract_compatible(root: Path) -> None:
         )
 
 
+def ensure_verification_contract_compatible(root: Path) -> None:
+    """Reject an incompatible helper or schema before adoption writes any files.
+
+    A missing path is installed later. A byte-identical canonical copy is preserved.
+    `.engineering/verification.yaml` is not consulted and is never created.
+    """
+    for rel in VERIFICATION_CONTRACT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_skills_contract_compatible(root: Path) -> None:
     """Reject an incompatible helper or schema before adoption writes any files.
 
@@ -1099,6 +1128,7 @@ def main() -> int:
     ensure_knowledge_contract_compatible(root)
     ensure_runtime_contract_compatible(root)
     ensure_skills_contract_compatible(root)
+    ensure_verification_contract_compatible(root)
 
     written: list[str] = []
     skipped: list[str] = []
@@ -1128,7 +1158,12 @@ def main() -> int:
     )
     for alias in RESUME_ADAPTER_ALIASES:
         write_missing(root, alias, resume_text, written, skipped)
-    for rel in (*KNOWLEDGE_CONTRACT_MANAGED, *RUNTIME_CONTRACT_MANAGED, *SKILLS_CONTRACT_MANAGED):
+    for rel in (
+        *KNOWLEDGE_CONTRACT_MANAGED,
+        *RUNTIME_CONTRACT_MANAGED,
+        *SKILLS_CONTRACT_MANAGED,
+        *VERIFICATION_CONTRACT_MANAGED,
+    ):
         write_missing(
             root,
             rel,

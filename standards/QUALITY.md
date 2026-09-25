@@ -78,6 +78,21 @@ Default behavior:
 
 These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.
 
+## Trust by evidence
+
+Optional `.engineering/verification.yaml` maps a feature to applicable domains and to launch, drive, observe, and cleanup references. Those references are existing test scenario IDs, runtime authority or capability IDs, and skill or profile IDs only. The map contains no command, shell, URL, endpoint, or argv fields. `python3 tools/verification-contract.py check` validates a present map and passes when the file is absent. Adoption never creates the file.
+
+`python3 tools/verification-contract.py assess` reads one bounded evidence receipt and no boundary file. Receipt-only CLI output stays at T0/BLOCK. Implementer-produced output is never terminal evidence. T1–T5 calculation requires an in-process `TrustedCoordinatorBoundary` passed to `assess`. A raw dict or parsed JSON object stays at T0. The tool does not establish that precondition, does not verify skills-contract signatures, and a provenance string is not a trust anchor. Receipts bind repository, workstream, intent revision `>= 1`, and a lowercase 40-hex HEAD. The assessor does not execute project commands and does not merge, release, or deploy.
+
+- T0 is self-report or receipt-only CLI output and is never completion evidence.
+- T1 is referenced deterministic test, skill, and profile evidence at the exact HEAD and intent revision, only from the coordinator precondition.
+- T2 adds exact-HEAD CI evidence from that same precondition.
+- T3 adds PASS evidence for every referenced runtime id plus a bounded runtime subject. Missing runtime evidence cannot reach T3.
+- T4 calls `independent_verifier.evaluate` on that coordinator precondition for the exact subject. Receipt-minted verifier actors cannot satisfy T4.
+- T5 reports `AUTOMATION_ELIGIBLE=YES` only after T4 and coordinator policy eligibility outside the receipt, plus an explicit `automation_eligible` entry. `EXTERNAL_MUTATION=NO`. `external_digest` is not treated as verified content; `DIGEST_VERIFIED=NO`. Eligibility does not authorize merge, release, deploy, or external writes.
+
+Stale HEAD, stale intent, unknown evidence, and unbounded logs fail closed. UNKNOWN stays BLOCK and never PASS.
+
 ## Bounded hardening and audit depth
 
 Security, reliability, quality, and architecture can always be improved further. A quality process therefore needs a stopping rule as well as a defect-finding rule.

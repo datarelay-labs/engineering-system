@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Coordinator trust evidence boundary",
+  "description": "In-process trusted-coordinator precondition. A provenance string is not a trust anchor. The public CLI does not accept this document. Implementer-produced output is never terminal evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "provenance",
+    "target_repo",
+    "workstream",
+    "intent_revision",
+    "subject_head",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "trust-evidence-boundary"},
+    "provenance": {"type": "string", "const": "coordinator-boundary"},
+    "target_repo": {"$ref": "#/$defs/repo"},
+    "workstream": {"$ref": "#/$defs/workstream"},
+    "intent_revision": {"$ref": "#/$defs/revision"},
+    "subject_head": {"$ref": "#/$defs/sha"},
+    "runtime_subject": {"$ref": "#/$defs/token"},
+    "evidence": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "verifier": {"$ref": "#/$defs/verifier"},
+    "automation_policy": {"$ref": "#/$defs/policy"}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "repo": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "workstream": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9_.:@/+-]+$"
+    },
+    "refId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
+    },
+    "subjectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "actorId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@+-]*$"
+    },
+    "status": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK", "UNKNOWN"]},
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "context_id"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/actorId"},
+        "context_id": {"$ref": "#/$defs/actorId"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "id", "status", "subject_head", "intent_revision"],
+      "properties": {
+        "authority": {"type": "string", "enum": ["test", "ci", "runtime", "skill", "profile"]},
+        "id": {"$ref": "#/$defs/refId"},
+        "status": {"$ref": "#/$defs/status"},
+        "subject_head": {"$ref": "#/$defs/sha"},
+        "intent_revision": {"$ref": "#/$defs/revision"}
+      }
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_risk",
+        "implementer",
+        "verifier",
+        "oracle_id",
+        "oracle_result",
+        "ci_subject_id",
+        "ci_result"
+      ],
+      "properties": {
+        "change_risk": {"const": "HIGH"},
+        "implementer": {"$ref": "#/$defs/actor"},
+        "verifier": {"$ref": "#/$defs/actor"},
+        "oracle_id": {"$ref": "#/$defs/refId"},
+        "oracle_result": {"$ref": "#/$defs/status"},
+        "ci_subject_id": {"$ref": "#/$defs/subjectId"},
+        "ci_result": {"$ref": "#/$defs/status"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_id", "eligible"],
+      "properties": {
+        "feature_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "eligible": {"type": "boolean"}
+      }
+    }
+  }
+}

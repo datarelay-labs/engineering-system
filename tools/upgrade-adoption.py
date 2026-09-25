@@ -15,6 +15,7 @@ from adopt import (
     RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
+    VERIFICATION_CONTRACT_MANAGED,
     canonical_baseline,
     canonical_version,
     engineering_workflow,
@@ -400,6 +401,42 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
         installed.append(rel)
     return installed
 
+
+def plan_verification_contract_install(root: Path) -> dict[str, str]:
+    """Install the optional verification-contract helper only when the path is missing.
+
+    Identical canonical copies are left unchanged. A different existing file,
+    including the required independent verifier, fails closed before any upgrade
+    mutation. `.engineering/verification.yaml` is not created.
+    """
+    planned: dict[str, str] = {}
+    for rel in VERIFICATION_CONTRACT_MANAGED:
+        source = CANONICAL / rel
+        if not source.is_file():
+            raise SystemExit(f"FAIL canonical {rel} missing")
+        text = source.read_text(encoding="utf-8")
+        path = root / rel
+        if not path.exists():
+            planned[rel] = text
+            continue
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
+    return planned
+
+
+def apply_verification_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def _span_covered(span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
     start, end = span
     return any(start >= c_start and end <= c_end for c_start, c_end in covered)
@@ -729,6 +766,7 @@ def main() -> int:
     planned_knowledge_contract = plan_knowledge_contract_install(root)
     planned_runtime_contract = plan_runtime_contract_install(root)
     planned_skills_contract = plan_skills_contract_install(root)
+    planned_verification_contract = plan_verification_contract_install(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -766,6 +804,12 @@ def main() -> int:
         print("SKILLS_CONTRACT_INSTALLED=" + ",".join(installed_skills))
     else:
         print("SKILLS_CONTRACT_INSTALLED=<none>")
+
+    installed_verification = apply_verification_contract_install(root, planned_verification_contract)
+    if installed_verification:
+        print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
+    else:
+        print("VERIFICATION_CONTRACT_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:
