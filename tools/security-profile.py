@@ -123,6 +123,9 @@ INFRA_MUTATION_MARKERS = (
 ID_TOKEN_WRITE_RE = re.compile(r"id-token\s*:\s*['\"]?write\b")
 WRITE_PERMISSION_VALUES = {"write", "write-all"}
 SECRET_REF_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+SECRET_BRACKET_RE = re.compile(
+    r"""secrets\[\s*(?:'(?P<single>[^']*)'|"(?P<double>[^"]*)"|(?P<dynamic>[^\]]+))\s*\]"""
+)
 SECRETS_INHERIT_RE = re.compile(r"(?m)^[ \t]*secrets:[ \t]*inherit[ \t]*(?:#.*)?$")
 BUILTIN_GITHUB_TOKEN = "GITHUB_TOKEN"
 PAGES_MARKERS = ("deploy-pages", "upload-pages-artifact", "configure-pages")
@@ -240,6 +243,17 @@ GOVERNANCE_WORKFLOW_PATHS = {
     ".github/workflows/engineering-system.yml",
     ".github/workflows/engineering-system.yaml",
 }
+CANONICAL_COMPLIANCE_USES = frozenset(
+    {
+        "datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml",
+        "datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml",
+        "datarelay-labs/engineering-system/.github/workflows/affected-tests.yml",
+    }
+)
+GOVERNANCE_TOP_LEVEL = frozenset({"name", "on", "permissions", "jobs"})
+GOVERNANCE_JOB_KEYS = frozenset({"uses", "with", "permissions"})
+GOVERNANCE_WITH_KEYS = frozenset({"manifest_path", "trigger"})
+READ_ONLY_PERMISSION_VALUES = frozenset({"read", "none"})
 
 
 def is_workflow(path: Path, root: Path) -> bool:
@@ -277,15 +291,89 @@ def workflow_text(path: Path) -> str | None:
         return None
 
 
-def is_governance_workflow(path: Path, root: Path, text: str) -> bool:
-    """Mandatory adoption compliance caller is not a product/build/deploy surface.
+def read_only_permissions(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in READ_ONLY_PERMISSION_VALUES | {"read-all"}
+    if isinstance(value, dict):
+        return all(
+            isinstance(item, str) and item.strip().lower() in READ_ONLY_PERMISSION_VALUES
+            for item in value.values()
+        )
+    return False
 
-    A deploy, release, credential, or infrastructure signal inside that file
-    still counts as product surface.
-    """
+
+def pull_request_trigger(loaded: dict[str, Any]) -> bool:
+    """GitHub workflow `on` is boolean true under YAML 1.1."""
+    if "on" in loaded:
+        trigger = loaded.get("on")
+    elif True in loaded:
+        trigger = loaded.get(True)
+    else:
+        return False
+    if isinstance(trigger, str):
+        return trigger.strip() == "pull_request"
+    if isinstance(trigger, list):
+        return trigger == ["pull_request"]
+    if isinstance(trigger, dict):
+        return set(trigger) == {"pull_request"}
+    return False
+
+
+def governance_top_keys(loaded: dict[str, Any]) -> set[Any]:
+    keys = set(loaded)
+    if True in keys:
+        keys.remove(True)
+        keys.add("on")
+    return keys
+
+
+def canonical_compliance_use(raw: str) -> bool:
+    match = REMOTE_USE_RE.fullmatch(raw.strip().strip("'\""))
+    if match is None or not FULL_SHA_RE.fullmatch(match.group("ref") or ""):
+        return False
+    path = match.group("path")
+    if not path:
+        return False
+    return f"{match.group('owner')}/{match.group('repo')}/{path}" in CANONICAL_COMPLIANCE_USES
+
+
+def canonical_compliance_job(job: Any) -> bool:
+    if not isinstance(job, dict) or set(job) - GOVERNANCE_JOB_KEYS:
+        return False
+    if any(key in job for key in ("runs-on", "steps", "run")):
+        return False
+    uses = job.get("uses")
+    if not isinstance(uses, str) or not canonical_compliance_use(uses):
+        return False
+    inputs = job.get("with")
+    if inputs is not None:
+        if not isinstance(inputs, dict) or set(inputs) - GOVERNANCE_WITH_KEYS:
+            return False
+        if not all(isinstance(value, str) for value in inputs.values()):
+            return False
+    return read_only_permissions(job.get("permissions"))
+
+
+def is_governance_workflow(path: Path, root: Path, text: str) -> bool:
+    """Canonical compliance caller only. Local runs and other callers are product surface."""
     if path.relative_to(root).as_posix() not in GOVERNANCE_WORKFLOW_PATHS:
         return False
-    return not sensitive_workflow(path, text)
+    if sensitive_workflow(path, text):
+        return False
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(loaded, dict) or governance_top_keys(loaded) - GOVERNANCE_TOP_LEVEL:
+        return False
+    if not pull_request_trigger(loaded) or not read_only_permissions(loaded.get("permissions")):
+        return False
+    jobs = loaded.get("jobs")
+    if not isinstance(jobs, dict) or not jobs:
+        return False
+    return all(canonical_compliance_job(job) for job in jobs.values())
 
 
 def permission_grants_write(value: Any) -> bool:
@@ -318,14 +406,26 @@ def permissions_grant_write(text: str) -> bool:
     )
 
 
+def bracket_secret_is_external(match: re.Match[str]) -> bool:
+    literal = match.group("single")
+    if literal is None:
+        literal = match.group("double")
+    if literal is None:
+        return True
+    return literal != BUILTIN_GITHUB_TOKEN
+
+
 def secret_backed_external_write(text: str) -> bool:
     """Credential forwarding or a secret other than the built-in GITHUB_TOKEN.
 
-    This matches explicit secret references only. It does not interpret shell.
+    Dot and quoted bracket indexes are explicit. A dynamic or unquoted index
+    fails closed. This does not interpret shell.
     """
     if SECRETS_INHERIT_RE.search(text):
         return True
-    return any(match.group(1) != BUILTIN_GITHUB_TOKEN for match in SECRET_REF_RE.finditer(text))
+    if any(match.group(1) != BUILTIN_GITHUB_TOKEN for match in SECRET_REF_RE.finditer(text)):
+        return True
+    return any(bracket_secret_is_external(match) for match in SECRET_BRACKET_RE.finditer(text))
 
 
 def sensitive_workflow(path: Path, text: str) -> bool:
@@ -687,14 +787,12 @@ def read_git_config(root: Path) -> str | None:
     admin = _lexical_path(git_path.parent, gitdir_raw)
     if admin is None or admin.is_symlink() or not admin.is_dir():
         return None
-    if (admin / "commondir").exists():
-        common = _worktree_common_dir(admin)
-        if common is None:
-            return None
-        config_path = common / "config"
-    else:
-        config_path = admin / "config"
-    return _regular_config_text(config_path)
+    if not (admin / "commondir").is_file():
+        return None
+    common = _worktree_common_dir(admin)
+    if common is None:
+        return None
+    return _regular_config_text(common / "config")
 
 
 def local_repository_identity(root: Path) -> str | None:

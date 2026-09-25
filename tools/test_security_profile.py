@@ -895,6 +895,121 @@ def test_authoritative_symlinks_cannot_grant_pass() -> None:
             fail(f"ordinary source symlink was {ordinary_report['profile']}: {ordinary_report['reason']}")
 
 
+def test_arbitrary_gitdir_cannot_grant_repository_pass() -> None:
+    github_controls = (
+        "repository_visibility",
+        "secret_scanning",
+        "push_protection",
+        "dependabot_security_updates",
+        "codeql_or_sast",
+    )
+    pass_states = {"REQUIRED_PASS", "RECOMMENDED_PASS", "EQUIVALENT_EXTERNAL"}
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        external = base / "external.git"
+        external.mkdir()
+        (external / "config").write_text(
+            '[remote "origin"]\n'
+            "\turl = https://github.com/example/app.git\n",
+            encoding="utf-8",
+        )
+        root = base / "target-repo"
+        root.mkdir()
+        write_project(root, maturity="production", production_oriented=True)
+        (root / "src").mkdir()
+        (root / "src" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+        (root / ".git").write_text(f"gitdir: {external}\n", encoding="utf-8")
+        if PROFILE.local_repository_identity(root) is not None:
+            fail(f"arbitrary gitdir identity was {PROFILE.local_repository_identity(root)!r}")
+        if PROFILE.read_git_config(root):
+            fail("arbitrary gitdir config was read")
+        report = PROFILE.build_report(root, enabled_fixture())
+        for control_id in github_controls:
+            if state_of(report, control_id) in pass_states:
+                fail(f"arbitrary gitdir yielded {state_of(report, control_id)} for {control_id}")
+        if state_of(report, "privileged_tool_provenance") in pass_states:
+            fail("arbitrary gitdir granted privileged provenance PASS")
+
+
+def test_governance_filename_with_local_run_blocks_preproduct() -> None:
+    executable = (
+        "name: Engineering System\n"
+        "on: workflow_dispatch\n"
+        "jobs:\n"
+        "  execute:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo execute\n"
+    )
+    foreign_caller = (
+        "name: Engineering System\n"
+        "on:\n"
+        "  pull_request:\n"
+        "permissions:\n"
+        "  contents: read\n"
+        "jobs:\n"
+        "  extra:\n"
+        f"    uses: example/other/.github/workflows/run.yml@{SHA}\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_project(root, maturity="experimental", production_oriented=False)
+        write_origin(root, "example/app")
+        write_workflow(root, "engineering-system.yml", executable)
+        report = PROFILE.build_report(root, enabled_fixture(bootstrap="allow-no-tests"))
+        if report["profile"] == "empty-preproduct":
+            fail("local run inside engineering-system.yml classified empty-preproduct")
+        if "conflicts" not in report["reason"]:
+            fail(f"local run did not conflict with bootstrap: {report['reason']}")
+        write_workflow(root, "engineering-system.yml", foreign_caller)
+        foreign = PROFILE.build_report(root, enabled_fixture(bootstrap="allow-no-tests"))
+        if foreign["profile"] == "empty-preproduct":
+            fail("non-canonical caller classified empty-preproduct")
+
+
+def test_bracket_secrets_fail_sensitive_pin() -> None:
+    def workflow(token: str) -> str:
+        return (
+            "name: check\n"
+            "on: workflow_dispatch\n"
+            "jobs:\n"
+            "  upload:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - uses: sample-org/uploader@v1\n"
+            "        with:\n"
+            f"          token: {token}\n"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_project(root, maturity="development", production_oriented=False)
+        (root / "src").mkdir()
+        (root / "src" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+        sensitive_tokens = (
+            "${{ secrets['UPLOAD_TOKEN'] }}",
+            '${{ secrets["UPLOAD_TOKEN"] }}',
+            "${{ secrets.UPLOAD_TOKEN }}",
+            "${{ secrets[inputs.token_name] }}",
+        )
+        for token in sensitive_tokens:
+            write_workflow(root, "ci.yml", workflow(token))
+            report = PROFILE.build_report(root, enabled_fixture())
+            if report["profile"] != "development-code":
+                fail(f"bracket secret fixture profile was {report['profile']}")
+            if state_of(report, "sensitive_action_pin") != "REQUIRED_FAIL":
+                fail(f"{token} was {state_of(report, 'sensitive_action_pin')}")
+            if state_of(report, "ordinary_action_pin") == "RECOMMENDED_GAP":
+                fail(f"{token} was downgraded to ordinary_action_pin")
+        for token in ("${{ secrets['GITHUB_TOKEN'] }}", "${{ secrets.GITHUB_TOKEN }}"):
+            write_workflow(root, "ci.yml", workflow(token))
+            report = PROFILE.build_report(root, enabled_fixture())
+            if state_of(report, "sensitive_action_pin") == "REQUIRED_FAIL":
+                fail(f"built-in {token} was treated as an external secret")
+            if state_of(report, "ordinary_action_pin") != "RECOMMENDED_GAP":
+                fail(f"built-in {token} was not an ordinary gap")
+
+
 def test_unknown_privileged_provenance_fails_closed() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -991,6 +1106,9 @@ def main() -> None:
     test_worktree_commondir_binds_repository()
     test_forged_origin_key_and_symlink_git_do_not_bind()
     test_authoritative_symlinks_cannot_grant_pass()
+    test_arbitrary_gitdir_cannot_grant_repository_pass()
+    test_governance_filename_with_local_run_blocks_preproduct()
+    test_bracket_secrets_fail_sensitive_pin()
     test_unknown_privileged_provenance_fails_closed()
     test_outcome_has_no_mutation_path()
     print("PASS security profile classifier and read-only audit")
