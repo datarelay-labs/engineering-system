@@ -53,7 +53,7 @@
     "stops_unrelated_sessions": {"const": false},
     "mutates_existing_sessions": {"const": false},
     "spawns_process": {"const": false},
-    "mutates_github": {"const": false},
+    "mutates_github": {"type": "boolean"},
     "executes_command": {"const": false},
     "busy_loop": {"const": false},
     "sleeps": {"const": false},

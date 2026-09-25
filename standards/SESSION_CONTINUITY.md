@@ -489,21 +489,24 @@ The host is a run-once adapter around the watch evaluator. An external scheduler
 python3 tools/coordinator_watch_host.py run-once --request <request.json>
 ```
 
-One request declares one watch class and the paths for its lock, watch state, action ledger, collected facts, and authoritative refetch. `work_budget` must be 1.
+One request declares one watch class, repository, workstream, and effect target. Mutable lock, watch-state, ledger, and journal paths are derived from that identity. `work_budget` must be 1.
 
 Contract:
 
 - a single-instance lock is acquired before evaluation; if the lock is already owned, the run yields and does not evaluate or deliver;
-- fact documents are read-only JSON for the declared watch class; caller command, shell, endpoint, or URL fields fail closed;
+- fresh authoritative facts are collected read-only for the declared watch; caller command, shell, endpoint, or URL fields fail closed;
 - the host calls `coordinator_watch.py` and does not reimplement its decisions;
 - `NO_CHANGE`, `RECHECK_LATER`, and `CLOSE_WATCH` persist bounded watch state and deliver no typed action;
-- `WAKE_COORDINATOR` and `RESUME_ADMITTED_WORKER` are delivered only after a fresh read of authoritative packet, subject, resource, and admission facts, and only when `worker_adapter.py` returns `APPLIED` for the exact host-built effect;
-- `NOTIFY_OWNER` uses that same host-signed dispatch boundary for one bounded `INFO` notice; `COMPLETE` is reserved for whole Work Packet completion and is not emitted by a watch pass;
+- `WAKE_COORDINATOR` and `RESUME_ADMITTED_WORKER` are authorized only when `worker_adapter.py` verifies the exact host-built effect without consuming the dispatch, then delivered only when `send_effect` returns a durable GitHub comment receipt; authorization alone is not delivery;
+- `NOTIFY_OWNER` uses that same unconsumed dispatch check, then one bounded `INFO` Telegram send to `api.telegram.org`; `NOTIFICATION_DELIVERY=VERIFIED` requires a durable message receipt. `COMPLETE` is reserved for whole Work Packet completion and is not emitted by a watch pass;
+- before send, the host atomically reserves the dispatch for that effect digest and executor attempt. Another effect or attempt cannot send it. Final consumption happens only after the receipt is durable. A crash before send stays retryable by the same attempt. A crash after the send marker without a receipt is reconcile-blocked and is not retried;
 - a changed intent revision or subject, a resource `BLOCK`, or an admission `DENY` before delivery yields zero actions and does not stop or mutate unrelated sessions;
 - an ambiguous prior action outcome blocks retry; the same applied key or a consumed dispatch is deduplicated;
 - missing or invalid trusted dispatch denies the external or worker effect;
 - persisted watch state and the action ledger store bounded metadata only;
-- the host performs no GitHub mutation, merge, caller-selected command, session stop, or model call.
+- lock, watch-state, ledger, and effect-journal paths are derived from the watch identity under the host state root. Caller filenames that differ are rejected. Symlink and path escape fail closed before mutation;
+- authoritative packet, branch, subject, and CI facts come from `collect_authoritative` through fixed `/usr/bin/gh` provenance, not caller `PATH`. Git dirty/unpushed, worker liveness/progress, resource, and admission come from trusted machine observation or stay `UNKNOWN`; Work Packet text cannot set those passing values. Caller-selected fact files and the request branch cannot supply both sides of an authority comparison;
+- the host performs no merge, caller-selected command, session stop, or model call. GitHub delivery is one fixed `gh api` issue comment. Owner delivery is one fixed Telegram INFO send.
 
 `run-once` returns exit 0 when it emits a result. Exit 3 is reserved for malformed or execution-keyed requests. The result schema is `schemas/coordinator-watch-host.schema.json`.
 

@@ -69,6 +69,10 @@ paths:
     domains: [schemas, session-continuity]
   "tools/coordinator_watch_host.py":
     domains: [session-continuity, workflows]
+  "tools/coordinator_watch_collect.py":
+    domains: [session-continuity, workflows]
+  "tools/coordinator_watch_effects.py":
+    domains: [session-continuity, workflows]
   "tools/test_coordinator_watch_host.py":
     domains: [session-continuity]
   "schemas/coordinator-watch-host.schema.json":

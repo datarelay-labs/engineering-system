@@ -470,9 +470,26 @@ def validate_coordinator_watch_host_contract():
         "work_budget",
         "EXECUTION_FORBIDDEN",
         "INFO",
+        "collect_authoritative",
+        "send_effect",
+        "consume_replay",
+        "reserve_dispatch",
+        "finalize_dispatch",
     ):
         if token not in tool:
             raise SystemExit(f"FAIL coordinator watch host missing token: {token}")
+    effects = (ROOT / "tools/coordinator_watch_effects.py").read_text(encoding="utf-8")
+    collector = (ROOT / "tools/coordinator_watch_collect.py").read_text(encoding="utf-8")
+    for token in ("api.telegram.org", "send_github_comment", "shell=False"):
+        if token not in effects:
+            raise SystemExit(f"FAIL coordinator watch effects missing token: {token}")
+    if "shell=True" in effects or "shell=True" in collector:
+        raise SystemExit("FAIL coordinator watch delivery encodes a caller shell")
+    for token in ("issue\", \"view", "collect_authoritative", "/usr/bin/gh"):
+        if token not in collector:
+            raise SystemExit(f"FAIL coordinator watch collector missing token: {token}")
+    if "resolve_trusted_gh" not in effects:
+        raise SystemExit("FAIL coordinator watch effects do not use the trusted gh binary")
     if results != {
         "NO_ACTION",
         "DELIVERED",
