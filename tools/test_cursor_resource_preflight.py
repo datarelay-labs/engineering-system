@@ -45,6 +45,7 @@ def persist_list(count: int) -> str:
 def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged = os.environ.copy()
     merged.pop("ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD", None)
+    merged.pop(preflight.RESOURCE_GUARD_CONFIG_ENV, None)
     if env:
         merged.update(env)
     return subprocess.run(
@@ -162,6 +163,159 @@ def test_small_host_profile_is_possible() -> None:
     block_mem = int(report["BLOCK_MEM_AVAILABLE_BYTES"])
     assert block_mem < 8 * GIB
     assert block_mem < 1 * GIB
+
+
+def isolated_config_env(base: Path, **extra: str) -> dict[str, str]:
+    home = base / "home"
+    xdg = base / "xdg"
+    home.mkdir(parents=True)
+    xdg.mkdir(parents=True)
+    values = {
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(xdg),
+        "ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD": str(TOOL),
+    }
+    values.update(extra)
+    return values
+
+
+def test_executable_path_env_is_not_parsed_as_yaml() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        mem = base / "meminfo"
+        sessions = base / "sessions"
+        mem.write_text(meminfo(29 * GIB, 20 * GIB, 4 * GIB, 4 * GIB), encoding="utf-8")
+        sessions.write_text(persist_list(1), encoding="utf-8")
+        common = ("--meminfo-file", str(mem), "--persist-list-file", str(sessions))
+        collided = run_cli(*common, env=isolated_config_env(base))
+        baseline = run_cli(*common, env=isolated_config_env(base / "baseline"))
+    assert collided.returncode == baseline.returncode, collided.stdout
+    assert collided.returncode == 0, collided.stdout
+    report = fields(collided.stdout)
+    assert report["RESULT"] == "PASS"
+    assert report["PROFILE_SOURCE"] == "builtin"
+    assert report["BLOCK_MEM_AVAILABLE_BYTES"] == str(8 * GIB)
+    assert "malformed" not in report["REASON"]
+    assert fields(baseline.stdout)["PROFILE_SOURCE"] == "builtin"
+
+
+def test_explicit_config_env_overrides_thresholds() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        mem = base / "meminfo"
+        sessions = base / "sessions"
+        config = base / "guard.yaml"
+        mem.write_text(meminfo(29 * GIB, 20 * GIB, 4 * GIB, 4 * GIB), encoding="utf-8")
+        sessions.write_text(persist_list(3), encoding="utf-8")
+        config.write_text("warn_sessions: 2\nblock_sessions: 3\n", encoding="utf-8")
+        result = run_cli(
+            "--meminfo-file",
+            str(mem),
+            "--persist-list-file",
+            str(sessions),
+            env=isolated_config_env(base, **{preflight.RESOURCE_GUARD_CONFIG_ENV: str(config)}),
+        )
+    assert result.returncode == 2, result.stdout
+    report = fields(result.stdout)
+    assert report["PROFILE_SOURCE"] == "override"
+    assert report["BLOCK_SESSIONS"] == "3"
+    assert report["BLOCK_MEM_AVAILABLE_BYTES"] == str(8 * GIB)
+    assert report["RESULT"] == "BLOCK"
+
+
+def test_default_user_yaml_still_discovered() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        mem = base / "meminfo"
+        sessions = base / "sessions"
+        mem.write_text(meminfo(29 * GIB, 20 * GIB, 4 * GIB, 4 * GIB), encoding="utf-8")
+        sessions.write_text(persist_list(3), encoding="utf-8")
+        env = isolated_config_env(base)
+        config_dir = Path(env["XDG_CONFIG_HOME"]) / "engineering-system"
+        config_dir.mkdir()
+        (config_dir / "cursor-resource-guard.yaml").write_text(
+            "warn_sessions: 2\nblock_sessions: 3\n",
+            encoding="utf-8",
+        )
+        result = run_cli(
+            "--meminfo-file",
+            str(mem),
+            "--persist-list-file",
+            str(sessions),
+            env=env,
+        )
+    assert result.returncode == 2, result.stdout
+    report = fields(result.stdout)
+    assert report["PROFILE_SOURCE"] == "override"
+    assert report["BLOCK_SESSIONS"] == "3"
+
+
+def test_missing_explicit_config_env_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        mem = base / "meminfo"
+        sessions = base / "sessions"
+        mem.write_text(meminfo(29 * GIB, 20 * GIB), encoding="utf-8")
+        sessions.write_text(persist_list(0), encoding="utf-8")
+        result = run_cli(
+            "--meminfo-file",
+            str(mem),
+            "--persist-list-file",
+            str(sessions),
+            env=isolated_config_env(
+                base,
+                **{preflight.RESOURCE_GUARD_CONFIG_ENV: str(base / "missing.yaml")},
+            ),
+        )
+    assert result.returncode == 3, result.stdout
+    report = fields(result.stdout)
+    assert report["RESULT"] == "BLOCK"
+    assert "missing" in report["REASON"]
+
+
+def test_malformed_explicit_config_env_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        mem = base / "meminfo"
+        sessions = base / "sessions"
+        mem.write_text(meminfo(29 * GIB, 20 * GIB), encoding="utf-8")
+        sessions.write_text(persist_list(0), encoding="utf-8")
+        result = run_cli(
+            "--meminfo-file",
+            str(mem),
+            "--persist-list-file",
+            str(sessions),
+            env=isolated_config_env(base, **{preflight.RESOURCE_GUARD_CONFIG_ENV: str(TOOL)}),
+        )
+    assert result.returncode == 3, result.stdout
+    report = fields(result.stdout)
+    assert report["RESULT"] == "BLOCK"
+    assert "malformed" in report["REASON"]
+
+
+def test_resource_guard_names_agree() -> None:
+    executable_env = "ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD"
+    config_env = preflight.RESOURCE_GUARD_CONFIG_ENV
+    resumes = [
+        ROOT / ".cursor/commands/resume.md",
+        ROOT / ".cursor/commands/work-resume.md",
+        ROOT / "templates/.cursor/commands/resume.md",
+        ROOT / "templates/.cursor/commands/work-resume.md",
+    ]
+    resume_text = resumes[0].read_text(encoding="utf-8")
+    for path in resumes[1:]:
+        assert path.read_text(encoding="utf-8") == resume_text
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    instruction = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    tool = TOOL.read_text(encoding="utf-8")
+    for text in (resume_text, session, instruction, tool):
+        assert executable_env in text
+        assert config_env in text
+    assert "never threshold YAML" in resume_text
+    assert "never parsed as YAML" in session
+    assert "never threshold YAML" in instruction
+    assert 'os.environ.get("ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD"' not in tool
+    assert "os.environ.get(RESOURCE_GUARD_CONFIG_ENV" in tool
 
 
 def test_host_override_precedes_builtin_profile() -> None:
@@ -369,6 +523,12 @@ def main() -> int:
     test_excessive_swap_blocks()
     test_no_swap_does_not_block()
     test_small_host_profile_is_possible()
+    test_executable_path_env_is_not_parsed_as_yaml()
+    test_explicit_config_env_overrides_thresholds()
+    test_default_user_yaml_still_discovered()
+    test_missing_explicit_config_env_fails_closed()
+    test_malformed_explicit_config_env_fails_closed()
+    test_resource_guard_names_agree()
     test_host_override_precedes_builtin_profile()
     test_malformed_override_fails_closed()
     test_impossible_override_fails_closed()
