@@ -668,6 +668,7 @@ P0b records verified exact-head outcomes against cost, time, rework, and human i
 - Default output is `engineering-system/telemetry/` under the repository's absolute Git directory (`git rev-parse --absolute-git-dir`). That location is Git metadata, so generated records stay outside the tracked worktree for canonical repositories, adopted repositories, and linked worktrees. The directory is bounded to 32 records and easy to disable with a `DISABLED` marker. `.cursorignore` and a textual `.gitignore` rule are not the retention boundary. There is no automatic network export.
 - Capture provider, model, reasoning, and toolset at session start. A later change requires a recorded justification. Do not switch profiles silently.
 - Soft task budgets are optional. Exhaustion yields terminal `BLOCK` with disposition `YIELD`. Further retries fail closed.
+- Persistent benchmark lanes use the hook-only plugin `benchmarks/persistent-instrumentation` outside the historical task tree. Native hook JSON is the only event source. Requested launch sandbox and observed effective sandbox stay separate. Qualified receipts finalize through this canonical record. Missing usage and cost stay null. Do not estimate.
 
 ## GitHub marker and lifecycle
 

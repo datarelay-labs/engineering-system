@@ -1411,6 +1411,8 @@
                 "fixture_id",
                 "task_source_head",
                 "profile",
+                "requested_sandbox",
+                "expected_effective_sandbox",
                 "isolation"
               ],
               "properties": {
@@ -1461,6 +1463,14 @@
                 },
                 "profile": {
                   "$ref": "#/$defs/profile"
+                },
+                "requested_sandbox": {
+                  "type": "string",
+                  "const": "enabled"
+                },
+                "expected_effective_sandbox": {
+                  "type": "string",
+                  "const": "disabled"
                 },
                 "isolation": {
                   "$ref": "#/$defs/isolation"

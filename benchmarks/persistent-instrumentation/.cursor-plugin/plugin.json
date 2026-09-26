@@ -1,0 +1,6 @@
+{
+  "name": "benchmark-lane-instrumentation",
+  "version": "1.0.0",
+  "description": "Hook-only persistent benchmark lane instrumentation.",
+  "hooks": "./hooks/hooks.json"
+}

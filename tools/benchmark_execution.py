@@ -71,6 +71,11 @@ LANE_WORKSTREAM = {
     "CONTROL": f"{PILOT_CASE_ID.lower()}-control",
     "CANDIDATE": f"{PILOT_CASE_ID.lower()}-candidate",
 }
+# Comparable #81 launch: both lanes request the same CLI sandbox. The observed
+# effective sandbox is a separate fact (AppArmor/host fallback is disabled).
+REQUESTED_SANDBOX = "enabled"
+EXPECTED_EFFECTIVE_SANDBOX = "disabled"
+BENCHMARK_NETWORK = "NONE"
 NAME_RE = re.compile(r"^[A-Za-z0-9_.:@\[\]=,+-]{1,80}$")
 TELEMETRY_DERIVATIONS = (
     {"result_field": "WALL_SECONDS", "source": "duration_seconds", "when_null": "UNKNOWN"},
@@ -179,6 +184,33 @@ def _lookup(record: dict[str, Any], source: str) -> Any:
             raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
         value = value[part]
     return value
+
+
+def persistent_lane_plan(prepared: dict[str, Any]) -> dict[str, Any]:
+    """Bind requested sandbox and plugin args. This does not launch a worker."""
+    if not isinstance(prepared, dict) or prepared.get("execute_worker") is not False:
+        raise ExecutionError("WORKER_LAUNCH_FORBIDDEN")
+    argv = prepared.get("argv")
+    env = prepared.get("env")
+    if (
+        not isinstance(argv, list)
+        or len(argv) != 2
+        or argv[0] != "--plugin-dir"
+        or not isinstance(argv[1], str)
+        or not argv[1]
+    ):
+        raise ExecutionError("PLUGIN_ARGV_INVALID")
+    if not isinstance(env, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in env.items()
+    ):
+        raise ExecutionError("PLUGIN_ARGV_INVALID")
+    return {
+        "requested_sandbox": REQUESTED_SANDBOX,
+        "expected_effective_sandbox": EXPECTED_EFFECTIVE_SANDBOX,
+        "argv": ["--sandbox", REQUESTED_SANDBOX, argv[0], argv[1]],
+        "env": dict(env),
+        "execute_worker": False,
+    }
 
 
 def telemetry_mapping() -> dict[str, Any]:
@@ -358,6 +390,8 @@ def _lane(
             "fixture_id": fixture_id,
             "task_source_head": case["source_commit"],
             "profile": dict(profile),
+            "requested_sandbox": REQUESTED_SANDBOX,
+            "expected_effective_sandbox": EXPECTED_EFFECTIVE_SANDBOX,
             "isolation": {
                 "reset": case["reset"],
                 "relative_directory": f"benchmark-dry-run/{case['id']}/{lane.lower()}",
@@ -397,7 +431,7 @@ def _envelope(
         "comparison": comparison,
         "reason": reason,
         "execute_worker": False,
-        "network": "NONE",
+        "network": BENCHMARK_NETWORK,
         "telemetry_mapping": telemetry_mapping(),
         "lanes": lanes,
     }
