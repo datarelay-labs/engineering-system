@@ -1591,17 +1591,22 @@ def test_toolset_and_receipt_are_not_worker_authoritative() -> None:
 
 
 def test_signed_subset_records_allowlist() -> None:
-    """Shell without Write/Edit is still the allowlist once a host signature matches."""
+    """Shell without Write/Edit stays the allowlist, and a worker cannot self-authorize telemetry."""
     source = TOOL.read_text(encoding="utf-8")
     if "class CoordinatorReceiptWitness" in source or "trust_root.mkdir" in source or ".receipt-key" in source:
         _fail("production telemetry still mints a worker-visible receipt authority")
-    if "os.environ" in source:
-        _fail("production telemetry selects trust material from the environment")
+    if "os.environ" in source or "_TEST_HOST_RECEIPT" in source or "test_mode" in source:
+        _fail("production telemetry selects trust material from the environment or a test seam")
+    if hasattr(capture, "_bind_host_finalizer") or hasattr(capture, "_TEST_HOST_RECEIPT_ANCHOR"):
+        _fail("production module still exposes a trust-selection seam")
     original = _sticky_clock("2026-09-26T11:00:00Z", "2026-09-26T11:00:02Z")
-    previous_anchor = capture._TEST_HOST_RECEIPT_ANCHOR
-    previous_dir = capture._TEST_HOST_RECEIPT_DIR
-    capture._TEST_HOST_RECEIPT_ANCHOR = None
-    capture._TEST_HOST_RECEIPT_DIR = None
+    previous = {
+        "anchor": capture.HOST_RECEIPT_ANCHOR,
+        "directory": capture.HOST_RECEIPT_DIR,
+        "anchor_ok": capture._host_anchor_ok,
+        "directory_ok": capture._host_dir_ok,
+    }
+    planted = sys.modules.get("skills_contract")
     try:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1614,49 +1619,77 @@ def test_signed_subset_records_allowlist() -> None:
                 _fail(f"shell-only stop was {result['reason']}")
             checkout = root / "control"
             _control_checkout(checkout)
-            blocked = capture.finalize_lane(descriptor, root=checkout)
-            if blocked["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in blocked:
-                _fail(f"unsigned subset finalized as {blocked}")
-            fixtures = _fixtures()
-            keys = root / "keys"
-            private, public = fixtures.generate_keypair(keys)
-            other_private, _other_public = fixtures.generate_keypair(root / "other-keys")
-            host_dir = root / "host-receipts"
-            host_dir.mkdir()
             binding = capture.host_receipt_binding(descriptor, root=checkout)
             if binding["effective_toolset"] != "write-shell-allowlist" or binding["lifecycle"] != "COMPLETE":
                 _fail(f"host binding was {binding}")
+            fixtures = _fixtures()
+            private, public = fixtures.generate_keypair(root / "keys")
+            signed = fixtures.sign_payload(private, binding)
+            skills_spec = importlib.util.spec_from_file_location(
+                "skills_contract_assertion_check",
+                ROOT / "tools" / "skills-contract.py",
+            )
+            assert skills_spec and skills_spec.loader
+            skills = importlib.util.module_from_spec(skills_spec)
+            sys.modules["skills_contract_assertion_check"] = skills
+            try:
+                skills_spec.loader.exec_module(skills)
+                if not skills.ed25519_verify(public, fixtures.canonical_payload_bytes(signed), signed["signature"]):
+                    _fail("skills-contract rejected a fixture signature for the bounded receipt")
+            finally:
+                sys.modules.pop("skills_contract_assertion_check", None)
+            host_dir = root / "host-receipts"
+            host_dir.mkdir()
             assertion = host_dir / f"{RUN_ID}-CONTROL.host-receipt.json"
-            assertion.write_text(json.dumps(fixtures.sign_payload(private, binding)) + "\n", encoding="utf-8")
+            assertion.write_text(json.dumps(signed) + "\n", encoding="utf-8")
             os.environ["ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY"] = str(public)
             os.environ["ES_BENCHMARK_TRUST_DIR"] = str(host_dir)
-            ignored = capture.finalize_lane(descriptor, root=checkout)
-            if ignored["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in ignored:
-                _fail(f"caller env upgraded trust as {ignored}")
-            assertion.write_text(json.dumps(fixtures.sign_payload(other_private, binding)) + "\n", encoding="utf-8")
+            capture.HOST_RECEIPT_ANCHOR = public
+            capture.HOST_RECEIPT_DIR = host_dir
             capture._TEST_HOST_RECEIPT_ANCHOR = public
             capture._TEST_HOST_RECEIPT_DIR = host_dir
-            mismatched = capture.finalize_lane(descriptor, root=checkout)
-            if mismatched["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in mismatched:
-                _fail(f"foreign signature finalized as {mismatched}")
-            assertion.write_text(json.dumps(fixtures.sign_payload(private, binding)) + "\n", encoding="utf-8")
+            capture._host_anchor_ok = lambda _path: True
+            capture._host_dir_ok = lambda _path: True
+
+            class _FakeSkills:
+                HOST_OPENSSL_PATH = "/usr/bin/openssl"
+                __file__ = str(public)
+
+                @staticmethod
+                def verify_signed_json(_path, _anchor):
+                    return dict(signed)
+
+                @staticmethod
+                def ed25519_verify(_anchor, _message, _signature):
+                    return True
+
+            sys.modules["skills_contract"] = _FakeSkills()
             finalized = capture.finalize_lane(descriptor, root=checkout)
-            if finalized["reason"] != "TELEMETRY_RECORDED" or finalized["execute_worker"] is not False:
-                _fail(f"signed subset finalized as {finalized}")
-            record = finalized.get("record")
-            if not isinstance(record, dict) or record.get("profile", {}).get("toolset") != "write-shell-allowlist":
-                _fail(f"recorded toolset was {record}")
+            if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized or finalized["execute_worker"] is not False:
+                _fail(f"monkeypatched trust finalized as {finalized}")
             retained = checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json"
-            if not retained.is_file():
-                _fail("signed subset did not store canonical telemetry")
-            stored = json.loads(retained.read_text(encoding="utf-8"))
-            if stored.get("profile", {}).get("toolset") != "write-shell-allowlist":
-                _fail(f"stored toolset was {stored.get('profile')}")
+            if retained.exists():
+                _fail("monkeypatched trust wrote canonical telemetry")
+            receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if receipt.get("lifecycle") == "COMPLETE" or "counts" in receipt:
+                _fail("monkeypatched trust sealed the lane")
+            if capture.host_receipt_authority_available():
+                _fail("monkeypatched paths made the fixed anchor look present")
     finally:
         os.environ.pop("ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY", None)
         os.environ.pop("ES_BENCHMARK_TRUST_DIR", None)
-        capture._TEST_HOST_RECEIPT_ANCHOR = previous_anchor
-        capture._TEST_HOST_RECEIPT_DIR = previous_dir
+        capture.HOST_RECEIPT_ANCHOR = previous["anchor"]
+        capture.HOST_RECEIPT_DIR = previous["directory"]
+        capture._host_anchor_ok = previous["anchor_ok"]
+        capture._host_dir_ok = previous["directory_ok"]
+        if hasattr(capture, "_TEST_HOST_RECEIPT_ANCHOR"):
+            delattr(capture, "_TEST_HOST_RECEIPT_ANCHOR")
+        if hasattr(capture, "_TEST_HOST_RECEIPT_DIR"):
+            delattr(capture, "_TEST_HOST_RECEIPT_DIR")
+        if planted is None:
+            sys.modules.pop("skills_contract", None)
+        else:
+            sys.modules["skills_contract"] = planted
         _restore_clock(original)
 
 

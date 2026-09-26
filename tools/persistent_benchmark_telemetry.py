@@ -3,9 +3,10 @@
 
 A Cursor ``stop`` hook checkpoints one agent loop. It does not seal the lane.
 Explicit ``finalize_lane`` writes a canonical record only after a host-signed
-assertion verifies against the fixed root-administered trust anchor. This
-module does not mint that key, accept a caller witness, or start a benchmark
-worker. Native hook JSON is the only event source.
+assertion verifies against the fixed root-administered trust anchor and the
+fixed OpenSSL Ed25519 verifier. This module does not mint that key, accept a
+caller witness, or honor a module-global trust override. Native hook JSON is
+the only event source.
 """
 from __future__ import annotations
 
@@ -375,13 +376,10 @@ def _require_clean_task(task_root: Path) -> None:
             raise CaptureError("TASK_CHECKOUT_DIRTY")
 
 
-# Fixed host provenance. This module never creates these paths and never
-# accepts a caller-selected substitute.
+# Fixed host provenance. Finalization captures these objects and does not
+# reread them, so later assignment cannot select a worker-controlled path.
 HOST_RECEIPT_ANCHOR = Path("/etc/engineering-system/skills-trust-anchor.pub")
 HOST_RECEIPT_DIR = Path("/var/lib/engineering-system/benchmark-receipts")
-# Test-only injection. Production finalize does not read environment or arguments for these.
-_TEST_HOST_RECEIPT_ANCHOR: Path | None = None
-_TEST_HOST_RECEIPT_DIR: Path | None = None
 
 
 def _host_anchor_ok(path: Path) -> bool:
@@ -403,11 +401,6 @@ def _host_anchor_ok(path: Path) -> bool:
     return True
 
 
-def host_receipt_authority_available() -> bool:
-    """Report the fixed host anchor. Environment and repository paths cannot select it."""
-    return _host_anchor_ok(HOST_RECEIPT_ANCHOR)
-
-
 def _host_dir_ok(path: Path) -> bool:
     """Root-owned, non-symlink, not group/world-writable directory and parent."""
     try:
@@ -421,62 +414,6 @@ def _host_dir_ok(path: Path) -> bool:
             return False
         parent_stat = parent.stat()
         if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
-            return False
-    except OSError:
-        return False
-    return True
-
-
-def _load_skills_contract() -> Any:
-    module = sys.modules.get("skills_contract")
-    if module is not None:
-        return module
-    path = TOOLS / "skills-contract.py"
-    spec = importlib.util.spec_from_file_location("skills_contract", path)
-    if spec is None or spec.loader is None:
-        raise CaptureError("TRUST_BOUNDARY_UNAVAILABLE")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["skills_contract"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _resolve_host_receipt_locations() -> tuple[Path, Path] | None:
-    """Return the anchor and assertion directory, or None when provenance is absent.
-
-    Test globals are the only non-production injection, and only when both are
-    set. Environment variables and function arguments cannot select either path.
-    """
-    test_anchor = _TEST_HOST_RECEIPT_ANCHOR
-    test_dir = _TEST_HOST_RECEIPT_DIR
-    if test_anchor is not None or test_dir is not None:
-        if not isinstance(test_anchor, Path) or not isinstance(test_dir, Path):
-            return None
-        try:
-            if test_anchor.is_symlink() or not test_anchor.is_file():
-                return None
-            if test_dir.is_symlink() or not test_dir.is_dir():
-                return None
-        except OSError:
-            return None
-        return test_anchor.resolve(), test_dir.resolve()
-    if not _host_anchor_ok(HOST_RECEIPT_ANCHOR) or not _host_dir_ok(HOST_RECEIPT_DIR):
-        return None
-    return HOST_RECEIPT_ANCHOR.resolve(), HOST_RECEIPT_DIR.resolve()
-
-
-def _assertion_path(directory: Path, run_id: str, lane: str) -> Path:
-    return directory / f"{run_id}-{lane}.host-receipt.json"
-
-
-def _assertion_provenance_ok(path: Path, *, test_mode: bool) -> bool:
-    try:
-        if path.is_symlink() or not path.is_file():
-            return False
-        if test_mode:
-            return True
-        stat = path.stat()
-        if stat.st_uid != 0 or stat.st_mode & 0o022:
             return False
     except OSError:
         return False
@@ -1330,106 +1267,131 @@ def host_receipt_binding(descriptor_path: Path, *, root: Path) -> dict[str, Any]
     return _host_assertion_body(descriptor, bounded, head)
 
 
-def _verify_host_assertion(path: Path, anchor: Path, expected: dict[str, Any]) -> bool:
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(document, dict):
-        return False
-    signature = document.get("signature")
-    if not isinstance(signature, str) or not signature:
-        return False
-    unsigned = {key: value for key, value in document.items() if key != "signature"}
-    if unsigned != expected:
-        return False
-    try:
-        skills = _load_skills_contract()
-    except (CaptureError, OSError, ImportError):
-        return False
-    verified = getattr(skills, "ed25519_verify", None)
-    if not callable(verified):
-        return False
-    return bool(verified(anchor, _canonical(unsigned), signature))
+def _bind_host_finalizer():
+    """Capture fixed provenance so later module-global mutation cannot select it."""
+    anchor = HOST_RECEIPT_ANCHOR
+    directory = HOST_RECEIPT_DIR
+    skills_file = (TOOLS / "skills-contract.py").resolve()
+    spec_from_file_location = importlib.util.spec_from_file_location
+    module_from_spec = importlib.util.module_from_spec
+    modules = sys.modules
+    verifier_name = "_es_benchmark_skills_verify"
+    anchor_ok = _host_anchor_ok
+    directory_ok = _host_dir_ok
+    git_head = efficiency_telemetry.git_head
+    build_record = efficiency_telemetry.build_record
+    write_record = efficiency_telemetry.write_record
+    telemetry_error = efficiency_telemetry.TelemetryError
+    lane_workstream = benchmark_execution.lane_workstream
+
+    def host_receipt_authority_available() -> bool:
+        """Report the fixed host anchor. Environment and module assignment cannot select it."""
+        return anchor_ok(anchor)
+
+    def verify_signed_assertion(assertion: Path, expected: dict[str, Any]) -> bool:
+        if not anchor_ok(anchor) or not directory_ok(directory) or not anchor_ok(assertion):
+            return False
+        spec = spec_from_file_location(verifier_name, skills_file)
+        if spec is None or spec.loader is None:
+            return False
+        module = module_from_spec(spec)
+        modules[verifier_name] = module
+        try:
+            spec.loader.exec_module(module)
+            loaded = getattr(module, "__file__", None)
+            if loaded is None or Path(loaded).resolve() != skills_file:
+                return False
+            if getattr(module, "HOST_OPENSSL_PATH", None) != "/usr/bin/openssl":
+                return False
+            verifier = getattr(module, "verify_signed_json", None)
+            if not callable(verifier):
+                return False
+            payload = verifier(assertion, anchor)
+        except (OSError, json.JSONDecodeError, SystemExit, ImportError, SyntaxError, ValueError, TypeError):
+            return False
+        finally:
+            if modules.get(verifier_name) is module:
+                del modules[verifier_name]
+        if not isinstance(payload, dict):
+            return False
+        unsigned = {key: value for key, value in payload.items() if key != "signature"}
+        return unsigned == expected
+
+    def finalize_lane(descriptor_path: Path, *, root: Path) -> dict[str, Any]:
+        """Seal one lane only when a fixed-host signature verifies.
+
+        Worker-writable receipts are not authority. Caller arguments, environment
+        variables, and module-global assignment cannot select trust material.
+        """
+        try:
+            descriptor = _load_descriptor(descriptor_path)
+            state_dir = descriptor_path.parent
+            receipt = _load_receipt(receipt_path(state_dir, descriptor["run_id"], descriptor["lane"]), descriptor)
+            if receipt.get("block"):
+                return {"status": "BLOCK", "reason": receipt["block"], "execute_worker": False}
+            if receipt.get("handshake") is None:
+                return {"status": "BLOCK", "reason": "HANDSHAKE_MISSING", "execute_worker": False}
+            head = git_head(root)
+            if head != descriptor["system_head"]:
+                return {"status": "BLOCK", "reason": "EXACT_HEAD_UNVERIFIED", "execute_worker": False}
+            if receipt.get("lifecycle") == "COMPLETE":
+                return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
+            if receipt.get("loop") != "completed":
+                return {"status": "BLOCK", "reason": "INCOMPLETE_LIFECYCLE", "execute_worker": False}
+            _require_effective_toolset(descriptor, receipt)
+            fingerprints = _load_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]))
+            bounded = _bounded_receipt(descriptor, receipt, fingerprints)
+            expected = _host_assertion_body(descriptor, bounded, head)
+            assertion = directory / f"{descriptor['run_id']}-{descriptor['lane']}.host-receipt.json"
+            if not verify_signed_assertion(assertion, expected):
+                return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
+            receipt.pop("duration_ms", None)
+            receipt["finished_at"] = bounded["finished_at"]
+            receipt["duration_seconds"] = bounded["duration_seconds"]
+            receipt["counts"] = bounded["counts"]
+            receipt["lifecycle"] = "COMPLETE"
+            receipt["effective_toolset"] = REQUIRED_TOOLSET
+            _write_receipt(receipt_path(state_dir, descriptor["run_id"], descriptor["lane"]), receipt, None)
+            _delete_ephemeral(state_dir, descriptor["run_id"], descriptor["lane"])
+            usage = bounded["usage"]
+            profile = dict(descriptor["profile"])
+            profile["toolset"] = REQUIRED_TOOLSET
+            record = build_record(
+                repo=descriptor["repository"],
+                workstream=lane_workstream(descriptor["case_id"], descriptor["lane"]),
+                task_kind="TEST",
+                profile=profile,
+                started_at=receipt["started_at"],
+                finished_at=receipt["finished_at"],
+                duration_seconds=receipt["duration_seconds"],
+                counts=bounded["counts"],
+                validation={
+                    "ids": [descriptor["case_id"]],
+                    "exact_head": head,
+                    "evidence_state": "EXACT_HEAD",
+                    "outcome": "PASS",
+                },
+                terminal="PASS",
+                budget={
+                    "soft_limit": None,
+                    "consumed": None,
+                    "unit": None,
+                    "state": "UNKNOWN",
+                    "disposition": "CONTINUE",
+                },
+                usage=usage if isinstance(usage, dict) else None,
+                run_id=descriptor["run_id"],
+                root=root,
+            )
+            write_record(root, record)
+        except CaptureError as exc:
+            return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}
+        except telemetry_error as exc:
+            return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}
+        return {"status": "READY", "reason": "TELEMETRY_RECORDED", "execute_worker": False, "record": record}
+
+    return host_receipt_authority_available, finalize_lane
 
 
-def finalize_lane(descriptor_path: Path, *, root: Path) -> dict[str, Any]:
-    """Seal one lane only when a host-signed assertion verifies.
-
-    Worker-writable receipt bytes are not authority. A caller object, path, or
-    environment value cannot select the anchor or the assertion. Missing host
-    provenance returns TRUST_BOUNDARY_UNAVAILABLE and writes no canonical record.
-    """
-    try:
-        descriptor = _load_descriptor(descriptor_path)
-        state_dir = descriptor_path.parent
-        receipt = _load_receipt(receipt_path(state_dir, descriptor["run_id"], descriptor["lane"]), descriptor)
-        if receipt.get("block"):
-            return {"status": "BLOCK", "reason": receipt["block"], "execute_worker": False}
-        if receipt.get("handshake") is None:
-            return {"status": "BLOCK", "reason": "HANDSHAKE_MISSING", "execute_worker": False}
-        head = efficiency_telemetry.git_head(root)
-        if head != descriptor["system_head"]:
-            return {"status": "BLOCK", "reason": "EXACT_HEAD_UNVERIFIED", "execute_worker": False}
-        if receipt.get("lifecycle") == "COMPLETE":
-            return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
-        if receipt.get("loop") != "completed":
-            return {"status": "BLOCK", "reason": "INCOMPLETE_LIFECYCLE", "execute_worker": False}
-        _require_effective_toolset(descriptor, receipt)
-        fingerprints = _load_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]))
-        bounded = _bounded_receipt(descriptor, receipt, fingerprints)
-        expected = _host_assertion_body(descriptor, bounded, head)
-        locations = _resolve_host_receipt_locations()
-        if locations is None:
-            return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
-        anchor, directory = locations
-        assertion = _assertion_path(directory, descriptor["run_id"], descriptor["lane"])
-        test_mode = _TEST_HOST_RECEIPT_ANCHOR is not None
-        if not _assertion_provenance_ok(assertion, test_mode=test_mode):
-            return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
-        if not _verify_host_assertion(assertion, anchor, expected):
-            return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
-        receipt.pop("duration_ms", None)
-        receipt["finished_at"] = bounded["finished_at"]
-        receipt["duration_seconds"] = bounded["duration_seconds"]
-        receipt["counts"] = bounded["counts"]
-        receipt["lifecycle"] = "COMPLETE"
-        receipt["effective_toolset"] = REQUIRED_TOOLSET
-        _write_receipt(receipt_path(state_dir, descriptor["run_id"], descriptor["lane"]), receipt, None)
-        _delete_ephemeral(state_dir, descriptor["run_id"], descriptor["lane"])
-        usage = bounded["usage"]
-        profile = dict(descriptor["profile"])
-        profile["toolset"] = REQUIRED_TOOLSET
-        record = efficiency_telemetry.build_record(
-            repo=descriptor["repository"],
-            workstream=benchmark_execution.lane_workstream(descriptor["case_id"], descriptor["lane"]),
-            task_kind="TEST",
-            profile=profile,
-            started_at=receipt["started_at"],
-            finished_at=receipt["finished_at"],
-            duration_seconds=receipt["duration_seconds"],
-            counts=bounded["counts"],
-            validation={
-                "ids": [descriptor["case_id"]],
-                "exact_head": head,
-                "evidence_state": "EXACT_HEAD",
-                "outcome": "PASS",
-            },
-            terminal="PASS",
-            budget={
-                "soft_limit": None,
-                "consumed": None,
-                "unit": None,
-                "state": "UNKNOWN",
-                "disposition": "CONTINUE",
-            },
-            usage=usage if isinstance(usage, dict) else None,
-            run_id=descriptor["run_id"],
-            root=root,
-        )
-        efficiency_telemetry.write_record(root, record)
-    except CaptureError as exc:
-        return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}
-    except efficiency_telemetry.TelemetryError as exc:
-        return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}
-    return {"status": "READY", "reason": "TELEMETRY_RECORDED", "execute_worker": False, "record": record}
+host_receipt_authority_available, finalize_lane = _bind_host_finalizer()
+del _bind_host_finalizer
