@@ -90,6 +90,11 @@ REQUIRED_METHOD_FILES = (
     "tools/efficiency_telemetry.py",
     "tools/test_efficiency_telemetry.py",
     "schemas/efficiency-telemetry.schema.json",
+    "tools/persistent_benchmark_telemetry.py",
+    "tools/test_persistent_benchmark_telemetry.py",
+    "benchmarks/persistent-instrumentation/.cursor-plugin/plugin.json",
+    "benchmarks/persistent-instrumentation/hooks/hooks.json",
+    "benchmarks/persistent-instrumentation/hooks/record.py",
     "tools/knowledge-contract.py",
     "tools/test_knowledge_contract.py",
     "schemas/knowledge-index.schema.json",
@@ -1427,6 +1432,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_efficiency_telemetry.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_persistent_benchmark_telemetry.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/efficiency_telemetry.py", "gate"], cwd=ROOT)

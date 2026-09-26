@@ -671,6 +671,43 @@ def test_review_rework_preserves_canonical_aggregate() -> None:
         _fail("REVIEW_REWORK still maps only review_rework")
 
 
+def test_requested_sandbox_is_separate_from_effective_sandbox() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    document = EXEC.dry_run(
+        manifest,
+        case_id=EXEC.PILOT_CASE_ID,
+        manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+        profile=PROFILE,
+    )
+    encoded = json.dumps(document)
+    if "--plugin-dir" in encoded or "--sandbox" in encoded:
+        _fail("dry-run stored launch arguments")
+    for lane in document["lanes"]:
+        run = lane["worker_payload"]["run"]
+        if run["requested_sandbox"] != "enabled" or run["expected_effective_sandbox"] != "disabled":
+            _fail(f"sandbox binding was {run['requested_sandbox']} {run['expected_effective_sandbox']}")
+        if run["requested_sandbox"] == run["expected_effective_sandbox"] or run["profile"]["toolset"] == run["requested_sandbox"]:
+            _fail("toolset or effective sandbox was treated as the requested sandbox")
+    plan = EXEC.persistent_lane_plan(
+        {
+            "execute_worker": False,
+            "argv": ["--plugin-dir", "plugin-snapshot"],
+            "env": {"ES_BENCHMARK_LANE_DESCRIPTOR": "descriptor"},
+        }
+    )
+    if plan["execute_worker"] is not False or plan["argv"] != ["--sandbox", "enabled", "--plugin-dir", "plugin-snapshot"]:
+        _fail(f"launch plan was {plan}")
+    if plan["requested_sandbox"] == plan["expected_effective_sandbox"]:
+        _fail("launch plan collapsed requested and effective sandbox")
+    try:
+        EXEC.persistent_lane_plan({"execute_worker": True, "argv": ["--plugin-dir", "plugin-snapshot"], "env": {}})
+    except EXEC.ExecutionError as exc:
+        if exc.code != "WORKER_LAUNCH_FORBIDDEN":
+            _fail(f"worker launch returned {exc.code}")
+    else:
+        _fail("worker launch was accepted")
+
+
 def test_plan_has_no_production_mutation_or_execution_surface() -> None:
     manifest = EXEC.benchmark_fixture.load_manifest()
     document = EXEC.dry_run(
@@ -722,6 +759,7 @@ def main() -> None:
     test_telemetry_rejects_other_case_repository_and_workstream()
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
+    test_requested_sandbox_is_separate_from_effective_sandbox()
     test_plan_has_no_production_mutation_or_execution_surface()
     print("PASS benchmark execution dry-run")
 

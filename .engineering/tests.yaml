@@ -424,6 +424,22 @@ scenarios:
       - "telemetry stays in git-local content-free state, exact-head PASS matches Git, and budget exhaustion yields instead of retrying"
     release_gate: true
 
+  - id: ENG-BENCH-PERSIST-001
+    cost: cheap
+    estimated_seconds: 8
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Persistent benchmark telemetry finalization
+    level: static
+    domains: [ai, schemas]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_persistent_benchmark_telemetry.py"
+    invariants:
+      - "native hook receipts finalize one canonical efficiency record, keep usage unknown unless exposed, and do not launch a worker"
+    release_gate: true
+
   - id: ENG-KNOWLEDGE-001
     cost: cheap
     estimated_seconds: 5
