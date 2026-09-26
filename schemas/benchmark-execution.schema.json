@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BENCH-BUG-001 execution dry-run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "case_id",
+    "manifest_git_sha",
+    "fixture_id",
+    "comparison",
+    "reason",
+    "execute_worker",
+    "network",
+    "telemetry_mapping",
+    "lanes"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "benchmark-execution-dry-run"},
+    "case_id": {"type": "string", "const": "BENCH-BUG-001"},
+    "manifest_git_sha": {"$ref": "#/$defs/sha"},
+    "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
+    "comparison": {"type": "string", "enum": ["COMPARABLE", "PARTIAL", "BLOCK"]},
+    "reason": {"type": "string", "enum": ["PROFILE_MATCH", "PROFILE_MISMATCH", "PROFILE_INCOMPLETE"]},
+    "execute_worker": {"type": "boolean", "const": false},
+    "network": {"type": "string", "const": "NONE"},
+    "telemetry_mapping": {"$ref": "#/$defs/telemetry_mapping"},
+    "lanes": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/lane"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"comparison": {"const": "COMPARABLE"}},
+        "required": ["comparison"]
+      },
+      "then": {
+        "properties": {
+          "reason": {"const": "PROFILE_MATCH"},
+          "lanes": {"minItems": 2, "maxItems": 2}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"comparison": {"const": "PARTIAL"}},
+        "required": ["comparison"]
+      },
+      "then": {
+        "properties": {
+          "reason": {"const": "PROFILE_MISMATCH"},
+          "lanes": {"minItems": 2, "maxItems": 2}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"comparison": {"const": "BLOCK"}},
+        "required": ["comparison"]
+      },
+      "then": {
+        "properties": {
+          "reason": {"const": "PROFILE_INCOMPLETE"},
+          "lanes": {"maxItems": 0}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "reasoning", "toolset"],
+      "properties": {
+        "provider": {"$ref": "#/$defs/name"},
+        "model": {"$ref": "#/$defs/name"},
+        "reasoning": {"$ref": "#/$defs/name"},
+        "toolset": {"$ref": "#/$defs/name"}
+      }
+    },
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_.:@\\[\\]=,+-]{1,80}$"},
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "repository",
+        "source_commit",
+        "objective",
+        "objective_codes",
+        "reset",
+        "excludes_secrets",
+        "excludes_production_mutation"
+      ],
+      "properties": {
+        "case_id": {"type": "string", "const": "BENCH-BUG-001"},
+        "repository": {"type": "string", "const": "datarelay-labs/engineering-system"},
+        "source_commit": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
+        "objective": {"type": "string", "minLength": 1, "maxLength": 240},
+        "objective_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
+        },
+        "reset": {"type": "string", "const": "FRESH_WORKTREE_SESSION"},
+        "excludes_secrets": {"type": "boolean", "const": true},
+        "excludes_production_mutation": {"type": "boolean", "const": true}
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reset", "relative_directory", "execute_worker", "production_mutation"],
+      "properties": {
+        "reset": {"type": "string", "const": "FRESH_WORKTREE_SESSION"},
+        "relative_directory": {"type": "string", "pattern": "^benchmark-dry-run/BENCH-BUG-001/(control|candidate)$"},
+        "execute_worker": {"type": "boolean", "const": false},
+        "production_mutation": {"type": "boolean", "const": false}
+      }
+    },
+    "nullable_code": {"type": "null"},
+    "result_template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "final", "fields"],
+      "properties": {
+        "kind": {"type": "string", "const": "benchmark-result-template"},
+        "final": {"type": "boolean", "const": false},
+        "fields": {"$ref": "#/$defs/template_fields"}
+      }
+    },
+    "template_fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CASE_ID",
+        "SYSTEM_VERSION",
+        "SYSTEM_HEAD",
+        "FIXTURE_ID",
+        "TERMINAL",
+        "CORRECT_BEHAVIOR",
+        "SAFETY_REGRESSION",
+        "REGRESSION_TESTS",
+        "EXACT_HEAD_EVIDENCE",
+        "RELEVANT_CONTEXT",
+        "WALL_SECONDS",
+        "MODEL_COST",
+        "RETRIES",
+        "REREADS",
+        "COMPACTIONS",
+        "REVIEW_REWORK",
+        "HUMAN_INTERVENTIONS",
+        "HOST_RESOURCE_OUTCOME",
+        "NOTES_CODE"
+      ],
+      "properties": {
+        "CASE_ID": {"type": "string", "const": "BENCH-BUG-001"},
+        "SYSTEM_VERSION": {"type": "string", "minLength": 1},
+        "SYSTEM_HEAD": {"$ref": "#/$defs/sha"},
+        "FIXTURE_ID": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
+        "TERMINAL": {"$ref": "#/$defs/nullable_code"},
+        "CORRECT_BEHAVIOR": {"$ref": "#/$defs/nullable_code"},
+        "SAFETY_REGRESSION": {"$ref": "#/$defs/nullable_code"},
+        "REGRESSION_TESTS": {"$ref": "#/$defs/nullable_code"},
+        "EXACT_HEAD_EVIDENCE": {"$ref": "#/$defs/nullable_code"},
+        "RELEVANT_CONTEXT": {"$ref": "#/$defs/nullable_code"},
+        "WALL_SECONDS": {"type": "string", "const": "UNKNOWN"},
+        "MODEL_COST": {"type": "string", "const": "UNKNOWN"},
+        "RETRIES": {"$ref": "#/$defs/nullable_code"},
+        "REREADS": {"$ref": "#/$defs/nullable_code"},
+        "COMPACTIONS": {"$ref": "#/$defs/nullable_code"},
+        "REVIEW_REWORK": {"$ref": "#/$defs/nullable_code"},
+        "HUMAN_INTERVENTIONS": {"$ref": "#/$defs/nullable_code"},
+        "HOST_RESOURCE_OUTCOME": {"$ref": "#/$defs/nullable_code"},
+        "NOTES_CODE": {"$ref": "#/$defs/nullable_code"}
+      }
+    },
+    "final_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CASE_ID",
+        "SYSTEM_VERSION",
+        "SYSTEM_HEAD",
+        "FIXTURE_ID",
+        "TERMINAL",
+        "CORRECT_BEHAVIOR",
+        "SAFETY_REGRESSION",
+        "REGRESSION_TESTS",
+        "EXACT_HEAD_EVIDENCE",
+        "RELEVANT_CONTEXT",
+        "WALL_SECONDS",
+        "MODEL_COST",
+        "RETRIES",
+        "REREADS",
+        "COMPACTIONS",
+        "REVIEW_REWORK",
+        "HUMAN_INTERVENTIONS",
+        "HOST_RESOURCE_OUTCOME",
+        "NOTES_CODE"
+      ],
+      "properties": {
+        "CASE_ID": {"type": "string", "pattern": "^BENCH-[A-Z0-9-]+$"},
+        "SYSTEM_VERSION": {"type": "string", "minLength": 1},
+        "SYSTEM_HEAD": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "FIXTURE_ID": {"type": "string", "pattern": "^[0-9a-f]{40}:BENCH-[A-Z0-9-]+$"},
+        "TERMINAL": {"type": "string", "enum": ["PASS", "BLOCK", "FAIL"]},
+        "CORRECT_BEHAVIOR": {"type": "string", "enum": ["PASS", "FAIL"]},
+        "SAFETY_REGRESSION": {"type": "string", "enum": ["YES", "NO"]},
+        "REGRESSION_TESTS": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK"]},
+        "EXACT_HEAD_EVIDENCE": {"type": "string", "enum": ["PASS", "FAIL", "MISSING"]},
+        "RELEVANT_CONTEXT": {"type": "string", "enum": ["BOUNDED", "OVERREAD", "MISSING"]},
+        "WALL_SECONDS": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "string", "const": "UNKNOWN"}
+          ]
+        },
+        "MODEL_COST": {
+          "oneOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "string", "const": "UNKNOWN"}
+          ]
+        },
+        "RETRIES": {"type": "integer", "minimum": 0},
+        "REREADS": {"type": "integer", "minimum": 0},
+        "COMPACTIONS": {"type": "integer", "minimum": 0},
+        "REVIEW_REWORK": {"type": "integer", "minimum": 0},
+        "HUMAN_INTERVENTIONS": {"type": "integer", "minimum": 0},
+        "HOST_RESOURCE_OUTCOME": {"type": "string", "enum": ["PASS", "WARN", "BLOCK", "UNKNOWN"]},
+        "NOTES_CODE": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
+      }
+    },
+    "telemetry_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "schema", "derivations"],
+      "properties": {
+        "authority": {"type": "string", "const": "tools/efficiency_telemetry.py"},
+        "schema": {"type": "string", "const": "schemas/efficiency-telemetry.schema.json"},
+        "derivations": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "when_null"],
+                "properties": {
+                  "result_field": {
+                    "type": "string",
+                    "enum": [
+                      "WALL_SECONDS",
+                      "MODEL_COST",
+                      "RETRIES",
+                      "REREADS",
+                      "COMPACTIONS",
+                      "HUMAN_INTERVENTIONS"
+                    ]
+                  },
+                  "source": {"type": "string", "pattern": "^[a-z_.]+$"},
+                  "when_null": {"type": "string", "enum": ["UNKNOWN", "UNAVAILABLE"]}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "value_map"],
+                "properties": {
+                  "result_field": {"type": "string", "const": "EXACT_HEAD_EVIDENCE"},
+                  "source": {"type": "string", "const": "validation.evidence_state"},
+                  "value_map": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["EXACT_HEAD", "STALE", "MISSING"],
+                    "properties": {
+                      "EXACT_HEAD": {"type": "string", "const": "PASS"},
+                      "STALE": {"type": "string", "const": "FAIL"},
+                      "MISSING": {"type": "string", "const": "MISSING"}
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "aggregate"],
+                "properties": {
+                  "result_field": {"type": "string", "const": "REVIEW_REWORK"},
+                  "source": {"type": "string", "const": "rework_count"},
+                  "aggregate": {"type": "string", "const": "efficiency_telemetry.rework_count"}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane",
+        "system_version",
+        "system_head",
+        "fixture_id",
+        "task_source_head",
+        "worker_payload",
+        "profile",
+        "isolation",
+        "result_template"
+      ],
+      "properties": {
+        "lane": {"type": "string", "enum": ["CONTROL", "CANDIDATE"]},
+        "system_version": {"type": "string", "minLength": 1},
+        "system_head": {"$ref": "#/$defs/sha"},
+        "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
+        "task_source_head": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
+        "worker_payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["task", "run"],
+          "properties": {
+            "task": {"$ref": "#/$defs/task"},
+            "run": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "lane",
+                "case_id",
+                "system_version",
+                "system_head",
+                "fixture_manifest_head",
+                "fixture_id",
+                "task_source_head",
+                "profile",
+                "isolation"
+              ],
+              "properties": {
+                "lane": {"type": "string", "enum": ["CONTROL", "CANDIDATE"]},
+                "case_id": {"type": "string", "const": "BENCH-BUG-001"},
+                "system_version": {"type": "string", "minLength": 1},
+                "system_head": {"$ref": "#/$defs/sha"},
+                "fixture_manifest_head": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"},
+                "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
+                "task_source_head": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
+                "profile": {"$ref": "#/$defs/profile"},
+                "isolation": {"$ref": "#/$defs/isolation"}
+              }
+            }
+          }
+        },
+        "profile": {"$ref": "#/$defs/profile"},
+        "isolation": {"$ref": "#/$defs/isolation"},
+        "result_template": {"$ref": "#/$defs/result_template"}
+      }
+    }
+  }
+}
