@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Native Cursor hook receipts and canonical telemetry for one benchmark lane.
 
-Qualified receipts finalize only through ``efficiency_telemetry``. This module
-does not start a benchmark worker. Native hook JSON is the only event source.
+A Cursor ``stop`` hook checkpoints one agent loop. It does not seal the lane.
+Explicit ``finalize_lane`` is the coordinator boundary: the latest loop must be
+completed, counters are derived once, and only then does ``efficiency_telemetry``
+receive the canonical record. This module does not start a benchmark worker.
+Native hook JSON is the only event source.
 """
 from __future__ import annotations
 
@@ -48,7 +51,18 @@ NATIVE_EVENTS = frozenset(
     }
 )
 BLOCKING_HOOKS = frozenset({"beforeSubmitPrompt", "preToolUse", "beforeShellExecution"})
+LOOP_OPENERS = frozenset(
+    {
+        "beforeSubmitPrompt",
+        "preToolUse",
+        "beforeShellExecution",
+        "postToolUse",
+        "postToolUseFailure",
+        "preCompact",
+    }
+)
 NORMAL_SESSION_CLOSE = frozenset({"completed", "window_close", "user_close"})
+SEALED_SESSION_END = NORMAL_SESSION_CLOSE | frozenset({"error", "aborted"})
 # Native reasoning level is model_params id "effort". "reasoning" is the legacy alias.
 # "thinking" is a separate boolean mode and is not a reasoning level.
 REASONING_PARAM_IDS = frozenset({"effort", "reasoning"})
@@ -762,21 +776,26 @@ def ingest_hook(
         receipt = _load_receipt(receipt_file, descriptor)
         if receipt.get("block"):
             return _result(payload, status="BLOCK", reason=receipt["block"], blocked=True)
+        if receipt.get("lifecycle") == "COMPLETE":
+            return _after_seal(payload, descriptor, receipt)
         if not isinstance(payload, dict):
             raise CaptureError("MALFORMED_HOOK")
         _synthetic(payload)
         fingerprints = _load_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]))
         _apply(descriptor, receipt, payload, fingerprints, state_dir)
-        if receipt["lifecycle"] == "COMPLETE" and "counts" not in receipt:
-            _record_terminal_counts(receipt, fingerprints)
         _write_receipt(receipt_file, receipt, None)
-        if receipt["lifecycle"] == "COMPLETE":
-            _delete_ephemeral(state_dir, descriptor["run_id"], descriptor["lane"])
-        elif fingerprints:
+        if fingerprints:
             _write_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]), fingerprints)
     except CaptureError as exc:
         _block(descriptor_path, exc.code)
         return _result(payload, status="BLOCK", reason=exc.code, blocked=True)
+    if (
+        isinstance(payload, dict)
+        and payload.get("hook_event_name") == "stop"
+        and receipt.get("loop") == "completed"
+        and receipt.get("lifecycle") == "OPEN"
+    ):
+        return _result(payload, status="OPEN", reason="LOOP_CHECKPOINT", blocked=False)
     blocked = receipt.get("handshake") is None or receipt.get("block") is not None
     reason = assess(receipt)
     return _result(
@@ -785,6 +804,31 @@ def ingest_hook(
         reason=reason or "HANDSHAKE_BOUND",
         blocked=blocked,
     )
+
+
+def _after_seal(payload: Any, descriptor: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed for later count-relevant hooks without mutating a sealed receipt."""
+    try:
+        if not isinstance(payload, dict):
+            raise CaptureError("MALFORMED_HOOK")
+        _synthetic(payload)
+        version = payload.get("cursor_version")
+        if not isinstance(version, str) or version != descriptor["cursor_version"]:
+            raise CaptureError("VERSION_MISMATCH")
+        conversation = _conversation(payload)
+        handshake = receipt.get("handshake")
+        if not isinstance(handshake, dict) or handshake.get("conversation_id") != conversation:
+            raise CaptureError("SESSION_MISMATCH")
+        name = payload.get("hook_event_name")
+        if name == "sessionEnd":
+            reason = payload.get("reason")
+            if isinstance(reason, str) and reason in SEALED_SESSION_END:
+                return _result(payload, status="READY", reason="HANDSHAKE_BOUND", blocked=False)
+        if isinstance(name, str) and name in NATIVE_EVENTS:
+            return _result(payload, status="BLOCK", reason="LANE_SEALED", blocked=True)
+        raise CaptureError("UNMAPPED_EVENT")
+    except CaptureError as exc:
+        return _result(payload, status="BLOCK", reason=exc.code, blocked=True)
 
 
 def _block(descriptor_path: Path, code: str) -> None:
@@ -845,27 +889,24 @@ def _require_sandbox(descriptor: dict[str, Any], receipt: dict[str, Any]) -> Non
 
 
 def _finish_stop(payload: dict[str, Any], descriptor: dict[str, Any], receipt: dict[str, Any]) -> None:
+    """Checkpoint one completed agent loop. Do not seal the benchmark lane."""
     status = _terminal_status("stop", payload)
     if receipt["lifecycle"] == "COMPLETE":
-        if status == "completed":
-            return
-        raise CaptureError("INCOMPLETE_LIFECYCLE")
+        raise CaptureError("LANE_SEALED")
     if status != "completed":
         raise CaptureError("INCOMPLETE_LIFECYCLE")
     _require_sandbox(descriptor, receipt)
-    receipt["lifecycle"] = "COMPLETE"
 
 
 def _finish_session_end(payload: dict[str, Any], descriptor: dict[str, Any], receipt: dict[str, Any]) -> None:
+    """Record session end without sealing. Aborted endings fail closed."""
     reason = _terminal_status("sessionEnd", payload)
     if receipt["lifecycle"] == "COMPLETE":
-        if reason in NORMAL_SESSION_CLOSE or reason in {"error", "aborted"}:
+        if reason in SEALED_SESSION_END:
             return
         raise CaptureError("INCOMPLETE_LIFECYCLE")
-    if reason != "completed":
+    if reason not in NORMAL_SESSION_CLOSE:
         raise CaptureError("INCOMPLETE_LIFECYCLE")
-    _require_sandbox(descriptor, receipt)
-    receipt["lifecycle"] = "COMPLETE"
 
 
 def _terminal_status(event_name: str, payload: dict[str, Any]) -> str:
@@ -911,6 +952,7 @@ def _apply(
             "reasoning": reasoning,
         }
         receipt["started_at"] = _utc_now()
+        receipt["loop"] = "open"
     elif handshake["conversation_id"] != conversation or handshake["cursor_version"] != version:
         raise CaptureError("SESSION_MISMATCH" if handshake["conversation_id"] != conversation else "VERSION_MISMATCH")
     if event_name == "beforeShellExecution":
@@ -952,6 +994,8 @@ def _apply(
             raise CaptureError("DUPLICATE_EVENT")
     if event_name in {"beforeSubmitPrompt", "preCompact"} and generation is None:
         raise CaptureError("MISSING_TELEMETRY")
+    if event_name in LOOP_OPENERS:
+        receipt["loop"] = "open"
     event = {
         "hook_event_name": event_name,
         "conversation_id": conversation,
@@ -962,6 +1006,9 @@ def _apply(
     _append_event(receipt, event)
     if event_name == "stop":
         _finish_stop(payload, descriptor, receipt)
+        # Prove this loop's tool evidence is derivable. Do not freeze counts.
+        _derive_counts(receipt, fingerprints)
+        receipt["loop"] = "completed"
     elif event_name == "sessionEnd":
         _finish_session_end(payload, descriptor, receipt)
 
@@ -974,17 +1021,32 @@ def finalize_lane(descriptor_path: Path, *, root: Path) -> dict[str, Any]:
             receipt_path(descriptor_path.parent, descriptor["run_id"], descriptor["lane"]),
             descriptor,
         )
-        reason = assess(receipt)
-        if reason:
-            return {"status": "BLOCK", "reason": reason, "execute_worker": False}
+        if receipt.get("block"):
+            return {"status": "BLOCK", "reason": receipt["block"], "execute_worker": False}
+        if receipt.get("handshake") is None:
+            return {"status": "BLOCK", "reason": "HANDSHAKE_MISSING", "execute_worker": False}
+        head = efficiency_telemetry.git_head(root)
+        if head != descriptor["system_head"]:
+            return {"status": "BLOCK", "reason": "EXACT_HEAD_UNVERIFIED", "execute_worker": False}
+        if receipt.get("lifecycle") != "COMPLETE":
+            if receipt.get("loop") != "completed":
+                return {"status": "BLOCK", "reason": "INCOMPLETE_LIFECYCLE", "execute_worker": False}
+            fingerprints = _load_fingerprints(
+                fingerprint_path(descriptor_path.parent, descriptor["run_id"], descriptor["lane"])
+            )
+            _record_terminal_counts(receipt, fingerprints)
+            receipt["lifecycle"] = "COMPLETE"
+            _write_receipt(
+                receipt_path(descriptor_path.parent, descriptor["run_id"], descriptor["lane"]),
+                receipt,
+                None,
+            )
+            _delete_ephemeral(descriptor_path.parent, descriptor["run_id"], descriptor["lane"])
         counts = receipt.get("counts")
         if not isinstance(counts, dict) or not isinstance(receipt.get("duration_seconds"), int):
             return {"status": "BLOCK", "reason": "MISSING_TELEMETRY", "execute_worker": False}
         if not isinstance(receipt.get("started_at"), str) or not isinstance(receipt.get("finished_at"), str):
             return {"status": "BLOCK", "reason": "MISSING_TELEMETRY", "execute_worker": False}
-        head = efficiency_telemetry.git_head(root)
-        if head != descriptor["system_head"]:
-            return {"status": "BLOCK", "reason": "EXACT_HEAD_UNVERIFIED", "execute_worker": False}
         usage = receipt.get("usage")
         record = efficiency_telemetry.build_record(
             repo=descriptor["repository"],

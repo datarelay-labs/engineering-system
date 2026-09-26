@@ -220,15 +220,18 @@ def test_handshake_and_gate() -> None:
             descriptor_path=descriptor,
             plugin_root=plugin,
         )
-        if stopped["status"] != "READY" or stopped["reason"] != "HANDSHAKE_BOUND":
+        if stopped["status"] != "OPEN" or stopped["reason"] != "LOOP_CHECKPOINT" or stopped["blocked"] is not False:
             _fail(f"completed lifecycle was {stopped}")
         admitted = capture.gate_launch(descriptor)
-        if admitted["admission"] != "READY" or admitted["execute_worker"] is not False:
+        if admitted != {"admission": "BLOCK", "reason": "INCOMPLETE_LIFECYCLE", "execute_worker": False}:
             _fail(f"launch gate was {admitted}")
-        if (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists():
-            _fail("finalization left the HMAC key")
+        if not (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists():
+            _fail("loop checkpoint deleted the HMAC key")
+        open_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if "counts" in open_receipt or open_receipt["lifecycle"] != "OPEN" or open_receipt.get("loop") != "completed":
+            _fail(f"stop sealed the lane: {open_receipt.get('lifecycle')} {open_receipt.get('loop')}")
         if "efficiency-telemetry" in _stored_text(root):
-            _fail("slice A wrote a canonical telemetry record")
+            _fail("checkpoint wrote a canonical telemetry record")
 
 
 def test_fail_closed_evidence() -> None:
@@ -441,10 +444,10 @@ def test_stop_and_session_end_status_are_separate() -> None:
             descriptor_path=descriptor,
             plugin_root=plugin,
         )
-        if stopped["status"] != "READY":
+        if stopped["status"] != "OPEN" or stopped["reason"] != "LOOP_CHECKPOINT":
             _fail(f"stop status completed was {stopped}")
-        if (root / "state" / f"{'c' * 32}-CONTROL.hmac-key").exists():
-            _fail("stop finalization left the HMAC key")
+        if not (root / "state" / f"{'c' * 32}-CONTROL.hmac-key").exists():
+            _fail("stop checkpoint deleted the HMAC key")
         closed = capture.ingest_hook(
             {
                 "hook_event_name": "sessionEnd",
@@ -455,8 +458,8 @@ def test_stop_and_session_end_status_are_separate() -> None:
             descriptor_path=descriptor,
             plugin_root=plugin,
         )
-        if closed["status"] != "READY" or closed["blocked"] is not False:
-            _fail(f"window_close after completion was {closed}")
+        if closed["blocked"] is not False or closed["reason"] != "INCOMPLETE_LIFECYCLE":
+            _fail(f"window_close sealed an open lane: {closed}")
         user_close = capture.ingest_hook(
             {
                 "hook_event_name": "sessionEnd",
@@ -467,11 +470,11 @@ def test_stop_and_session_end_status_are_separate() -> None:
             descriptor_path=descriptor,
             plugin_root=plugin,
         )
-        if user_close["status"] != "READY":
-            _fail(f"user_close after completion was {user_close}")
+        if user_close["reason"] != "INCOMPLETE_LIFECYCLE" or user_close["blocked"] is not False:
+            _fail(f"user_close sealed an open lane: {user_close}")
         final = json.loads((root / "state" / f"{'c' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
-        if final["lifecycle"] != "COMPLETE" or final["block"] is not None:
-            _fail("normal session close corrupted the completed receipt")
+        if final["lifecycle"] != "OPEN" or final["block"] is not None or final.get("loop") != "completed":
+            _fail("session close sealed or corrupted the open receipt")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -510,10 +513,11 @@ def test_stop_and_session_end_status_are_separate() -> None:
             descriptor_path=descriptor,
             plugin_root=plugin,
         )
-        if ended["status"] != "READY":
+        if ended["blocked"] is not False or ended["reason"] != "INCOMPLETE_LIFECYCLE":
             _fail(f"sessionEnd reason completed was {ended}")
-        if (root / "state" / f"{'e' * 32}-CONTROL.fingerprints.json").exists():
-            _fail("sessionEnd finalization left fingerprint state")
+        ended_receipt = json.loads((root / "state" / f"{'e' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if ended_receipt["lifecycle"] == "COMPLETE" or "counts" in ended_receipt:
+            _fail("sessionEnd sealed the lane")
 
 
 def _file_bytes(root: Path) -> dict[str, bytes]:
@@ -870,6 +874,49 @@ def _ingest(descriptor: Path, plugin: Path, payload: dict) -> dict:
     return capture.ingest_hook(payload, descriptor_path=descriptor, plugin_root=plugin)
 
 
+def _control_checkout(destination: Path) -> None:
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if common.returncode:
+        _fail("control checkout source was unavailable")
+    source = Path(common.stdout.strip())
+    if not source.is_absolute():
+        source = (ROOT / source).resolve()
+    cloned = subprocess.run(
+        ["git", "clone", "--shared", "--no-checkout", str(source), str(destination)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if cloned.returncode:
+        _fail(f"control clone failed: {cloned.stderr.strip()}")
+    detached = subprocess.run(
+        ["git", "-C", str(destination), "checkout", "--detach", capture.benchmark_fixture.CONTROL_HEAD],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if detached.returncode:
+        _fail(f"control checkout failed: {detached.stderr.strip()}")
+
+
+def _prompt(generation: str) -> dict:
+    return {
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": "conv-1",
+        "cursor_version": CURSOR_VERSION,
+        "generation_id": generation,
+        "prompt": SECRET,
+    }
+
+
 def test_counts_come_from_native_events() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -918,8 +965,16 @@ def test_counts_come_from_native_events() -> None:
         ]
         for payload in events:
             result = _ingest(descriptor, plugin, payload)
-            if result["status"] != "READY" and payload["hook_event_name"] == "stop":
+            if payload["hook_event_name"] == "stop" and result["reason"] != "LOOP_CHECKPOINT":
                 _fail(f"qualified lifecycle blocked as {result['reason']}")
+        open_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if "counts" in open_receipt or not (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
+            _fail("stop froze counts or deleted fingerprints")
+        checkout = root / "control"
+        _control_checkout(checkout)
+        finalized = capture.finalize_lane(descriptor, root=checkout)
+        if finalized["status"] != "READY":
+            _fail(f"count finalization was {finalized}")
         receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
         expected = {
             "tool_turns": 4,
@@ -998,10 +1053,12 @@ def test_truncated_tool_lifecycle_blocks() -> None:
             _stop(),
         ):
             result = _ingest(descriptor, plugin, payload)
-        if result["status"] != "READY":
+        if result["reason"] != "LOOP_CHECKPOINT":
             _fail(f"single failure returned {result['reason']}")
-        receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
-        counts = receipt.get("counts")
+        checkout = root / "control"
+        _control_checkout(checkout)
+        finalized = capture.finalize_lane(descriptor, root=checkout)
+        counts = finalized.get("record", {}).get("counts") if finalized.get("record") else None
         if counts is None or counts["tool_turns"] != 1 or counts["retries"] != 0 or counts["rereads"] != 0:
             _fail(f"single failure counts were {counts}")
 
@@ -1069,6 +1126,29 @@ def test_missing_evidence_does_not_become_zero() -> None:
         if estimated["reason"] != "DURATION_AMBIGUOUS" or "record" in estimated:
             _fail(f"ambiguous duration finalized as {estimated}")
 
+    original = _clock(["2026-09-26T11:00:00Z", "2026-09-26T11:00:00Z"])
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root)
+            descriptor = Path(prepared["descriptor_path"])
+            plugin = Path(prepared["plugin_dir"])
+            _ingest(descriptor, plugin, _session())
+            _ingest(descriptor, plugin, _shell())
+            noted = _ingest(descriptor, plugin, _stop(duration_ms=2000))
+            if noted["reason"] != "LOOP_CHECKPOINT":
+                _fail(f"whole-second duration checkpoint returned {noted['reason']}")
+            checkout = root / "control"
+            _control_checkout(checkout)
+            mismatched = capture.finalize_lane(descriptor, root=checkout)
+            if mismatched["reason"] != "DURATION_AMBIGUOUS" or "record" in mismatched:
+                _fail(f"mismatched duration finalized as {mismatched}")
+            open_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if open_receipt["lifecycle"] == "COMPLETE" or "counts" in open_receipt:
+                _fail("mismatched duration sealed the lane")
+    finally:
+        _restore_clock(original)
+
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         prepared = _prepare(root)
@@ -1082,6 +1162,70 @@ def test_missing_evidence_does_not_become_zero() -> None:
         open_lane = capture.finalize_lane(descriptor, root=root)
         if open_lane["status"] != "BLOCK" or "record" in open_lane:
             _fail(f"estimated usage finalized as {open_lane}")
+
+
+def test_follow_up_prompt_is_one_human_intervention() -> None:
+    original = _clock(["2026-09-26T12:00:00Z", "2026-09-26T12:00:04Z"])
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root)
+            descriptor = Path(prepared["descriptor_path"])
+            plugin = Path(prepared["plugin_dir"])
+            for payload in (_session(), _prompt("gen-1"), _shell(), _stop()):
+                result = _ingest(descriptor, plugin, payload)
+            if result["reason"] != "LOOP_CHECKPOINT" or result["blocked"] is not False:
+                _fail(f"first stop was {result}")
+            receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if "counts" in receipt or receipt["lifecycle"] != "OPEN" or not (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists():
+                _fail("first stop sealed the lane or dropped the correlation key")
+            follow = _ingest(descriptor, plugin, _prompt("gen-2"))
+            if follow["blocked"] is not False or follow["hook_response"] != {"continue": True}:
+                _fail(f"follow-up prompt was {follow}")
+            tool = _ingest(descriptor, plugin, _read("tool-follow", "preToolUse", "follow-up"))
+            if tool["reason"] == "FINGERPRINT_KEY_MISSING" or tool["blocked"] is not False:
+                _fail(f"follow-up tool was {tool}")
+            posted = _ingest(descriptor, plugin, _read("tool-follow", "postToolUse", "follow-up"))
+            if posted["blocked"] is not False:
+                _fail(f"follow-up tool result was {posted}")
+            second = _ingest(descriptor, plugin, _stop())
+            if second["reason"] != "LOOP_CHECKPOINT":
+                _fail(f"second stop was {second}")
+            checkout = root / "control"
+            _control_checkout(checkout)
+            finalized = capture.finalize_lane(descriptor, root=checkout)
+            if finalized["status"] != "READY" or finalized["execute_worker"] is not False:
+                _fail(f"follow-up finalize was {finalized}")
+            counts = finalized["record"]["counts"]
+            if counts["human_interventions"] != 1 or counts["tool_turns"] != 1:
+                _fail(f"follow-up counts were {counts}")
+            if (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists() or (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
+                _fail("finalization left ephemeral correlation state")
+            sealed = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if sealed["lifecycle"] != "COMPLETE" or sealed["counts"]["human_interventions"] != 1:
+                _fail("sealed receipt did not keep the follow-up count")
+            later = _ingest(descriptor, plugin, _read("tool-after", "preToolUse", "after-seal"))
+            if later["reason"] != "LANE_SEALED" or later["blocked"] is not True or later["hook_response"] != {"permission": "deny"}:
+                _fail(f"post-seal tool was {later}")
+            unchanged = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if unchanged != sealed or unchanged.get("block") is not None:
+                _fail("post-seal hook mutated the sealed receipt")
+            closed = _ingest(
+                descriptor,
+                plugin,
+                {
+                    "hook_event_name": "sessionEnd",
+                    "conversation_id": "conv-1",
+                    "cursor_version": CURSOR_VERSION,
+                    "reason": "window_close",
+                },
+            )
+            if closed["status"] != "READY" or closed["blocked"] is not False:
+                _fail(f"window_close after seal was {closed}")
+            if json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8")) != sealed:
+                _fail("window_close after seal changed the receipt")
+    finally:
+        _restore_clock(original)
 
 
 def test_finalize_writes_one_canonical_record() -> None:
@@ -1099,44 +1243,15 @@ def test_finalize_writes_one_canonical_record() -> None:
                 _fail("requested sandbox matched the effective sandbox")
             for payload in (_session(), _shell(), _stop(usage={"input_tokens": 12})):
                 result = _ingest(descriptor, plugin, payload)
-            if result["status"] != "READY":
+            if result["reason"] != "LOOP_CHECKPOINT":
                 _fail(f"exposed usage lifecycle was {result}")
             incomplete = root / "partial"
             incomplete.mkdir()
             blocked = capture.finalize_lane(descriptor, root=incomplete)
             if blocked["reason"] != "EXACT_HEAD_UNVERIFIED" or "record" in blocked:
                 _fail(f"unverified head finalized as {blocked}")
-            common = subprocess.run(
-                ["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if common.returncode:
-                _fail("control checkout source was unavailable")
-            source = Path(common.stdout.strip())
-            if not source.is_absolute():
-                source = (ROOT / source).resolve()
             checkout = root / "control"
-            cloned = subprocess.run(
-                ["git", "clone", "--shared", "--no-checkout", str(source), str(checkout)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-            if cloned.returncode:
-                _fail(f"control clone failed: {cloned.stderr.strip()}")
-            detached = subprocess.run(
-                ["git", "-C", str(checkout), "checkout", "--detach", capture.benchmark_fixture.CONTROL_HEAD],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-            if detached.returncode:
-                _fail(f"control checkout failed: {detached.stderr.strip()}")
+            _control_checkout(checkout)
             finalized = capture.finalize_lane(descriptor, root=checkout)
             if finalized["status"] != "READY" or finalized["execute_worker"] is not False:
                 _fail(f"finalize was {finalized}")
@@ -1190,6 +1305,7 @@ def main() -> None:
         test_counts_come_from_native_events,
         test_truncated_tool_lifecycle_blocks,
         test_missing_evidence_does_not_become_zero,
+        test_follow_up_prompt_is_one_human_intervention,
         test_finalize_writes_one_canonical_record,
     )
     for test in tests:
