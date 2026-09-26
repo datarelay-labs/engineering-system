@@ -17,7 +17,7 @@ from pathlib import Path
 
 def _deny(payload: object) -> dict:
     name = payload.get("hook_event_name") if isinstance(payload, dict) else None
-    if name in {"preToolUse", "beforeShellExecution"}:
+    if name in {"preToolUse", "beforeShellExecution", "beforeMCPExecution"}:
         return {"permission": "deny"}
     if name == "beforeSubmitPrompt":
         return {"continue": False}

@@ -40,13 +40,55 @@ def _fail(message: str) -> None:
     raise SystemExit(f"FAIL {message}")
 
 
+def _git(root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode:
+        _fail(f"git {' '.join(args)} failed: {completed.stderr.strip()}")
+    return completed.stdout.strip()
+
+
+def _clone_shared(destination: Path) -> None:
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if common.returncode:
+        _fail("checkout source was unavailable")
+    source = Path(common.stdout.strip())
+    if not source.is_absolute():
+        source = (ROOT / source).resolve()
+    cloned = subprocess.run(
+        ["git", "clone", "--shared", "--no-checkout", str(source), str(destination)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if cloned.returncode:
+        _fail(f"clone failed: {cloned.stderr.strip()}")
+
+
+def _frozen_checkout(destination: Path, *, head: str | None = None, origin: str | None = None) -> None:
+    identity = capture.benchmark_execution.FROZEN_CASE_IDENTITIES["BENCH-BUG-001"]
+    _clone_shared(destination)
+    _git(destination, "remote", "set-url", "origin", origin or "https://github.com/datarelay-labs/engineering-system.git")
+    _git(destination, "checkout", "--detach", head or identity["source_commit"])
+
+
 def _prepare(root: Path, *, lane: str = "CONTROL", run_id: str = RUN_ID) -> dict:
-    task = root / "task"
-    task.mkdir()
-    (task / "SOURCE").write_text("frozen\n", encoding="utf-8")
+    _frozen_checkout(root / "task")
     return capture.prepare_lane(
         state_dir=root / "state",
-        task_root=task,
+        task_root=root / "task",
         snapshot_dir=root / "plugin",
         run_id=run_id,
         case_id="BENCH-BUG-001",
@@ -124,12 +166,12 @@ def test_prepare_stays_outside_task_tree() -> None:
         root = Path(temporary)
         prepared = _prepare(root)
         task = root / "task"
-        if list(task.rglob("*")) != [task / "SOURCE"]:
+        if _git(task, "status", "--porcelain"):
             _fail("historical task tree changed")
-        if (task / "SOURCE").read_text(encoding="utf-8") != "frozen\n":
+        identity = capture.benchmark_execution.FROZEN_CASE_IDENTITIES["BENCH-BUG-001"]
+        if _git(task, "rev-parse", "HEAD") != identity["source_commit"]:
             _fail("historical task source changed")
         descriptor = json.loads(Path(prepared["descriptor_path"]).read_text(encoding="utf-8"))
-        identity = capture.benchmark_execution.FROZEN_CASE_IDENTITIES["BENCH-BUG-001"]
         if descriptor["repository"] != identity["repository"]:
             _fail("descriptor repository drifted")
         if descriptor["task_source_head"] != identity["source_commit"]:
@@ -847,16 +889,22 @@ def _restore_clock(original) -> None:
     capture._utc_now = original
 
 
-def _read(tool_id: str, hook: str, marker: str) -> dict:
+def _read(tool_id: str, hook: str, marker: str, tool_name: str = "Read") -> dict:
     return {
         "hook_event_name": hook,
         "conversation_id": "conv-1",
         "cursor_version": CURSOR_VERSION,
         "generation_id": "gen-1",
         "tool_use_id": tool_id,
-        "tool_name": "Read",
+        "tool_name": tool_name,
         "tool_input": {"secret": TOOL_SECRET, "marker": marker},
     }
+
+
+def _derived(root: Path, run_id: str = RUN_ID, lane: str = "CONTROL") -> dict:
+    receipt = json.loads((root / "state" / f"{run_id}-{lane}.receipt.json").read_text(encoding="utf-8"))
+    fingerprints = json.loads((root / "state" / f"{run_id}-{lane}.fingerprints.json").read_text(encoding="utf-8"))
+    return capture._derive_counts(receipt, fingerprints["fingerprints"])
 
 
 def _stop(**extra: object) -> dict:
@@ -961,6 +1009,8 @@ def test_counts_come_from_native_events() -> None:
                 "generation_id": "gen-2",
                 "prompt": SECRET,
             },
+            _read("tool-write", "preToolUse", "write", "Write"),
+            _read("tool-write", "postToolUse", "write", "Write"),
             _stop(),
         ]
         for payload in events:
@@ -970,14 +1020,8 @@ def test_counts_come_from_native_events() -> None:
         open_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
         if "counts" in open_receipt or not (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
             _fail("stop froze counts or deleted fingerprints")
-        checkout = root / "control"
-        _control_checkout(checkout)
-        finalized = capture.finalize_lane(descriptor, root=checkout)
-        if finalized["status"] != "READY":
-            _fail(f"count finalization was {finalized}")
-        receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
         expected = {
-            "tool_turns": 4,
+            "tool_turns": 5,
             "retries": 1,
             "rereads": 2,
             "compactions": 2,
@@ -986,13 +1030,23 @@ def test_counts_come_from_native_events() -> None:
             "review_rework": 0,
             "human_interventions": 1,
         }
-        if receipt.get("counts") != expected:
-            _fail(f"counts were {receipt.get('counts')}")
+        if _derived(root) != expected:
+            _fail(f"counts were {_derived(root)}")
+        checkout = root / "control"
+        _control_checkout(checkout)
+        finalized = capture.finalize_lane(descriptor, root=checkout)
+        if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized:
+            _fail(f"untrusted count finalization was {finalized}")
+        receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if "counts" in receipt or receipt.get("lifecycle") == "COMPLETE":
+            _fail("missing host authority sealed the lane")
+        if (checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json").exists():
+            _fail("missing host authority wrote canonical telemetry")
         compactions = [item for item in receipt["events"] if item["hook_event_name"] == "preCompact"]
         if len(compactions) != 2 or {item["generation_id"] for item in compactions} != {"compact-1"}:
             _fail(f"same-generation compactions were {compactions}")
-        if (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
-            _fail("finalized lane kept tool fingerprints")
+        if not (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
+            _fail("untrusted finalization deleted tool fingerprints")
         if receipt.get("usage") is not None:
             _fail("missing usage was stored")
         stored = _stored_text(root)
@@ -1055,12 +1109,14 @@ def test_truncated_tool_lifecycle_blocks() -> None:
             result = _ingest(descriptor, plugin, payload)
         if result["reason"] != "LOOP_CHECKPOINT":
             _fail(f"single failure returned {result['reason']}")
+        counts = _derived(root)
+        if counts["tool_turns"] != 1 or counts["retries"] != 0 or counts["rereads"] != 0:
+            _fail(f"single failure counts were {counts}")
         checkout = root / "control"
         _control_checkout(checkout)
         finalized = capture.finalize_lane(descriptor, root=checkout)
-        counts = finalized.get("record", {}).get("counts") if finalized.get("record") else None
-        if counts is None or counts["tool_turns"] != 1 or counts["retries"] != 0 or counts["rereads"] != 0:
-            _fail(f"single failure counts were {counts}")
+        if "record" in finalized or finalized["reason"] == "TELEMETRY_RECORDED":
+            _fail(f"single failure recorded telemetry as {finalized}")
 
 
 def test_missing_evidence_does_not_become_zero() -> None:
@@ -1172,7 +1228,14 @@ def test_follow_up_prompt_is_one_human_intervention() -> None:
             prepared = _prepare(root)
             descriptor = Path(prepared["descriptor_path"])
             plugin = Path(prepared["plugin_dir"])
-            for payload in (_session(), _prompt("gen-1"), _shell(), _stop()):
+            for payload in (
+                _session(),
+                _prompt("gen-1"),
+                _shell(),
+                _read("tool-write", "preToolUse", "write", "Write"),
+                _read("tool-write", "postToolUse", "write", "Write"),
+                _stop(),
+            ):
                 result = _ingest(descriptor, plugin, payload)
             if result["reason"] != "LOOP_CHECKPOINT" or result["blocked"] is not False:
                 _fail(f"first stop was {result}")
@@ -1191,19 +1254,31 @@ def test_follow_up_prompt_is_one_human_intervention() -> None:
             second = _ingest(descriptor, plugin, _stop())
             if second["reason"] != "LOOP_CHECKPOINT":
                 _fail(f"second stop was {second}")
+            counts = _derived(root)
+            if counts["human_interventions"] != 1 or counts["tool_turns"] != 2:
+                _fail(f"follow-up counts were {counts}")
             checkout = root / "control"
             _control_checkout(checkout)
             finalized = capture.finalize_lane(descriptor, root=checkout)
-            if finalized["status"] != "READY" or finalized["execute_worker"] is not False:
+            if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or finalized["execute_worker"] is not False or "record" in finalized:
                 _fail(f"follow-up finalize was {finalized}")
-            counts = finalized["record"]["counts"]
-            if counts["human_interventions"] != 1 or counts["tool_turns"] != 1:
-                _fail(f"follow-up counts were {counts}")
-            if (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists() or (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
-                _fail("finalization left ephemeral correlation state")
+            if not (root / "state" / f"{RUN_ID}-CONTROL.hmac-key").exists() or not (root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").exists():
+                _fail("missing host authority deleted correlation state")
+            if (checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json").exists():
+                _fail("missing host authority wrote canonical telemetry")
+            open_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if open_receipt["lifecycle"] == "COMPLETE" or "counts" in open_receipt:
+                _fail("missing host authority sealed the follow-up lane")
+            sealed = dict(open_receipt)
+            sealed["lifecycle"] = "COMPLETE"
+            sealed["counts"] = counts
+            (root / "state" / f"{RUN_ID}-CONTROL.receipt.json").write_text(
+                json.dumps(sealed, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
             sealed = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
-            if sealed["lifecycle"] != "COMPLETE" or sealed["counts"]["human_interventions"] != 1:
-                _fail("sealed receipt did not keep the follow-up count")
+            if sealed["counts"]["human_interventions"] != 1:
+                _fail("follow-up count was lost before the post-seal check")
             later = _ingest(descriptor, plugin, _read("tool-after", "preToolUse", "after-seal"))
             if later["reason"] != "LANE_SEALED" or later["blocked"] is not True or later["hook_response"] != {"permission": "deny"}:
                 _fail(f"post-seal tool was {later}")
@@ -1229,7 +1304,7 @@ def test_follow_up_prompt_is_one_human_intervention() -> None:
 
 
 def test_finalize_writes_one_canonical_record() -> None:
-    original = _clock(["2026-09-26T11:00:00Z", "2026-09-26T11:00:02Z"])
+    original = _clock(["2026-09-26T11:00:00Z", "2026-09-26T11:00:02Z", "2026-09-26T11:00:02Z"])
     try:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1241,7 +1316,13 @@ def test_finalize_writes_one_canonical_record() -> None:
                 _fail(f"launch plan was {plan['argv']}")
             if plan["requested_sandbox"] == plan["expected_effective_sandbox"]:
                 _fail("requested sandbox matched the effective sandbox")
-            for payload in (_session(), _shell(), _stop(usage={"input_tokens": 12})):
+            for payload in (
+                _session(),
+                _shell(),
+                _read("tool-write", "preToolUse", "write", "Write"),
+                _read("tool-write", "postToolUse", "write", "Write"),
+                _stop(usage={"input_tokens": 12}),
+            ):
                 result = _ingest(descriptor, plugin, payload)
             if result["reason"] != "LOOP_CHECKPOINT":
                 _fail(f"exposed usage lifecycle was {result}")
@@ -1253,39 +1334,205 @@ def test_finalize_writes_one_canonical_record() -> None:
             checkout = root / "control"
             _control_checkout(checkout)
             finalized = capture.finalize_lane(descriptor, root=checkout)
-            if finalized["status"] != "READY" or finalized["execute_worker"] is not False:
+            if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or finalized["execute_worker"] is not False or "record" in finalized:
                 _fail(f"finalize was {finalized}")
-            record = finalized["record"]
             again = capture.finalize_lane(descriptor, root=checkout)
-            if again.get("record") != record:
-                _fail("second finalize changed the canonical record")
-            if record["usage"]["input_tokens"] != 12 or record["usage"]["cost"] is not None:
-                _fail(f"usage was {record['usage']}")
-            if record["duration_seconds"] != 2 or record["terminal"] != "PASS":
-                _fail(f"record identity was {record['duration_seconds']} {record['terminal']}")
-            if record["validation"]["exact_head"] != capture.benchmark_fixture.CONTROL_HEAD:
-                _fail("record exact head was not the control head")
-            derived = capture.benchmark_execution.derive_observed_fields(
-                record,
-                lane="CONTROL",
-                system_head=capture.benchmark_fixture.CONTROL_HEAD,
-                profile=PROFILE,
-                run_id=RUN_ID,
-                case_id="BENCH-BUG-001",
-            )
-            if derived["WALL_SECONDS"] != 2 or derived["MODEL_COST"] != "UNKNOWN" or derived["EXACT_HEAD_EVIDENCE"] != "PASS":
-                _fail(f"derived fields were {derived}")
-            if derived["RETRIES"] != 0 or derived["HUMAN_INTERVENTIONS"] != 0 or derived["REVIEW_REWORK"] != 0:
-                _fail(f"derived counts were {derived}")
-            encoded = json.dumps(record)
-            for needle in (SECRET, TOOL_SECRET, PATH_SECRET, EMAIL_SECRET, "echo-secret-command", "conv-1", "plugin-dir"):
-                if needle in encoded:
-                    _fail(f"canonical record retained {needle}")
+            if again != finalized:
+                _fail("second finalize changed the fail-closed result")
             retained = checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json"
-            if not retained.is_file():
-                _fail("canonical record was not stored in the git directory")
+            if retained.exists():
+                _fail("missing host authority stored a canonical record")
+            receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+            if receipt.get("lifecycle") == "COMPLETE" or "counts" in receipt:
+                _fail("missing host authority sealed a legitimate lane")
+            if receipt.get("usage", {}).get("input_tokens") != 12:
+                _fail(f"exposed usage was {receipt.get('usage')}")
     finally:
         _restore_clock(original)
+
+
+def _expect_checkout(task: Path, snapshot: Path, code: str) -> None:
+    try:
+        capture.prepare_lane(
+            state_dir=snapshot.parent / "state",
+            task_root=task,
+            snapshot_dir=snapshot,
+            run_id=RUN_ID,
+            case_id="BENCH-BUG-001",
+            lane="CONTROL",
+            profile=PROFILE,
+            cursor_version=CURSOR_VERSION,
+            expected_effective_sandbox=EXPECTED_EFFECTIVE_SANDBOX,
+        )
+    except capture.CaptureError as exc:
+        if exc.code != code:
+            _fail(f"checkout returned {exc.code}")
+    else:
+        _fail(f"checkout {code} prepared a lane")
+    if snapshot.exists() or (snapshot.parent / "state").exists():
+        _fail(f"{code} left lane files")
+
+
+def test_task_checkout_binds_frozen_identity() -> None:
+    identity = capture.benchmark_execution.FROZEN_CASE_IDENTITIES["BENCH-BUG-001"]
+    if identity["source_commit"] == capture.benchmark_fixture.CONTROL_HEAD:
+        _fail("wrong-head fixture matches the frozen source")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        plain = root / "plain"
+        plain.mkdir()
+        _expect_checkout(plain, root / "plain-plugin", "TASK_CHECKOUT_UNVERIFIED")
+        wrong_head = root / "wrong-head"
+        _frozen_checkout(wrong_head, head=capture.benchmark_fixture.CONTROL_HEAD)
+        _expect_checkout(wrong_head, root / "head-plugin", "TASK_HEAD_MISMATCH")
+        wrong_repo = root / "wrong-repo"
+        _frozen_checkout(wrong_repo, origin="https://github.com/datarelay-labs/datarelay-link.git")
+        _expect_checkout(wrong_repo, root / "repo-plugin", "TASK_REPOSITORY_MISMATCH")
+
+
+def test_toolset_and_receipt_are_not_worker_authoritative() -> None:
+    recorder = (capture.PLUGIN_ROOT / "hooks" / "record.py").read_text(encoding="utf-8")
+    if "ES_BENCHMARK_TRUST_DIR" in recorder or "finalize_lane" in recorder or "CoordinatorReceiptWitness" in recorder:
+        _fail("hook recorder can reach receipt authority")
+    if capture.host_receipt_authority_available():
+        _fail("this host reported a receipt anchor that is not provisioned")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        foreign = dict(PROFILE)
+        foreign["toolset"] = "read-only"
+        (root / "task").mkdir()
+        try:
+            capture.prepare_lane(
+                state_dir=root / "state",
+                task_root=root / "task",
+                snapshot_dir=root / "plugin",
+                run_id=RUN_ID,
+                case_id="BENCH-BUG-001",
+                lane="CONTROL",
+                profile=foreign,
+                cursor_version=CURSOR_VERSION,
+                expected_effective_sandbox=EXPECTED_EFFECTIVE_SANDBOX,
+            )
+        except capture.CaptureError as exc:
+            if exc.code != "TOOLSET_UNKNOWN":
+                _fail(f"descriptor toolset returned {exc.code}")
+        else:
+            _fail("descriptor toolset was admitted")
+        if (root / "plugin").exists():
+            _fail("rejected toolset staged a plugin")
+        prepared = _prepare(root)
+        if "trust_dir" in prepared or "receipt-key" in json.dumps(prepared):
+            _fail("prepare returned receipt-authority material")
+        if set(prepared["env"]) != {
+            "ES_BENCHMARK_LANE_DESCRIPTOR",
+            "ES_BENCHMARK_TELEMETRY_MODULE",
+            "ES_BENCHMARK_PLUGIN_ROOT",
+        }:
+            _fail(f"worker env was {sorted(prepared['env'])}")
+        if list(root.rglob("*.receipt-key")):
+            _fail("prepare minted a receipt key")
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        _ingest(descriptor, plugin, _shell())
+        stopped = _ingest(descriptor, plugin, _stop())
+        if stopped["reason"] != "LOOP_CHECKPOINT":
+            _fail(f"shell-only stop was {stopped['reason']}")
+        checkout = root / "control"
+        _control_checkout(checkout)
+        missing = capture.finalize_lane(descriptor, root=checkout)
+        if missing["reason"] != "TOOLSET_UNOBSERVED" or "record" in missing:
+            _fail(f"shell-only toolset was {missing}")
+        extra = _ingest(descriptor, plugin, _read("web", "preToolUse", "web", "WebSearch"))
+        if extra["reason"] != "TOOLSET_MISMATCH":
+            _fail(f"extra tool was {extra['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        unknown = _ingest(descriptor, plugin, _read("mystery", "preToolUse", "mystery", "NoSuchTool"))
+        if unknown["reason"] != "TOOLSET_UNKNOWN":
+            _fail(f"unknown tool was {unknown['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        mcp = _ingest(
+            descriptor,
+            plugin,
+            {
+                "hook_event_name": "beforeMCPExecution",
+                "conversation_id": "conv-1",
+                "cursor_version": CURSOR_VERSION,
+                "tool_name": "mcp",
+                "mcp_server_name": "example",
+            },
+        )
+        if mcp["reason"] != "TOOLSET_MISMATCH":
+            _fail(f"mcp tool was {mcp['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        for payload in (
+            _session(),
+            _shell(),
+            _read("tool-write", "preToolUse", "write", "Write"),
+            _read("tool-write", "postToolUse", "write", "Write"),
+            _stop(),
+        ):
+            _ingest(descriptor, plugin, payload)
+        receipt_path = root / "state" / f"{RUN_ID}-CONTROL.receipt.json"
+        forged = json.loads(receipt_path.read_text(encoding="utf-8"))
+        forged["lifecycle"] = "COMPLETE"
+        forged["counts"] = {
+            "tool_turns": 0,
+            "retries": 0,
+            "rereads": 0,
+            "compactions": 0,
+            "pr_rework": 0,
+            "ci_rework": 0,
+            "review_rework": 0,
+            "human_interventions": 0,
+        }
+        forged["duration_seconds"] = 1
+        forged["finished_at"] = "2026-09-26T11:00:01Z"
+        forged["effective_toolset"] = "write-shell-allowlist"
+        receipt_path.write_text(json.dumps(forged) + "\n", encoding="utf-8")
+        hidden = root / ".hidden-trust"
+        hidden.mkdir()
+        key = hidden / "lane.receipt-key"
+        key.write_bytes(b"same-uid-secret")
+        key.chmod(0o600)
+        os.environ["ES_BENCHMARK_TRUST_DIR"] = str(hidden)
+        try:
+            checkout = root / "control"
+            _control_checkout(checkout)
+            forged_result = capture.finalize_lane(descriptor, root=checkout)
+            if forged_result["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in forged_result:
+                _fail(f"forged receipt finalized as {forged_result}")
+            witnessed = capture.finalize_lane(
+                descriptor,
+                root=checkout,
+                witness=capture.CoordinatorReceiptWitness(forged, {}),
+            )
+            if witnessed["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in witnessed:
+                _fail(f"in-process witness bypassed the missing host anchor as {witnessed}")
+            rejected = capture.finalize_lane(descriptor, root=checkout, witness={"receipt": forged})
+            if rejected["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in rejected:
+                _fail(f"dict witness was accepted as {rejected}")
+            if (checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json").exists():
+                _fail("forged receipt wrote canonical telemetry")
+        finally:
+            os.environ.pop("ES_BENCHMARK_TRUST_DIR", None)
 
 
 def main() -> None:
@@ -1307,6 +1554,8 @@ def main() -> None:
         test_missing_evidence_does_not_become_zero,
         test_follow_up_prompt_is_one_human_intervention,
         test_finalize_writes_one_canonical_record,
+        test_task_checkout_binds_frozen_identity,
+        test_toolset_and_receipt_are_not_worker_authoritative,
     )
     for test in tests:
         print(f"RUN {test.__name__}", flush=True)
