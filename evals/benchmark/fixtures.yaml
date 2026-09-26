@@ -249,113 +249,100 @@ cases:
     source_record: datarelay-labs/engineering-system#22
     source_commit: f3a6856a81c7bee307ca8a6cf256faa73514610e
     lineage_commits:
-      - 3cb07ef3e95cbda49735154eb9d5c0d50b48bf09
       - 14150e424c922ff3a930b45dcf31d3a3d3ba28b2
     identity_basis: PRE_TASK_BASE_COMMIT
+    snapshot_at: "2026-09-23T03:29:00Z"
     task:
-      objective: Classify the frozen rollout topology and reuse the recorded existing rollout snapshots without writing default branches.
+      objective: Classify the frozen open rollout topology and reuse the recorded existing rollout snapshots without writing default branches.
       objective_codes:
         - CLASSIFY_FROZEN_ROLLOUT_TOPOLOGY
         - REUSE_RECORDED_ROLLOUT_SNAPSHOTS
         - AVOID_DEFAULT_BRANCH_WRITES
     rollout_topology:
       - repository: datarelay-labs/engineering-system
+        pull_request: 28
         source_record: datarelay-labs/engineering-system#28
         role: CANONICAL
-        base_commit: f3a6856a81c7bee307ca8a6cf256faa73514610e
-        head_commit: 3cb07ef3e95cbda49735154eb9d5c0d50b48bf09
-        merge_commit: 14150e424c922ff3a930b45dcf31d3a3d3ba28b2
-        state: MERGED
+        snapshot_head_commit: 3cb07ef3e95cbda49735154eb9d5c0d50b48bf09
+        snapshot_state: OPEN
       - repository: datarelay-labs/athena
+        pull_request: 2
         source_record: datarelay-labs/athena#2
         role: EXISTING_ROLLOUT
-        base_commit: 6720b948744d42f1332f86f9a8157ff588e40d6e
-        head_commit: 314023fd02d06e50c15bac5cced0b21d01be8e52
-        merge_commit: 21c551d43ac16e2c56223b83e8bba5636bcfd236
-        state: MERGED
+        snapshot_head_commit: 09ab78dfe53a0c09be38ece1ff86227f37e9ea3f
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-control
+        pull_request: 135
         source_record: datarelay-labs/datarelay-control#135
         role: EXISTING_ROLLOUT
-        base_commit: 2412616607d405b22e311c963a0f40e8c0daba27
-        head_commit: a745cf51ddd899205561c43321248aef5e5049a5
-        merge_commit: 3deb41a2a96ce9573ea8d97cb5505aa5e3c1ac6c
-        state: MERGED
+        snapshot_head_commit: 30b74d8929d08f9a2833eec67742a809cd289848
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-link
+        pull_request: 48
         source_record: datarelay-labs/datarelay-link#48
         role: EXISTING_ROLLOUT
-        base_commit: 5b2dfe8b2b4c0a41a7d8cc9e702552f6d759bc73
-        head_commit: 7151b47172f920397ba4e015bb72ef123aae5514
-        merge_commit: 0e0c9e4e550538d7b2c44e15975a10f8243f8def
-        state: MERGED
+        snapshot_head_commit: 2c1a029567cf78f71e3fc0a55a1aaf575fd64271
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-atlas-docs
+        pull_request: 3
         source_record: datarelay-labs/datarelay-atlas-docs#3
         role: EXISTING_ROLLOUT
-        base_commit: a7a246484bfea8a508c905e8a9798683fa49d8a5
-        head_commit: f63ecf07ca13f7bdddfb44bae86ed95126689bb1
-        merge_commit: ca106b4decd63400ea1b1cf6856922747bc4055b
-        state: MERGED
+        snapshot_head_commit: 2f9b468a92cbc80e874835d7f0872157827c1fdf
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-grant
+        pull_request: 2
         source_record: datarelay-labs/datarelay-grant#2
         role: EXISTING_ROLLOUT
-        base_commit: f4c8b1cdfca73d6ab7d18669f10ed6ccbbcc2d85
-        head_commit: d3b4d8c3a12497c6ba3a70e470b4e1c1429bffbf
-        merge_commit: 9121463263ebe62a32c585f0cd62c58984b1c622
-        state: MERGED
+        snapshot_head_commit: 5a0a9ce3f7c54b32e20522d282b7b3d39239f3eb
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-link-docs
+        pull_request: 34
         source_record: datarelay-labs/datarelay-link-docs#34
         role: EXISTING_ROLLOUT
-        base_commit: 027047565427fa5bcb882ba9d4f1d1e99ffe108e
-        head_commit: 9317e5d2479c6cd20c0c093afec2bfa9f4a00f5d
-        merge_commit: c531f90a9762a19a1e20b4906d1f985dda7486a4
-        state: MERGED
+        snapshot_head_commit: 8927756e10be9626f113bc423bb2d41aa7ee1fbb
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-link-plugin
+        pull_request: 10
         source_record: datarelay-labs/datarelay-link-plugin#10
         role: EXISTING_ROLLOUT
-        base_commit: 6e882ba7b341841596a825278e3bccd2cbf48c0b
-        head_commit: 3fdd98edbf0630607b6932ca657855f3b1b7c124
-        merge_commit: 5a380978b118e02ecc5c5188204f0b63b1e59edd
-        state: MERGED
+        snapshot_head_commit: d45e401e5e9ba8fb326f5c326e99f368069e0adb
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-atlas
+        pull_request: 29
         source_record: datarelay-labs/datarelay-atlas#29
         role: EXISTING_ROLLOUT
-        base_commit: ebbcdf87cd2fe42b8238d74ba71f0495c7420f3b
-        head_commit: 9a9195cf3a6b46f4899ae9c697b373f058c8516f
-        merge_commit: 992fb6add4173c180b78851fd058019016694c96
-        state: MERGED
+        snapshot_head_commit: 26d70dd9d86a0e9f38bd43746ae9e8afb167f5b6
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-control-docs
+        pull_request: 9
         source_record: datarelay-labs/datarelay-control-docs#9
         role: EXISTING_ROLLOUT
-        base_commit: 072f6e8874d7bc0606389970ec7e3747ac60092f
-        head_commit: 0a8ca8bb486fe633a0ad788be5fb46aacba4b562
-        merge_commit: 7aed9f17c773f9a9abcf5ed8473acd54ca4f2314
-        state: MERGED
+        snapshot_head_commit: b80ba5e14ee9c9b2a9b47f3e2d7fe67deae7eb00
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-docs
+        pull_request: 7
         source_record: datarelay-labs/datarelay-docs#7
         role: EXISTING_ROLLOUT
-        base_commit: 2d8a1de1606cdc92cfa60471f998982efd5479b5
-        head_commit: be0f85b6a5ca0715a2daf4667fc70b5f7021f282
-        merge_commit: 4c339a11c23d0d8a077848252969afbeb2fbaacd
-        state: MERGED
+        snapshot_head_commit: cd3f303ba2df77a7f537f6e20c3881a845f02095
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-grant-docs
+        pull_request: 2
         source_record: datarelay-labs/datarelay-grant-docs#2
         role: EXISTING_ROLLOUT
-        base_commit: 4e996a44b118be58e728ace4bac5da3cd1400812
-        head_commit: fc224d162c6e7f6f54a8bae5e1506333c5f6077f
-        merge_commit: eaab0293466a6a8ea741f7ebddd6e97c82c5f1d9
-        state: MERGED
+        snapshot_head_commit: f971974c4846ded090d2fa605b0444d5bd4cfe32
+        snapshot_state: OPEN
       - repository: datarelay-labs/engineering-system-docs
+        pull_request: 19
         source_record: datarelay-labs/engineering-system-docs#19
         role: EXISTING_ROLLOUT
-        base_commit: 137aa0f7e67a62f7b685e5f74e1500ec017c3b62
-        head_commit: 8ff9bb221805c1cc2fdcaaeae6b2a9661dc89459
-        merge_commit: 8b7f037353c598e211913a6b6bf13c2aa1e328cd
-        state: MERGED
+        snapshot_head_commit: 22ce3804074df4316014c568ae3218a5ab0bff54
+        snapshot_state: OPEN
       - repository: datarelay-labs/datarelay-link
+        pull_request: 40
         source_record: datarelay-labs/datarelay-link#40
         role: SUPERSEDED
-        base_commit: c039bff2ba155ed5f1062761e3707de268b4bb35
-        head_commit: 8bc3283db9afa674a1e6de2b92925b4d1c723394
-        state: CLOSED_UNMERGED
+        snapshot_head_commit: 8bc3283db9afa674a1e6de2b92925b4d1c723394
+        snapshot_state: OPEN
     oracle:
       - INVENTORY_COMPLETE_OR_EXPLICIT_PARTIAL
       - REPOSITORIES_CLASSIFIED_INDEPENDENTLY

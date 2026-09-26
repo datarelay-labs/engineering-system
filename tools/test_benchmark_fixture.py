@@ -118,11 +118,10 @@ def test_canonical_manifest_freezes_proven_identities() -> None:
         _fail("multi fixture did not freeze the canonical rollout base")
     if multi["source_commit"] == FIXTURE.CONTROL_HEAD:
         _fail("multi fixture starts from the completed rollout merge")
-    if multi["lineage_commits"] != [
-        "3cb07ef3e95cbda49735154eb9d5c0d50b48bf09",
-        FIXTURE.CONTROL_HEAD,
-    ]:
-        _fail("multi fixture lost the canonical rollout lineage")
+    if multi["lineage_commits"] != [FIXTURE.CONTROL_HEAD]:
+        _fail("multi fixture lost the hidden rollout merge provenance")
+    if multi["snapshot_at"] != "2026-09-23T03:29:00Z":
+        _fail("multi fixture freeze time drifted")
     cross = by_id["BENCH-CROSS-002"]
     if cross["status"] != "FROZEN" or cross["identity_basis"] != "HISTORICAL_CHECKPOINT_COMMIT":
         _fail("cross fixture did not freeze the historical checkpoint")
@@ -219,7 +218,7 @@ def test_worker_task_hides_oracle_and_issue_text() -> None:
         if case["id"] == "BENCH-INCIDENT-003":
             allowed_extra.add("evidence_input")
         if case["id"] == "BENCH-MULTI-007":
-            allowed_extra.add("rollout_topology")
+            allowed_extra.update({"rollout_topology", "snapshot_at"})
         if extra != allowed_extra:
             _fail(f"{case['id']} worker task exposed unexpected fields {extra}")
         encoded = json.dumps(task)
@@ -237,6 +236,13 @@ def test_worker_task_hides_oracle_and_issue_text() -> None:
             for lineage in case["lineage_commits"]:
                 if lineage in encoded:
                     _fail(f"{case['id']} worker task exposed outcome lineage")
+        else:
+            for forbidden in ("merge_commit", "MERGED", "CLOSED_UNMERGED", "source_record"):
+                if _has_key(task, forbidden) or forbidden in encoded:
+                    _fail(f"{case['id']} worker topology exposed {forbidden}")
+            for lineage in case["lineage_commits"]:
+                if lineage in encoded:
+                    _fail(f"{case['id']} worker task exposed a merge outcome")
         if task["source_commit"] != case["source_commit"] or task["objective"] != case["task"]["objective"]:
             _fail(f"{case['id']} worker task did not preserve the frozen objective")
     leaked = _manifest()
@@ -259,23 +265,63 @@ def test_worker_task_hides_oracle_and_issue_text() -> None:
     _expect(concluded, "EVIDENCE_LEAKS_CONCLUSION")
     multi_case = next(case for case in manifest["cases"] if case["id"] == "BENCH-MULTI-007")
     multi_task = FIXTURE.worker_task(manifest, "BENCH-MULTI-007")
-    projected = {
-        (item["repository"], item["role"], item["base_commit"], item["head_commit"], item["state"])
-        for item in multi_task["rollout_topology"]
+    expected_heads = {
+        ("datarelay-labs/engineering-system", 28): "3cb07ef3e95cbda49735154eb9d5c0d50b48bf09",
+        ("datarelay-labs/athena", 2): "09ab78dfe53a0c09be38ece1ff86227f37e9ea3f",
+        ("datarelay-labs/datarelay-control", 135): "30b74d8929d08f9a2833eec67742a809cd289848",
+        ("datarelay-labs/datarelay-link", 48): "2c1a029567cf78f71e3fc0a55a1aaf575fd64271",
+        ("datarelay-labs/datarelay-atlas-docs", 3): "2f9b468a92cbc80e874835d7f0872157827c1fdf",
+        ("datarelay-labs/datarelay-grant", 2): "5a0a9ce3f7c54b32e20522d282b7b3d39239f3eb",
+        ("datarelay-labs/datarelay-link-docs", 34): "8927756e10be9626f113bc423bb2d41aa7ee1fbb",
+        ("datarelay-labs/datarelay-link-plugin", 10): "d45e401e5e9ba8fb326f5c326e99f368069e0adb",
+        ("datarelay-labs/datarelay-atlas", 29): "26d70dd9d86a0e9f38bd43746ae9e8afb167f5b6",
+        ("datarelay-labs/datarelay-control-docs", 9): "b80ba5e14ee9c9b2a9b47f3e2d7fe67deae7eb00",
+        ("datarelay-labs/datarelay-docs", 7): "cd3f303ba2df77a7f537f6e20c3881a845f02095",
+        ("datarelay-labs/datarelay-grant-docs", 2): "f971974c4846ded090d2fa605b0444d5bd4cfe32",
+        ("datarelay-labs/engineering-system-docs", 19): "22ce3804074df4316014c568ae3218a5ab0bff54",
+        ("datarelay-labs/datarelay-link", 40): "8bc3283db9afa674a1e6de2b92925b4d1c723394",
     }
+    if multi_task["snapshot_at"] != "2026-09-23T03:29:00Z":
+        _fail("worker topology freeze time drifted")
+    if len(multi_task["rollout_topology"]) != 14:
+        _fail("worker topology dropped an open rollout entry")
+    seen = {}
+    for item in multi_task["rollout_topology"]:
+        if item["snapshot_state"] != "OPEN":
+            _fail("worker topology is not the open snapshot")
+        seen[(item["repository"], item["pull_request"])] = item["snapshot_head_commit"]
+    if seen != expected_heads:
+        _fail("worker topology snapshot heads drifted")
     recorded = {
-        (item["repository"], item["role"], item["base_commit"], item["head_commit"], item["state"])
+        (item["repository"], item["pull_request"]): item["snapshot_head_commit"]
         for item in multi_case["rollout_topology"]
     }
-    if projected != recorded:
-        _fail("multi worker task dropped frozen rollout topology")
+    if recorded != expected_heads:
+        _fail("manifest topology snapshot heads drifted")
     superseded = next(item for item in multi_task["rollout_topology"] if item["role"] == "SUPERSEDED")
-    if superseded["state"] != "CLOSED_UNMERGED" or "merge_commit" in superseded:
-        _fail("superseded rollout was treated as merged")
-    if superseded["head_commit"] != "8bc3283db9afa674a1e6de2b92925b4d1c723394":
-        _fail("superseded rollout head drifted")
+    if superseded["pull_request"] != 40 or superseded["snapshot_state"] != "OPEN":
+        _fail("superseded rollout was not kept as an open stale path")
     if "api.github.com" in json.dumps(multi_task):
         _fail("multi worker task depends on live issue discovery")
+    mutated = copy.deepcopy(manifest)
+    mutated_multi = next(case for case in mutated["cases"] if case["id"] == "BENCH-MULTI-007")
+    mutated_multi["rollout_topology"][0]["snapshot_head_commit"] = "c" * 40
+    try:
+        FIXTURE.validate_manifest(mutated)
+    except FIXTURE.FixtureError as exc:
+        _fail(f"edited snapshot head failed validation as {exc.code}")
+    frozen_sha = "a" * 40
+    later_sha = "b" * 40
+    original_id = FIXTURE.fixture_id(frozen_sha, "BENCH-MULTI-007")
+    if FIXTURE.fixture_id(later_sha, "BENCH-MULTI-007") == original_id:
+        _fail("snapshot head edit kept the same fixture id")
+    try:
+        FIXTURE.bind_fixture_id(original_id, mutated, later_sha)
+    except FIXTURE.FixtureError as exc:
+        if exc.code != "FIXTURE_REVISION_MISMATCH":
+            _fail(f"stale snapshot binding returned {exc.code}")
+    else:
+        _fail("changed snapshot head retained a valid fixture id")
 
 
 def _has_key(value: object, key: str) -> bool:

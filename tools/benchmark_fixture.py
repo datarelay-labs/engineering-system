@@ -118,6 +118,7 @@ PRODUCTION_MUTATION_RE = re.compile(
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CASE_ID_RE = re.compile(r"^BENCH-[A-Z0-9-]+$")
 FIXTURE_ID_RE = re.compile(r"^([0-9a-f]{40}):(BENCH-[A-Z0-9-]+)$")
+SNAPSHOT_AT = "2026-09-23T03:29:00Z"
 CONCLUSION_RE = re.compile(r"root cause", re.IGNORECASE)
 INCIDENT_EVIDENCE_CODES = (
     "HOST_CAPACITY_20GIB_RAM_6CPU_4GIB_SWAP",
@@ -267,28 +268,28 @@ def _require_historical_inputs(case: dict[str, Any]) -> None:
     elif "evidence_input" in case:
         raise FixtureError("UNEXPECTED_EVIDENCE_INPUT")
     if case["id"] != "BENCH-MULTI-007":
-        if "rollout_topology" in case:
+        if "rollout_topology" in case or "snapshot_at" in case:
             raise FixtureError("UNEXPECTED_ROLLOUT_TOPOLOGY")
         return
+    if case.get("snapshot_at") != SNAPSHOT_AT:
+        raise FixtureError("SNAPSHOT_MISMATCH")
     topology = case.get("rollout_topology")
-    if not topology:
+    if not topology or len(topology) != 14:
         raise FixtureError("MISSING_ROLLOUT_TOPOLOGY")
     canonical = [item for item in topology if item["role"] == "CANONICAL"]
-    if len(canonical) != 1 or canonical[0]["state"] != "MERGED":
+    if len(canonical) != 1 or canonical[0]["repository"] != case["repository"]:
         raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
-    entry = canonical[0]
-    if case["source_commit"] != entry["base_commit"]:
-        raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
-    if case["lineage_commits"] != [entry["head_commit"], entry["merge_commit"]]:
-        raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
-    records = [item["source_record"] for item in topology]
-    if len(records) != len(set(records)):
-        raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
+    seen = []
     for item in topology:
+        if item["snapshot_state"] != "OPEN":
+            raise FixtureError("SNAPSHOT_STATE_MISMATCH")
         if _record_repository(item["source_record"]) != item["repository"]:
             raise FixtureError("SOURCE_RECORD_MISMATCH")
-        if item["state"] == "CLOSED_UNMERGED" and "merge_commit" in item:
-            raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
+        if not item["source_record"].endswith("#" + str(item["pull_request"])):
+            raise FixtureError("SOURCE_RECORD_MISMATCH")
+        seen.append((item["repository"], item["pull_request"]))
+    if len(seen) != len(set(seen)):
+        raise FixtureError("ROLLOUT_TOPOLOGY_MISMATCH")
 
 
 def fixture_id(manifest_git_sha: str, case_id: str) -> str:
@@ -355,10 +356,18 @@ def worker_task(manifest: dict[str, Any], case_id: str) -> dict[str, Any]:
         ]
         allowed.add("evidence_input")
     if "rollout_topology" in case:
+        projected["snapshot_at"] = case["snapshot_at"]
         projected["rollout_topology"] = [
-            {key: item[key] for key in item if key in {"repository", "role", "base_commit", "head_commit", "merge_commit", "state"}}
+            {
+                "repository": item["repository"],
+                "pull_request": item["pull_request"],
+                "role": item["role"],
+                "snapshot_head_commit": item["snapshot_head_commit"],
+                "snapshot_state": item["snapshot_state"],
+            }
             for item in case["rollout_topology"]
         ]
+        allowed.add("snapshot_at")
         allowed.add("rollout_topology")
     if set(projected) != allowed:
         raise FixtureError("TASK_LEAKS_ORACLE")

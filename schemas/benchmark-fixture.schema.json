@@ -76,32 +76,15 @@
     "rollout_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "source_record", "role", "base_commit", "head_commit", "state"],
+      "required": ["repository", "pull_request", "role", "snapshot_head_commit", "snapshot_state", "source_record"],
       "properties": {
         "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "pull_request": {"type": "integer", "minimum": 1, "maximum": 100000},
         "source_record": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"},
         "role": {"type": "string", "enum": ["CANONICAL", "EXISTING_ROLLOUT", "SUPERSEDED"]},
-        "base_commit": {"$ref": "#/$defs/sha"},
-        "head_commit": {"$ref": "#/$defs/sha"},
-        "merge_commit": {"$ref": "#/$defs/sha"},
-        "state": {"type": "string", "enum": ["MERGED", "CLOSED_UNMERGED"]}
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {"state": {"const": "MERGED"}},
-            "required": ["state"]
-          },
-          "then": {"required": ["merge_commit"]}
-        },
-        {
-          "if": {
-            "properties": {"state": {"const": "CLOSED_UNMERGED"}},
-            "required": ["state"]
-          },
-          "then": {"not": {"required": ["merge_commit"]}}
-        }
-      ]
+        "snapshot_head_commit": {"$ref": "#/$defs/sha"},
+        "snapshot_state": {"type": "string", "const": "OPEN"}
+      }
     },
     "case": {
       "type": "object",
@@ -130,6 +113,7 @@
           "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"
         },
         "source_commit": {"$ref": "#/$defs/sha"},
+        "snapshot_at": {"type": "string", "const": "2026-09-23T03:29:00Z"},
         "lineage_commits": {
           "type": "array",
           "maxItems": 3,
@@ -218,7 +202,8 @@
                 {"required": ["reset"]},
                 {"required": ["task"]},
                 {"required": ["evidence_input"]},
-                {"required": ["rollout_topology"]}
+                {"required": ["rollout_topology"]},
+                {"required": ["snapshot_at"]}
               ]
             }
           }
