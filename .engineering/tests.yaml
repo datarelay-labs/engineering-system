@@ -131,6 +131,12 @@ paths:
     domains: [schemas]
   "schemas/trust-evidence-boundary.schema.json":
     domains: [schemas]
+  "tools/security-profile.py":
+    domains: [standards, workflows]
+  "tools/test_security_profile.py":
+    domains: [standards, workflows]
+  "schemas/security-profile.schema.json":
+    domains: [schemas, standards]
   "tools/incident-evidence.py":
     domains: [operations-contract, workflows]
   "tools/test_incident_evidence.py":
@@ -156,7 +162,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -474,4 +480,20 @@ scenarios:
     command: "python3 tools/test_verification_contract.py"
     invariants:
       - "verification maps reference existing ids only and T5 performs no mutation"
+    release_gate: true
+
+  - id: ENG-SECURITY-PROFILE-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Read-only repository security profile audit
+    level: static
+    domains: [standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_security_profile.py"
+    invariants:
+      - "security profile audit classifies four profiles or NEEDS_INPUT and has no GitHub mutation path"
     release_gate: true
