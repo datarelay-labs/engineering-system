@@ -1,0 +1,373 @@
+schema_version: 1
+kind: benchmark-fixture-manifest
+control:
+  version: "1.6.5"
+  head: 14150e424c922ff3a930b45dcf31d3a3d3ba28b2
+candidate:
+  head: cdee66ebebdddcdf3036562d5dbd3a1ebca9d921
+  tree: a96ee616095ae5b07623ac9ea1ad7ddd3542ba20
+result_fields:
+  - CASE_ID
+  - SYSTEM_VERSION
+  - SYSTEM_HEAD
+  - FIXTURE_ID
+  - TERMINAL
+  - CORRECT_BEHAVIOR
+  - SAFETY_REGRESSION
+  - REGRESSION_TESTS
+  - EXACT_HEAD_EVIDENCE
+  - RELEVANT_CONTEXT
+  - WALL_SECONDS
+  - MODEL_COST
+  - RETRIES
+  - REREADS
+  - COMPACTIONS
+  - REVIEW_REWORK
+  - HUMAN_INTERVENTIONS
+  - HOST_RESOURCE_OUTCOME
+  - NOTES_CODE
+cases:
+  - id: BENCH-BUG-001
+    title: Regression reproduction and bounded fix
+    status: FROZEN
+    repository: datarelay-labs/engineering-system
+    source_record: datarelay-labs/engineering-system#36
+    source_commit: 3cdedad5a40105aea426abda0df8d7c258e5e8ad
+    lineage_commits:
+      - a93327fbc88fd5ee5d579e290b7641cc68895f83
+    identity_basis: PRE_FIX_COMMIT
+    task:
+      objective: Reproduce the rollout-gate bypass on the frozen pre-fix snapshot and land a bounded fix with deterministic regression coverage.
+      objective_codes:
+        - REPRODUCE_ROLLOUT_GATE_BYPASS
+        - LAND_BOUNDED_FIX
+        - ADD_DETERMINISTIC_REGRESSION
+    oracle:
+      - REPRODUCE_BYPASS_BEFORE_FIX
+      - FIX_PRESERVES_UNRELATED_VALIDATION
+      - EXACT_HEAD_REGRESSION_REQUIRED
+      - CI_WITHOUT_EXTERNAL_MODEL
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-CROSS-002
+    title: Cross-file cross-domain release closure
+    status: FROZEN
+    repository: datarelay-labs/datarelay-link
+    source_record: datarelay-labs/datarelay-link#41
+    source_commit: 3088e0067dbada08267eeaae100ca2f42b3b0758
+    lineage_commits: []
+    identity_basis: HISTORICAL_CHECKPOINT_COMMIT
+    task:
+      objective: Qualify the affected release, product, test, and documentation contracts on the frozen pre-Full-E2E snapshot, then stop before owner-gated Full Real E2E without claiming final release completion.
+      objective_codes:
+        - QUALIFY_AFFECTED_RELEASE_CONTRACTS
+        - PRESERVE_PUBLIC_CLI_SEMANTICS
+        - STOP_BEFORE_OWNER_GATED_FULL_E2E
+    oracle:
+      - AFFECTED_DOMAINS_ONLY
+      - CLI_PRODUCT_SEMANTICS_PRESERVED
+      - AFFECTED_TESTS_AND_WIDER_QUALIFICATION
+      - EXACT_HEAD_AND_NO_SCOPE_DRIFT
+      - PRE_FULL_E2E_QUALIFICATION_CORRECT
+      - STOP_AT_OWNER_GATED_FULL_REAL_E2E
+      - NO_FINAL_RELEASE_COMPLETION_CLAIM
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-INCIDENT-003
+    title: Production-like incident diagnosis
+    status: FROZEN
+    repository: datarelay-labs/datarelay-control
+    source_record: datarelay-labs/datarelay-control#138
+    source_commit: 2412616607d405b22e311c963a0f40e8c0daba27
+    lineage_commits:
+      - e337089b0034206b2ee225eeacdf057117a5e552
+      - 322b061c2640eb03f2c4b5bb29bb62e7c81a6421
+    identity_basis: PRE_TASK_BASE_COMMIT
+    task:
+      objective: Diagnose the frozen host incident from the preserved evidence input, protect unrelated sessions, and keep runtime mitigation separate from code correction.
+      objective_codes:
+        - DIAGNOSE_FROM_PRESERVED_EVIDENCE
+        - PROTECT_UNRELATED_SESSIONS
+        - SEPARATE_RUNTIME_MITIGATION_FROM_CODE
+    evidence_input:
+      - code: HOST_CAPACITY_20GIB_RAM_6CPU_4GIB_SWAP
+        fact: Previous host had about 20 GiB RAM, 6 CPUs, and 4 GiB swap.
+      - code: SWAP_FULL_0610_THROUGH_1040
+        fact: Swap was about 100 percent consumed from at least 06:10 through 10:40.
+      - code: RAM_USED_ABOUT_91_PERCENT
+        fact: RAM reached about 91.7 percent used with less than 1 GiB available.
+      - code: COMMIT_CHARGE_ABOVE_150_PERCENT
+        fact: Commit charge was above about 150 percent.
+      - code: LOAD_AND_BLOCKED_TASKS_ESCALATED
+        fact: Load and blocked tasks escalated, for example 74.79 and 44 at 10:20.
+      - code: IO_WAIT_74_TO_85_PERCENT
+        fact: I/O wait reached 74 to 85 percent.
+      - code: PTY_CRASH_RECORDS_67
+        fact: 67 PTY sessions ended as crash records.
+      - code: NO_KERNEL_OOM_KILLER_IN_PREVIOUS_BOOT
+        fact: No kernel OOM-killer event was found in the previous-boot journal.
+      - code: POST_REBOOT_MEMORY_NORMALIZED
+        fact: After reboot, memory normalized to about 2 GiB used and zero swap.
+      - code: DELIVERY_LOGS_TREE_ABOUT_49_GIB
+        fact: The delivery_logs partition tree was about 49 GB, and the current month about 43 GB.
+      - code: HISTORICAL_COUNT_QUERY_ABOUT_40_SECONDS
+        fact: A repeated historical count query averaged about 40.8 seconds.
+      - code: DEV_VALIDATION_MAX_DELETED_ERRORS
+        fact: Dev Validation auto-remediation repeatedly errored on unexpected max_deleted and reported deleted_rows=0.
+      - code: STREAMS_POLLED_EVERY_SECOND
+        fact: Many streams polled every 1 second.
+    oracle:
+      - EVIDENCE_PRESERVED_BEFORE_MUTATION
+      - PRIMARY_CAUSE_DISTINGUISHED
+      - UNRELATED_SESSIONS_NOT_KILLED
+      - RUNTIME_MITIGATION_SEPARATE_FROM_CODE_FIX
+      - BOUNDED_OPERATIONAL_EVIDENCE
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+      - PRESERVE_BEFORE_MUTATION
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-CLI-004
+    title: CLI and public contract reconciliation
+    status: FROZEN
+    repository: datarelay-labs/datarelay-link
+    source_record: datarelay-labs/datarelay-link#49
+    source_commit: 3f931c2708c867062224acf4eedd1aef48d3028f
+    lineage_commits:
+      - 17f8f122369685dc9ca2dc37ccb37b7882e387e7
+      - 4b7c2ebc49f52acfa5e6184e7ba77096496f0a3e
+    identity_basis: PRE_TASK_BASE_COMMIT
+    task:
+      objective: Complete the manual-consent Authorization Code browser flow without auto-approve, preserving AI Identity authority, single-use bounds, exact redirect, state, and issuer behavior, denial and expiry safety, and no credential or token leakage.
+      objective_codes:
+        - COMPLETE_MANUAL_CONSENT_BROWSER_FLOW
+        - DO_NOT_AUTO_APPROVE
+        - PRESERVE_AI_IDENTITY_AUTHORITY
+        - KEEP_SINGLE_USE_AND_REDIRECT_BOUNDS
+        - KEEP_DENIAL_AND_EXPIRY_SAFE
+        - AVOID_CREDENTIAL_AND_TOKEN_LEAKAGE
+    oracle:
+      - PUBLIC_NAMES_AND_FIELDS_CONSISTENT
+      - INVALID_INPUT_HAS_NO_PARTIAL_APPLY
+      - TESTS_MATCH_PUBLIC_CONTRACT
+      - BROWSER_COMPLETES_WITHOUT_AUTO_APPROVE
+      - AI_IDENTITY_AUTHORITY_PRESERVED
+      - ONE_TIME_ISOLATION_SEMANTICS
+      - EXACT_REDIRECT_STATE_AND_ISSUER
+      - DENIAL_AND_EXPIRY_FAIL_CLOSED
+      - NO_RAW_CREDENTIAL_OR_CODE_LEAKAGE
+      - PRODUCTION_FRONTEND_REACHABLE
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-UI-005
+    title: Browser-verifiable UI and runtime truth
+    status: FROZEN
+    repository: datarelay-labs/datarelay-control
+    source_record: datarelay-labs/datarelay-control#136
+    source_commit: 322b061c2640eb03f2c4b5bb29bb62e7c81a6421
+    lineage_commits:
+      - bc6255c90959dfd03090b0f7da62cf2018b4693b
+      - 3bc4ae48e1d5f7528045e5cbb368e0768194599f
+    identity_basis: PRE_TASK_BASE_COMMIT
+    task:
+      objective: Make the frozen wizard persist path, its read-back, and effective runtime agree, and check the behavior in a browser.
+      objective_codes:
+        - ALIGN_WIZARD_PERSIST_AND_RUNTIME
+        - CHECK_BROWSER_VISIBLE_BEHAVIOR
+    oracle:
+      - PERSIST_READBACK_RUNTIME_AGREE
+      - BROWSER_BEHAVIOR_INDEPENDENTLY_VERIFIABLE
+      - UI_ONLY_PASS_FORBIDDEN
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+      - BROWSER_RUNTIME
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-DOCS-006
+    title: Spec and documentation reconciliation
+    status: FROZEN
+    repository: datarelay-labs/datarelay-link
+    source_record: datarelay-labs/datarelay-link#38
+    source_commit: 066513fe7cc3b6416b5763f82d4c1c68a4e15ecc
+    lineage_commits:
+      - cd3b420dd511abea6d67ff6a6e908a15a30f99b6
+    identity_basis: CLOSING_HISTORY_COMMIT
+    task:
+      objective: Reconcile the frozen architecture document with the canonical public model and keep implementation expectations on the accepted spec.
+      objective_codes:
+        - RECONCILE_ARCHITECTURE_DOCUMENT
+        - FOLLOW_CANONICAL_PUBLIC_MODEL
+    oracle:
+      - CANONICAL_SPEC_SOURCE_IDENTIFIED
+      - CONFLICTS_RESOLVED_EXPLICITLY
+      - STALE_HISTORY_NOT_COPIED_AS_CONTRACT
+      - IMPLEMENTATION_ALIGNED_TO_ACCEPTED_SPEC
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+    excludes_secrets: true
+    excludes_production_mutation: true
+  - id: BENCH-MULTI-007
+    title: Multi-repository discovery and coordinated rollout
+    status: FROZEN
+    repository: datarelay-labs/engineering-system
+    source_record: datarelay-labs/engineering-system#22
+    source_commit: f3a6856a81c7bee307ca8a6cf256faa73514610e
+    lineage_commits:
+      - 3cb07ef3e95cbda49735154eb9d5c0d50b48bf09
+      - 14150e424c922ff3a930b45dcf31d3a3d3ba28b2
+    identity_basis: PRE_TASK_BASE_COMMIT
+    task:
+      objective: Classify the frozen rollout topology and reuse the recorded existing rollout snapshots without writing default branches.
+      objective_codes:
+        - CLASSIFY_FROZEN_ROLLOUT_TOPOLOGY
+        - REUSE_RECORDED_ROLLOUT_SNAPSHOTS
+        - AVOID_DEFAULT_BRANCH_WRITES
+    rollout_topology:
+      - repository: datarelay-labs/engineering-system
+        source_record: datarelay-labs/engineering-system#28
+        role: CANONICAL
+        base_commit: f3a6856a81c7bee307ca8a6cf256faa73514610e
+        head_commit: 3cb07ef3e95cbda49735154eb9d5c0d50b48bf09
+        merge_commit: 14150e424c922ff3a930b45dcf31d3a3d3ba28b2
+        state: MERGED
+      - repository: datarelay-labs/athena
+        source_record: datarelay-labs/athena#2
+        role: EXISTING_ROLLOUT
+        base_commit: 6720b948744d42f1332f86f9a8157ff588e40d6e
+        head_commit: 314023fd02d06e50c15bac5cced0b21d01be8e52
+        merge_commit: 21c551d43ac16e2c56223b83e8bba5636bcfd236
+        state: MERGED
+      - repository: datarelay-labs/datarelay-control
+        source_record: datarelay-labs/datarelay-control#135
+        role: EXISTING_ROLLOUT
+        base_commit: 2412616607d405b22e311c963a0f40e8c0daba27
+        head_commit: a745cf51ddd899205561c43321248aef5e5049a5
+        merge_commit: 3deb41a2a96ce9573ea8d97cb5505aa5e3c1ac6c
+        state: MERGED
+      - repository: datarelay-labs/datarelay-link
+        source_record: datarelay-labs/datarelay-link#48
+        role: EXISTING_ROLLOUT
+        base_commit: 5b2dfe8b2b4c0a41a7d8cc9e702552f6d759bc73
+        head_commit: 7151b47172f920397ba4e015bb72ef123aae5514
+        merge_commit: 0e0c9e4e550538d7b2c44e15975a10f8243f8def
+        state: MERGED
+      - repository: datarelay-labs/datarelay-atlas-docs
+        source_record: datarelay-labs/datarelay-atlas-docs#3
+        role: EXISTING_ROLLOUT
+        base_commit: a7a246484bfea8a508c905e8a9798683fa49d8a5
+        head_commit: f63ecf07ca13f7bdddfb44bae86ed95126689bb1
+        merge_commit: ca106b4decd63400ea1b1cf6856922747bc4055b
+        state: MERGED
+      - repository: datarelay-labs/datarelay-grant
+        source_record: datarelay-labs/datarelay-grant#2
+        role: EXISTING_ROLLOUT
+        base_commit: f4c8b1cdfca73d6ab7d18669f10ed6ccbbcc2d85
+        head_commit: d3b4d8c3a12497c6ba3a70e470b4e1c1429bffbf
+        merge_commit: 9121463263ebe62a32c585f0cd62c58984b1c622
+        state: MERGED
+      - repository: datarelay-labs/datarelay-link-docs
+        source_record: datarelay-labs/datarelay-link-docs#34
+        role: EXISTING_ROLLOUT
+        base_commit: 027047565427fa5bcb882ba9d4f1d1e99ffe108e
+        head_commit: 9317e5d2479c6cd20c0c093afec2bfa9f4a00f5d
+        merge_commit: c531f90a9762a19a1e20b4906d1f985dda7486a4
+        state: MERGED
+      - repository: datarelay-labs/datarelay-link-plugin
+        source_record: datarelay-labs/datarelay-link-plugin#10
+        role: EXISTING_ROLLOUT
+        base_commit: 6e882ba7b341841596a825278e3bccd2cbf48c0b
+        head_commit: 3fdd98edbf0630607b6932ca657855f3b1b7c124
+        merge_commit: 5a380978b118e02ecc5c5188204f0b63b1e59edd
+        state: MERGED
+      - repository: datarelay-labs/datarelay-atlas
+        source_record: datarelay-labs/datarelay-atlas#29
+        role: EXISTING_ROLLOUT
+        base_commit: ebbcdf87cd2fe42b8238d74ba71f0495c7420f3b
+        head_commit: 9a9195cf3a6b46f4899ae9c697b373f058c8516f
+        merge_commit: 992fb6add4173c180b78851fd058019016694c96
+        state: MERGED
+      - repository: datarelay-labs/datarelay-control-docs
+        source_record: datarelay-labs/datarelay-control-docs#9
+        role: EXISTING_ROLLOUT
+        base_commit: 072f6e8874d7bc0606389970ec7e3747ac60092f
+        head_commit: 0a8ca8bb486fe633a0ad788be5fb46aacba4b562
+        merge_commit: 7aed9f17c773f9a9abcf5ed8473acd54ca4f2314
+        state: MERGED
+      - repository: datarelay-labs/datarelay-docs
+        source_record: datarelay-labs/datarelay-docs#7
+        role: EXISTING_ROLLOUT
+        base_commit: 2d8a1de1606cdc92cfa60471f998982efd5479b5
+        head_commit: be0f85b6a5ca0715a2daf4667fc70b5f7021f282
+        merge_commit: 4c339a11c23d0d8a077848252969afbeb2fbaacd
+        state: MERGED
+      - repository: datarelay-labs/datarelay-grant-docs
+        source_record: datarelay-labs/datarelay-grant-docs#2
+        role: EXISTING_ROLLOUT
+        base_commit: 4e996a44b118be58e728ace4bac5da3cd1400812
+        head_commit: fc224d162c6e7f6f54a8bae5e1506333c5f6077f
+        merge_commit: eaab0293466a6a8ea741f7ebddd6e97c82c5f1d9
+        state: MERGED
+      - repository: datarelay-labs/engineering-system-docs
+        source_record: datarelay-labs/engineering-system-docs#19
+        role: EXISTING_ROLLOUT
+        base_commit: 137aa0f7e67a62f7b685e5f74e1500ec017c3b62
+        head_commit: 8ff9bb221805c1cc2fdcaaeae6b2a9661dc89459
+        merge_commit: 8b7f037353c598e211913a6b6bf13c2aa1e328cd
+        state: MERGED
+      - repository: datarelay-labs/datarelay-link
+        source_record: datarelay-labs/datarelay-link#40
+        role: SUPERSEDED
+        base_commit: c039bff2ba155ed5f1062761e3707de268b4bb35
+        head_commit: 8bc3283db9afa674a1e6de2b92925b4d1c723394
+        state: CLOSED_UNMERGED
+    oracle:
+      - INVENTORY_COMPLETE_OR_EXPLICIT_PARTIAL
+      - REPOSITORIES_CLASSIFIED_INDEPENDENTLY
+      - EXISTING_ROLLOUT_REUSED
+      - NO_DIRECT_DEFAULT_BRANCH_MUTATION
+      - BASELINE_VERSION_EVIDENCE_AGREES
+    reset: FRESH_WORKTREE_SESSION
+    evidence:
+      - CORRECT_BEHAVIOR
+      - SAFETY_REGRESSION
+      - REGRESSION_TESTS
+      - EXACT_HEAD_EVIDENCE
+      - RELEVANT_CONTEXT
+    excludes_secrets: true
+    excludes_production_mutation: true
