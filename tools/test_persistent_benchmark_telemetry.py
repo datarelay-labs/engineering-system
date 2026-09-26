@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -1373,6 +1374,54 @@ def _expect_checkout(task: Path, snapshot: Path, code: str) -> None:
         _fail(f"{code} left lane files")
 
 
+def _sticky_clock(start: str, finish: str):
+    original = capture._utc_now
+    state = {"n": 0}
+
+    def clock() -> str:
+        state["n"] += 1
+        return start if state["n"] == 1 else finish
+
+    capture._utc_now = clock
+    return original
+
+
+def _fixtures():
+    path = ROOT / "tools" / "skills_contract_fixtures.py"
+    spec = importlib.util.spec_from_file_location("skills_contract_fixtures", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_dirty_frozen_checkout_is_rejected() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        modified = root / "modified"
+        _frozen_checkout(modified)
+        agents = modified / "AGENTS.md"
+        agents.write_text(agents.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        _expect_checkout(modified, root / "modified-plugin", "TASK_CHECKOUT_DIRTY")
+
+        untracked = root / "untracked"
+        _frozen_checkout(untracked)
+        (untracked / "notes.tmp").write_text("x\n", encoding="utf-8")
+        _expect_checkout(untracked, root / "untracked-plugin", "TASK_CHECKOUT_DIRTY")
+
+        staged = root / "staged"
+        _frozen_checkout(staged)
+        (staged / "staged.tmp").write_text("x\n", encoding="utf-8")
+        _git(staged, "add", "--", "staged.tmp")
+        _expect_checkout(staged, root / "staged-plugin", "TASK_CHECKOUT_DIRTY")
+
+        submodule = root / "submodule"
+        _frozen_checkout(submodule)
+        gitlink = _git(submodule, "rev-parse", "HEAD")
+        _git(submodule, "update-index", "--add", "--cacheinfo", f"160000,{gitlink},vendor/drift")
+        _expect_checkout(submodule, root / "submodule-plugin", "TASK_CHECKOUT_DIRTY")
+
+
 def test_task_checkout_binds_frozen_identity() -> None:
     identity = capture.benchmark_execution.FROZEN_CASE_IDENTITIES["BENCH-BUG-001"]
     if identity["source_commit"] == capture.benchmark_fixture.CONTROL_HEAD:
@@ -1441,8 +1490,11 @@ def test_toolset_and_receipt_are_not_worker_authoritative() -> None:
         checkout = root / "control"
         _control_checkout(checkout)
         missing = capture.finalize_lane(descriptor, root=checkout)
-        if missing["reason"] != "TOOLSET_UNOBSERVED" or "record" in missing:
-            _fail(f"shell-only toolset was {missing}")
+        if missing["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in missing:
+            _fail(f"shell-only subset was {missing}")
+        shell_receipt = json.loads((root / "state" / f"{RUN_ID}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if shell_receipt.get("observed_tools") != ["Shell"] or shell_receipt.get("lifecycle") == "COMPLETE":
+            _fail(f"shell-only receipt was {shell_receipt.get('observed_tools')} {shell_receipt.get('lifecycle')}")
         extra = _ingest(descriptor, plugin, _read("web", "preToolUse", "web", "WebSearch"))
         if extra["reason"] != "TOOLSET_MISMATCH":
             _fail(f"extra tool was {extra['reason']}")
@@ -1519,20 +1571,93 @@ def test_toolset_and_receipt_are_not_worker_authoritative() -> None:
             forged_result = capture.finalize_lane(descriptor, root=checkout)
             if forged_result["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in forged_result:
                 _fail(f"forged receipt finalized as {forged_result}")
-            witnessed = capture.finalize_lane(
-                descriptor,
-                root=checkout,
-                witness=capture.CoordinatorReceiptWitness(forged, {}),
-            )
-            if witnessed["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in witnessed:
-                _fail(f"in-process witness bypassed the missing host anchor as {witnessed}")
-            rejected = capture.finalize_lane(descriptor, root=checkout, witness={"receipt": forged})
-            if rejected["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in rejected:
-                _fail(f"dict witness was accepted as {rejected}")
+            if hasattr(capture, "CoordinatorReceiptWitness"):
+                _fail("in-process witness class remains a production authority")
+            parameters = inspect.signature(capture.finalize_lane).parameters
+            if set(parameters) != {"descriptor_path", "root"} or any(
+                item.kind in {item.VAR_KEYWORD, item.VAR_POSITIONAL} for item in parameters.values()
+            ):
+                _fail(f"finalize accepts caller authority via {list(parameters)}")
+            try:
+                capture.finalize_lane(descriptor, root=checkout, witness={"receipt": forged})  # type: ignore[call-arg]
+            except TypeError:
+                pass
+            else:
+                _fail("dict witness was accepted")
             if (checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json").exists():
                 _fail("forged receipt wrote canonical telemetry")
         finally:
             os.environ.pop("ES_BENCHMARK_TRUST_DIR", None)
+
+
+def test_signed_subset_records_allowlist() -> None:
+    """Shell without Write/Edit is still the allowlist once a host signature matches."""
+    source = TOOL.read_text(encoding="utf-8")
+    if "class CoordinatorReceiptWitness" in source or "trust_root.mkdir" in source or ".receipt-key" in source:
+        _fail("production telemetry still mints a worker-visible receipt authority")
+    if "os.environ" in source:
+        _fail("production telemetry selects trust material from the environment")
+    original = _sticky_clock("2026-09-26T11:00:00Z", "2026-09-26T11:00:02Z")
+    previous_anchor = capture._TEST_HOST_RECEIPT_ANCHOR
+    previous_dir = capture._TEST_HOST_RECEIPT_DIR
+    capture._TEST_HOST_RECEIPT_ANCHOR = None
+    capture._TEST_HOST_RECEIPT_DIR = None
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root)
+            descriptor = Path(prepared["descriptor_path"])
+            plugin = Path(prepared["plugin_dir"])
+            for payload in (_session(), _shell(), _stop()):
+                result = _ingest(descriptor, plugin, payload)
+            if result["reason"] != "LOOP_CHECKPOINT":
+                _fail(f"shell-only stop was {result['reason']}")
+            checkout = root / "control"
+            _control_checkout(checkout)
+            blocked = capture.finalize_lane(descriptor, root=checkout)
+            if blocked["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in blocked:
+                _fail(f"unsigned subset finalized as {blocked}")
+            fixtures = _fixtures()
+            keys = root / "keys"
+            private, public = fixtures.generate_keypair(keys)
+            other_private, _other_public = fixtures.generate_keypair(root / "other-keys")
+            host_dir = root / "host-receipts"
+            host_dir.mkdir()
+            binding = capture.host_receipt_binding(descriptor, root=checkout)
+            if binding["effective_toolset"] != "write-shell-allowlist" or binding["lifecycle"] != "COMPLETE":
+                _fail(f"host binding was {binding}")
+            assertion = host_dir / f"{RUN_ID}-CONTROL.host-receipt.json"
+            assertion.write_text(json.dumps(fixtures.sign_payload(private, binding)) + "\n", encoding="utf-8")
+            os.environ["ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY"] = str(public)
+            os.environ["ES_BENCHMARK_TRUST_DIR"] = str(host_dir)
+            ignored = capture.finalize_lane(descriptor, root=checkout)
+            if ignored["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in ignored:
+                _fail(f"caller env upgraded trust as {ignored}")
+            assertion.write_text(json.dumps(fixtures.sign_payload(other_private, binding)) + "\n", encoding="utf-8")
+            capture._TEST_HOST_RECEIPT_ANCHOR = public
+            capture._TEST_HOST_RECEIPT_DIR = host_dir
+            mismatched = capture.finalize_lane(descriptor, root=checkout)
+            if mismatched["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in mismatched:
+                _fail(f"foreign signature finalized as {mismatched}")
+            assertion.write_text(json.dumps(fixtures.sign_payload(private, binding)) + "\n", encoding="utf-8")
+            finalized = capture.finalize_lane(descriptor, root=checkout)
+            if finalized["reason"] != "TELEMETRY_RECORDED" or finalized["execute_worker"] is not False:
+                _fail(f"signed subset finalized as {finalized}")
+            record = finalized.get("record")
+            if not isinstance(record, dict) or record.get("profile", {}).get("toolset") != "write-shell-allowlist":
+                _fail(f"recorded toolset was {record}")
+            retained = checkout / ".git" / "engineering-system" / "telemetry" / f"{RUN_ID}.json"
+            if not retained.is_file():
+                _fail("signed subset did not store canonical telemetry")
+            stored = json.loads(retained.read_text(encoding="utf-8"))
+            if stored.get("profile", {}).get("toolset") != "write-shell-allowlist":
+                _fail(f"stored toolset was {stored.get('profile')}")
+    finally:
+        os.environ.pop("ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY", None)
+        os.environ.pop("ES_BENCHMARK_TRUST_DIR", None)
+        capture._TEST_HOST_RECEIPT_ANCHOR = previous_anchor
+        capture._TEST_HOST_RECEIPT_DIR = previous_dir
+        _restore_clock(original)
 
 
 def main() -> None:
@@ -1554,8 +1679,10 @@ def main() -> None:
         test_missing_evidence_does_not_become_zero,
         test_follow_up_prompt_is_one_human_intervention,
         test_finalize_writes_one_canonical_record,
+        test_dirty_frozen_checkout_is_rejected,
         test_task_checkout_binds_frozen_identity,
         test_toolset_and_receipt_are_not_worker_authoritative,
+        test_signed_subset_records_allowlist,
     )
     for test in tests:
         print(f"RUN {test.__name__}", flush=True)
