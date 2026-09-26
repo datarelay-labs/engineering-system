@@ -1227,10 +1227,49 @@ def _bounded_receipt(
     }
 
 
+def _qualified_record(
+    descriptor: dict[str, Any],
+    bounded: dict[str, Any],
+    system_head: str,
+    root: Path,
+) -> dict[str, Any]:
+    profile = dict(descriptor["profile"])
+    profile["toolset"] = REQUIRED_TOOLSET
+    usage = bounded["usage"]
+    return efficiency_telemetry.build_record(
+        repo=descriptor["repository"],
+        workstream=benchmark_execution.lane_workstream(descriptor["case_id"], descriptor["lane"]),
+        task_kind="TEST",
+        profile=profile,
+        started_at=bounded["started_at"],
+        finished_at=bounded["finished_at"],
+        duration_seconds=bounded["duration_seconds"],
+        counts=bounded["counts"],
+        validation={
+            "ids": [descriptor["case_id"]],
+            "exact_head": system_head,
+            "evidence_state": "EXACT_HEAD",
+            "outcome": "PASS",
+        },
+        terminal="PASS",
+        budget={
+            "soft_limit": None,
+            "consumed": None,
+            "unit": None,
+            "state": "UNKNOWN",
+            "disposition": "CONTINUE",
+        },
+        usage=usage if isinstance(usage, dict) else None,
+        run_id=descriptor["run_id"],
+        root=root,
+    )
+
+
 def _host_assertion_body(
     descriptor: dict[str, Any],
     bounded: dict[str, Any],
     system_head: str,
+    record: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -1242,6 +1281,7 @@ def _host_assertion_body(
         "system_head": system_head,
         "descriptor_digest": descriptor["descriptor_digest"],
         "receipt_digest": _sha256(_canonical(bounded)),
+        "telemetry_digest": benchmark_execution.canonical_telemetry_digest(record),
         "lifecycle": "COMPLETE",
         "effective_toolset": REQUIRED_TOOLSET,
     }
@@ -1264,7 +1304,8 @@ def host_receipt_binding(descriptor_path: Path, *, root: Path) -> dict[str, Any]
     _require_effective_toolset(descriptor, receipt)
     fingerprints = _load_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]))
     bounded = _bounded_receipt(descriptor, receipt, fingerprints)
-    return _host_assertion_body(descriptor, bounded, head)
+    record = _qualified_record(descriptor, bounded, head, root)
+    return _host_assertion_body(descriptor, bounded, head, record)
 
 
 def _bind_host_finalizer():
@@ -1279,10 +1320,8 @@ def _bind_host_finalizer():
     anchor_ok = _host_anchor_ok
     directory_ok = _host_dir_ok
     git_head = efficiency_telemetry.git_head
-    build_record = efficiency_telemetry.build_record
     write_record = efficiency_telemetry.write_record
     telemetry_error = efficiency_telemetry.TelemetryError
-    lane_workstream = benchmark_execution.lane_workstream
 
     def host_receipt_authority_available() -> bool:
         """Report the fixed host anchor. Environment and module assignment cannot select it."""
@@ -1341,7 +1380,8 @@ def _bind_host_finalizer():
             _require_effective_toolset(descriptor, receipt)
             fingerprints = _load_fingerprints(fingerprint_path(state_dir, descriptor["run_id"], descriptor["lane"]))
             bounded = _bounded_receipt(descriptor, receipt, fingerprints)
-            expected = _host_assertion_body(descriptor, bounded, head)
+            record = _qualified_record(descriptor, bounded, head, root)
+            expected = _host_assertion_body(descriptor, bounded, head, record)
             assertion = directory / f"{descriptor['run_id']}-{descriptor['lane']}.host-receipt.json"
             if not verify_signed_assertion(assertion, expected):
                 return {"status": "BLOCK", "reason": "TRUST_BOUNDARY_UNAVAILABLE", "execute_worker": False}
@@ -1353,36 +1393,6 @@ def _bind_host_finalizer():
             receipt["effective_toolset"] = REQUIRED_TOOLSET
             _write_receipt(receipt_path(state_dir, descriptor["run_id"], descriptor["lane"]), receipt, None)
             _delete_ephemeral(state_dir, descriptor["run_id"], descriptor["lane"])
-            usage = bounded["usage"]
-            profile = dict(descriptor["profile"])
-            profile["toolset"] = REQUIRED_TOOLSET
-            record = build_record(
-                repo=descriptor["repository"],
-                workstream=lane_workstream(descriptor["case_id"], descriptor["lane"]),
-                task_kind="TEST",
-                profile=profile,
-                started_at=receipt["started_at"],
-                finished_at=receipt["finished_at"],
-                duration_seconds=receipt["duration_seconds"],
-                counts=bounded["counts"],
-                validation={
-                    "ids": [descriptor["case_id"]],
-                    "exact_head": head,
-                    "evidence_state": "EXACT_HEAD",
-                    "outcome": "PASS",
-                },
-                terminal="PASS",
-                budget={
-                    "soft_limit": None,
-                    "consumed": None,
-                    "unit": None,
-                    "state": "UNKNOWN",
-                    "disposition": "CONTINUE",
-                },
-                usage=usage if isinstance(usage, dict) else None,
-                run_id=descriptor["run_id"],
-                root=root,
-            )
             write_record(root, record)
         except CaptureError as exc:
             return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}

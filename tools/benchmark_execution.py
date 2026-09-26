@@ -5,12 +5,15 @@ The coordinator may read the frozen manifest. A worker payload is only
 ``worker_task()`` plus explicit run metadata. The dry-run binds one of the
 seven frozen case identities and emits a non-final result template. Observed
 cost, time, and counts are derived from a canonical efficiency telemetry
-record; this module does not emit a second telemetry record. It does not
-start a model, agent, or network call.
+record. EXACT_HEAD or terminal PASS records qualify only when a fixed
+host-signed assertion binds that record. This module does not emit a second
+telemetry record. It does not start a model, agent, or network call.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import re
 import sys
@@ -268,50 +271,147 @@ def _bind_telemetry_lane(
         raise ExecutionError("TELEMETRY_LANE_MISMATCH")
 
 
-def derive_observed_fields(
-    record: dict[str, Any],
-    *,
-    lane: str,
-    system_head: str,
-    profile: dict[str, Any],
-    run_id: str,
-    case_id: str = PILOT_CASE_ID,
-) -> dict[str, Any]:
-    """Map one canonical telemetry record into #44 fields for one benchmark lane."""
-    try:
-        parsed = efficiency_telemetry.parse_document(record)
-    except efficiency_telemetry.TelemetryError as exc:
-        raise ExecutionError(exc.code) from exc
-    if parsed.get("kind") != "efficiency-telemetry":
-        raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
-    _bind_telemetry_lane(
-        parsed,
-        case_id=case_id,
-        lane=lane,
-        system_head=system_head,
-        profile=profile,
-        run_id=run_id,
-    )
-    derived: dict[str, Any] = {}
-    for rule in TELEMETRY_DERIVATIONS:
-        if "aggregate" in rule:
-            if (
-                rule["aggregate"] != "efficiency_telemetry.rework_count"
-                or rule["result_field"] != "REVIEW_REWORK"
-                or rule["source"] != "rework_count"
-            ):
-                raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
-            derived[rule["result_field"]] = efficiency_telemetry.rework_count(parsed["counts"])
-            continue
-        value = _lookup(parsed, rule["source"])
-        if "value_map" in rule:
-            mapped = rule["value_map"].get(value)
-            if mapped is None:
-                raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
-            derived[rule["result_field"]] = mapped
-            continue
-        derived[rule["result_field"]] = rule["when_null"] if value is None else value
-    return derived
+def canonical_telemetry_digest(record: dict[str, Any]) -> str:
+    """Digest the parsed canonical record. This does not establish host trust."""
+    payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _bind_observed_fields():
+    """Capture fixed host provenance for terminal telemetry qualification."""
+    anchor = Path("/etc/engineering-system/skills-trust-anchor.pub")
+    directory = Path("/var/lib/engineering-system/benchmark-receipts")
+    skills_file = (TOOLS / "skills-contract.py").resolve()
+    spec_from_file_location = importlib.util.spec_from_file_location
+    module_from_spec = importlib.util.module_from_spec
+    modules = sys.modules
+    verifier_name = "_es_benchmark_consumer_verify"
+
+    def path_ok(path: Path, *, expect_file: bool) -> bool:
+        try:
+            if path.is_symlink():
+                return False
+            if expect_file:
+                if not path.is_file():
+                    return False
+            elif not path.is_dir():
+                return False
+            stat = path.stat()
+            if stat.st_uid != 0 or stat.st_mode & 0o022:
+                return False
+            parent = path.parent
+            if parent.is_symlink():
+                return False
+            parent_stat = parent.stat()
+            if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
+                return False
+        except OSError:
+            return False
+        return True
+
+    def assertion_binds(parsed: dict[str, Any], lane: str) -> bool:
+        if not path_ok(anchor, expect_file=True) or not path_ok(directory, expect_file=False):
+            return False
+        assertion = directory / f"{parsed['run_id']}-{lane}.host-receipt.json"
+        if not path_ok(assertion, expect_file=True):
+            return False
+        spec = spec_from_file_location(verifier_name, skills_file)
+        if spec is None or spec.loader is None:
+            return False
+        module = module_from_spec(spec)
+        modules[verifier_name] = module
+        try:
+            spec.loader.exec_module(module)
+            loaded = getattr(module, "__file__", None)
+            if loaded is None or Path(loaded).resolve() != skills_file:
+                return False
+            if getattr(module, "HOST_OPENSSL_PATH", None) != "/usr/bin/openssl":
+                return False
+            verifier = getattr(module, "verify_signed_json", None)
+            if not callable(verifier):
+                return False
+            payload = verifier(assertion, anchor)
+        except (OSError, json.JSONDecodeError, SystemExit, ImportError, SyntaxError, ValueError, TypeError):
+            return False
+        finally:
+            if modules.get(verifier_name) is module:
+                del modules[verifier_name]
+        if not isinstance(payload, dict):
+            return False
+        validation = parsed.get("validation")
+        if not isinstance(validation, dict):
+            return False
+        return (
+            payload.get("kind") == "benchmark-host-receipt"
+            and payload.get("lifecycle") == "COMPLETE"
+            and payload.get("run_id") == parsed.get("run_id")
+            and payload.get("lane") == lane
+            and payload.get("repository") == parsed.get("repo")
+            and payload.get("system_head") == validation.get("exact_head")
+            and payload.get("telemetry_digest") == canonical_telemetry_digest(parsed)
+        )
+
+    def derive_observed_fields(
+        record: dict[str, Any],
+        *,
+        lane: str,
+        system_head: str,
+        profile: dict[str, Any],
+        run_id: str,
+        case_id: str = PILOT_CASE_ID,
+    ) -> dict[str, Any]:
+        """Map one canonical telemetry record into #44 fields for one benchmark lane.
+
+        Non-terminal MISSING or BLOCK records still map nulls and counts for the
+        stacked dry-run contract. EXACT_HEAD or terminal PASS qualifies only when
+        the fixed host-signed assertion binds this record.
+        """
+        try:
+            parsed = efficiency_telemetry.parse_document(record)
+        except efficiency_telemetry.TelemetryError as exc:
+            raise ExecutionError(exc.code) from exc
+        if parsed.get("kind") != "efficiency-telemetry":
+            raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
+        _bind_telemetry_lane(
+            parsed,
+            case_id=case_id,
+            lane=lane,
+            system_head=system_head,
+            profile=profile,
+            run_id=run_id,
+        )
+        validation = parsed.get("validation")
+        qualifying = (
+            isinstance(validation, dict) and validation.get("evidence_state") == "EXACT_HEAD"
+        ) or parsed.get("terminal") == "PASS"
+        if qualifying and not assertion_binds(parsed, lane):
+            raise ExecutionError("TELEMETRY_UNAUTHENTICATED")
+        derived: dict[str, Any] = {}
+        for rule in TELEMETRY_DERIVATIONS:
+            if "aggregate" in rule:
+                if (
+                    rule["aggregate"] != "efficiency_telemetry.rework_count"
+                    or rule["result_field"] != "REVIEW_REWORK"
+                    or rule["source"] != "rework_count"
+                ):
+                    raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
+                derived[rule["result_field"]] = efficiency_telemetry.rework_count(parsed["counts"])
+                continue
+            value = _lookup(parsed, rule["source"])
+            if "value_map" in rule:
+                mapped = rule["value_map"].get(value)
+                if mapped is None:
+                    raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
+                derived[rule["result_field"]] = mapped
+                continue
+            derived[rule["result_field"]] = rule["when_null"] if value is None else value
+        return derived
+
+    return derive_observed_fields
+
+
+derive_observed_fields = _bind_observed_fields()
+del _bind_observed_fields
 
 
 def accepts_final_result(instance: Any) -> bool:

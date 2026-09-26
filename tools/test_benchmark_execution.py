@@ -7,6 +7,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -560,9 +563,17 @@ def test_telemetry_lane_binding_rejects_swaps_and_unrelated_records() -> None:
     exact = copy.deepcopy(record)
     exact["validation"]["evidence_state"] = "EXACT_HEAD"
     exact["validation"]["exact_head"] = EXEC.benchmark_fixture.CONTROL_HEAD
-    derived = _derive(exact)
-    if derived["EXACT_HEAD_EVIDENCE"] != "PASS":
-        _fail("matching control lane did not derive exact-head evidence")
+    exact["validation"]["outcome"] = "PASS"
+    exact["terminal"] = "PASS"
+    exact["counts"]["retries"] = 999
+    exact["counts"]["human_interventions"] = 777
+    try:
+        _derive(exact)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_UNAUTHENTICATED":
+            _fail(f"unsigned exact-head record returned {exc.code}")
+    else:
+        _fail("unsigned exact-head record qualified")
     try:
         _derive(
             exact,
@@ -745,6 +756,72 @@ def test_plan_has_no_production_mutation_or_execution_surface() -> None:
         _fail(f"cli dry-run returned {status}: {stdout.getvalue().strip()}")
 
 
+def test_forged_canonical_record_does_not_qualify() -> None:
+    record = _telemetry_record()
+    record["counts"]["retries"] = 999
+    record["counts"]["human_interventions"] = 777
+    record["validation"] = {
+        "ids": ["ENG-BENCH-EXEC-001"],
+        "exact_head": EXEC.benchmark_fixture.CONTROL_HEAD,
+        "evidence_state": "EXACT_HEAD",
+        "outcome": "PASS",
+    }
+    record["terminal"] = "PASS"
+    previous_skills = sys.modules.get("skills_contract")
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assertion = {
+                "kind": "benchmark-host-receipt",
+                "lifecycle": "COMPLETE",
+                "run_id": record["run_id"],
+                "lane": "CONTROL",
+                "repository": record["repo"],
+                "system_head": EXEC.benchmark_fixture.CONTROL_HEAD,
+                "telemetry_digest": EXEC.canonical_telemetry_digest(record),
+                "signature": "worker-minted",
+            }
+            host_dir = root / "worker-receipts"
+            host_dir.mkdir()
+            (host_dir / f"{record['run_id']}-CONTROL.host-receipt.json").write_text(
+                json.dumps(assertion) + "\n",
+                encoding="utf-8",
+            )
+            os.environ["ES_BENCHMARK_TRUST_DIR"] = str(host_dir)
+            os.environ["ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY"] = str(root / "worker.pub")
+            EXEC.HOST_RECEIPT_ANCHOR = root / "worker.pub"
+            EXEC.HOST_RECEIPT_DIR = host_dir
+
+            class _FakeSkills:
+                HOST_OPENSSL_PATH = "/usr/bin/openssl"
+
+                @staticmethod
+                def verify_signed_json(_path, _anchor):
+                    return dict(assertion)
+
+            sys.modules["skills_contract"] = _FakeSkills()
+            try:
+                derived = _derive(record)
+            except EXEC.ExecutionError as exc:
+                if exc.code != "TELEMETRY_UNAUTHENTICATED":
+                    _fail(f"forged canonical record returned {exc.code}")
+            else:
+                if derived.get("EXACT_HEAD_EVIDENCE") == "PASS" or derived.get("RETRIES") == 999:
+                    _fail(f"forged canonical record qualified as {derived}")
+                _fail("forged canonical record was accepted")
+    finally:
+        os.environ.pop("ES_BENCHMARK_TRUST_DIR", None)
+        os.environ.pop("ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY", None)
+        if hasattr(EXEC, "HOST_RECEIPT_ANCHOR"):
+            delattr(EXEC, "HOST_RECEIPT_ANCHOR")
+        if hasattr(EXEC, "HOST_RECEIPT_DIR"):
+            delattr(EXEC, "HOST_RECEIPT_DIR")
+        if previous_skills is None:
+            sys.modules.pop("skills_contract", None)
+        else:
+            sys.modules["skills_contract"] = previous_skills
+
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -756,6 +833,7 @@ def main() -> None:
     test_final_result_binds_selected_case_and_lane()
     test_frozen_manifest_content_must_match_revision()
     test_telemetry_lane_binding_rejects_swaps_and_unrelated_records()
+    test_forged_canonical_record_does_not_qualify()
     test_telemetry_rejects_other_case_repository_and_workstream()
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
