@@ -398,14 +398,14 @@ scenarios:
     timeout_seconds: 30
     agent_default: true
     scope: static
-    name: BENCH-BUG-001 execution dry-run
+    name: Frozen-case benchmark execution dry-run
     level: static
     domains: [ai, schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
     command: "python3 tools/test_benchmark_execution.py"
     invariants:
-      - "BENCH-BUG-001 dry-run binds the frozen identities, hides the oracle, and does not launch a model worker"
+      - "each of the seven frozen-case dry-runs binds that case's identities, hides the oracle, rejects cross-case swaps, and does not launch a model worker"
     release_gate: true
 
   - id: ENG-TELEMETRY-001

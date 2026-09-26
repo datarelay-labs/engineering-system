@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Prepare a BENCH-BUG-001 control/candidate dry-run without launching workers.
+"""Prepare a frozen-case control/candidate dry-run without launching workers.
 
 The coordinator may read the frozen manifest. A worker payload is only
-``worker_task()`` plus explicit run metadata. The dry-run binds the pilot
-identities and emits a non-final result template. Observed cost, time, and
-counts are derived from a canonical efficiency telemetry record; this module
-does not emit a second telemetry record. It does not start a model, agent,
-or network call.
+``worker_task()`` plus explicit run metadata. The dry-run binds one of the
+seven frozen case identities and emits a non-final result template. Observed
+cost, time, and counts are derived from a canonical efficiency telemetry
+record; this module does not emit a second telemetry record. It does not
+start a model, agent, or network call.
 """
 from __future__ import annotations
 
@@ -31,12 +31,45 @@ ROOT = TOOLS.parent
 SCHEMA_PATH = ROOT / "schemas" / "benchmark-execution.schema.json"
 PILOT_CASE_ID = "BENCH-BUG-001"
 PILOT_MANIFEST_HEAD = "2990e6683f87a9858c4441e719ebf78b643c7ded"
-PILOT_TASK_SOURCE_HEAD = "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
-PILOT_REPOSITORY = "datarelay-labs/engineering-system"
 CANDIDATE_SYSTEM_VERSION = "1.7"
+# Repository and source commit for each frozen case at PILOT_MANIFEST_HEAD.
+# These stay explicit so a mutated manifest fails before blob equality, and
+# the BENCH-BUG-001 source check remains TASK_SOURCE_MISMATCH.
+FROZEN_CASE_IDENTITIES = {
+    "BENCH-BUG-001": {
+        "repository": "datarelay-labs/engineering-system",
+        "source_commit": "3cdedad5a40105aea426abda0df8d7c258e5e8ad",
+    },
+    "BENCH-CROSS-002": {
+        "repository": "datarelay-labs/datarelay-link",
+        "source_commit": "3088e0067dbada08267eeaae100ca2f42b3b0758",
+    },
+    "BENCH-INCIDENT-003": {
+        "repository": "datarelay-labs/datarelay-control",
+        "source_commit": "2412616607d405b22e311c963a0f40e8c0daba27",
+    },
+    "BENCH-CLI-004": {
+        "repository": "datarelay-labs/datarelay-link",
+        "source_commit": "3f931c2708c867062224acf4eedd1aef48d3028f",
+    },
+    "BENCH-UI-005": {
+        "repository": "datarelay-labs/datarelay-control",
+        "source_commit": "322b061c2640eb03f2c4b5bb29bb62e7c81a6421",
+    },
+    "BENCH-DOCS-006": {
+        "repository": "datarelay-labs/datarelay-link",
+        "source_commit": "066513fe7cc3b6416b5763f82d4c1c68a4e15ecc",
+    },
+    "BENCH-MULTI-007": {
+        "repository": "datarelay-labs/engineering-system",
+        "source_commit": "f3a6856a81c7bee307ca8a6cf256faa73514610e",
+    },
+}
+PILOT_REPOSITORY = FROZEN_CASE_IDENTITIES[PILOT_CASE_ID]["repository"]
+PILOT_TASK_SOURCE_HEAD = FROZEN_CASE_IDENTITIES[PILOT_CASE_ID]["source_commit"]
 LANE_WORKSTREAM = {
-    "CONTROL": "bench-bug-001-control",
-    "CANDIDATE": "bench-bug-001-candidate",
+    "CONTROL": f"{PILOT_CASE_ID.lower()}-control",
+    "CANDIDATE": f"{PILOT_CASE_ID.lower()}-candidate",
 }
 NAME_RE = re.compile(r"^[A-Za-z0-9_.:@\[\]=,+-]{1,80}$")
 TELEMETRY_DERIVATIONS = (
@@ -83,6 +116,15 @@ class ExecutionError(Exception):
         self.code = code
 
 
+def lane_workstream(case_id: str, lane: str) -> str:
+    """Return the telemetry workstream for one frozen case and lane."""
+    if lane not in LANE_WORKSTREAM:
+        raise ExecutionError("LANE_INVALID")
+    if case_id not in FROZEN_CASE_IDENTITIES:
+        raise ExecutionError("CASE_NOT_IN_PILOT")
+    return f"{case_id.lower()}-{lane.lower()}"
+
+
 def _schema() -> dict[str, Any]:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
@@ -105,19 +147,24 @@ def _reject_worker_leak(payload: dict[str, Any], case: dict[str, Any]) -> None:
     banned_values = set(case["oracle"])
     banned_values.update(case.get("lineage_commits") or [])
     banned_values.add(case["source_record"])
+    lane_heads = {benchmark_fixture.CONTROL_HEAD, benchmark_fixture.CANDIDATE_HEAD}
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, key: str | None = None) -> None:
         if isinstance(value, dict):
             if FORBIDDEN_WORKER_KEYS.intersection(value):
                 raise ExecutionError("TASK_LEAKS_ORACLE")
-            for item in value.values():
-                walk(item)
+            for child_key, item in value.items():
+                walk(item, child_key)
             return
         if isinstance(value, list):
             for item in value:
-                walk(item)
+                walk(item, key)
             return
         if isinstance(value, str) and value in banned_values:
+            # Lane system heads are explicit run metadata. BENCH-MULTI-007's
+            # lineage also names the control baseline, which is not a task leak.
+            if key == "system_head" and value in lane_heads:
+                return
             raise ExecutionError("TASK_LEAKS_ORACLE")
         if isinstance(value, str) and benchmark_fixture.PRODUCTION_MUTATION_RE.search(value):
             raise ExecutionError("PRODUCTION_MUTATION_INSTRUCTION")
@@ -157,17 +204,21 @@ def _require_frozen_manifest(manifest: dict[str, Any]) -> None:
 def _bind_telemetry_lane(
     parsed: dict[str, Any],
     *,
+    case_id: str,
     lane: str,
     system_head: str,
     profile: dict[str, Any],
     run_id: str,
 ) -> None:
+    if case_id not in FROZEN_CASE_IDENTITIES:
+        raise ExecutionError("CASE_NOT_IN_PILOT")
     if lane not in LANE_WORKSTREAM:
         raise ExecutionError("LANE_INVALID")
     expected_head = benchmark_fixture.CONTROL_HEAD if lane == "CONTROL" else benchmark_fixture.CANDIDATE_HEAD
-    if system_head != expected_head or parsed["repo"] != PILOT_REPOSITORY:
+    repository = FROZEN_CASE_IDENTITIES[case_id]["repository"]
+    if system_head != expected_head or parsed["repo"] != repository:
         raise ExecutionError("TELEMETRY_LANE_MISMATCH")
-    if parsed["workstream"] != LANE_WORKSTREAM[lane] or parsed["run_id"] != run_id:
+    if parsed["workstream"] != lane_workstream(case_id, lane) or parsed["run_id"] != run_id:
         raise ExecutionError("TELEMETRY_LANE_MISMATCH")
     try:
         actual = efficiency_telemetry.normalize_profile(parsed["profile"])
@@ -192,6 +243,7 @@ def derive_observed_fields(
     system_head: str,
     profile: dict[str, Any],
     run_id: str,
+    case_id: str = PILOT_CASE_ID,
 ) -> dict[str, Any]:
     """Map one canonical telemetry record into #44 fields for one benchmark lane."""
     try:
@@ -202,6 +254,7 @@ def derive_observed_fields(
         raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
     _bind_telemetry_lane(
         parsed,
+        case_id=case_id,
         lane=lane,
         system_head=system_head,
         profile=profile,
@@ -233,6 +286,28 @@ def accepts_final_result(instance: Any) -> bool:
     """Return whether a document is a final #44 result. Templates are not."""
     schema = _schema()["$defs"]["final_result"]
     return not any(Draft202012Validator(schema).iter_errors(instance))
+
+
+def bind_final_result(instance: Any, *, case_id: str, lane: str) -> bool:
+    """Return whether a final result is the selected frozen case and lane."""
+    if not isinstance(instance, dict):
+        return False
+    if case_id not in FROZEN_CASE_IDENTITIES or lane not in LANE_WORKSTREAM:
+        return False
+    if not accepts_final_result(instance):
+        return False
+    if lane == "CONTROL":
+        expected_version = benchmark_fixture.CONTROL_VERSION
+        expected_head = benchmark_fixture.CONTROL_HEAD
+    else:
+        expected_version = CANDIDATE_SYSTEM_VERSION
+        expected_head = benchmark_fixture.CANDIDATE_HEAD
+    return (
+        instance.get("CASE_ID") == case_id
+        and instance.get("FIXTURE_ID") == f"{PILOT_MANIFEST_HEAD}:{case_id}"
+        and instance.get("SYSTEM_VERSION") == expected_version
+        and instance.get("SYSTEM_HEAD") == expected_head
+    )
 
 
 def _result_template(case_id: str, system_version: str, system_head: str, fixture_id: str) -> dict[str, Any]:
@@ -307,6 +382,7 @@ def _lane(
 
 def _envelope(
     *,
+    case_id: str,
     manifest_git_sha: str,
     comparison: str,
     reason: str,
@@ -315,9 +391,9 @@ def _envelope(
     document = {
         "schema_version": 1,
         "kind": "benchmark-execution-dry-run",
-        "case_id": PILOT_CASE_ID,
+        "case_id": case_id,
         "manifest_git_sha": manifest_git_sha,
-        "fixture_id": f"{manifest_git_sha}:{PILOT_CASE_ID}",
+        "fixture_id": f"{manifest_git_sha}:{case_id}",
         "comparison": comparison,
         "reason": reason,
         "execute_worker": False,
@@ -344,8 +420,10 @@ def dry_run(
     profile: dict[str, Any] | None,
     candidate_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the pilot dry-run plan, or a fail-closed profile comparison."""
-    if case_id != PILOT_CASE_ID:
+    """Return one frozen-case dry-run plan, or a fail-closed profile comparison."""
+    if tuple(FROZEN_CASE_IDENTITIES) != benchmark_fixture.REQUIRED_CASE_IDS:
+        raise ExecutionError("CASE_SET_MISMATCH")
+    if case_id not in FROZEN_CASE_IDENTITIES:
         raise ExecutionError("CASE_NOT_IN_PILOT")
     if benchmark_fixture.SHA_RE.fullmatch(manifest_git_sha) is None:
         raise ExecutionError("FIXTURE_ID_INVALID")
@@ -367,8 +445,11 @@ def dry_run(
     except benchmark_fixture.FixtureError as exc:
         raise ExecutionError(exc.code) from exc
     case = benchmark_fixture._case_by_id(validated, case_id)
-    if case["source_commit"] != PILOT_TASK_SOURCE_HEAD:
+    identity = FROZEN_CASE_IDENTITIES[case_id]
+    if case["source_commit"] != identity["source_commit"]:
         raise ExecutionError("TASK_SOURCE_MISMATCH")
+    if case["repository"] != identity["repository"]:
+        raise ExecutionError("REPOSITORY_MISMATCH")
     _require_frozen_manifest(validated)
     control_profile = _complete_profile(profile)
     other = profile if candidate_profile is None else candidate_profile
@@ -378,10 +459,11 @@ def dry_run(
         validated,
         manifest_git_sha,
     )
-    if fixture_binding["fixture_id"] != f"{PILOT_MANIFEST_HEAD}:{PILOT_CASE_ID}":
+    if fixture_binding["fixture_id"] != f"{PILOT_MANIFEST_HEAD}:{case_id}":
         raise ExecutionError("FIXTURE_REVISION_MISMATCH")
     if control_profile is None or candidate_profile_norm is None:
         return _envelope(
+            case_id=case_id,
             manifest_git_sha=manifest_git_sha,
             comparison="BLOCK",
             reason="PROFILE_INCOMPLETE",
@@ -412,6 +494,7 @@ def dry_run(
     if lanes[0]["system_head"] == lanes[1]["system_head"]:
         raise ExecutionError("SYSTEM_HEAD_MISMATCH")
     return _envelope(
+        case_id=case_id,
         manifest_git_sha=manifest_git_sha,
         comparison=comparison,
         reason=reason,
@@ -436,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     dry = sub.add_parser("dry-run")
     dry.add_argument("--manifest", type=Path, default=benchmark_fixture.MANIFEST_PATH)
+    dry.add_argument("--case-id", default=PILOT_CASE_ID)
     dry.add_argument("--json", action="store_true")
     for prefix in ("", "candidate_"):
         for field in efficiency_telemetry.PROFILE_FIELDS:
@@ -448,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest = benchmark_fixture.load_manifest(args.manifest)
         document = dry_run(
             manifest,
-            case_id=PILOT_CASE_ID,
+            case_id=args.case_id,
             manifest_git_sha=PILOT_MANIFEST_HEAD,
             profile=_profile_from_args(args, ""),
             candidate_profile=_profile_from_args(args, "candidate_"),
