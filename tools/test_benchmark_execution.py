@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regressions for the BENCH-BUG-001 execution dry-run."""
+"""Regressions for frozen benchmark execution dry-runs."""
 from __future__ import annotations
 
 import copy
@@ -111,7 +111,7 @@ def test_worker_payload_hides_oracle_lineage_and_source_record() -> None:
 def test_rejects_stale_fixture_head_and_source() -> None:
     _expect("FIXTURE_ID_INVALID", manifest_git_sha="not-a-sha")
     _expect("FIXTURE_REVISION_MISMATCH", manifest_git_sha="a" * 40)
-    _expect("CASE_NOT_IN_PILOT", case_id="BENCH-DOCS-006")
+    _expect("CASE_NOT_IN_PILOT", case_id="BENCH-UNKNOWN-000")
     manifest = EXEC.benchmark_fixture.load_manifest()
     drifted = copy.deepcopy(manifest)
     drifted["control"]["head"] = "b" * 40
@@ -157,6 +157,23 @@ def test_rejects_stale_fixture_head_and_source() -> None:
             _fail(f"task source mismatch returned {exc.code}")
     else:
         _fail("task source mismatch was accepted")
+    drifted = copy.deepcopy(manifest)
+    for case in drifted["cases"]:
+        if case["id"] == EXEC.PILOT_CASE_ID:
+            case["repository"] = "example/unrelated"
+            case["source_record"] = "example/unrelated#1"
+    try:
+        EXEC.dry_run(
+            drifted,
+            case_id=EXEC.PILOT_CASE_ID,
+            manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+            profile=PROFILE,
+        )
+    except EXEC.ExecutionError as exc:
+        if exc.code != "REPOSITORY_MISMATCH":
+            _fail(f"repository mismatch returned {exc.code}")
+    else:
+        _fail("repository mismatch was accepted")
 
 
 def test_profile_mismatch_is_not_comparable_pass() -> None:
@@ -191,7 +208,7 @@ def test_profile_mismatch_is_not_comparable_pass() -> None:
             _fail("mismatched template was accepted as a final result")
 
 
-def _final_example(lane: str = "CONTROL") -> dict:
+def _final_example(lane: str = "CONTROL", case_id: str = "BENCH-BUG-001") -> dict:
     if lane == "CANDIDATE":
         version = "1.7"
         head = EXEC.benchmark_fixture.CANDIDATE_HEAD
@@ -199,10 +216,10 @@ def _final_example(lane: str = "CONTROL") -> dict:
         version = "1.6.5"
         head = EXEC.benchmark_fixture.CONTROL_HEAD
     return {
-        "CASE_ID": "BENCH-BUG-001",
+        "CASE_ID": case_id,
         "SYSTEM_VERSION": version,
         "SYSTEM_HEAD": head,
-        "FIXTURE_ID": f"{EXEC.PILOT_MANIFEST_HEAD}:BENCH-BUG-001",
+        "FIXTURE_ID": f"{EXEC.PILOT_MANIFEST_HEAD}:{case_id}",
         "TERMINAL": "BLOCK",
         "CORRECT_BEHAVIOR": "FAIL",
         "SAFETY_REGRESSION": "NO",
@@ -298,6 +315,177 @@ def test_final_result_rejects_unbound_identity() -> None:
     swapped_version["SYSTEM_VERSION"] = "1.7"
     if EXEC.accepts_final_result(swapped_version):
         _fail("final result accepted a swapped system version")
+
+
+def _lane_neutral(payload: dict) -> dict:
+    neutral = copy.deepcopy(payload)
+    neutral["run"].pop("lane")
+    neutral["run"].pop("system_version")
+    neutral["run"].pop("system_head")
+    neutral["run"]["isolation"].pop("relative_directory")
+    return neutral
+
+
+def test_every_frozen_case_prepares_without_workers() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    if tuple(case["id"] for case in manifest["cases"]) != tuple(EXEC.FROZEN_CASE_IDENTITIES):
+        _fail("frozen case identity table drifted from the manifest order")
+    for case in manifest["cases"]:
+        case_id = case["id"]
+        identity = EXEC.FROZEN_CASE_IDENTITIES[case_id]
+        document = EXEC.dry_run(
+            manifest,
+            case_id=case_id,
+            manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+            profile=PROFILE,
+        )
+        if document["comparison"] != "COMPARABLE" or document["execute_worker"] is not False:
+            _fail(f"{case_id} dry-run was not a comparable non-executing plan")
+        if document["network"] != "NONE" or document["case_id"] != case_id:
+            _fail(f"{case_id} dry-run changed network or case identity")
+        if document["fixture_id"] != f"{EXEC.PILOT_MANIFEST_HEAD}:{case_id}":
+            _fail(f"{case_id} fixture id drifted")
+        lanes = document["lanes"]
+        if [lane["lane"] for lane in lanes] != ["CONTROL", "CANDIDATE"]:
+            _fail(f"{case_id} lanes were not control then candidate")
+        if lanes[0]["worker_payload"]["task"] != lanes[1]["worker_payload"]["task"]:
+            _fail(f"{case_id} lanes did not receive the same task")
+        if _lane_neutral(lanes[0]["worker_payload"]) != _lane_neutral(lanes[1]["worker_payload"]):
+            _fail(f"{case_id} worker payloads differed outside lane metadata")
+        if lanes[0]["profile"] != lanes[1]["profile"] or lanes[0]["system_head"] == lanes[1]["system_head"]:
+            _fail(f"{case_id} profile or system head binding drifted")
+        if lanes[0]["system_head"] != EXEC.benchmark_fixture.CONTROL_HEAD:
+            _fail(f"{case_id} control head drifted")
+        if lanes[1]["system_head"] != EXEC.benchmark_fixture.CANDIDATE_HEAD:
+            _fail(f"{case_id} candidate head drifted")
+        if any(lane["task_source_head"] != identity["source_commit"] for lane in lanes):
+            _fail(f"{case_id} task source drifted")
+        task = lanes[0]["worker_payload"]["task"]
+        if task["repository"] != identity["repository"] or task["source_commit"] != identity["source_commit"]:
+            _fail(f"{case_id} worker task identity drifted")
+        encoded_task = json.dumps(task)
+        for banned in (
+            "oracle",
+            "lineage_commits",
+            "source_record",
+            case["source_record"],
+            *case["oracle"],
+            *case["lineage_commits"],
+        ):
+            if banned in encoded_task:
+                _fail(f"{case_id} worker task leaked {banned}")
+        if EXEC.accepts_final_result(lanes[0]["result_template"]):
+            _fail(f"{case_id} template was accepted as a final result")
+    drifted = copy.deepcopy(manifest)
+    for case in drifted["cases"]:
+        if case["id"] == "BENCH-DOCS-006":
+            case["source_commit"] = "d" * 40
+    try:
+        EXEC.dry_run(
+            drifted,
+            case_id="BENCH-DOCS-006",
+            manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+            profile=PROFILE,
+        )
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TASK_SOURCE_MISMATCH":
+            _fail(f"docs source mismatch returned {exc.code}")
+    else:
+        _fail("docs source mismatch was accepted")
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        status = EXEC.main(
+            [
+                "dry-run",
+                "--case-id",
+                "BENCH-DOCS-006",
+                "--provider",
+                "example-provider",
+                "--model",
+                "example-model",
+                "--reasoning",
+                "low",
+                "--toolset",
+                "read-only",
+            ]
+        )
+    if status != 0 or stdout.getvalue().strip() != "PASS benchmark execution dry-run":
+        _fail(f"docs cli dry-run returned {status}: {stdout.getvalue().strip()}")
+
+
+def test_final_result_binds_selected_case_and_lane() -> None:
+    for case_id in EXEC.FROZEN_CASE_IDENTITIES:
+        control = _final_example("CONTROL", case_id)
+        candidate = _final_example("CANDIDATE", case_id)
+        if not EXEC.accepts_final_result(control) or not EXEC.accepts_final_result(candidate):
+            _fail(f"final result contract rejected {case_id}")
+        if not EXEC.bind_final_result(control, case_id=case_id, lane="CONTROL"):
+            _fail(f"control result did not bind to {case_id}")
+        if not EXEC.bind_final_result(candidate, case_id=case_id, lane="CANDIDATE"):
+            _fail(f"candidate result did not bind to {case_id}")
+        if EXEC.bind_final_result(control, case_id=case_id, lane="CANDIDATE"):
+            _fail(f"control result bound to the candidate lane for {case_id}")
+        if EXEC.bind_final_result(candidate, case_id=case_id, lane="CONTROL"):
+            _fail(f"candidate result bound to the control lane for {case_id}")
+        for other in EXEC.FROZEN_CASE_IDENTITIES:
+            if other == case_id:
+                continue
+            if EXEC.bind_final_result(control, case_id=other, lane="CONTROL"):
+                _fail(f"{case_id} result bound to {other}")
+
+
+def test_telemetry_rejects_other_case_repository_and_workstream() -> None:
+    docs = "BENCH-DOCS-006"
+    docs_identity = EXEC.FROZEN_CASE_IDENTITIES[docs]
+    docs_record = _telemetry_record(
+        repo=docs_identity["repository"],
+        workstream=EXEC.lane_workstream(docs, "CONTROL"),
+        run_id="e" * 32,
+    )
+    derived = _derive(docs_record, case_id=docs)
+    if derived["WALL_SECONDS"] != "UNKNOWN" or derived["EXACT_HEAD_EVIDENCE"] != "MISSING":
+        _fail("matching docs telemetry was not derived")
+    try:
+        _derive(docs_record, case_id=EXEC.PILOT_CASE_ID)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"docs telemetry on the pilot case returned {exc.code}")
+    else:
+        _fail("docs telemetry was accepted for BENCH-BUG-001")
+    multi = "BENCH-MULTI-007"
+    multi_record = _telemetry_record(
+        repo=EXEC.FROZEN_CASE_IDENTITIES[multi]["repository"],
+        workstream=EXEC.lane_workstream(multi, "CONTROL"),
+        run_id="f" * 32,
+    )
+    if EXEC.FROZEN_CASE_IDENTITIES[multi]["repository"] != EXEC.PILOT_REPOSITORY:
+        _fail("multi and pilot repositories no longer share the binding contrast")
+    try:
+        _derive(multi_record, case_id=EXEC.PILOT_CASE_ID)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"same-repository other-case telemetry returned {exc.code}")
+    else:
+        _fail("same-repository telemetry from another case was accepted")
+    if _derive(multi_record, case_id=multi)["RETRIES"] != 0:
+        _fail("matching multi telemetry was not derived")
+    candidate_docs = _telemetry_record(
+        repo=docs_identity["repository"],
+        workstream=EXEC.lane_workstream(docs, "CANDIDATE"),
+        run_id="e" * 32,
+    )
+    try:
+        _derive(
+            candidate_docs,
+            case_id=docs,
+            lane="CONTROL",
+            system_head=EXEC.benchmark_fixture.CONTROL_HEAD,
+        )
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"docs candidate telemetry on control returned {exc.code}")
+    else:
+        _fail("docs candidate telemetry was accepted for the control lane")
 
 
 def _telemetry_record(**overrides: object):
@@ -527,8 +715,11 @@ def main() -> None:
     test_profile_mismatch_is_not_comparable_pass()
     test_result_template_cannot_pass_as_final_result()
     test_final_result_rejects_unbound_identity()
+    test_every_frozen_case_prepares_without_workers()
+    test_final_result_binds_selected_case_and_lane()
     test_frozen_manifest_content_must_match_revision()
     test_telemetry_lane_binding_rejects_swaps_and_unrelated_records()
+    test_telemetry_rejects_other_case_repository_and_workstream()
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
     test_plan_has_no_production_mutation_or_execution_surface()

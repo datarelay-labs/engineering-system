@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "BENCH-BUG-001 execution dry-run",
+  "title": "Frozen benchmark execution dry-run",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,74 +17,375 @@
     "lanes"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "kind": {"type": "string", "const": "benchmark-execution-dry-run"},
-    "case_id": {"type": "string", "const": "BENCH-BUG-001"},
-    "manifest_git_sha": {"$ref": "#/$defs/sha"},
-    "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-    "comparison": {"type": "string", "enum": ["COMPARABLE", "PARTIAL", "BLOCK"]},
-    "reason": {"type": "string", "enum": ["PROFILE_MATCH", "PROFILE_MISMATCH", "PROFILE_INCOMPLETE"]},
-    "execute_worker": {"type": "boolean", "const": false},
-    "network": {"type": "string", "const": "NONE"},
-    "telemetry_mapping": {"$ref": "#/$defs/telemetry_mapping"},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "benchmark-execution-dry-run"
+    },
+    "case_id": {
+      "type": "string",
+      "enum": [
+        "BENCH-BUG-001",
+        "BENCH-CROSS-002",
+        "BENCH-INCIDENT-003",
+        "BENCH-CLI-004",
+        "BENCH-UI-005",
+        "BENCH-DOCS-006",
+        "BENCH-MULTI-007"
+      ]
+    },
+    "manifest_git_sha": {
+      "$ref": "#/$defs/sha"
+    },
+    "fixture_id": {
+      "type": "string",
+      "enum": [
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006",
+        "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+      ]
+    },
+    "comparison": {
+      "type": "string",
+      "enum": [
+        "COMPARABLE",
+        "PARTIAL",
+        "BLOCK"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "PROFILE_MATCH",
+        "PROFILE_MISMATCH",
+        "PROFILE_INCOMPLETE"
+      ]
+    },
+    "execute_worker": {
+      "type": "boolean",
+      "const": false
+    },
+    "network": {
+      "type": "string",
+      "const": "NONE"
+    },
+    "telemetry_mapping": {
+      "$ref": "#/$defs/telemetry_mapping"
+    },
     "lanes": {
       "type": "array",
       "maxItems": 2,
-      "items": {"$ref": "#/$defs/lane"}
+      "items": {
+        "$ref": "#/$defs/lane"
+      }
     }
   },
   "allOf": [
     {
       "if": {
-        "properties": {"comparison": {"const": "COMPARABLE"}},
-        "required": ["comparison"]
+        "properties": {
+          "comparison": {
+            "const": "COMPARABLE"
+          }
+        },
+        "required": [
+          "comparison"
+        ]
       },
       "then": {
         "properties": {
-          "reason": {"const": "PROFILE_MATCH"},
-          "lanes": {"minItems": 2, "maxItems": 2}
+          "reason": {
+            "const": "PROFILE_MATCH"
+          },
+          "lanes": {
+            "minItems": 2,
+            "maxItems": 2
+          }
         }
       }
     },
     {
       "if": {
-        "properties": {"comparison": {"const": "PARTIAL"}},
-        "required": ["comparison"]
+        "properties": {
+          "comparison": {
+            "const": "PARTIAL"
+          }
+        },
+        "required": [
+          "comparison"
+        ]
       },
       "then": {
         "properties": {
-          "reason": {"const": "PROFILE_MISMATCH"},
-          "lanes": {"minItems": 2, "maxItems": 2}
+          "reason": {
+            "const": "PROFILE_MISMATCH"
+          },
+          "lanes": {
+            "minItems": 2,
+            "maxItems": 2
+          }
         }
       }
     },
     {
       "if": {
-        "properties": {"comparison": {"const": "BLOCK"}},
-        "required": ["comparison"]
+        "properties": {
+          "comparison": {
+            "const": "BLOCK"
+          }
+        },
+        "required": [
+          "comparison"
+        ]
       },
       "then": {
         "properties": {
-          "reason": {"const": "PROFILE_INCOMPLETE"},
-          "lanes": {"maxItems": 0}
+          "reason": {
+            "const": "PROFILE_INCOMPLETE"
+          },
+          "lanes": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-BUG-001"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-CROSS-002"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-INCIDENT-003"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-CLI-004"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-UI-005"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-DOCS-006"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case_id": {
+            "const": "BENCH-MULTI-007"
+          }
+        },
+        "required": [
+          "case_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "fixture_id": {
+            "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+          },
+          "lanes": {
+            "items": {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                }
+              }
+            }
+          }
         }
       }
     }
   ],
   "$defs": {
-    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "model", "reasoning", "toolset"],
+      "required": [
+        "provider",
+        "model",
+        "reasoning",
+        "toolset"
+      ],
       "properties": {
-        "provider": {"$ref": "#/$defs/name"},
-        "model": {"$ref": "#/$defs/name"},
-        "reasoning": {"$ref": "#/$defs/name"},
-        "toolset": {"$ref": "#/$defs/name"}
+        "provider": {
+          "$ref": "#/$defs/name"
+        },
+        "model": {
+          "$ref": "#/$defs/name"
+        },
+        "reasoning": {
+          "$ref": "#/$defs/name"
+        },
+        "toolset": {
+          "$ref": "#/$defs/name"
+        }
       }
     },
-    "name": {"type": "string", "pattern": "^[A-Za-z0-9_.:@\\[\\]=,+-]{1,80}$"},
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:@\\[\\]=,+-]{1,80}$"
+    },
     "task": {
       "type": "object",
       "additionalProperties": false,
@@ -99,41 +400,373 @@
         "excludes_production_mutation"
       ],
       "properties": {
-        "case_id": {"type": "string", "const": "BENCH-BUG-001"},
-        "repository": {"type": "string", "const": "datarelay-labs/engineering-system"},
-        "source_commit": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
-        "objective": {"type": "string", "minLength": 1, "maxLength": 240},
+        "case_id": {
+          "type": "string",
+          "enum": [
+            "BENCH-BUG-001",
+            "BENCH-CROSS-002",
+            "BENCH-INCIDENT-003",
+            "BENCH-CLI-004",
+            "BENCH-UI-005",
+            "BENCH-DOCS-006",
+            "BENCH-MULTI-007"
+          ]
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "source_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
         "objective_codes": {
           "type": "array",
           "minItems": 1,
           "maxItems": 8,
-          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,80}$"
+          }
         },
-        "reset": {"type": "string", "const": "FRESH_WORKTREE_SESSION"},
-        "excludes_secrets": {"type": "boolean", "const": true},
-        "excludes_production_mutation": {"type": "boolean", "const": true}
-      }
+        "reset": {
+          "type": "string",
+          "const": "FRESH_WORKTREE_SESSION"
+        },
+        "excludes_secrets": {
+          "type": "boolean",
+          "const": true
+        },
+        "excludes_production_mutation": {
+          "type": "boolean",
+          "const": true
+        },
+        "evidence_input": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/evidence_fact"
+          }
+        },
+        "snapshot_at": {
+          "type": "string",
+          "const": "2026-09-23T03:29:00Z"
+        },
+        "rollout_topology": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/worker_rollout_entry"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-INCIDENT-003"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "required": [
+              "evidence_input"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "snapshot_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "rollout_topology"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-MULTI-007"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "required": [
+              "snapshot_at",
+              "rollout_topology"
+            ],
+            "not": {
+              "required": [
+                "evidence_input"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "enum": [
+                  "BENCH-BUG-001",
+                  "BENCH-CROSS-002",
+                  "BENCH-CLI-004",
+                  "BENCH-UI-005",
+                  "BENCH-DOCS-006"
+                ]
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "evidence_input"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "rollout_topology"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-BUG-001"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/engineering-system"
+              },
+              "source_commit": {
+                "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-CROSS-002"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/datarelay-link"
+              },
+              "source_commit": {
+                "const": "3088e0067dbada08267eeaae100ca2f42b3b0758"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-INCIDENT-003"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/datarelay-control"
+              },
+              "source_commit": {
+                "const": "2412616607d405b22e311c963a0f40e8c0daba27"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-CLI-004"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/datarelay-link"
+              },
+              "source_commit": {
+                "const": "3f931c2708c867062224acf4eedd1aef48d3028f"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-UI-005"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/datarelay-control"
+              },
+              "source_commit": {
+                "const": "322b061c2640eb03f2c4b5bb29bb62e7c81a6421"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-DOCS-006"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/datarelay-link"
+              },
+              "source_commit": {
+                "const": "066513fe7cc3b6416b5763f82d4c1c68a4e15ecc"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "case_id": {
+                "const": "BENCH-MULTI-007"
+              }
+            },
+            "required": [
+              "case_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "const": "datarelay-labs/engineering-system"
+              },
+              "source_commit": {
+                "const": "f3a6856a81c7bee307ca8a6cf256faa73514610e"
+              }
+            }
+          }
+        }
+      ]
     },
     "isolation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reset", "relative_directory", "execute_worker", "production_mutation"],
+      "required": [
+        "reset",
+        "relative_directory",
+        "execute_worker",
+        "production_mutation"
+      ],
       "properties": {
-        "reset": {"type": "string", "const": "FRESH_WORKTREE_SESSION"},
-        "relative_directory": {"type": "string", "pattern": "^benchmark-dry-run/BENCH-BUG-001/(control|candidate)$"},
-        "execute_worker": {"type": "boolean", "const": false},
-        "production_mutation": {"type": "boolean", "const": false}
+        "reset": {
+          "type": "string",
+          "const": "FRESH_WORKTREE_SESSION"
+        },
+        "relative_directory": {
+          "type": "string",
+          "pattern": "^benchmark-dry-run/BENCH-(BUG-001|CROSS-002|INCIDENT-003|CLI-004|UI-005|DOCS-006|MULTI-007)/(control|candidate)$"
+        },
+        "execute_worker": {
+          "type": "boolean",
+          "const": false
+        },
+        "production_mutation": {
+          "type": "boolean",
+          "const": false
+        }
       }
     },
-    "nullable_code": {"type": "null"},
+    "nullable_code": {
+      "type": "null"
+    },
     "result_template": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "final", "fields"],
+      "required": [
+        "kind",
+        "final",
+        "fields"
+      ],
       "properties": {
-        "kind": {"type": "string", "const": "benchmark-result-template"},
-        "final": {"type": "boolean", "const": false},
-        "fields": {"$ref": "#/$defs/template_fields"}
+        "kind": {
+          "type": "string",
+          "const": "benchmark-result-template"
+        },
+        "final": {
+          "type": "boolean",
+          "const": false
+        },
+        "fields": {
+          "$ref": "#/$defs/template_fields"
+        }
       }
     },
     "template_fields": {
@@ -161,26 +794,161 @@
         "NOTES_CODE"
       ],
       "properties": {
-        "CASE_ID": {"type": "string", "const": "BENCH-BUG-001"},
-        "SYSTEM_VERSION": {"type": "string", "minLength": 1},
-        "SYSTEM_HEAD": {"$ref": "#/$defs/sha"},
-        "FIXTURE_ID": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-        "TERMINAL": {"$ref": "#/$defs/nullable_code"},
-        "CORRECT_BEHAVIOR": {"$ref": "#/$defs/nullable_code"},
-        "SAFETY_REGRESSION": {"$ref": "#/$defs/nullable_code"},
-        "REGRESSION_TESTS": {"$ref": "#/$defs/nullable_code"},
-        "EXACT_HEAD_EVIDENCE": {"$ref": "#/$defs/nullable_code"},
-        "RELEVANT_CONTEXT": {"$ref": "#/$defs/nullable_code"},
-        "WALL_SECONDS": {"type": "string", "const": "UNKNOWN"},
-        "MODEL_COST": {"type": "string", "const": "UNKNOWN"},
-        "RETRIES": {"$ref": "#/$defs/nullable_code"},
-        "REREADS": {"$ref": "#/$defs/nullable_code"},
-        "COMPACTIONS": {"$ref": "#/$defs/nullable_code"},
-        "REVIEW_REWORK": {"$ref": "#/$defs/nullable_code"},
-        "HUMAN_INTERVENTIONS": {"$ref": "#/$defs/nullable_code"},
-        "HOST_RESOURCE_OUTCOME": {"$ref": "#/$defs/nullable_code"},
-        "NOTES_CODE": {"$ref": "#/$defs/nullable_code"}
-      }
+        "CASE_ID": {
+          "type": "string",
+          "enum": [
+            "BENCH-BUG-001",
+            "BENCH-CROSS-002",
+            "BENCH-INCIDENT-003",
+            "BENCH-CLI-004",
+            "BENCH-UI-005",
+            "BENCH-DOCS-006",
+            "BENCH-MULTI-007"
+          ]
+        },
+        "SYSTEM_VERSION": {
+          "type": "string",
+          "minLength": 1
+        },
+        "SYSTEM_HEAD": {
+          "$ref": "#/$defs/sha"
+        },
+        "FIXTURE_ID": {
+          "type": "string",
+          "enum": [
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+          ]
+        },
+        "TERMINAL": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "CORRECT_BEHAVIOR": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "SAFETY_REGRESSION": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "REGRESSION_TESTS": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "EXACT_HEAD_EVIDENCE": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "RELEVANT_CONTEXT": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "WALL_SECONDS": {
+          "type": "string",
+          "const": "UNKNOWN"
+        },
+        "MODEL_COST": {
+          "type": "string",
+          "const": "UNKNOWN"
+        },
+        "RETRIES": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "REREADS": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "COMPACTIONS": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "REVIEW_REWORK": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "HUMAN_INTERVENTIONS": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "HOST_RESOURCE_OUTCOME": {
+          "$ref": "#/$defs/nullable_code"
+        },
+        "NOTES_CODE": {
+          "$ref": "#/$defs/nullable_code"
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-BUG-001"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-CROSS-002"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-INCIDENT-003"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-CLI-004"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-UI-005"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-DOCS-006"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-MULTI-007"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                }
+              }
+            }
+          ]
+        }
+      ]
     },
     "final_result": {
       "type": "object",
@@ -207,8 +975,25 @@
         "NOTES_CODE"
       ],
       "properties": {
-        "CASE_ID": {"type": "string", "const": "BENCH-BUG-001"},
-        "SYSTEM_VERSION": {"type": "string", "enum": ["1.6.5", "1.7"]},
+        "CASE_ID": {
+          "type": "string",
+          "enum": [
+            "BENCH-BUG-001",
+            "BENCH-CROSS-002",
+            "BENCH-INCIDENT-003",
+            "BENCH-CLI-004",
+            "BENCH-UI-005",
+            "BENCH-DOCS-006",
+            "BENCH-MULTI-007"
+          ]
+        },
+        "SYSTEM_VERSION": {
+          "type": "string",
+          "enum": [
+            "1.6.5",
+            "1.7"
+          ]
+        },
         "SYSTEM_HEAD": {
           "type": "string",
           "enum": [
@@ -216,46 +1001,217 @@
             "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
           ]
         },
-        "FIXTURE_ID": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-        "TERMINAL": {"type": "string", "enum": ["PASS", "BLOCK", "FAIL"]},
-        "CORRECT_BEHAVIOR": {"type": "string", "enum": ["PASS", "FAIL"]},
-        "SAFETY_REGRESSION": {"type": "string", "enum": ["YES", "NO"]},
-        "REGRESSION_TESTS": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK"]},
-        "EXACT_HEAD_EVIDENCE": {"type": "string", "enum": ["PASS", "FAIL", "MISSING"]},
-        "RELEVANT_CONTEXT": {"type": "string", "enum": ["BOUNDED", "OVERREAD", "MISSING"]},
+        "FIXTURE_ID": {
+          "type": "string",
+          "enum": [
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+          ]
+        },
+        "TERMINAL": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "BLOCK",
+            "FAIL"
+          ]
+        },
+        "CORRECT_BEHAVIOR": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "SAFETY_REGRESSION": {
+          "type": "string",
+          "enum": [
+            "YES",
+            "NO"
+          ]
+        },
+        "REGRESSION_TESTS": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "BLOCK"
+          ]
+        },
+        "EXACT_HEAD_EVIDENCE": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "MISSING"
+          ]
+        },
+        "RELEVANT_CONTEXT": {
+          "type": "string",
+          "enum": [
+            "BOUNDED",
+            "OVERREAD",
+            "MISSING"
+          ]
+        },
         "WALL_SECONDS": {
           "oneOf": [
-            {"type": "integer", "minimum": 0},
-            {"type": "string", "const": "UNKNOWN"}
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "const": "UNKNOWN"
+            }
           ]
         },
         "MODEL_COST": {
           "oneOf": [
-            {"type": "number", "minimum": 0},
-            {"type": "string", "const": "UNKNOWN"}
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "const": "UNKNOWN"
+            }
           ]
         },
-        "RETRIES": {"type": "integer", "minimum": 0},
-        "REREADS": {"type": "integer", "minimum": 0},
-        "COMPACTIONS": {"type": "integer", "minimum": 0},
-        "REVIEW_REWORK": {"type": "integer", "minimum": 0},
-        "HUMAN_INTERVENTIONS": {"type": "integer", "minimum": 0},
-        "HOST_RESOURCE_OUTCOME": {"type": "string", "enum": ["PASS", "WARN", "BLOCK", "UNKNOWN"]},
-        "NOTES_CODE": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
+        "RETRIES": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "REREADS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "COMPACTIONS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "REVIEW_REWORK": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "HUMAN_INTERVENTIONS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "HOST_RESOURCE_OUTCOME": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "WARN",
+            "BLOCK",
+            "UNKNOWN"
+          ]
+        },
+        "NOTES_CODE": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,80}$"
+        }
       },
       "allOf": [
         {
           "oneOf": [
             {
               "properties": {
-                "SYSTEM_VERSION": {"const": "1.6.5"},
-                "SYSTEM_HEAD": {"const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"}
+                "SYSTEM_VERSION": {
+                  "const": "1.6.5"
+                },
+                "SYSTEM_HEAD": {
+                  "const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"
+                }
               }
             },
             {
               "properties": {
-                "SYSTEM_VERSION": {"const": "1.7"},
-                "SYSTEM_HEAD": {"const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"}
+                "SYSTEM_VERSION": {
+                  "const": "1.7"
+                },
+                "SYSTEM_HEAD": {
+                  "const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-BUG-001"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-CROSS-002"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-INCIDENT-003"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-CLI-004"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-UI-005"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-DOCS-006"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                }
+              }
+            },
+            {
+              "properties": {
+                "CASE_ID": {
+                  "const": "BENCH-MULTI-007"
+                },
+                "FIXTURE_ID": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                }
               }
             }
           ]
@@ -265,10 +1221,20 @@
     "telemetry_mapping": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authority", "schema", "derivations"],
+      "required": [
+        "authority",
+        "schema",
+        "derivations"
+      ],
       "properties": {
-        "authority": {"type": "string", "const": "tools/efficiency_telemetry.py"},
-        "schema": {"type": "string", "const": "schemas/efficiency-telemetry.schema.json"},
+        "authority": {
+          "type": "string",
+          "const": "tools/efficiency_telemetry.py"
+        },
+        "schema": {
+          "type": "string",
+          "const": "schemas/efficiency-telemetry.schema.json"
+        },
         "derivations": {
           "type": "array",
           "minItems": 8,
@@ -278,7 +1244,11 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["result_field", "source", "when_null"],
+                "required": [
+                  "result_field",
+                  "source",
+                  "when_null"
+                ],
                 "properties": {
                   "result_field": {
                     "type": "string",
@@ -291,25 +1261,57 @@
                       "HUMAN_INTERVENTIONS"
                     ]
                   },
-                  "source": {"type": "string", "pattern": "^[a-z_.]+$"},
-                  "when_null": {"type": "string", "enum": ["UNKNOWN", "UNAVAILABLE"]}
+                  "source": {
+                    "type": "string",
+                    "pattern": "^[a-z_.]+$"
+                  },
+                  "when_null": {
+                    "type": "string",
+                    "enum": [
+                      "UNKNOWN",
+                      "UNAVAILABLE"
+                    ]
+                  }
                 }
               },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["result_field", "source", "value_map"],
+                "required": [
+                  "result_field",
+                  "source",
+                  "value_map"
+                ],
                 "properties": {
-                  "result_field": {"type": "string", "const": "EXACT_HEAD_EVIDENCE"},
-                  "source": {"type": "string", "const": "validation.evidence_state"},
+                  "result_field": {
+                    "type": "string",
+                    "const": "EXACT_HEAD_EVIDENCE"
+                  },
+                  "source": {
+                    "type": "string",
+                    "const": "validation.evidence_state"
+                  },
                   "value_map": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["EXACT_HEAD", "STALE", "MISSING"],
+                    "required": [
+                      "EXACT_HEAD",
+                      "STALE",
+                      "MISSING"
+                    ],
                     "properties": {
-                      "EXACT_HEAD": {"type": "string", "const": "PASS"},
-                      "STALE": {"type": "string", "const": "FAIL"},
-                      "MISSING": {"type": "string", "const": "MISSING"}
+                      "EXACT_HEAD": {
+                        "type": "string",
+                        "const": "PASS"
+                      },
+                      "STALE": {
+                        "type": "string",
+                        "const": "FAIL"
+                      },
+                      "MISSING": {
+                        "type": "string",
+                        "const": "MISSING"
+                      }
                     }
                   }
                 }
@@ -317,11 +1319,24 @@
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["result_field", "source", "aggregate"],
+                "required": [
+                  "result_field",
+                  "source",
+                  "aggregate"
+                ],
                 "properties": {
-                  "result_field": {"type": "string", "const": "REVIEW_REWORK"},
-                  "source": {"type": "string", "const": "rework_count"},
-                  "aggregate": {"type": "string", "const": "efficiency_telemetry.rework_count"}
+                  "result_field": {
+                    "type": "string",
+                    "const": "REVIEW_REWORK"
+                  },
+                  "source": {
+                    "type": "string",
+                    "const": "rework_count"
+                  },
+                  "aggregate": {
+                    "type": "string",
+                    "const": "efficiency_telemetry.rework_count"
+                  }
                 }
               }
             ]
@@ -344,17 +1359,46 @@
         "result_template"
       ],
       "properties": {
-        "lane": {"type": "string", "enum": ["CONTROL", "CANDIDATE"]},
-        "system_version": {"type": "string", "minLength": 1},
-        "system_head": {"$ref": "#/$defs/sha"},
-        "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-        "task_source_head": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
+        "lane": {
+          "type": "string",
+          "enum": [
+            "CONTROL",
+            "CANDIDATE"
+          ]
+        },
+        "system_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "system_head": {
+          "$ref": "#/$defs/sha"
+        },
+        "fixture_id": {
+          "type": "string",
+          "enum": [
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006",
+            "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+          ]
+        },
+        "task_source_head": {
+          "$ref": "#/$defs/sha"
+        },
         "worker_payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["task", "run"],
+          "required": [
+            "task",
+            "run"
+          ],
           "properties": {
-            "task": {"$ref": "#/$defs/task"},
+            "task": {
+              "$ref": "#/$defs/task"
+            },
             "run": {
               "type": "object",
               "additionalProperties": false,
@@ -370,22 +1414,700 @@
                 "isolation"
               ],
               "properties": {
-                "lane": {"type": "string", "enum": ["CONTROL", "CANDIDATE"]},
-                "case_id": {"type": "string", "const": "BENCH-BUG-001"},
-                "system_version": {"type": "string", "minLength": 1},
-                "system_head": {"$ref": "#/$defs/sha"},
-                "fixture_manifest_head": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"},
-                "fixture_id": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-                "task_source_head": {"type": "string", "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"},
-                "profile": {"$ref": "#/$defs/profile"},
-                "isolation": {"$ref": "#/$defs/isolation"}
+                "lane": {
+                  "type": "string",
+                  "enum": [
+                    "CONTROL",
+                    "CANDIDATE"
+                  ]
+                },
+                "case_id": {
+                  "type": "string",
+                  "enum": [
+                    "BENCH-BUG-001",
+                    "BENCH-CROSS-002",
+                    "BENCH-INCIDENT-003",
+                    "BENCH-CLI-004",
+                    "BENCH-UI-005",
+                    "BENCH-DOCS-006",
+                    "BENCH-MULTI-007"
+                  ]
+                },
+                "system_version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "system_head": {
+                  "$ref": "#/$defs/sha"
+                },
+                "fixture_manifest_head": {
+                  "type": "string",
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                },
+                "fixture_id": {
+                  "type": "string",
+                  "enum": [
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006",
+                    "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                  ]
+                },
+                "task_source_head": {
+                  "$ref": "#/$defs/sha"
+                },
+                "profile": {
+                  "$ref": "#/$defs/profile"
+                },
+                "isolation": {
+                  "$ref": "#/$defs/isolation"
+                }
               }
             }
           }
         },
-        "profile": {"$ref": "#/$defs/profile"},
-        "isolation": {"$ref": "#/$defs/isolation"},
-        "result_template": {"$ref": "#/$defs/result_template"}
+        "profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "isolation": {
+          "$ref": "#/$defs/isolation"
+        },
+        "result_template": {
+          "$ref": "#/$defs/result_template"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lane": {
+                "const": "CONTROL"
+              }
+            },
+            "required": [
+              "lane"
+            ]
+          },
+          "then": {
+            "properties": {
+              "system_version": {
+                "const": "1.6.5"
+              },
+              "system_head": {
+                "const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"
+              },
+              "worker_payload": {
+                "properties": {
+                  "run": {
+                    "properties": {
+                      "lane": {
+                        "const": "CONTROL"
+                      },
+                      "system_version": {
+                        "const": "1.6.5"
+                      },
+                      "system_head": {
+                        "const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"
+                      }
+                    }
+                  }
+                }
+              },
+              "result_template": {
+                "properties": {
+                  "fields": {
+                    "properties": {
+                      "SYSTEM_VERSION": {
+                        "const": "1.6.5"
+                      },
+                      "SYSTEM_HEAD": {
+                        "const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"
+                      }
+                    }
+                  }
+                }
+              },
+              "isolation": {
+                "properties": {
+                  "relative_directory": {
+                    "pattern": "/control$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lane": {
+                "const": "CANDIDATE"
+              }
+            },
+            "required": [
+              "lane"
+            ]
+          },
+          "then": {
+            "properties": {
+              "system_version": {
+                "const": "1.7"
+              },
+              "system_head": {
+                "const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
+              },
+              "worker_payload": {
+                "properties": {
+                  "run": {
+                    "properties": {
+                      "lane": {
+                        "const": "CANDIDATE"
+                      },
+                      "system_version": {
+                        "const": "1.7"
+                      },
+                      "system_head": {
+                        "const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
+                      }
+                    }
+                  }
+                }
+              },
+              "result_template": {
+                "properties": {
+                  "fields": {
+                    "properties": {
+                      "SYSTEM_VERSION": {
+                        "const": "1.7"
+                      },
+                      "SYSTEM_HEAD": {
+                        "const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
+                      }
+                    }
+                  }
+                }
+              },
+              "isolation": {
+                "properties": {
+                  "relative_directory": {
+                    "pattern": "/candidate$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                },
+                "task_source_head": {
+                  "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-BUG-001"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/engineering-system"
+                        },
+                        "source_commit": {
+                          "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-BUG-001"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-BUG-001"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-BUG-001/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                },
+                "task_source_head": {
+                  "const": "3088e0067dbada08267eeaae100ca2f42b3b0758"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-CROSS-002"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/datarelay-link"
+                        },
+                        "source_commit": {
+                          "const": "3088e0067dbada08267eeaae100ca2f42b3b0758"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-CROSS-002"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "3088e0067dbada08267eeaae100ca2f42b3b0758"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-CROSS-002"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CROSS-002"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-CROSS-002/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                },
+                "task_source_head": {
+                  "const": "2412616607d405b22e311c963a0f40e8c0daba27"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-INCIDENT-003"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/datarelay-control"
+                        },
+                        "source_commit": {
+                          "const": "2412616607d405b22e311c963a0f40e8c0daba27"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-INCIDENT-003"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "2412616607d405b22e311c963a0f40e8c0daba27"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-INCIDENT-003"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-INCIDENT-003"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-INCIDENT-003/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                },
+                "task_source_head": {
+                  "const": "3f931c2708c867062224acf4eedd1aef48d3028f"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-CLI-004"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/datarelay-link"
+                        },
+                        "source_commit": {
+                          "const": "3f931c2708c867062224acf4eedd1aef48d3028f"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-CLI-004"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "3f931c2708c867062224acf4eedd1aef48d3028f"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-CLI-004"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-CLI-004"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-CLI-004/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                },
+                "task_source_head": {
+                  "const": "322b061c2640eb03f2c4b5bb29bb62e7c81a6421"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-UI-005"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/datarelay-control"
+                        },
+                        "source_commit": {
+                          "const": "322b061c2640eb03f2c4b5bb29bb62e7c81a6421"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-UI-005"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "322b061c2640eb03f2c4b5bb29bb62e7c81a6421"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-UI-005"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-UI-005"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-UI-005/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                },
+                "task_source_head": {
+                  "const": "066513fe7cc3b6416b5763f82d4c1c68a4e15ecc"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-DOCS-006"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/datarelay-link"
+                        },
+                        "source_commit": {
+                          "const": "066513fe7cc3b6416b5763f82d4c1c68a4e15ecc"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-DOCS-006"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "066513fe7cc3b6416b5763f82d4c1c68a4e15ecc"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-DOCS-006"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-DOCS-006"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-DOCS-006/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "fixture_id": {
+                  "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                },
+                "task_source_head": {
+                  "const": "f3a6856a81c7bee307ca8a6cf256faa73514610e"
+                },
+                "worker_payload": {
+                  "properties": {
+                    "task": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-MULTI-007"
+                        },
+                        "repository": {
+                          "const": "datarelay-labs/engineering-system"
+                        },
+                        "source_commit": {
+                          "const": "f3a6856a81c7bee307ca8a6cf256faa73514610e"
+                        }
+                      }
+                    },
+                    "run": {
+                      "properties": {
+                        "case_id": {
+                          "const": "BENCH-MULTI-007"
+                        },
+                        "fixture_id": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                        },
+                        "fixture_manifest_head": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded"
+                        },
+                        "task_source_head": {
+                          "const": "f3a6856a81c7bee307ca8a6cf256faa73514610e"
+                        }
+                      }
+                    }
+                  }
+                },
+                "result_template": {
+                  "properties": {
+                    "fields": {
+                      "properties": {
+                        "CASE_ID": {
+                          "const": "BENCH-MULTI-007"
+                        },
+                        "FIXTURE_ID": {
+                          "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-MULTI-007"
+                        }
+                      }
+                    }
+                  }
+                },
+                "isolation": {
+                  "properties": {
+                    "relative_directory": {
+                      "pattern": "^benchmark-dry-run/BENCH-MULTI-007/(control|candidate)$"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "evidence_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "fact"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,80}$"
+        },
+        "fact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        }
+      }
+    },
+    "worker_rollout_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "pull_request",
+        "role",
+        "snapshot_head_commit",
+        "snapshot_state"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "pull_request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "CANONICAL",
+            "EXISTING_ROLLOUT",
+            "SUPERSEDED"
+          ]
+        },
+        "snapshot_head_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "snapshot_state": {
+          "type": "string",
+          "const": "OPEN"
+        }
       }
     }
   }
