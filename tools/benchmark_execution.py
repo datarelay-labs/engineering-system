@@ -39,7 +39,11 @@ TELEMETRY_DERIVATIONS = (
     {"result_field": "RETRIES", "source": "counts.retries", "when_null": "UNAVAILABLE"},
     {"result_field": "REREADS", "source": "counts.rereads", "when_null": "UNAVAILABLE"},
     {"result_field": "COMPACTIONS", "source": "counts.compactions", "when_null": "UNAVAILABLE"},
-    {"result_field": "REVIEW_REWORK", "source": "counts.review_rework", "when_null": "UNAVAILABLE"},
+    {
+        "result_field": "REVIEW_REWORK",
+        "source": "rework_count",
+        "aggregate": "efficiency_telemetry.rework_count",
+    },
     {"result_field": "HUMAN_INTERVENTIONS", "source": "counts.human_interventions", "when_null": "UNAVAILABLE"},
     {
         "result_field": "EXACT_HEAD_EVIDENCE",
@@ -143,6 +147,15 @@ def derive_observed_fields(record: dict[str, Any]) -> dict[str, Any]:
         raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
     derived: dict[str, Any] = {}
     for rule in TELEMETRY_DERIVATIONS:
+        if "aggregate" in rule:
+            if (
+                rule["aggregate"] != "efficiency_telemetry.rework_count"
+                or rule["result_field"] != "REVIEW_REWORK"
+                or rule["source"] != "rework_count"
+            ):
+                raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
+            derived[rule["result_field"]] = efficiency_telemetry.rework_count(parsed["counts"])
+            continue
         value = _lookup(parsed, rule["source"])
         if "value_map" in rule:
             mapped = rule["value_map"].get(value)

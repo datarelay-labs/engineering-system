@@ -326,6 +326,54 @@ def test_telemetry_mapping_uses_canonical_records_only() -> None:
     _fail("partial telemetry object was accepted")
 
 
+def test_review_rework_preserves_canonical_aggregate() -> None:
+    counts = {field: 0 for field in EXEC.efficiency_telemetry.COUNT_FIELDS}
+    counts["pr_rework"] = 2
+    counts["ci_rework"] = 3
+    counts["review_rework"] = 5
+    record = EXEC.efficiency_telemetry.build_record(
+        repo="datarelay-labs/engineering-system",
+        workstream="benchmark-dry-run",
+        task_kind="TEST",
+        profile=PROFILE,
+        started_at="2026-09-26T00:00:00Z",
+        finished_at=None,
+        duration_seconds=None,
+        counts=counts,
+        validation={
+            "ids": ["ENG-BENCH-EXEC-001"],
+            "exact_head": None,
+            "evidence_state": "MISSING",
+            "outcome": "UNKNOWN",
+        },
+        terminal="BLOCK",
+        budget={
+            "soft_limit": None,
+            "consumed": None,
+            "unit": None,
+            "state": "UNKNOWN",
+            "disposition": "CONTINUE",
+        },
+        usage=None,
+        run_id="b" * 32,
+    )
+    derived = EXEC.derive_observed_fields(record)
+    report = EXEC.efficiency_telemetry.build_report(
+        [record],
+        head="a" * 40,
+        evidence_state="MISSING",
+    )
+    if derived["REVIEW_REWORK"] != report["rework_count"]:
+        _fail("benchmark REVIEW_REWORK diverged from canonical rework_count")
+    if derived["REVIEW_REWORK"] != 10 or derived["REVIEW_REWORK"] == counts["review_rework"]:
+        _fail("REVIEW_REWORK omitted pr or ci rework")
+    review = next(item for item in EXEC.telemetry_mapping()["derivations"] if item["result_field"] == "REVIEW_REWORK")
+    if review.get("aggregate") != "efficiency_telemetry.rework_count" or review.get("source") != "rework_count":
+        _fail("REVIEW_REWORK mapping is not the canonical aggregate")
+    if "counts.review_rework" in json.dumps(EXEC.telemetry_mapping()):
+        _fail("REVIEW_REWORK still maps only review_rework")
+
+
 def test_plan_has_no_production_mutation_or_execution_surface() -> None:
     manifest = EXEC.benchmark_fixture.load_manifest()
     document = EXEC.dry_run(
@@ -370,6 +418,7 @@ def main() -> None:
     test_profile_mismatch_is_not_comparable_pass()
     test_result_template_cannot_pass_as_final_result()
     test_telemetry_mapping_uses_canonical_records_only()
+    test_review_rework_preserves_canonical_aggregate()
     test_plan_has_no_production_mutation_or_execution_surface()
     print("PASS benchmark execution dry-run")
 

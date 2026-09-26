@@ -43,6 +43,7 @@ COUNT_FIELDS = (
     "review_rework",
     "human_interventions",
 )
+REWORK_COUNT_FIELDS = ("pr_rework", "ci_rework", "review_rework")
 PROHIBITED_KEYS = frozenset(
     {
         "prompt",
@@ -459,6 +460,11 @@ def write_record(root: Path, record: dict[str, Any]) -> Path:
     return destination
 
 
+def rework_count(counts: dict[str, Any]) -> int:
+    """Return the canonical P0b rework total for one telemetry record."""
+    return sum(counts[field] for field in REWORK_COUNT_FIELDS)
+
+
 def _worst(statuses: list[str]) -> str:
     if any(status == "FAIL" for status in statuses):
         return "FAIL"
@@ -495,7 +501,7 @@ def build_report(
     humans = 0
     for record in parsed:
         counts = record["counts"]
-        rework += counts["pr_rework"] + counts["ci_rework"] + counts["review_rework"]
+        rework += rework_count(counts)
         humans += counts["human_interventions"]
     report = {
         "schema_version": 1,

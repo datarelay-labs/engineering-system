@@ -264,7 +264,6 @@
                       "RETRIES",
                       "REREADS",
                       "COMPACTIONS",
-                      "REVIEW_REWORK",
                       "HUMAN_INTERVENTIONS"
                     ]
                   },
@@ -289,6 +288,16 @@
                       "MISSING": {"type": "string", "const": "MISSING"}
                     }
                   }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "aggregate"],
+                "properties": {
+                  "result_field": {"type": "string", "const": "REVIEW_REWORK"},
+                  "source": {"type": "string", "const": "rework_count"},
+                  "aggregate": {"type": "string", "const": "efficiency_telemetry.rework_count"}
                 }
               }
             ]
