@@ -84,6 +84,9 @@ REQUIRED_METHOD_FILES = (
     "tools/test_benchmark_fixture.py",
     "schemas/benchmark-fixture.schema.json",
     "evals/benchmark/fixtures.yaml",
+    "tools/benchmark_execution.py",
+    "tools/test_benchmark_execution.py",
+    "schemas/benchmark-execution.schema.json",
     "tools/efficiency_telemetry.py",
     "tools/test_efficiency_telemetry.py",
     "schemas/efficiency-telemetry.schema.json",
@@ -1184,10 +1187,14 @@ def validate_verification_contract():
 
 def validate_benchmark_fixtures():
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-fixture.schema.json"))
+    Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-execution.schema.json"))
     completed = subprocess.run(["python3", "tools/benchmark_fixture.py", "validate"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_benchmark_fixture.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_benchmark_execution.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
 
