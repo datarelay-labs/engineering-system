@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Historical benchmark fixture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "control",
+    "candidate",
+    "result_fields",
+    "cases"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "benchmark-fixture-manifest"},
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "head"],
+      "properties": {
+        "version": {"type": "string", "const": "1.6.5"},
+        "head": {"$ref": "#/$defs/sha"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "tree"],
+      "properties": {
+        "head": {"$ref": "#/$defs/sha"},
+        "tree": {"$ref": "#/$defs/sha"}
+      }
+    },
+    "result_fields": {
+      "type": "array",
+      "minItems": 19,
+      "maxItems": 19,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/code"}
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"},
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "objective_codes"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1, "maxLength": 240},
+        "objective_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/code"}
+        }
+      }
+    },
+    "evidence_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "fact"],
+      "properties": {
+        "code": {"$ref": "#/$defs/code"},
+        "fact": {"type": "string", "minLength": 1, "maxLength": 180}
+      }
+    },
+    "rollout_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "pull_request", "role", "snapshot_head_commit", "snapshot_state", "source_record"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "pull_request": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "source_record": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"},
+        "role": {"type": "string", "enum": ["CANONICAL", "EXISTING_ROLLOUT", "SUPERSEDED"]},
+        "snapshot_head_commit": {"$ref": "#/$defs/sha"},
+        "snapshot_state": {"type": "string", "const": "OPEN"}
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "status",
+        "repository",
+        "source_record",
+        "oracle",
+        "evidence",
+        "excludes_secrets",
+        "excludes_production_mutation"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^BENCH-[A-Z0-9-]+$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "status": {"type": "string", "enum": ["FROZEN", "BLOCKED"]},
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "source_record": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"
+        },
+        "source_commit": {"$ref": "#/$defs/sha"},
+        "snapshot_at": {"type": "string", "const": "2026-09-23T03:29:00Z"},
+        "lineage_commits": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sha"}
+        },
+        "identity_basis": {
+          "type": "string",
+          "enum": [
+            "PRE_FIX_COMMIT",
+            "PRE_TASK_BASE_COMMIT",
+            "CLOSING_HISTORY_COMMIT",
+            "QUALIFIED_CONTENT_COMMIT",
+            "DEFAULT_BRANCH_COMMIT",
+            "PULL_REQUEST_HEAD",
+            "ROLLOUT_BASELINE_COMMIT",
+            "HISTORICAL_CHECKPOINT_COMMIT"
+          ]
+        },
+        "block_reason": {"$ref": "#/$defs/code"},
+        "task": {"$ref": "#/$defs/task"},
+        "evidence_input": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/evidence_fact"}
+        },
+        "rollout_topology": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/rollout_entry"}
+        },
+        "oracle": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/code"}
+        },
+        "reset": {"type": "string", "const": "FRESH_WORKTREE_SESSION"},
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "CORRECT_BEHAVIOR",
+              "SAFETY_REGRESSION",
+              "REGRESSION_TESTS",
+              "EXACT_HEAD_EVIDENCE",
+              "RELEVANT_CONTEXT",
+              "PRESERVE_BEFORE_MUTATION",
+              "BROWSER_RUNTIME"
+            ]
+          }
+        },
+        "excludes_secrets": {"type": "boolean", "const": true},
+        "excludes_production_mutation": {"type": "boolean", "const": true}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "FROZEN"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["source_commit", "lineage_commits", "identity_basis", "reset", "task"],
+            "not": {"required": ["block_reason"]}
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "BLOCKED"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["block_reason"],
+            "not": {
+              "anyOf": [
+                {"required": ["source_commit"]},
+                {"required": ["lineage_commits"]},
+                {"required": ["identity_basis"]},
+                {"required": ["reset"]},
+                {"required": ["task"]},
+                {"required": ["evidence_input"]},
+                {"required": ["rollout_topology"]},
+                {"required": ["snapshot_at"]}
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

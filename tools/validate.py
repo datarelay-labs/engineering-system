@@ -80,6 +80,10 @@ REQUIRED_METHOD_FILES = (
     "schemas/behavior-scenario.schema.json",
     "schemas/behavior-result.schema.json",
     "evals/behavior/scenarios.yaml",
+    "tools/benchmark_fixture.py",
+    "tools/test_benchmark_fixture.py",
+    "schemas/benchmark-fixture.schema.json",
+    "evals/benchmark/fixtures.yaml",
     "tools/efficiency_telemetry.py",
     "tools/test_efficiency_telemetry.py",
     "schemas/efficiency-telemetry.schema.json",
@@ -1178,6 +1182,16 @@ def validate_verification_contract():
     print("PASS optional verification and trust evidence contract")
 
 
+def validate_benchmark_fixtures():
+    Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-fixture.schema.json"))
+    completed = subprocess.run(["python3", "tools/benchmark_fixture.py", "validate"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_benchmark_fixture.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+
+
 def validate_security_profile():
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/security-profile.schema.json"))
     tool = (ROOT / "tools/security-profile.py").read_text(encoding="utf-8")
@@ -1400,6 +1414,7 @@ def main():
         print("FAIL behavior eval rollout gate")
         raise SystemExit(gate.returncode)
     print("PASS behavior eval regression and deterministic gate")
+    validate_benchmark_fixtures()
 
     completed = subprocess.run(["python3", "tools/test_knowledge_contract.py"], cwd=ROOT)
     if completed.returncode:
