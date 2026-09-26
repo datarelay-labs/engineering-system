@@ -991,6 +991,11 @@ def test_bracket_secrets_fail_sensitive_pin() -> None:
             '${{ secrets["UPLOAD_TOKEN"] }}',
             "${{ secrets.UPLOAD_TOKEN }}",
             "${{ secrets[inputs.token_name] }}",
+            "${{ secrets ['UPLOAD_TOKEN'] }}",
+            '${{ secrets ["UPLOAD_TOKEN"] }}',
+            "${{ secrets [inputs.token_name] }}",
+            "${{ secrets [UPLOAD_TOKEN] }}",
+            "${{ secrets\t[inputs.token_name] }}",
         )
         for token in sensitive_tokens:
             write_workflow(root, "ci.yml", workflow(token))
@@ -1001,7 +1006,12 @@ def test_bracket_secrets_fail_sensitive_pin() -> None:
                 fail(f"{token} was {state_of(report, 'sensitive_action_pin')}")
             if state_of(report, "ordinary_action_pin") == "RECOMMENDED_GAP":
                 fail(f"{token} was downgraded to ordinary_action_pin")
-        for token in ("${{ secrets['GITHUB_TOKEN'] }}", "${{ secrets.GITHUB_TOKEN }}"):
+        for token in (
+            "${{ secrets['GITHUB_TOKEN'] }}",
+            "${{ secrets.GITHUB_TOKEN }}",
+            "${{ secrets ['GITHUB_TOKEN'] }}",
+            '${{ secrets ["GITHUB_TOKEN"] }}',
+        ):
             write_workflow(root, "ci.yml", workflow(token))
             report = PROFILE.build_report(root, enabled_fixture())
             if state_of(report, "sensitive_action_pin") == "REQUIRED_FAIL":

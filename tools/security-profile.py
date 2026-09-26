@@ -124,7 +124,7 @@ ID_TOKEN_WRITE_RE = re.compile(r"id-token\s*:\s*['\"]?write\b")
 WRITE_PERMISSION_VALUES = {"write", "write-all"}
 SECRET_REF_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
 SECRET_BRACKET_RE = re.compile(
-    r"""secrets\[\s*(?:'(?P<single>[^']*)'|"(?P<double>[^"]*)"|(?P<dynamic>[^\]]+))\s*\]"""
+    r"""secrets[ \t]*\[\s*(?:'(?P<single>[^']*)'|"(?P<double>[^"]*)"|(?P<dynamic>[^\]]+))\s*\]"""
 )
 SECRETS_INHERIT_RE = re.compile(r"(?m)^[ \t]*secrets:[ \t]*inherit[ \t]*(?:#.*)?$")
 BUILTIN_GITHUB_TOKEN = "GITHUB_TOKEN"
@@ -418,8 +418,9 @@ def bracket_secret_is_external(match: re.Match[str]) -> bool:
 def secret_backed_external_write(text: str) -> bool:
     """Credential forwarding or a secret other than the built-in GITHUB_TOKEN.
 
-    Dot and quoted bracket indexes are explicit. A dynamic or unquoted index
-    fails closed. This does not interpret shell.
+    Dot and quoted bracket indexes are explicit. Horizontal whitespace before
+    the index is still an index. A dynamic or unquoted index fails closed.
+    This does not interpret shell.
     """
     if SECRETS_INHERIT_RE.search(text):
         return True
