@@ -3,9 +3,10 @@
 
 The coordinator may read the frozen manifest. A worker payload is only
 ``worker_task()`` plus explicit run metadata. The dry-run binds the pilot
-identities, reuses efficiency-telemetry profile and usage semantics, and
-emits a #44 result skeleton. It does not start a model, agent, or network
-call, and it does not write a second telemetry store.
+identities and emits a non-final result template. Observed cost, time, and
+counts are derived from a canonical efficiency telemetry record; this module
+does not emit a second telemetry record. It does not start a model, agent,
+or network call.
 """
 from __future__ import annotations
 
@@ -32,12 +33,19 @@ PILOT_MANIFEST_HEAD = "2990e6683f87a9858c4441e719ebf78b643c7ded"
 PILOT_TASK_SOURCE_HEAD = "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
 CANDIDATE_SYSTEM_VERSION = "1.7"
 NAME_RE = re.compile(r"^[A-Za-z0-9_.:@\[\]=,+-]{1,80}$")
-SHARED_COUNT_FIELDS = (
-    "retries",
-    "rereads",
-    "compactions",
-    "review_rework",
-    "human_interventions",
+TELEMETRY_DERIVATIONS = (
+    {"result_field": "WALL_SECONDS", "source": "duration_seconds", "when_null": "UNKNOWN"},
+    {"result_field": "MODEL_COST", "source": "usage.cost", "when_null": "UNKNOWN"},
+    {"result_field": "RETRIES", "source": "counts.retries", "when_null": "UNAVAILABLE"},
+    {"result_field": "REREADS", "source": "counts.rereads", "when_null": "UNAVAILABLE"},
+    {"result_field": "COMPACTIONS", "source": "counts.compactions", "when_null": "UNAVAILABLE"},
+    {"result_field": "REVIEW_REWORK", "source": "counts.review_rework", "when_null": "UNAVAILABLE"},
+    {"result_field": "HUMAN_INTERVENTIONS", "source": "counts.human_interventions", "when_null": "UNAVAILABLE"},
+    {
+        "result_field": "EXACT_HEAD_EVIDENCE",
+        "source": "validation.evidence_state",
+        "value_map": {"EXACT_HEAD": "PASS", "STALE": "FAIL", "MISSING": "MISSING"},
+    },
 )
 FORBIDDEN_WORKER_KEYS = frozenset(
     {
@@ -107,41 +115,67 @@ def _reject_worker_leak(payload: dict[str, Any], case: dict[str, Any]) -> None:
     walk(payload)
 
 
-def _result(case_id: str, system_version: str, system_head: str, fixture_id: str) -> dict[str, Any]:
-    result = {
+def _lookup(record: dict[str, Any], source: str) -> Any:
+    value: Any = record
+    for part in source.split("."):
+        if not isinstance(value, dict) or part not in value:
+            raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
+        value = value[part]
+    return value
+
+
+def telemetry_mapping() -> dict[str, Any]:
+    """Reference canonical telemetry fields. This is not a telemetry record."""
+    return {
+        "authority": "tools/efficiency_telemetry.py",
+        "schema": "schemas/efficiency-telemetry.schema.json",
+        "derivations": [dict(item) for item in TELEMETRY_DERIVATIONS],
+    }
+
+
+def derive_observed_fields(record: dict[str, Any]) -> dict[str, Any]:
+    """Map one schema-valid canonical telemetry record into #44 observed fields."""
+    try:
+        parsed = efficiency_telemetry.parse_document(record)
+    except efficiency_telemetry.TelemetryError as exc:
+        raise ExecutionError(exc.code) from exc
+    if parsed.get("kind") != "efficiency-telemetry":
+        raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
+    derived: dict[str, Any] = {}
+    for rule in TELEMETRY_DERIVATIONS:
+        value = _lookup(parsed, rule["source"])
+        if "value_map" in rule:
+            mapped = rule["value_map"].get(value)
+            if mapped is None:
+                raise ExecutionError("TELEMETRY_DERIVATION_INVALID")
+            derived[rule["result_field"]] = mapped
+            continue
+        derived[rule["result_field"]] = rule["when_null"] if value is None else value
+    return derived
+
+
+def accepts_final_result(instance: Any) -> bool:
+    """Return whether a document is a final #44 result. Templates are not."""
+    schema = _schema()["$defs"]["final_result"]
+    return not any(Draft202012Validator(schema).iter_errors(instance))
+
+
+def _result_template(case_id: str, system_version: str, system_head: str, fixture_id: str) -> dict[str, Any]:
+    known = {
         "CASE_ID": case_id,
         "SYSTEM_VERSION": system_version,
         "SYSTEM_HEAD": system_head,
         "FIXTURE_ID": fixture_id,
-        "TERMINAL": "BLOCK",
-        "CORRECT_BEHAVIOR": "UNKNOWN",
-        "SAFETY_REGRESSION": "UNKNOWN",
-        "REGRESSION_TESTS": "BLOCK",
-        "EXACT_HEAD_EVIDENCE": "MISSING",
-        "RELEVANT_CONTEXT": "MISSING",
         "WALL_SECONDS": "UNKNOWN",
         "MODEL_COST": "UNKNOWN",
-        "RETRIES": 0,
-        "REREADS": 0,
-        "COMPACTIONS": 0,
-        "REVIEW_REWORK": 0,
-        "HUMAN_INTERVENTIONS": 0,
-        "HOST_RESOURCE_OUTCOME": "UNKNOWN",
-        "NOTES_CODE": "DRY_RUN_NOT_EXECUTED",
     }
-    if tuple(result) != benchmark_fixture.RESULT_FIELDS:
+    fields = {name: known.get(name) for name in benchmark_fixture.RESULT_FIELDS}
+    if tuple(fields) != benchmark_fixture.RESULT_FIELDS:
         raise ExecutionError("RESULT_FIELDS_MISMATCH")
-    return result
-
-
-def _telemetry(profile: dict[str, str]) -> dict[str, Any]:
-    return {
-        "semantics": "efficiency-telemetry",
-        "profile": dict(profile),
-        "duration_seconds": None,
-        "usage": efficiency_telemetry.usage_from_exposed(None),
-        "counts": {field: 0 for field in SHARED_COUNT_FIELDS},
-    }
+    template = {"kind": "benchmark-result-template", "final": False, "fields": fields}
+    if accepts_final_result(template) or accepts_final_result(fields):
+        raise ExecutionError("TEMPLATE_ACCEPTED_AS_FINAL")
+    return template
 
 
 def _lane(
@@ -192,8 +226,7 @@ def _lane(
         "worker_payload": payload,
         "profile": dict(profile),
         "isolation": payload["run"]["isolation"],
-        "result": _result(case["id"], system_version, system_head, fixture_id),
-        "telemetry": _telemetry(profile),
+        "result_template": _result_template(case["id"], system_version, system_head, fixture_id),
     }
 
 
@@ -214,6 +247,7 @@ def _envelope(
         "reason": reason,
         "execute_worker": False,
         "network": "NONE",
+        "telemetry_mapping": telemetry_mapping(),
         "lanes": lanes,
     }
     errors = sorted(Draft202012Validator(_schema()).iter_errors(document), key=lambda item: list(item.path))

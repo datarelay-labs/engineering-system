@@ -13,6 +13,7 @@
     "reason",
     "execute_worker",
     "network",
+    "telemetry_mapping",
     "lanes"
   ],
   "properties": {
@@ -25,6 +26,7 @@
     "reason": {"type": "string", "enum": ["PROFILE_MATCH", "PROFILE_MISMATCH", "PROFILE_INCOMPLETE"]},
     "execute_worker": {"type": "boolean", "const": false},
     "network": {"type": "string", "const": "NONE"},
+    "telemetry_mapping": {"$ref": "#/$defs/telemetry_mapping"},
     "lanes": {
       "type": "array",
       "maxItems": 2,
@@ -123,7 +125,18 @@
         "production_mutation": {"type": "boolean", "const": false}
       }
     },
-    "result": {
+    "nullable_code": {"type": "null"},
+    "result_template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "final", "fields"],
+      "properties": {
+        "kind": {"type": "string", "const": "benchmark-result-template"},
+        "final": {"type": "boolean", "const": false},
+        "fields": {"$ref": "#/$defs/template_fields"}
+      }
+    },
+    "template_fields": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -152,53 +165,133 @@
         "SYSTEM_VERSION": {"type": "string", "minLength": 1},
         "SYSTEM_HEAD": {"$ref": "#/$defs/sha"},
         "FIXTURE_ID": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
-        "TERMINAL": {"type": "string", "const": "BLOCK"},
-        "CORRECT_BEHAVIOR": {"type": "string", "const": "UNKNOWN"},
-        "SAFETY_REGRESSION": {"type": "string", "const": "UNKNOWN"},
-        "REGRESSION_TESTS": {"type": "string", "const": "BLOCK"},
-        "EXACT_HEAD_EVIDENCE": {"type": "string", "const": "MISSING"},
-        "RELEVANT_CONTEXT": {"type": "string", "const": "MISSING"},
+        "TERMINAL": {"$ref": "#/$defs/nullable_code"},
+        "CORRECT_BEHAVIOR": {"$ref": "#/$defs/nullable_code"},
+        "SAFETY_REGRESSION": {"$ref": "#/$defs/nullable_code"},
+        "REGRESSION_TESTS": {"$ref": "#/$defs/nullable_code"},
+        "EXACT_HEAD_EVIDENCE": {"$ref": "#/$defs/nullable_code"},
+        "RELEVANT_CONTEXT": {"$ref": "#/$defs/nullable_code"},
         "WALL_SECONDS": {"type": "string", "const": "UNKNOWN"},
         "MODEL_COST": {"type": "string", "const": "UNKNOWN"},
-        "RETRIES": {"type": "integer", "const": 0},
-        "REREADS": {"type": "integer", "const": 0},
-        "COMPACTIONS": {"type": "integer", "const": 0},
-        "REVIEW_REWORK": {"type": "integer", "const": 0},
-        "HUMAN_INTERVENTIONS": {"type": "integer", "const": 0},
-        "HOST_RESOURCE_OUTCOME": {"type": "string", "const": "UNKNOWN"},
-        "NOTES_CODE": {"type": "string", "const": "DRY_RUN_NOT_EXECUTED"}
+        "RETRIES": {"$ref": "#/$defs/nullable_code"},
+        "REREADS": {"$ref": "#/$defs/nullable_code"},
+        "COMPACTIONS": {"$ref": "#/$defs/nullable_code"},
+        "REVIEW_REWORK": {"$ref": "#/$defs/nullable_code"},
+        "HUMAN_INTERVENTIONS": {"$ref": "#/$defs/nullable_code"},
+        "HOST_RESOURCE_OUTCOME": {"$ref": "#/$defs/nullable_code"},
+        "NOTES_CODE": {"$ref": "#/$defs/nullable_code"}
       }
     },
-    "telemetry": {
+    "final_result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["semantics", "profile", "duration_seconds", "usage", "counts"],
+      "required": [
+        "CASE_ID",
+        "SYSTEM_VERSION",
+        "SYSTEM_HEAD",
+        "FIXTURE_ID",
+        "TERMINAL",
+        "CORRECT_BEHAVIOR",
+        "SAFETY_REGRESSION",
+        "REGRESSION_TESTS",
+        "EXACT_HEAD_EVIDENCE",
+        "RELEVANT_CONTEXT",
+        "WALL_SECONDS",
+        "MODEL_COST",
+        "RETRIES",
+        "REREADS",
+        "COMPACTIONS",
+        "REVIEW_REWORK",
+        "HUMAN_INTERVENTIONS",
+        "HOST_RESOURCE_OUTCOME",
+        "NOTES_CODE"
+      ],
       "properties": {
-        "semantics": {"type": "string", "const": "efficiency-telemetry"},
-        "profile": {"$ref": "#/$defs/profile"},
-        "duration_seconds": {"type": "null"},
-        "usage": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost"],
-          "properties": {
-            "input_tokens": {"type": "null"},
-            "output_tokens": {"type": "null"},
-            "cache_read_tokens": {"type": "null"},
-            "cache_write_tokens": {"type": "null"},
-            "cost": {"type": "null"}
-          }
+        "CASE_ID": {"type": "string", "pattern": "^BENCH-[A-Z0-9-]+$"},
+        "SYSTEM_VERSION": {"type": "string", "minLength": 1},
+        "SYSTEM_HEAD": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "FIXTURE_ID": {"type": "string", "pattern": "^[0-9a-f]{40}:BENCH-[A-Z0-9-]+$"},
+        "TERMINAL": {"type": "string", "enum": ["PASS", "BLOCK", "FAIL"]},
+        "CORRECT_BEHAVIOR": {"type": "string", "enum": ["PASS", "FAIL"]},
+        "SAFETY_REGRESSION": {"type": "string", "enum": ["YES", "NO"]},
+        "REGRESSION_TESTS": {"type": "string", "enum": ["PASS", "FAIL", "BLOCK"]},
+        "EXACT_HEAD_EVIDENCE": {"type": "string", "enum": ["PASS", "FAIL", "MISSING"]},
+        "RELEVANT_CONTEXT": {"type": "string", "enum": ["BOUNDED", "OVERREAD", "MISSING"]},
+        "WALL_SECONDS": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "string", "const": "UNKNOWN"}
+          ]
         },
-        "counts": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["retries", "rereads", "compactions", "review_rework", "human_interventions"],
-          "properties": {
-            "retries": {"type": "integer", "const": 0},
-            "rereads": {"type": "integer", "const": 0},
-            "compactions": {"type": "integer", "const": 0},
-            "review_rework": {"type": "integer", "const": 0},
-            "human_interventions": {"type": "integer", "const": 0}
+        "MODEL_COST": {
+          "oneOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "string", "const": "UNKNOWN"}
+          ]
+        },
+        "RETRIES": {"type": "integer", "minimum": 0},
+        "REREADS": {"type": "integer", "minimum": 0},
+        "COMPACTIONS": {"type": "integer", "minimum": 0},
+        "REVIEW_REWORK": {"type": "integer", "minimum": 0},
+        "HUMAN_INTERVENTIONS": {"type": "integer", "minimum": 0},
+        "HOST_RESOURCE_OUTCOME": {"type": "string", "enum": ["PASS", "WARN", "BLOCK", "UNKNOWN"]},
+        "NOTES_CODE": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
+      }
+    },
+    "telemetry_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "schema", "derivations"],
+      "properties": {
+        "authority": {"type": "string", "const": "tools/efficiency_telemetry.py"},
+        "schema": {"type": "string", "const": "schemas/efficiency-telemetry.schema.json"},
+        "derivations": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "when_null"],
+                "properties": {
+                  "result_field": {
+                    "type": "string",
+                    "enum": [
+                      "WALL_SECONDS",
+                      "MODEL_COST",
+                      "RETRIES",
+                      "REREADS",
+                      "COMPACTIONS",
+                      "REVIEW_REWORK",
+                      "HUMAN_INTERVENTIONS"
+                    ]
+                  },
+                  "source": {"type": "string", "pattern": "^[a-z_.]+$"},
+                  "when_null": {"type": "string", "enum": ["UNKNOWN", "UNAVAILABLE"]}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["result_field", "source", "value_map"],
+                "properties": {
+                  "result_field": {"type": "string", "const": "EXACT_HEAD_EVIDENCE"},
+                  "source": {"type": "string", "const": "validation.evidence_state"},
+                  "value_map": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["EXACT_HEAD", "STALE", "MISSING"],
+                    "properties": {
+                      "EXACT_HEAD": {"type": "string", "const": "PASS"},
+                      "STALE": {"type": "string", "const": "FAIL"},
+                      "MISSING": {"type": "string", "const": "MISSING"}
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -215,8 +308,7 @@
         "worker_payload",
         "profile",
         "isolation",
-        "result",
-        "telemetry"
+        "result_template"
       ],
       "properties": {
         "lane": {"type": "string", "enum": ["CONTROL", "CANDIDATE"]},
@@ -260,8 +352,7 @@
         },
         "profile": {"$ref": "#/$defs/profile"},
         "isolation": {"$ref": "#/$defs/isolation"},
-        "result": {"$ref": "#/$defs/result"},
-        "telemetry": {"$ref": "#/$defs/telemetry"}
+        "result_template": {"$ref": "#/$defs/result_template"}
       }
     }
   }
