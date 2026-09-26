@@ -191,12 +191,18 @@ def test_profile_mismatch_is_not_comparable_pass() -> None:
             _fail("mismatched template was accepted as a final result")
 
 
-def _final_example() -> dict:
+def _final_example(lane: str = "CONTROL") -> dict:
+    if lane == "CANDIDATE":
+        version = "1.7"
+        head = EXEC.benchmark_fixture.CANDIDATE_HEAD
+    else:
+        version = "1.6.5"
+        head = EXEC.benchmark_fixture.CONTROL_HEAD
     return {
         "CASE_ID": "BENCH-BUG-001",
-        "SYSTEM_VERSION": "1.6.5",
-        "SYSTEM_HEAD": "a" * 40,
-        "FIXTURE_ID": f"{'a' * 40}:BENCH-BUG-001",
+        "SYSTEM_VERSION": version,
+        "SYSTEM_HEAD": head,
+        "FIXTURE_ID": f"{EXEC.PILOT_MANIFEST_HEAD}:BENCH-BUG-001",
         "TERMINAL": "BLOCK",
         "CORRECT_BEHAVIOR": "FAIL",
         "SAFETY_REGRESSION": "NO",
@@ -262,6 +268,159 @@ def test_result_template_cannot_pass_as_final_result() -> None:
             _fail("result collapsed to an aggregate score")
     if not EXEC.accepts_final_result(_final_example()):
         _fail("final result contract rejected a complete #44 record")
+    if not EXEC.accepts_final_result(_final_example("CANDIDATE")):
+        _fail("final result contract rejected the candidate lane identity")
+
+
+def test_final_result_rejects_unbound_identity() -> None:
+    control = _final_example()
+    wrong_case = dict(control)
+    wrong_case["CASE_ID"] = "BENCH-DOCS-006"
+    if EXEC.accepts_final_result(wrong_case):
+        _fail("final result accepted a different case")
+    wrong_fixture = dict(control)
+    wrong_fixture["FIXTURE_ID"] = f"{'a' * 40}:BENCH-BUG-001"
+    if EXEC.accepts_final_result(wrong_fixture):
+        _fail("final result accepted an unrelated fixture")
+    mismatched_fixture = dict(control)
+    mismatched_fixture["FIXTURE_ID"] = f"{EXEC.PILOT_MANIFEST_HEAD}:BENCH-DOCS-006"
+    if EXEC.accepts_final_result(mismatched_fixture):
+        _fail("final result accepted a case/fixture mismatch")
+    unrelated_head = dict(control)
+    unrelated_head["SYSTEM_HEAD"] = "b" * 40
+    if EXEC.accepts_final_result(unrelated_head):
+        _fail("final result accepted an unrelated system head")
+    swapped = dict(control)
+    swapped["SYSTEM_HEAD"] = EXEC.benchmark_fixture.CANDIDATE_HEAD
+    if EXEC.accepts_final_result(swapped):
+        _fail("final result accepted a control/candidate identity swap")
+    swapped_version = dict(control)
+    swapped_version["SYSTEM_VERSION"] = "1.7"
+    if EXEC.accepts_final_result(swapped_version):
+        _fail("final result accepted a swapped system version")
+
+
+def _telemetry_record(**overrides: object):
+    counts = overrides.pop("counts", None)
+    if counts is None:
+        counts = {field: 0 for field in EXEC.efficiency_telemetry.COUNT_FIELDS}
+    validation = {
+        "ids": ["ENG-BENCH-EXEC-001"],
+        "exact_head": None,
+        "evidence_state": "MISSING",
+        "outcome": "UNKNOWN",
+    }
+    extra_validation = overrides.pop("validation", None)
+    if isinstance(extra_validation, dict):
+        validation.update(extra_validation)
+    kwargs = {
+        "repo": EXEC.PILOT_REPOSITORY,
+        "workstream": EXEC.LANE_WORKSTREAM["CONTROL"],
+        "task_kind": "TEST",
+        "profile": dict(PROFILE),
+        "started_at": "2026-09-26T00:00:00Z",
+        "finished_at": None,
+        "duration_seconds": None,
+        "counts": counts,
+        "validation": validation,
+        "terminal": "BLOCK",
+        "budget": {
+            "soft_limit": None,
+            "consumed": None,
+            "unit": None,
+            "state": "UNKNOWN",
+            "disposition": "CONTINUE",
+        },
+        "usage": None,
+        "run_id": "a" * 32,
+    }
+    kwargs.update(overrides)
+    return EXEC.efficiency_telemetry.build_record(**kwargs)
+
+
+def _derive(record: dict, **overrides: object):
+    kwargs = {
+        "lane": "CONTROL",
+        "system_head": EXEC.benchmark_fixture.CONTROL_HEAD,
+        "profile": dict(PROFILE),
+        "run_id": record.get("run_id", "a" * 32),
+    }
+    kwargs.update(overrides)
+    return EXEC.derive_observed_fields(record, **kwargs)
+
+
+def test_frozen_manifest_content_must_match_revision() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    mutated = copy.deepcopy(manifest)
+    mutated["cases"][0]["title"] = "Modified otherwise-valid title"
+    try:
+        EXEC.dry_run(
+            mutated,
+            case_id=EXEC.PILOT_CASE_ID,
+            manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+            profile=PROFILE,
+        )
+    except EXEC.ExecutionError as exc:
+        if exc.code != "FROZEN_MANIFEST_MISMATCH":
+            _fail(f"modified frozen manifest returned {exc.code}")
+    else:
+        _fail("modified manifest inherited the frozen manifest SHA")
+
+
+def test_telemetry_lane_binding_rejects_swaps_and_unrelated_records() -> None:
+    record = _telemetry_record(run_id="c" * 32)
+    exact = copy.deepcopy(record)
+    exact["validation"]["evidence_state"] = "EXACT_HEAD"
+    exact["validation"]["exact_head"] = EXEC.benchmark_fixture.CONTROL_HEAD
+    derived = _derive(exact)
+    if derived["EXACT_HEAD_EVIDENCE"] != "PASS":
+        _fail("matching control lane did not derive exact-head evidence")
+    try:
+        _derive(
+            exact,
+            lane="CANDIDATE",
+            system_head=EXEC.benchmark_fixture.CANDIDATE_HEAD,
+        )
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"control record on candidate lane returned {exc.code}")
+    else:
+        _fail("control telemetry was accepted for the candidate lane")
+    swapped_head = copy.deepcopy(exact)
+    swapped_head["validation"]["exact_head"] = EXEC.benchmark_fixture.CANDIDATE_HEAD
+    swapped_head["workstream"] = EXEC.LANE_WORKSTREAM["CANDIDATE"]
+    try:
+        _derive(swapped_head)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"swapped exact head returned {exc.code}")
+    else:
+        _fail("candidate exact head was accepted for the control lane")
+    unrelated = copy.deepcopy(record)
+    unrelated["repo"] = "example/unrelated"
+    try:
+        _derive(unrelated)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"unrelated repository returned {exc.code}")
+    else:
+        _fail("unrelated telemetry record was accepted")
+    try:
+        _derive(record, run_id="d" * 32)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"unrelated run id returned {exc.code}")
+    else:
+        _fail("unrelated run id was accepted")
+    other_profile = dict(PROFILE)
+    other_profile["model"] = "other-model"
+    try:
+        _derive(record, profile=other_profile)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TELEMETRY_LANE_MISMATCH":
+            _fail(f"profile mismatch returned {exc.code}")
+    else:
+        _fail("telemetry profile mismatch was accepted")
 
 
 def test_telemetry_mapping_uses_canonical_records_only() -> None:
@@ -282,35 +441,10 @@ def test_telemetry_mapping_uses_canonical_records_only() -> None:
         _fail("telemetry mapping left the canonical schema")
     counts = {field: 0 for field in EXEC.efficiency_telemetry.COUNT_FIELDS}
     counts["retries"] = 2
-    record = EXEC.efficiency_telemetry.build_record(
-        repo="datarelay-labs/engineering-system",
-        workstream="benchmark-dry-run",
-        task_kind="TEST",
-        profile=PROFILE,
-        started_at="2026-09-26T00:00:00Z",
-        finished_at=None,
-        duration_seconds=None,
-        counts=counts,
-        validation={
-            "ids": ["ENG-BENCH-EXEC-001"],
-            "exact_head": None,
-            "evidence_state": "MISSING",
-            "outcome": "UNKNOWN",
-        },
-        terminal="BLOCK",
-        budget={
-            "soft_limit": None,
-            "consumed": None,
-            "unit": None,
-            "state": "UNKNOWN",
-            "disposition": "CONTINUE",
-        },
-        usage=None,
-        run_id="a" * 32,
-    )
+    record = _telemetry_record(counts=counts, run_id="a" * 32)
     if record["kind"] != "efficiency-telemetry":
         _fail("canonical telemetry record was not built")
-    derived = EXEC.derive_observed_fields(record)
+    derived = _derive(record)
     if derived["WALL_SECONDS"] != "UNKNOWN" or derived["MODEL_COST"] != "UNKNOWN":
         _fail("canonical null usage was estimated")
     if derived["RETRIES"] != 2 or derived["EXACT_HEAD_EVIDENCE"] != "MISSING":
@@ -320,7 +454,7 @@ def test_telemetry_mapping_uses_canonical_records_only() -> None:
             _fail(f"derivation invented evaluator field {name}")
     partial = {"semantics": "efficiency-telemetry", "duration_seconds": None}
     try:
-        EXEC.derive_observed_fields(partial)
+        _derive(partial)
     except EXEC.ExecutionError:
         return
     _fail("partial telemetry object was accepted")
@@ -331,33 +465,8 @@ def test_review_rework_preserves_canonical_aggregate() -> None:
     counts["pr_rework"] = 2
     counts["ci_rework"] = 3
     counts["review_rework"] = 5
-    record = EXEC.efficiency_telemetry.build_record(
-        repo="datarelay-labs/engineering-system",
-        workstream="benchmark-dry-run",
-        task_kind="TEST",
-        profile=PROFILE,
-        started_at="2026-09-26T00:00:00Z",
-        finished_at=None,
-        duration_seconds=None,
-        counts=counts,
-        validation={
-            "ids": ["ENG-BENCH-EXEC-001"],
-            "exact_head": None,
-            "evidence_state": "MISSING",
-            "outcome": "UNKNOWN",
-        },
-        terminal="BLOCK",
-        budget={
-            "soft_limit": None,
-            "consumed": None,
-            "unit": None,
-            "state": "UNKNOWN",
-            "disposition": "CONTINUE",
-        },
-        usage=None,
-        run_id="b" * 32,
-    )
-    derived = EXEC.derive_observed_fields(record)
+    record = _telemetry_record(counts=counts, run_id="b" * 32)
+    derived = _derive(record)
     report = EXEC.efficiency_telemetry.build_report(
         [record],
         head="a" * 40,
@@ -417,6 +526,9 @@ def main() -> None:
     test_rejects_stale_fixture_head_and_source()
     test_profile_mismatch_is_not_comparable_pass()
     test_result_template_cannot_pass_as_final_result()
+    test_final_result_rejects_unbound_identity()
+    test_frozen_manifest_content_must_match_revision()
+    test_telemetry_lane_binding_rejects_swaps_and_unrelated_records()
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
     test_plan_has_no_production_mutation_or_execution_surface()

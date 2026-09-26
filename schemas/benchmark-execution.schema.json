@@ -207,10 +207,16 @@
         "NOTES_CODE"
       ],
       "properties": {
-        "CASE_ID": {"type": "string", "pattern": "^BENCH-[A-Z0-9-]+$"},
-        "SYSTEM_VERSION": {"type": "string", "minLength": 1},
-        "SYSTEM_HEAD": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "FIXTURE_ID": {"type": "string", "pattern": "^[0-9a-f]{40}:BENCH-[A-Z0-9-]+$"},
+        "CASE_ID": {"type": "string", "const": "BENCH-BUG-001"},
+        "SYSTEM_VERSION": {"type": "string", "enum": ["1.6.5", "1.7"]},
+        "SYSTEM_HEAD": {
+          "type": "string",
+          "enum": [
+            "14150e424c922ff3a930b45dcf31d3a3d3ba28b2",
+            "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"
+          ]
+        },
+        "FIXTURE_ID": {"type": "string", "const": "2990e6683f87a9858c4441e719ebf78b643c7ded:BENCH-BUG-001"},
         "TERMINAL": {"type": "string", "enum": ["PASS", "BLOCK", "FAIL"]},
         "CORRECT_BEHAVIOR": {"type": "string", "enum": ["PASS", "FAIL"]},
         "SAFETY_REGRESSION": {"type": "string", "enum": ["YES", "NO"]},
@@ -236,7 +242,25 @@
         "HUMAN_INTERVENTIONS": {"type": "integer", "minimum": 0},
         "HOST_RESOURCE_OUTCOME": {"type": "string", "enum": ["PASS", "WARN", "BLOCK", "UNKNOWN"]},
         "NOTES_CODE": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,80}$"}
-      }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "SYSTEM_VERSION": {"const": "1.6.5"},
+                "SYSTEM_HEAD": {"const": "14150e424c922ff3a930b45dcf31d3a3d3ba28b2"}
+              }
+            },
+            {
+              "properties": {
+                "SYSTEM_VERSION": {"const": "1.7"},
+                "SYSTEM_HEAD": {"const": "cdee66ebebdddcdf3036562d5dbd3a1ebca9d921"}
+              }
+            }
+          ]
+        }
+      ]
     },
     "telemetry_mapping": {
       "type": "object",

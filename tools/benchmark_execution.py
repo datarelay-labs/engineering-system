@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
 from jsonschema import Draft202012Validator
 
 TOOLS = Path(__file__).resolve().parent
@@ -31,7 +32,12 @@ SCHEMA_PATH = ROOT / "schemas" / "benchmark-execution.schema.json"
 PILOT_CASE_ID = "BENCH-BUG-001"
 PILOT_MANIFEST_HEAD = "2990e6683f87a9858c4441e719ebf78b643c7ded"
 PILOT_TASK_SOURCE_HEAD = "3cdedad5a40105aea426abda0df8d7c258e5e8ad"
+PILOT_REPOSITORY = "datarelay-labs/engineering-system"
 CANDIDATE_SYSTEM_VERSION = "1.7"
+LANE_WORKSTREAM = {
+    "CONTROL": "bench-bug-001-control",
+    "CANDIDATE": "bench-bug-001-candidate",
+}
 NAME_RE = re.compile(r"^[A-Za-z0-9_.:@\[\]=,+-]{1,80}$")
 TELEMETRY_DERIVATIONS = (
     {"result_field": "WALL_SECONDS", "source": "duration_seconds", "when_null": "UNKNOWN"},
@@ -137,14 +143,70 @@ def telemetry_mapping() -> dict[str, Any]:
     }
 
 
-def derive_observed_fields(record: dict[str, Any]) -> dict[str, Any]:
-    """Map one schema-valid canonical telemetry record into #44 observed fields."""
+def _require_frozen_manifest(manifest: dict[str, Any]) -> None:
+    """Reject content that is not the blob at the frozen manifest revision."""
+    relative = benchmark_fixture.MANIFEST_PATH.relative_to(ROOT).as_posix()
+    try:
+        text = efficiency_telemetry._git_output(ROOT, "show", f"{PILOT_MANIFEST_HEAD}:{relative}")
+    except efficiency_telemetry.TelemetryError as exc:
+        raise ExecutionError("FROZEN_MANIFEST_UNAVAILABLE") from exc
+    if yaml.safe_load(text) != manifest:
+        raise ExecutionError("FROZEN_MANIFEST_MISMATCH")
+
+
+def _bind_telemetry_lane(
+    parsed: dict[str, Any],
+    *,
+    lane: str,
+    system_head: str,
+    profile: dict[str, Any],
+    run_id: str,
+) -> None:
+    if lane not in LANE_WORKSTREAM:
+        raise ExecutionError("LANE_INVALID")
+    expected_head = benchmark_fixture.CONTROL_HEAD if lane == "CONTROL" else benchmark_fixture.CANDIDATE_HEAD
+    if system_head != expected_head or parsed["repo"] != PILOT_REPOSITORY:
+        raise ExecutionError("TELEMETRY_LANE_MISMATCH")
+    if parsed["workstream"] != LANE_WORKSTREAM[lane] or parsed["run_id"] != run_id:
+        raise ExecutionError("TELEMETRY_LANE_MISMATCH")
+    try:
+        actual = efficiency_telemetry.normalize_profile(parsed["profile"])
+        expected = efficiency_telemetry.normalize_profile(profile)
+    except efficiency_telemetry.TelemetryError as exc:
+        raise ExecutionError(exc.code) from exc
+    if actual != expected:
+        raise ExecutionError("TELEMETRY_LANE_MISMATCH")
+    validation = parsed["validation"]
+    exact_head = validation["exact_head"]
+    if validation["evidence_state"] == "EXACT_HEAD":
+        if exact_head != system_head:
+            raise ExecutionError("TELEMETRY_LANE_MISMATCH")
+    elif exact_head not in (None, system_head):
+        raise ExecutionError("TELEMETRY_LANE_MISMATCH")
+
+
+def derive_observed_fields(
+    record: dict[str, Any],
+    *,
+    lane: str,
+    system_head: str,
+    profile: dict[str, Any],
+    run_id: str,
+) -> dict[str, Any]:
+    """Map one canonical telemetry record into #44 fields for one benchmark lane."""
     try:
         parsed = efficiency_telemetry.parse_document(record)
     except efficiency_telemetry.TelemetryError as exc:
         raise ExecutionError(exc.code) from exc
     if parsed.get("kind") != "efficiency-telemetry":
         raise ExecutionError("TELEMETRY_RECORD_REQUIRED")
+    _bind_telemetry_lane(
+        parsed,
+        lane=lane,
+        system_head=system_head,
+        profile=profile,
+        run_id=run_id,
+    )
     derived: dict[str, Any] = {}
     for rule in TELEMETRY_DERIVATIONS:
         if "aggregate" in rule:
@@ -307,6 +369,7 @@ def dry_run(
     case = benchmark_fixture._case_by_id(validated, case_id)
     if case["source_commit"] != PILOT_TASK_SOURCE_HEAD:
         raise ExecutionError("TASK_SOURCE_MISMATCH")
+    _require_frozen_manifest(validated)
     control_profile = _complete_profile(profile)
     other = profile if candidate_profile is None else candidate_profile
     candidate_profile_norm = _complete_profile(other)
