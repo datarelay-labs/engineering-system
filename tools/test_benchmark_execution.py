@@ -824,10 +824,13 @@ def test_forged_canonical_record_does_not_qualify() -> None:
 
 def test_replaced_skills_contract_cannot_qualify_forged_telemetry() -> None:
     skills = ROOT / "tools" / "skills-contract.py"
-    original = skills.read_bytes()
+    skills_original = skills.read_bytes()
+    execution_original = TOOL.read_bytes()
     source = TOOL.read_text(encoding="utf-8")
-    if "skills-contract.py" in source or "exec_module" in source:
-        _fail("consumer still loads tools/skills-contract.py")
+    if "skills-contract.py" in source or "exec_module" in source or "host_signed_payload" in source or "pkeyutl" in source:
+        _fail("consumer still trusts same-UID verifier code")
+    if "/usr/lib/engineering-system/benchmark-receipt-verify" not in source:
+        _fail("consumer does not require the root receipt helper")
     record = _telemetry_record()
     record["counts"]["retries"] = 999
     record["counts"]["human_interventions"] = 777
@@ -839,10 +842,25 @@ def test_replaced_skills_contract_cannot_qualify_forged_telemetry() -> None:
     }
     record["terminal"] = "PASS"
     with tempfile.TemporaryDirectory() as temporary:
-        sentinel = Path(temporary) / "skills-contract-executed"
+        sentinel = Path(temporary) / "verifier-executed"
+        worker_helper = Path(temporary) / "benchmark-receipt-verify"
+        worker_helper.write_text("#!/bin/sh\n" + f"echo executed > {sentinel}\nexit 0\n", encoding="utf-8")
+        worker_helper.chmod(0o755)
+
+        def forged_payload(*_args, **_kwargs):
+            sentinel.write_text("executed", encoding="utf-8")
+            return {"kind": "benchmark-host-receipt", "lifecycle": "COMPLETE", "signature": "forged"}
+
+        EXEC.host_signed_payload = forged_payload
         skills.write_text(
             "HOST_OPENSSL_PATH = '/usr/bin/openssl'\n"
             "def verify_signed_json(path, anchor):\n"
+            f"    open({str(sentinel)!r}, 'w').write('executed')\n"
+            "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
+            encoding="utf-8",
+        )
+        TOOL.write_text(
+            "def host_signed_payload(assertion, anchor):\n"
             f"    open({str(sentinel)!r}, 'w').write('executed')\n"
             "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
             encoding="utf-8",
@@ -851,13 +869,16 @@ def test_replaced_skills_contract_cannot_qualify_forged_telemetry() -> None:
             derived = _derive(record)
         except EXEC.ExecutionError as exc:
             if exc.code != "TELEMETRY_UNAUTHENTICATED":
-                _fail(f"replaced skills-contract returned {exc.code}")
+                _fail(f"replaced same-UID verifier returned {exc.code}")
         else:
-            _fail(f"replaced skills-contract qualified forged telemetry as {derived}")
+            _fail(f"replaced same-UID verifier qualified forged telemetry as {derived}")
         finally:
-            skills.write_bytes(original)
+            skills.write_bytes(skills_original)
+            TOOL.write_bytes(execution_original)
+            if hasattr(EXEC, "host_signed_payload"):
+                delattr(EXEC, "host_signed_payload")
         if sentinel.exists():
-            _fail("replaced skills-contract was executed during consumption")
+            _fail("replaced same-UID verifier was executed during consumption")
 
 
 def main() -> None:

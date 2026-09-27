@@ -2,17 +2,18 @@
 """Native Cursor hook receipts and canonical telemetry for one benchmark lane.
 
 A Cursor ``stop`` hook checkpoints one agent loop. It does not seal the lane.
-Explicit ``finalize_lane`` writes a canonical record only after a host-signed
-assertion verifies against the fixed root-administered trust anchor and the
-fixed OpenSSL Ed25519 verifier. This module does not mint that key, accept a
-caller witness, or honor a module-global trust override. Native hook JSON is
-the only event source.
+Explicit ``finalize_lane`` writes a canonical record only after the fixed
+root-owned helper ``/usr/lib/engineering-system/benchmark-receipt-verify``
+accepts the host-signed assertion. This module does not verify Ed25519, mint
+that key, accept a caller witness, or honor a module-global trust override.
+A missing helper fails closed. Native hook JSON is the only event source.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import shutil
@@ -1457,11 +1458,55 @@ def host_receipt_binding(descriptor_path: Path, *, root: Path) -> dict[str, Any]
     return _host_assertion_body(descriptor, bounded, head, record)
 
 
+def _receipt_verifier_accepts(
+    verifier: Path,
+    assertion: Path,
+    anchor: Path,
+    *,
+    posix_spawn: Any = os.posix_spawn,
+    waitpid: Any = os.waitpid,
+    exitcode: Any = os.waitstatus_to_exitcode,
+    access: Any = os.access,
+) -> bool:
+    """Accept only a provenance-checked root helper. This function does not verify Ed25519."""
+    try:
+        if verifier.is_symlink() or not verifier.is_file():
+            return False
+        stat = verifier.stat()
+        if stat.st_uid != 0 or stat.st_mode & 0o022:
+            return False
+        parent = verifier.parent
+        if parent.is_symlink():
+            return False
+        parent_stat = parent.stat()
+        if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
+            return False
+        if not access(verifier, os.X_OK):
+            return False
+        file_actions = (
+            (os.POSIX_SPAWN_OPEN, 3, "/dev/null", os.O_WRONLY, 0),
+            (os.POSIX_SPAWN_DUP2, 3, 1),
+            (os.POSIX_SPAWN_DUP2, 3, 2),
+            (os.POSIX_SPAWN_CLOSE, 3),
+        )
+        pid = posix_spawn(
+            str(verifier),
+            [str(verifier), str(assertion), str(anchor)],
+            {"PATH": "/usr/bin", "LC_ALL": "C"},
+            file_actions=file_actions,
+        )
+        _child, status = waitpid(pid, 0)
+    except OSError:
+        return False
+    return exitcode(status) == 0
+
+
 def _bind_host_finalizer():
     """Capture fixed provenance so later module-global mutation cannot select it."""
     anchor = HOST_RECEIPT_ANCHOR
     directory = HOST_RECEIPT_DIR
-    verify_payload = benchmark_execution.host_signed_payload
+    verifier = Path("/usr/lib/engineering-system/benchmark-receipt-verify")
+    accepts = _receipt_verifier_accepts
     anchor_ok = _host_anchor_ok
     directory_ok = _host_dir_ok
     git_head = efficiency_telemetry.git_head
@@ -1475,7 +1520,12 @@ def _bind_host_finalizer():
     def verify_signed_assertion(assertion: Path, expected: dict[str, Any]) -> bool:
         if not anchor_ok(anchor) or not directory_ok(directory) or not anchor_ok(assertion):
             return False
-        payload = verify_payload(assertion, anchor)
+        if not accepts(verifier, assertion, anchor):
+            return False
+        try:
+            payload = json.loads(assertion.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return False
         if not isinstance(payload, dict):
             return False
         unsigned = {key: value for key, value in payload.items() if key != "signature"}

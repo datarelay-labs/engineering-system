@@ -5,20 +5,19 @@ The coordinator may read the frozen manifest. A worker payload is only
 ``worker_task()`` plus explicit run metadata. The dry-run binds one of the
 seven frozen case identities and emits a non-final result template. Observed
 cost, time, and counts are derived from a canonical efficiency telemetry
-record. EXACT_HEAD or terminal PASS records qualify only when a fixed
-host-signed assertion binds that record. This module does not emit a second
+record. EXACT_HEAD or terminal PASS records qualify only when the fixed
+root-owned receipt helper accepts the host-signed assertion. This module does
+not verify that signature itself. This module does not emit a second
 telemetry record. It does not start a model, agent, or network call.
 """
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -273,86 +272,47 @@ def _bind_telemetry_lane(
         raise ExecutionError("TELEMETRY_LANE_MISMATCH")
 
 
-def _bind_host_verifier():
-    """Verify host assertions with fixed OpenSSL. Repository Python is not loaded."""
-    openssl = Path("/usr/bin/openssl")
-    posix_spawn = os.posix_spawn
-    waitpid = os.waitpid
-    exitcode = os.waitstatus_to_exitcode
-    file_actions = (
-        (os.POSIX_SPAWN_OPEN, 3, "/dev/null", os.O_WRONLY, 0),
-        (os.POSIX_SPAWN_DUP2, 3, 1),
-        (os.POSIX_SPAWN_DUP2, 3, 2),
-        (os.POSIX_SPAWN_CLOSE, 3),
-    )
-    spawn_env = {"PATH": "/usr/bin", "LC_ALL": "C"}
-
-    def openssl_ok(path: Path) -> bool:
-        try:
-            if path.is_symlink() or not path.is_file():
-                return False
-            stat = path.stat()
-            if stat.st_uid != 0 or stat.st_mode & 0o022:
-                return False
-            parent = path.parent
-            if parent.is_symlink():
-                return False
-            parent_stat = parent.stat()
-            if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
-                return False
-            if not os.access(path, os.X_OK):
-                return False
-        except OSError:
+def _receipt_verifier_accepts(
+    verifier: Path,
+    assertion: Path,
+    anchor: Path,
+    *,
+    posix_spawn: Any = os.posix_spawn,
+    waitpid: Any = os.waitpid,
+    exitcode: Any = os.waitstatus_to_exitcode,
+    access: Any = os.access,
+) -> bool:
+    """Accept only a provenance-checked root helper. This function does not verify Ed25519."""
+    try:
+        if verifier.is_symlink() or not verifier.is_file():
             return False
-        return True
-
-    def verified_payload(assertion: Path, anchor: Path) -> dict[str, Any] | None:
-        if not openssl_ok(openssl):
-            return None
-        try:
-            payload = json.loads(assertion.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return None
-        if not isinstance(payload, dict) or not isinstance(payload.get("signature"), str):
-            return None
-        try:
-            signature = base64.b64decode(payload["signature"], validate=True)
-        except (ValueError, TypeError):
-            return None
-        body = {key: payload[key] for key in sorted(payload) if key != "signature"}
-        message = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        try:
-            with tempfile.TemporaryDirectory() as temporary:
-                message_path = Path(temporary) / "msg"
-                signature_path = Path(temporary) / "sig"
-                message_path.write_bytes(message)
-                signature_path.write_bytes(signature)
-                argv = [
-                    str(openssl),
-                    "pkeyutl",
-                    "-verify",
-                    "-pubin",
-                    "-inkey",
-                    str(anchor),
-                    "-rawin",
-                    "-in",
-                    str(message_path),
-                    "-sigfile",
-                    str(signature_path),
-                ]
-                pid = posix_spawn(str(openssl), argv, spawn_env, file_actions=file_actions)
-                _child, status = waitpid(pid, 0)
-        except OSError:
-            return None
-        if exitcode(status) != 0:
-            return None
-        return payload
-
-    return verified_payload
-
-
-host_signed_payload = _bind_host_verifier()
-del _bind_host_verifier
+        stat = verifier.stat()
+        if stat.st_uid != 0 or stat.st_mode & 0o022:
+            return False
+        parent = verifier.parent
+        if parent.is_symlink():
+            return False
+        parent_stat = parent.stat()
+        if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
+            return False
+        if not access(verifier, os.X_OK):
+            return False
+        file_actions = (
+            (os.POSIX_SPAWN_OPEN, 3, "/dev/null", os.O_WRONLY, 0),
+            (os.POSIX_SPAWN_DUP2, 3, 1),
+            (os.POSIX_SPAWN_DUP2, 3, 2),
+            (os.POSIX_SPAWN_CLOSE, 3),
+        )
+        pid = posix_spawn(
+            str(verifier),
+            [str(verifier), str(assertion), str(anchor)],
+            {"PATH": "/usr/bin", "LC_ALL": "C"},
+            file_actions=file_actions,
+        )
+        _child, status = waitpid(pid, 0)
+    except OSError:
+        return False
+    return exitcode(status) == 0
 
 
 def canonical_telemetry_digest(record: dict[str, Any]) -> str:
@@ -365,7 +325,8 @@ def _bind_observed_fields():
     """Capture fixed host provenance for terminal telemetry qualification."""
     anchor = Path("/etc/engineering-system/skills-trust-anchor.pub")
     directory = Path("/var/lib/engineering-system/benchmark-receipts")
-    verify_payload = host_signed_payload
+    verifier = Path("/usr/lib/engineering-system/benchmark-receipt-verify")
+    accepts = _receipt_verifier_accepts
 
     def path_ok(path: Path, *, expect_file: bool) -> bool:
         try:
@@ -395,7 +356,12 @@ def _bind_observed_fields():
         assertion = directory / f"{parsed['run_id']}-{lane}.host-receipt.json"
         if not path_ok(assertion, expect_file=True):
             return False
-        payload = verify_payload(assertion, anchor)
+        if not accepts(verifier, assertion, anchor):
+            return False
+        try:
+            payload = json.loads(assertion.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return False
         if not isinstance(payload, dict):
             return False
         validation = parsed.get("validation")

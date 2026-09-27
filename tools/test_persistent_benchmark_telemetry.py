@@ -2003,13 +2003,20 @@ def test_cursor_model_id_binds_profile_and_base_projection() -> None:
 
 def test_replaced_skills_contract_cannot_record_telemetry() -> None:
     skills = ROOT / "tools" / "skills-contract.py"
-    original = skills.read_bytes()
+    execution = ROOT / "tools" / "benchmark_execution.py"
+    skills_original = skills.read_bytes()
+    execution_original = execution.read_bytes()
     source = (ROOT / "tools" / "persistent_benchmark_telemetry.py").read_text(encoding="utf-8")
-    if "skills-contract.py" in source or "exec_module" in source:
-        _fail("finalizer still loads tools/skills-contract.py")
+    if "skills-contract.py" in source or "exec_module" in source or "host_signed_payload" in source or "pkeyutl" in source:
+        _fail("finalizer still trusts same-UID verifier code")
+    if "/usr/lib/engineering-system/benchmark-receipt-verify" not in source:
+        _fail("finalizer does not require the root receipt helper")
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        sentinel = root / "skills-contract-executed"
+        sentinel = root / "verifier-executed"
+        worker_helper = root / "benchmark-receipt-verify"
+        worker_helper.write_text("#!/bin/sh\n" + f"echo executed > {sentinel}\nexit 0\n", encoding="utf-8")
+        worker_helper.chmod(0o755)
         run_id = "c1" + "a" * 30
         prepared = _prepare(root, run_id=run_id)
         descriptor = Path(prepared["descriptor_path"])
@@ -2020,6 +2027,12 @@ def test_replaced_skills_contract_cannot_record_telemetry() -> None:
             _fail(f"replacement setup returned {result['reason']}")
         checkout = root / "control"
         _control_checkout(checkout)
+
+        def forged_payload(*_args, **_kwargs):
+            sentinel.write_text("executed", encoding="utf-8")
+            return {"kind": "benchmark-host-receipt", "lifecycle": "COMPLETE", "signature": "forged"}
+
+        capture.benchmark_execution.host_signed_payload = forged_payload
         skills.write_text(
             "HOST_OPENSSL_PATH = '/usr/bin/openssl'\n"
             "def verify_signed_json(path, anchor):\n"
@@ -2027,17 +2040,26 @@ def test_replaced_skills_contract_cannot_record_telemetry() -> None:
             "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
             encoding="utf-8",
         )
+        execution.write_text(
+            "def host_signed_payload(assertion, anchor):\n"
+            f"    open({str(sentinel)!r}, 'w').write('executed')\n"
+            "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
+            encoding="utf-8",
+        )
         try:
             finalized = capture.finalize_lane(descriptor, root=checkout)
         finally:
-            skills.write_bytes(original)
+            skills.write_bytes(skills_original)
+            execution.write_bytes(execution_original)
+            if hasattr(capture.benchmark_execution, "host_signed_payload"):
+                delattr(capture.benchmark_execution, "host_signed_payload")
         if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized or finalized["execute_worker"] is not False:
-            _fail(f"replaced skills-contract recorded telemetry as {finalized}")
+            _fail(f"replaced same-UID verifier recorded telemetry as {finalized}")
         if sentinel.exists():
-            _fail("replaced skills-contract was executed during finalization")
+            _fail("replaced same-UID verifier was executed during finalization")
         recorded = checkout / ".git" / "engineering-system" / "telemetry" / f"{run_id}.json"
         if recorded.exists():
-            _fail("replaced skills-contract wrote a telemetry record")
+            _fail("replaced same-UID verifier wrote a telemetry record")
 
 
 def test_optional_empty_generation_is_not_a_prompt_id() -> None:
