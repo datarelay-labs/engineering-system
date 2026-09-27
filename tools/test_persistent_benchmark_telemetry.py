@@ -1842,6 +1842,70 @@ def test_profile_binds_from_before_submit_prompt() -> None:
             _fail(f"foreign prompt version returned {version['reason']}")
 
 
+def _native_read(tool_use_id: str, **extra: object) -> dict:
+    payload = {
+        "hook_event_name": "preToolUse",
+        "conversation_id": "conv-1",
+        "session_id": "conv-1",
+        "cursor_version": CURSOR_VERSION,
+        "generation_id": "",
+        "model": "",
+        "tool_name": "Read",
+        "tool_use_id": tool_use_id,
+        "cwd": PATH_SECRET,
+        "tool_input": {"file_path": PATH_SECRET},
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_native_read_accepts_unresolved_generation_id() -> None:
+    tool_id = "11111111-1111-4111-8111-111111111111"
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="a1" + "b" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        read = _ingest(descriptor, plugin, _native_read(tool_id))
+        if read["reason"] == "IDENTITY_INVALID" or read["blocked"] is not False:
+            _fail(f"native Read with empty generation_id returned {read}")
+        receipt = json.loads(descriptor.with_name(f"{'a1' + 'b' * 30}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        event = receipt["events"][-1]
+        if event.get("hook_event_name") != "preToolUse" or event.get("tool_use_id") != tool_id or event.get("generation_id") is not None:
+            _fail(f"native Read event was {event}")
+        stored = descriptor.with_name(f"{'a1' + 'b' * 30}-CONTROL.receipt.json").read_text(encoding="utf-8")
+        if PATH_SECRET in stored or "file_path" in stored or '""' in stored:
+            _fail("native Read retained path content or an empty generation id")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="a2" + "b" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        early = _ingest(descriptor, plugin, _native_read(tool_id))
+        if early["reason"] != "MISSING_PROFILE_EVIDENCE":
+            _fail(f"Read before profile returned {early['reason']}")
+
+    negatives = (
+        ("a3" + "c" * 30, "a" * 81, "IDENTITY_INVALID"),
+        ("a4" + "c" * 30, "/tmp/secret-tool", "IDENTITY_INVALID"),
+        ("a5" + "c" * 30, "sk-live-abcdefghij", "PROHIBITED_CONTENT"),
+        ("a6" + "c" * 30, "", "MISSING_TELEMETRY"),
+    )
+    for run_id, tool_use_id, expected in negatives:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root, run_id=run_id)
+            descriptor = Path(prepared["descriptor_path"])
+            plugin = Path(prepared["plugin_dir"])
+            _ingest(descriptor, plugin, _session())
+            rejected = _ingest(descriptor, plugin, _native_read(tool_use_id))
+            if rejected["reason"] != expected:
+                _fail(f"tool id {tool_use_id!r} returned {rejected['reason']}")
+
+
 def main() -> None:
     tests = (
         test_plugin_is_hook_only,
@@ -1854,6 +1918,7 @@ def main() -> None:
         test_duplicate_prepare_leaves_existing_lane_unchanged,
         test_profile_and_sandbox_parity,
         test_profile_binds_from_before_submit_prompt,
+        test_native_read_accepts_unresolved_generation_id,
         test_blocking_hooks_deny_without_handshake,
         test_recorder_does_not_echo_payload,
         test_recorder_fails_closed_without_instrumentation,

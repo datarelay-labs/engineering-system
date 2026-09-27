@@ -680,7 +680,8 @@ def _conversation(payload: dict[str, Any]) -> str:
 
 
 def _optional_id(payload: dict[str, Any], key: str) -> str | None:
-    if key not in payload or payload[key] is None:
+    """Accept a native id. Cursor sends an empty string when the id is unresolved."""
+    if key not in payload or payload[key] is None or payload[key] == "":
         return None
     return _identity(payload[key], "IDENTITY_INVALID")
 
@@ -1120,7 +1121,11 @@ def _session_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tup
 
 
 def _agree_bound_profile(payload: dict[str, Any], descriptor: dict[str, Any], handshake: dict[str, Any]) -> None:
-    if "model" not in payload and "model_params" not in payload:
+    model = payload.get("model") if "model" in payload else None
+    params = payload.get("model_params") if "model_params" in payload else None
+    model_present = isinstance(model, str) and model != ""
+    params_present = isinstance(params, list) and len(params) > 0
+    if not model_present and not params_present:
         return
     model, reasoning = _matching_profile(payload, descriptor)
     if model != handshake["model"] or reasoning != handshake["reasoning"]:
