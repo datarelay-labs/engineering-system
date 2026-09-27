@@ -153,6 +153,10 @@ paths:
     domains: [ai, workflows]
   "tools/test_benchmark_execution.py":
     domains: [ai, workflows]
+  "tools/benchmark_receipt_verify.py":
+    domains: [ai, workflows]
+  "tools/test_benchmark_receipt_verify.py":
+    domains: [ai, workflows]
   "schemas/benchmark-execution.schema.json":
     domains: [schemas, ai]
 
@@ -438,6 +442,22 @@ scenarios:
     command: "python3 tools/test_persistent_benchmark_telemetry.py"
     invariants:
       - "native hook receipts finalize one canonical efficiency record, keep usage unknown unless exposed, and do not launch a worker"
+    release_gate: true
+
+  - id: ENG-BENCH-RECEIPT-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Root-owned benchmark receipt helper
+    level: static
+    domains: [ai, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_benchmark_receipt_verify.py"
+    invariants:
+      - "the fixed helper accepts one signed clean-tree receipt and blocks caller-selected trust paths, dirty or replaced blobs, wrong heads, and bad signatures without granting the worker a signing key"
     release_gate: true
 
   - id: ENG-KNOWLEDGE-001

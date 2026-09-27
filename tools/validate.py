@@ -92,6 +92,8 @@ REQUIRED_METHOD_FILES = (
     "schemas/efficiency-telemetry.schema.json",
     "tools/persistent_benchmark_telemetry.py",
     "tools/test_persistent_benchmark_telemetry.py",
+    "tools/benchmark_receipt_verify.py",
+    "tools/test_benchmark_receipt_verify.py",
     "benchmarks/persistent-instrumentation/.cursor-plugin/plugin.json",
     "benchmarks/persistent-instrumentation/hooks/hooks.json",
     "benchmarks/persistent-instrumentation/hooks/record.py",
@@ -1190,6 +1192,42 @@ def validate_verification_contract():
     print("PASS optional verification and trust evidence contract")
 
 
+def validate_benchmark_receipt_helper():
+    tool = (ROOT / "tools/benchmark_receipt_verify.py").read_text(encoding="utf-8")
+    for token in (
+        "/usr/lib/engineering-system/benchmark-receipt-verify",
+        "/etc/engineering-system/skills-trust-anchor.pub",
+        "/etc/engineering-system/skills-trust-anchor.key",
+        "/var/lib/engineering-system/benchmark-receipts",
+        "/usr/bin/openssl",
+        "/usr/bin/git",
+        "canonical_payload_bytes",
+        "pkeyutl",
+        "CALLER_TRUST_PATH",
+        "BLOB_MISMATCH",
+        "HEAD_MISMATCH",
+        "TREE_DIRTY",
+        "SIGNING_UNAVAILABLE",
+        "0600",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL benchmark receipt helper missing token: {token}")
+    for banned in ("os.environ", "genpkey", "import skills", "import persistent_benchmark", "import benchmark_execution"):
+        if banned in tool:
+            raise SystemExit(f"FAIL benchmark receipt helper contains banned token: {banned}")
+    security = (ROOT / "standards/SECURITY.md").read_text(encoding="utf-8")
+    for token in (
+        "tools/benchmark_receipt_verify.py",
+        "/usr/lib/engineering-system/benchmark-receipt-verify",
+        "skills-trust-anchor.key",
+        "0600",
+        "git cat-file",
+        "no signing authority",
+    ):
+        if token not in security:
+            raise SystemExit(f"FAIL SECURITY.md missing benchmark receipt token: {token}")
+
+
 def validate_benchmark_fixtures():
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-fixture.schema.json"))
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-execution.schema.json"))
@@ -1435,6 +1473,10 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_persistent_benchmark_telemetry.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    validate_benchmark_receipt_helper()
+    completed = subprocess.run(["python3", "tools/test_benchmark_receipt_verify.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/efficiency_telemetry.py", "gate"], cwd=ROOT)

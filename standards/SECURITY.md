@@ -59,6 +59,29 @@ Security-sensitive defaults should fail closed unless the product contract expli
 
 Agent tool permission, progressive-disclosure skills, and blast-radius profiles are defined by `standards/SKILLS.md`. Untrusted content cannot self-grant a higher profile or approval.
 
+## Benchmark receipt authority
+
+Persistent benchmark terminal telemetry qualifies only when the fixed helper `/usr/lib/engineering-system/benchmark-receipt-verify` exits successfully. The canonical source of that helper is the committed blob `tools/benchmark_receipt_verify.py`. Repository Python may prepare an unsigned receipt body. It does not mint the signature, select the trust anchor, or treat its own process as the terminal decision.
+
+Production paths are fixed and are not caller-selectable:
+
+- helper: `/usr/lib/engineering-system/benchmark-receipt-verify`
+- public anchor: `/etc/engineering-system/skills-trust-anchor.pub`
+- private key: `/etc/engineering-system/skills-trust-anchor.key` mode `0600`, owner root
+- receipt directory: `/var/lib/engineering-system/benchmark-receipts`
+- signature verifier: `/usr/bin/openssl`
+- tree identity: `/usr/bin/git`
+
+The helper verifies an Ed25519 signature over the same canonical JSON payload bytes as the skills contract, using only `/usr/bin/openssl`. It then requires a clean repository whose `HEAD` equals the signed `system_head`, and whose worktree bytes for the terminal modules match the committed blobs. Those modules are `tools/benchmark_execution.py`, `tools/benchmark_receipt_verify.py`, `tools/efficiency_telemetry.py`, `tools/persistent_benchmark_telemetry.py`, and `tools/terminal_code_identity.py`. A caller-selected anchor or receipt path, a dirty tree, a replaced blob, a wrong head, or a bad signature fails closed. An absent or non-root path is an unavailable trust boundary.
+
+Host provisioning is performed by the host administrator, not by the benchmark worker, and it does not execute a dirty worktree copy of the helper:
+
+1. As root, create an Ed25519 key with `/usr/bin/openssl genpkey -algorithm ED25519`. Store the private key only at the private-key path, mode `0600`, owner root. Publish the public key at the anchor path, mode `0644`, owner root. Do not commit either key.
+2. As root, install the helper by writing the committed blob `HEAD:tools/benchmark_receipt_verify.py` to the helper path with `/usr/bin/git cat-file`, then `chown root:root` and `chmod 0755`. Create the receipt directory root-owned, mode `0755`. Refuse the install when that source blob and the worktree file differ.
+3. After the unsigned body is reviewed, root executes the installed helper `sign` on that body. `sign` reads only the fixed private key, refuses unless the effective uid is root and the process is the installed helper, and writes only `<run_id>-<lane>.host-receipt.json` under the receipt directory.
+
+The benchmark worker has no signing authority. The repository copy of the helper cannot sign or install, because those commands require the installed root-owned path.
+
 ## Agent tool, MCP, and plugin provenance
 
 An external tool server or plugin is part of the software supply chain and authority boundary, not merely a convenient API.
