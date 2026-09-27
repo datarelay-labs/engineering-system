@@ -39,6 +39,8 @@ For a PR:
 - scenarios tagged `affected` run when their domains intersect changed-path domains
 - unmatched changed paths widen selection conservatively rather than silently skipping validation
 
+Ordinary PR validation must not duplicate the same native workflow through overlapping push+pull_request, and expensive release_gate scenarios must not be default affected/pr work or be invoked unconditionally by ordinary PR jobs; an expensive release-gate command must not be directly executed by an unconditional ordinary-PR job.
+
 A project may keep its native affected-test selector; shared tooling must not duplicate it if both prove the same invariant.
 
 ### Domain quality

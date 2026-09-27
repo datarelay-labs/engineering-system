@@ -33,6 +33,10 @@ paths:
     domains: [adoption]
   "tools/test_adopt.py":
     domains: [adoption]
+  "tools/ci_policy_audit.py":
+    domains: [adoption, enforcement]
+  "tools/test_ci_policy_audit.py":
+    domains: [adoption, enforcement]
   "tools/upgrade-adoption.py":
     domains: [adoption-upgrade]
   "tools/work_packet_authority.py":
@@ -535,3 +539,19 @@ scenarios:
     invariants:
       - "security profile audit classifies four profiles or NEEDS_INPUT and has no GitHub mutation path"
     release_gate: true
+
+  - id: ENG-ADOPTION-003
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: CI policy audit regression
+    level: unit
+    domains: [adoption, enforcement]
+    triggers: [affected]
+    platforms: [linux]
+    command: "python3 tools/test_ci_policy_audit.py"
+    invariants:
+      - "provable duplicate native CI and unconditional expensive ordinary-PR release-gate commands fail closed"
+    release_gate: false
