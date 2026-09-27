@@ -92,6 +92,9 @@ SEALED_SESSION_END = NORMAL_SESSION_CLOSE | frozenset({"error", "aborted"})
 # Native reasoning level is model_params id "effort". "reasoning" is the legacy alias.
 # "thinking" is a separate boolean mode and is not a reasoning level.
 REASONING_PARAM_IDS = frozenset({"effort", "reasoning"})
+# Cursor model ids such as gpt-5.6-sol-medium encode reasoning in the final suffix.
+# This set is not a generic suffix parser for other providers.
+CURSOR_MODEL_REASONING_SUFFIXES = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 TOOL_CATEGORIES = {
     "Read": "read",
     "Grep": "read",
@@ -1103,6 +1106,32 @@ def _require_bound_profile(descriptor: dict[str, Any], receipt: dict[str, Any]) 
         raise CaptureError("MISSING_PROFILE_EVIDENCE")
 
 
+def _cursor_canonical_profile(model: str, descriptor: dict[str, Any]) -> tuple[str, str]:
+    """Bind a Cursor model id only when it is the descriptor id and its suffix is the reasoning."""
+    profile = descriptor["profile"]
+    if profile.get("provider") != "cursor" or model != profile["model"] or "-" not in model:
+        raise CaptureError("PROFILE_MISMATCH")
+    base, suffix = model.rsplit("-", 1)
+    if not base or suffix not in CURSOR_MODEL_REASONING_SUFFIXES or suffix != profile["reasoning"]:
+        raise CaptureError("PROFILE_MISMATCH")
+    return model, suffix
+
+
+def _cursor_projected_model(observed: str, handshake: dict[str, Any], descriptor: dict[str, Any]) -> bool:
+    """Allow the bound Cursor id or its base id. A different base model does not agree."""
+    if descriptor["profile"].get("provider") != "cursor":
+        return False
+    canonical = handshake.get("model")
+    if not isinstance(canonical, str):
+        return False
+    if observed == canonical:
+        return True
+    if "-" not in canonical:
+        return False
+    base, suffix = canonical.rsplit("-", 1)
+    return bool(base) and suffix in CURSOR_MODEL_REASONING_SUFFIXES and observed == base
+
+
 def _matching_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tuple[str, str]:
     """Bind model and reasoning from native fields. Prompt text is not evidence."""
     model = payload.get("model")
@@ -1120,35 +1149,45 @@ def _matching_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tu
 def _session_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tuple[str, str] | None:
     """Return a profile when sessionStart already resolved one. Absence stays unbound."""
     model = payload.get("model") if "model" in payload else None
-    if "model_params" not in payload or payload.get("model_params") is None:
-        if model is None:
-            return None
-        if not isinstance(model, str) or model != descriptor["profile"]["model"]:
+    params = payload.get("model_params") if "model_params" in payload else None
+    reasoning = _reasoning_param(params) if isinstance(params, list) else None
+    if params is not None and not isinstance(params, list):
+        raise CaptureError("MISSING_PROFILE_EVIDENCE")
+    if reasoning is not None:
+        if not isinstance(model, str):
+            raise CaptureError("MISSING_PROFILE_EVIDENCE")
+        profile = descriptor["profile"]
+        if model != profile["model"] or reasoning != profile["reasoning"]:
             raise CaptureError("PROFILE_MISMATCH")
-        return None
-    reasoning = _reasoning_param(payload.get("model_params"))
-    if reasoning is None:
-        if model is not None and (not isinstance(model, str) or model != descriptor["profile"]["model"]):
-            raise CaptureError("PROFILE_MISMATCH")
+        return model, reasoning
+    if model is None or model == "":
         return None
     if not isinstance(model, str):
-        raise CaptureError("MISSING_PROFILE_EVIDENCE")
-    profile = descriptor["profile"]
-    if model != profile["model"] or reasoning != profile["reasoning"]:
         raise CaptureError("PROFILE_MISMATCH")
-    return model, reasoning
+    if descriptor["profile"].get("provider") == "cursor":
+        return _cursor_canonical_profile(model, descriptor)
+    if model != descriptor["profile"]["model"]:
+        raise CaptureError("PROFILE_MISMATCH")
+    return None
 
 
 def _agree_bound_profile(payload: dict[str, Any], descriptor: dict[str, Any], handshake: dict[str, Any]) -> None:
     model = payload.get("model") if "model" in payload else None
-    params = payload.get("model_params") if "model_params" in payload else None
-    model_present = isinstance(model, str) and model != ""
-    params_present = isinstance(params, list) and len(params) > 0
-    if not model_present and not params_present:
+    if "model_params" in payload and payload.get("model_params") is not None:
+        params = payload.get("model_params")
+        if not isinstance(params, list):
+            raise CaptureError("MISSING_PROFILE_EVIDENCE")
+        reasoning = _reasoning_param(params)
+        if reasoning is not None:
+            matched_model, matched_reasoning = _matching_profile(payload, descriptor)
+            if matched_model != handshake["model"] or matched_reasoning != handshake["reasoning"]:
+                raise CaptureError("PROFILE_MISMATCH")
+            return
+    if not isinstance(model, str) or model == "":
         return
-    model, reasoning = _matching_profile(payload, descriptor)
-    if model != handshake["model"] or reasoning != handshake["reasoning"]:
-        raise CaptureError("PROFILE_MISMATCH")
+    if _cursor_projected_model(model, handshake, descriptor):
+        return
+    raise CaptureError("PROFILE_MISMATCH")
 
 
 def _observe_sandbox(payload: dict[str, Any], descriptor: dict[str, Any], receipt: dict[str, Any]) -> None:

@@ -622,9 +622,9 @@ def test_profile_and_sandbox_parity() -> None:
         )
         if missing["reason"] != "INCOMPLETE_LIFECYCLE" or missing["blocked"] is not False:
             _fail(f"sessionStart without model_params returned {missing}")
-        unbound = json.loads(descriptor.with_name(f"{'7' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
-        if unbound["handshake"].get("conversation_id") != "conv-1" or "reasoning" in unbound["handshake"]:
-            _fail("sessionStart without model_params bound a profile")
+        bound = json.loads(descriptor.with_name(f"{'7' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if bound["handshake"].get("model") != PROFILE["model"] or bound["handshake"].get("reasoning") != "medium":
+            _fail("Cursor model id did not bind model and reasoning")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -681,8 +681,8 @@ def test_profile_and_sandbox_parity() -> None:
         if context_only["reason"] != "INCOMPLETE_LIFECYCLE" or context_only["blocked"] is not False:
             _fail(f"context-only sessionStart returned {context_only}")
         stored = descriptor.with_name(f"{'4' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8")
-        if '"reasoning"' in stored or "1m" in stored:
-            _fail("context-only sessionStart stored a reasoning level")
+        if "1m" in stored or "context" in stored:
+            _fail("context-only sessionStart stored a context param")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -1874,17 +1874,21 @@ def test_opaque_tool_use_id_is_canonical_correlation() -> None:
         started = _ingest(
             descriptor,
             plugin,
-            _session(conversation="123e4567-e89b-12d3-a456-426614174000", generation_id=""),
+            _session(
+                conversation="123e4567-e89b-12d3-a456-426614174000",
+                generation_id="123e4567-e89b-12d3-a456-426614174002",
+                model_params=None,
+            ),
         )
-        if started["reason"] == "IDENTITY_INVALID":
-            _fail("optional empty generation_id blocked sessionStart")
-        read = _ingest(descriptor, plugin, _native_tool("preToolUse", native))
+        if started["blocked"] is not False:
+            _fail(f"canonical sessionStart returned {started}")
+        read = _ingest(descriptor, plugin, _native_tool("preToolUse", native, model="gpt-5.6-sol"))
         if read["blocked"] is not False:
             _fail(f"opaque preToolUse returned {read}")
         posted = _ingest(
             descriptor,
             plugin,
-            _native_tool("postToolUse", native, tool_output=OUTPUT_SECRET),
+            _native_tool("postToolUse", native, model="gpt-5.6-sol", tool_output=OUTPUT_SECRET),
         )
         if posted["blocked"] is not False:
             _fail(f"opaque postToolUse returned {posted}")
@@ -1927,6 +1931,108 @@ def test_opaque_tool_use_id_is_canonical_correlation() -> None:
                 _fail(f"tool id {tool_use_id!r} returned {rejected['reason']}")
 
 
+def test_cursor_model_id_binds_profile_and_base_projection() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="b1" + "e" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        started = _ingest(descriptor, plugin, _session(model_params=None, model="gpt-5.6-sol-medium"))
+        if started["blocked"] is not False:
+            _fail(f"canonical Cursor model id returned {started}")
+        receipt = json.loads(descriptor.with_name(f"{'b1' + 'e' * 30}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if receipt["handshake"].get("model") != "gpt-5.6-sol-medium" or receipt["handshake"].get("reasoning") != "medium":
+            _fail(f"canonical model id handshake was {receipt['handshake']}")
+        agreed = _ingest(
+            descriptor,
+            plugin,
+            _read("tool-base", "preToolUse", "base", "Read") | {"model": "gpt-5.6-sol"},
+        )
+        if agreed["blocked"] is not False:
+            _fail(f"base model projection returned {agreed}")
+
+    for run_id, model in (
+        ("b2" + "e" * 30, "gpt-5.6-sol-high"),
+        ("b3" + "e" * 30, "gpt-5.6-sol-low"),
+        ("b4" + "e" * 30, "gpt-4.1"),
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root, run_id=run_id)
+            descriptor = Path(prepared["descriptor_path"])
+            plugin = Path(prepared["plugin_dir"])
+            _ingest(descriptor, plugin, _session(model_params=None))
+            rejected = _ingest(
+                descriptor,
+                plugin,
+                _read("tool-other", "preToolUse", "other", "Read") | {"model": model},
+            )
+            if rejected["reason"] != "PROFILE_MISMATCH":
+                _fail(f"model {model} returned {rejected['reason']}")
+
+    for run_id, model in (
+        ("b8" + "e" * 30, "gpt-5.6-sol-high"),
+        ("b9" + "e" * 30, "gpt-5.6-sol"),
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prepared = _prepare(root, run_id=run_id)
+            rejected = _ingest(
+                Path(prepared["descriptor_path"]),
+                Path(prepared["plugin_dir"]),
+                _session(model_params=None, model=model),
+            )
+            if rejected["reason"] != "PROFILE_MISMATCH":
+                _fail(f"sessionStart model {model} returned {rejected['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="ba" + "e" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session(model_params=None))
+        malformed = _ingest(
+            descriptor,
+            plugin,
+            _read("tool-malformed", "preToolUse", "malformed", "Read")
+            | {"model": "gpt-5.6-sol", "model_params": {"id": "effort", "value": "medium"}},
+        )
+        if malformed["reason"] != "MISSING_PROFILE_EVIDENCE":
+            _fail(f"non-list model_params returned {malformed['reason']}")
+
+
+def test_optional_empty_generation_is_not_a_prompt_id() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="b5" + "f" * 30)
+        started = _ingest(
+            Path(prepared["descriptor_path"]),
+            Path(prepared["plugin_dir"]),
+            _activation(generation_id=""),
+        )
+        if started["reason"] == "IDENTITY_INVALID" or started["blocked"] is not False:
+            _fail(f"empty generation on sessionStart returned {started}")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="b6" + "f" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        _ingest(descriptor, plugin, _shell())
+        stopped = _ingest(descriptor, plugin, _stop(generation_id=""))
+        if stopped["reason"] != "LOOP_CHECKPOINT":
+            _fail(f"empty generation on stop returned {stopped}")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="b7" + "f" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _session())
+        prompt = _ingest(descriptor, plugin, _native_prompt(generation_id=""))
+        if prompt["reason"] != "MISSING_TELEMETRY":
+            _fail(f"empty generation on beforeSubmitPrompt returned {prompt['reason']}")
+
+
 def main() -> None:
     tests = (
         test_plugin_is_hook_only,
@@ -1940,6 +2046,8 @@ def main() -> None:
         test_profile_and_sandbox_parity,
         test_profile_binds_from_before_submit_prompt,
         test_opaque_tool_use_id_is_canonical_correlation,
+        test_cursor_model_id_binds_profile_and_base_projection,
+        test_optional_empty_generation_is_not_a_prompt_id,
         test_blocking_hooks_deny_without_handshake,
         test_recorder_does_not_echo_payload,
         test_recorder_fails_closed_without_instrumentation,
