@@ -242,6 +242,7 @@ def test_handshake_and_gate() -> None:
             "cursor_version": CURSOR_VERSION,
             "conversation_id": "conv-1",
             "session_id": "conv-1",
+            "model": PROFILE["model"],
             "reasoning": "medium",
         }:
             _fail(f"handshake was {handshake}")
@@ -612,13 +613,17 @@ def test_profile_and_sandbox_parity() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         prepared = _prepare(root, run_id="7" * 32)
+        descriptor = Path(prepared["descriptor_path"])
         missing = capture.ingest_hook(
             _session(model_params=[]),
-            descriptor_path=Path(prepared["descriptor_path"]),
+            descriptor_path=descriptor,
             plugin_root=Path(prepared["plugin_dir"]),
         )
-        if missing["reason"] != "MISSING_PROFILE_EVIDENCE":
-            _fail(f"missing reasoning returned {missing['reason']}")
+        if missing["reason"] != "INCOMPLETE_LIFECYCLE" or missing["blocked"] is not False:
+            _fail(f"sessionStart without model_params returned {missing}")
+        unbound = json.loads(descriptor.with_name(f"{'7' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if unbound["handshake"].get("conversation_id") != "conv-1" or "reasoning" in unbound["handshake"]:
+            _fail("sessionStart without model_params bound a profile")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -666,24 +671,31 @@ def test_profile_and_sandbox_parity() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         prepared = _prepare(root, run_id="4" * 32)
+        descriptor = Path(prepared["descriptor_path"])
         context_only = capture.ingest_hook(
             _session(model_params=[{"id": "context", "value": "medium"}]),
-            descriptor_path=Path(prepared["descriptor_path"]),
+            descriptor_path=descriptor,
             plugin_root=Path(prepared["plugin_dir"]),
         )
-        if context_only["reason"] != "MISSING_PROFILE_EVIDENCE":
-            _fail(f"context-only params returned {context_only['reason']}")
+        if context_only["reason"] != "INCOMPLETE_LIFECYCLE" or context_only["blocked"] is not False:
+            _fail(f"context-only sessionStart returned {context_only}")
+        stored = descriptor.with_name(f"{'4' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8")
+        if '"reasoning"' in stored or "1m" in stored:
+            _fail("context-only sessionStart stored a reasoning level")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         prepared = _prepare(root, run_id="3" * 32)
+        descriptor = Path(prepared["descriptor_path"])
         thinking_only = capture.ingest_hook(
             _session(model_params=[{"id": "thinking", "value": True}]),
-            descriptor_path=Path(prepared["descriptor_path"]),
+            descriptor_path=descriptor,
             plugin_root=Path(prepared["plugin_dir"]),
         )
-        if thinking_only["reason"] != "MISSING_PROFILE_EVIDENCE":
-            _fail(f"thinking-only params returned {thinking_only['reason']}")
+        if thinking_only["reason"] != "INCOMPLETE_LIFECYCLE" or thinking_only["blocked"] is not False:
+            _fail(f"thinking-only sessionStart returned {thinking_only}")
+        if "thinking" in descriptor.with_name(f"{'3' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"):
+            _fail("thinking mode was stored as reasoning")
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -1693,6 +1705,143 @@ def test_signed_subset_records_allowlist() -> None:
         _restore_clock(original)
 
 
+def _native_prompt(conversation: str = "conv-1", **extra: object) -> dict:
+    payload = {
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": conversation,
+        "cursor_version": CURSOR_VERSION,
+        "generation_id": "gen-1",
+        "model": PROFILE["model"],
+        "model_id": PROFILE["model"],
+        "model_params": [{"id": "effort", "value": "medium"}],
+        "prompt": SECRET,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _activation(**extra: object) -> dict:
+    payload = {
+        "hook_event_name": "sessionStart",
+        "conversation_id": "conv-1",
+        "session_id": "conv-1",
+        "cursor_version": CURSOR_VERSION,
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_profile_binds_from_before_submit_prompt() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="b" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        started = _ingest(descriptor, plugin, _activation())
+        if started["reason"] != "INCOMPLETE_LIFECYCLE" or started["blocked"] is not False:
+            _fail(f"unresolved sessionStart returned {started}")
+        receipt = json.loads(descriptor.with_name(f"{'b' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if "model" in receipt["handshake"] or "reasoning" in receipt["handshake"]:
+            _fail("unresolved sessionStart bound a profile")
+        bound = _ingest(descriptor, plugin, _native_prompt())
+        if bound["blocked"] is not False:
+            _fail(f"profile-bearing beforeSubmitPrompt returned {bound}")
+        receipt = json.loads(descriptor.with_name(f"{'b' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if receipt["handshake"].get("model") != PROFILE["model"] or receipt["handshake"].get("reasoning") != "medium":
+            _fail(f"beforeSubmitPrompt did not bind the native profile: {receipt['handshake']}")
+        stored = descriptor.with_name(f"{'b' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8")
+        if SECRET in stored or "model_id" in stored or "prompt" in stored:
+            _fail("profile binding retained raw prompt or model_id")
+        shell = _ingest(descriptor, plugin, _shell())
+        if shell["blocked"] is not False:
+            _fail(f"shell after profile binding returned {shell}")
+        stopped = _ingest(descriptor, plugin, _stop())
+        if stopped["reason"] != "LOOP_CHECKPOINT":
+            _fail(f"stop after deferred profile binding returned {stopped}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="c" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        tool = _ingest(
+            descriptor,
+            plugin,
+            {
+                "hook_event_name": "preToolUse",
+                "conversation_id": "conv-1",
+                "cursor_version": CURSOR_VERSION,
+                "tool_use_id": "tool-1",
+                "tool_name": "Read",
+                "tool_input": {"path": PATH_SECRET},
+            },
+        )
+        if tool["reason"] != "MISSING_PROFILE_EVIDENCE" or tool["blocked"] is not True:
+            _fail(f"tool before profile returned {tool}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="e" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        missing = _ingest(descriptor, plugin, _native_prompt(model_params=None))
+        if missing["reason"] != "MISSING_PROFILE_EVIDENCE":
+            _fail(f"beforeSubmitPrompt without model_params returned {missing['reason']}")
+        mismatched = None
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="1" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        mismatched = _ingest(descriptor, plugin, _native_prompt(model_params=[{"id": "effort", "value": "high"}]))
+        if mismatched["reason"] != "PROFILE_MISMATCH":
+            _fail(f"prompt reasoning mismatch returned {mismatched['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="2" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        ambiguous = _ingest(
+            descriptor,
+            plugin,
+            _native_prompt(model_params=[{"id": "effort", "value": "medium"}, {"id": "reasoning", "value": "high"}]),
+        )
+        if ambiguous["reason"] != "PROFILE_AMBIGUOUS":
+            _fail(f"prompt ambiguity returned {ambiguous['reason']}")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="0" * 32)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        foreign = _ingest(descriptor, plugin, _native_prompt(conversation="conv-2"))
+        if foreign["reason"] != "SESSION_MISMATCH":
+            _fail(f"foreign prompt returned {foreign['reason']}")
+        version = _ingest(descriptor, plugin, _native_prompt(cursor_version="2026.09.26-aaaaaaa"))
+        if version["reason"] != "SESSION_MISMATCH":
+            _fail(f"prompt after foreign session returned {version['reason']}")
+        receipt = json.loads(descriptor.with_name(f"{'0' * 32}-CONTROL.receipt.json").read_text(encoding="utf-8"))
+        if "reasoning" in receipt.get("handshake", {}):
+            _fail("foreign profile event bound reasoning")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root, run_id="f1" + "a" * 30)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        _ingest(descriptor, plugin, _activation())
+        version = _ingest(descriptor, plugin, _native_prompt(cursor_version="2026.09.26-aaaaaaa"))
+        if version["reason"] != "VERSION_MISMATCH":
+            _fail(f"foreign prompt version returned {version['reason']}")
+
+
 def main() -> None:
     tests = (
         test_plugin_is_hook_only,
@@ -1704,6 +1853,7 @@ def main() -> None:
         test_stop_and_session_end_status_are_separate,
         test_duplicate_prepare_leaves_existing_lane_unchanged,
         test_profile_and_sandbox_parity,
+        test_profile_binds_from_before_submit_prompt,
         test_blocking_hooks_deny_without_handshake,
         test_recorder_does_not_echo_payload,
         test_recorder_fails_closed_without_instrumentation,

@@ -74,6 +74,19 @@ LOOP_OPENERS = frozenset(
         "preCompact",
     }
 )
+# Tool, compaction, and stop events cannot establish the profile. They require
+# a profile already bound from sessionStart or beforeSubmitPrompt.
+PROFILE_REQUIRED_EVENTS = frozenset(
+    {
+        "preToolUse",
+        "beforeShellExecution",
+        "postToolUse",
+        "postToolUseFailure",
+        "beforeMCPExecution",
+        "preCompact",
+        "stop",
+    }
+)
 NORMAL_SESSION_CLOSE = frozenset({"completed", "window_close", "user_close"})
 SEALED_SESSION_END = NORMAL_SESSION_CLOSE | frozenset({"error", "aborted"})
 # Native reasoning level is model_params id "effort". "reasoning" is the legacy alias.
@@ -1034,8 +1047,8 @@ def _block(descriptor_path: Path, code: str) -> None:
     _delete_ephemeral(descriptor_path.parent, descriptor["run_id"], descriptor["lane"])
 
 
-def _observed_reasoning(payload: dict[str, Any]) -> str:
-    params = payload.get("model_params")
+def _reasoning_param(params: Any) -> str | None:
+    """Return a resolved reasoning level. Unresolved params return None."""
     if not isinstance(params, list):
         raise CaptureError("MISSING_PROFILE_EVIDENCE")
     found: str | None = None
@@ -1048,9 +1061,70 @@ def _observed_reasoning(payload: dict[str, Any]) -> str:
         if found is not None and found != value:
             raise CaptureError("PROFILE_AMBIGUOUS")
         found = value
-    if found is None:
-        raise CaptureError("MISSING_PROFILE_EVIDENCE")
     return found
+
+
+def _profile_bound(handshake: Any) -> bool:
+    return (
+        isinstance(handshake, dict)
+        and isinstance(handshake.get("model"), str)
+        and isinstance(handshake.get("reasoning"), str)
+    )
+
+
+def _require_bound_profile(descriptor: dict[str, Any], receipt: dict[str, Any]) -> None:
+    handshake = receipt.get("handshake")
+    profile = descriptor["profile"]
+    if (
+        not _profile_bound(handshake)
+        or handshake["model"] != profile["model"]
+        or handshake["reasoning"] != profile["reasoning"]
+    ):
+        raise CaptureError("MISSING_PROFILE_EVIDENCE")
+
+
+def _matching_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tuple[str, str]:
+    """Bind model and reasoning from native fields. Prompt text is not evidence."""
+    model = payload.get("model")
+    if "model_params" not in payload:
+        raise CaptureError("MISSING_PROFILE_EVIDENCE")
+    reasoning = _reasoning_param(payload.get("model_params"))
+    if not isinstance(model, str) or reasoning is None:
+        raise CaptureError("MISSING_PROFILE_EVIDENCE")
+    profile = descriptor["profile"]
+    if model != profile["model"] or reasoning != profile["reasoning"]:
+        raise CaptureError("PROFILE_MISMATCH")
+    return model, reasoning
+
+
+def _session_profile(payload: dict[str, Any], descriptor: dict[str, Any]) -> tuple[str, str] | None:
+    """Return a profile when sessionStart already resolved one. Absence stays unbound."""
+    model = payload.get("model") if "model" in payload else None
+    if "model_params" not in payload or payload.get("model_params") is None:
+        if model is None:
+            return None
+        if not isinstance(model, str) or model != descriptor["profile"]["model"]:
+            raise CaptureError("PROFILE_MISMATCH")
+        return None
+    reasoning = _reasoning_param(payload.get("model_params"))
+    if reasoning is None:
+        if model is not None and (not isinstance(model, str) or model != descriptor["profile"]["model"]):
+            raise CaptureError("PROFILE_MISMATCH")
+        return None
+    if not isinstance(model, str):
+        raise CaptureError("MISSING_PROFILE_EVIDENCE")
+    profile = descriptor["profile"]
+    if model != profile["model"] or reasoning != profile["reasoning"]:
+        raise CaptureError("PROFILE_MISMATCH")
+    return model, reasoning
+
+
+def _agree_bound_profile(payload: dict[str, Any], descriptor: dict[str, Any], handshake: dict[str, Any]) -> None:
+    if "model" not in payload and "model_params" not in payload:
+        return
+    model, reasoning = _matching_profile(payload, descriptor)
+    if model != handshake["model"] or reasoning != handshake["reasoning"]:
+        raise CaptureError("PROFILE_MISMATCH")
 
 
 def _observe_sandbox(payload: dict[str, Any], descriptor: dict[str, Any], receipt: dict[str, Any]) -> None:
@@ -1077,6 +1151,7 @@ def _finish_stop(payload: dict[str, Any], descriptor: dict[str, Any], receipt: d
         raise CaptureError("LANE_SEALED")
     if status != "completed":
         raise CaptureError("INCOMPLETE_LIFECYCLE")
+    _require_bound_profile(descriptor, receipt)
     _require_sandbox(descriptor, receipt)
 
 
@@ -1121,22 +1196,30 @@ def _apply(
     if handshake is None:
         if event_name != "sessionStart":
             raise CaptureError("HANDSHAKE_MISSING")
-        model = payload.get("model")
-        if not isinstance(model, str) or model != descriptor["profile"]["model"]:
-            raise CaptureError("PROFILE_MISMATCH")
-        reasoning = _observed_reasoning(payload)
-        if reasoning != descriptor["profile"]["reasoning"]:
-            raise CaptureError("PROFILE_MISMATCH")
-        receipt["handshake"] = {
+        observed = _session_profile(payload, descriptor)
+        handshake = {
             "cursor_version": version,
             "conversation_id": conversation,
             "session_id": conversation,
-            "reasoning": reasoning,
         }
+        if observed is not None:
+            handshake["model"] = observed[0]
+            handshake["reasoning"] = observed[1]
+        receipt["handshake"] = handshake
         receipt["started_at"] = _utc_now()
         receipt["loop"] = "open"
     elif handshake["conversation_id"] != conversation or handshake["cursor_version"] != version:
         raise CaptureError("SESSION_MISMATCH" if handshake["conversation_id"] != conversation else "VERSION_MISMATCH")
+    if event_name == "beforeSubmitPrompt" and not _profile_bound(handshake):
+        model, reasoning = _matching_profile(payload, descriptor)
+        handshake["model"] = model
+        handshake["reasoning"] = reasoning
+    elif _profile_bound(handshake) and event_name == "beforeSubmitPrompt":
+        _agree_bound_profile(payload, descriptor, handshake)
+    elif event_name in PROFILE_REQUIRED_EVENTS:
+        if not _profile_bound(handshake):
+            raise CaptureError("MISSING_PROFILE_EVIDENCE")
+        _agree_bound_profile(payload, descriptor, handshake)
     if event_name == "beforeMCPExecution":
         raise CaptureError("TOOLSET_MISMATCH")
     if "tool_name" in payload:
@@ -1296,6 +1379,7 @@ def host_receipt_binding(descriptor_path: Path, *, root: Path) -> dict[str, Any]
         raise CaptureError(str(receipt["block"]))
     if receipt.get("handshake") is None:
         raise CaptureError("HANDSHAKE_MISSING")
+    _require_bound_profile(descriptor, receipt)
     head = efficiency_telemetry.git_head(root)
     if head != descriptor["system_head"]:
         raise CaptureError("EXACT_HEAD_UNVERIFIED")
@@ -1370,6 +1454,10 @@ def _bind_host_finalizer():
                 return {"status": "BLOCK", "reason": receipt["block"], "execute_worker": False}
             if receipt.get("handshake") is None:
                 return {"status": "BLOCK", "reason": "HANDSHAKE_MISSING", "execute_worker": False}
+            try:
+                _require_bound_profile(descriptor, receipt)
+            except CaptureError as exc:
+                return {"status": "BLOCK", "reason": exc.code, "execute_worker": False}
             head = git_head(root)
             if head != descriptor["system_head"]:
                 return {"status": "BLOCK", "reason": "EXACT_HEAD_UNVERIFIED", "execute_worker": False}
