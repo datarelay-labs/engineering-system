@@ -423,6 +423,97 @@ def test_managed_upgrade_to_1_6() -> None:
         assert (target / ".cursorignore").read_text(encoding="utf-8") == (ROOT / "templates" / ".cursorignore").read_text(encoding="utf-8")
 
 
+def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
+    """A legitimate pre-context-epoch 1.6.5 adoption must remain upgradeable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-165-baseline-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/same-version\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        resume_history = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "resume"
+            / "1.6.5-pre-context-epoch.md"
+        ).read_text(encoding="utf-8")
+        rule_history = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "rule"
+            / "1.6.5-pre-context-epoch.mdc"
+        ).read_text(encoding="utf-8")
+        (target / ".cursor/commands/resume.md").write_text(
+            resume_history, encoding="utf-8"
+        )
+        (target / ".cursor/commands/work-resume.md").write_text(
+            resume_history, encoding="utf-8"
+        )
+        (target / ".cursor/rules/engineering-system.mdc").write_text(
+            rule_history, encoding="utf-8"
+        )
+        (target / "tools/context_epoch.py").unlink()
+        commit_all(target, "simulate canonical pre-context-epoch 1.6.5 baseline")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CURSOR_RULE_SYNCED=YES" in upgraded.stdout
+        assert (
+            "CURSOR_RESUME_ADAPTERS_SYNCED="
+            ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
+            in upgraded.stdout
+        )
+        assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["engineering_system"]["version"] == "1.6.5"
+        assert project["engineering_system"]["baseline"] == NEW_BASELINE
+        canonical_resume = (
+            ROOT / "templates" / ".cursor" / "commands" / "resume.md"
+        ).read_text(encoding="utf-8")
+        canonical_rule = (
+            ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc"
+        ).read_text(encoding="utf-8")
+        assert (target / ".cursor/commands/resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+        assert (target / ".cursor/commands/work-resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+        assert (target / ".cursor/rules/engineering-system.mdc").read_text(
+            encoding="utf-8"
+        ) == canonical_rule
+        assert (target / "tools/context_epoch.py").read_bytes() == (
+            ROOT / "tools/context_epoch.py"
+        ).read_bytes()
+
+
 def test_custom_cursorignore_preserved_on_upgrade() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-custom-ignore"
@@ -454,6 +545,7 @@ def test_supported_managed_cursor_rule_history_is_upgradeable() -> None:
         "1.6.0-cursor-rule-routing.mdc": "af8e76084880d2effefb50336a8e02777892d04932852ac5784b47d318196553",
         "1.6.0-work-packet-intent.mdc": "81edcc3137ca63ee5074b0edd0315d3b2ae863fe5b8643d68faacfa5e07eac2a",
         "1.6.3.mdc": "01a357b466549a3bf2e7495fca78ef9a2aaead3b895f3583186e7fa8874732e5",
+        "1.6.5-pre-context-epoch.mdc": "49438f2735d2a97b7776a7de6c21deebf5ed6679628bba783ee65468c1e94752",
     }
     history = ROOT / "tools" / "managed_adapter_history" / "rule"
     assert {path.name for path in history.glob("*.mdc")} == set(expected)
@@ -1650,6 +1742,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_same_version_1_6_5_pre_context_epoch_upgrade()
     test_custom_cursorignore_preserved_on_upgrade()
     test_supported_managed_cursor_rule_history_is_upgradeable()
     test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
