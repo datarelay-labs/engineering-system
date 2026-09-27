@@ -18,6 +18,7 @@ SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
 SAFE_TASK_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_-]{0,63}$")
+SAFE_HOOK_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
 REQUIRED_META_V2 = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
     "TASK_KIND", "OWNER_INTENT",
@@ -272,21 +273,42 @@ def packet_identity(packet: Packet) -> str:
     audit = analyze_packet(packet)
     if audit["status"] == "BLOCK":
         raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
-    lines = [f"{key}={packet.metadata.get(key, '<missing>')}" for key in IDENTITY_KEYS]
+    lines = [
+        f"{key}={packet.metadata.get(key, MISSING_IDENTITY_VALUE)}"
+        for key in IDENTITY_KEYS
+    ]
+    lines.append(f"PACKET_BODY_SHA256={packet.body_sha256}")
     lines.append(f"PACKET_CONTEXT_AUDIT={audit['status']}")
     lines.append("PACKET_IDENTITY=PASS")
     return "\n".join(lines) + "\n"
 
 
-def require_identity(packet: Packet, expected: dict[str, str | None]) -> None:
-    """Fail closed when a refetched packet no longer matches selected identity."""
+def require_identity(
+    packet: Packet,
+    expected: dict[str, str | None],
+    *,
+    expected_body_sha256: str | None = None,
+) -> None:
+    """Fail closed when a refetched packet no longer matches selected bytes."""
     audit = analyze_packet(packet)
     if audit["status"] == "BLOCK":
         raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
-    mismatches = [
-        key for key in IDENTITY_KEYS
-        if expected.get(key) is not None and packet.metadata.get(key) != expected[key]
-    ]
+    mismatches: list[str] = []
+    for key in IDENTITY_KEYS:
+        value = expected.get(key)
+        if value is None:
+            continue
+        actual = packet.metadata.get(key)
+        if value == MISSING_IDENTITY_VALUE:
+            if actual is not None:
+                mismatches.append(key)
+        elif actual != value:
+            mismatches.append(key)
+    if expected_body_sha256 is not None:
+        if re.fullmatch(r"[0-9a-f]{64}", expected_body_sha256) is None:
+            raise ContextError("PACKET_BODY_SHA256_INVALID")
+        if packet.body_sha256 != expected_body_sha256:
+            mismatches.append("PACKET_BODY_SHA256")
     if mismatches:
         raise ContextError("PACKET_IDENTITY_MISMATCH:" + ",".join(mismatches))
 
@@ -320,7 +342,7 @@ def _validate_precompact(value: Any) -> dict[str, Any] | None:
             item = value[key]
             if key == "is_first_compaction" and not isinstance(item, bool):
                 raise ContextError("PRECOMPACT_INVALID:is_first_compaction")
-            if key == "trigger" and not isinstance(item, str):
+            if key == "trigger" and item not in {"auto", "manual"}:
                 raise ContextError("PRECOMPACT_INVALID:trigger")
             result[key] = item
     return result
@@ -385,15 +407,22 @@ def sanitize_hook(payload: dict[str, Any]) -> dict[str, Any]:
             result[key + "_hash"] = _hash_id(value)
     for key in ("cursor_version", "model", "model_id", "trigger", "status"):
         value = payload.get(key)
-        if isinstance(value, str) and len(value) <= 128:
+        if isinstance(value, str) and SAFE_HOOK_LABEL_RE.fullmatch(value):
             result[key] = value
     params = payload.get("model_params")
-    if isinstance(params, dict):
-        safe_params = {
-            key: value
-            for key, value in params.items()
-            if key in {"effort", "reasoning"} and isinstance(value, str) and len(value) <= 64
-        }
+    if isinstance(params, list):
+        safe_params: list[dict[str, str]] = []
+        for item in params:
+            if not isinstance(item, dict):
+                continue
+            param_id = item.get("id")
+            param_value = item.get("value")
+            if (
+                param_id in {"effort", "reasoning", "thinking", "context"}
+                and isinstance(param_value, str)
+                and SAFE_HOOK_LABEL_RE.fullmatch(param_value)
+            ):
+                safe_params.append({"id": param_id, "value": param_value})
         if safe_params:
             result["model_params"] = safe_params
     for key in (
@@ -433,6 +462,7 @@ def main() -> int:
     project.add_argument("--projection-char-cap", type=int, default=DEFAULT_PROJECTION_CHAR_CAP)
     for key in IDENTITY_KEYS:
         project.add_argument("--expect-" + key.lower().replace("_", "-"))
+    project.add_argument("--expect-body-sha256")
 
     lint = sub.add_parser("packet-lint")
     lint.add_argument("--body-file", required=True)
@@ -455,7 +485,11 @@ def main() -> int:
                 key: getattr(args, "expect_" + key.lower())
                 for key in IDENTITY_KEYS
             }
-            require_identity(packet, expected)
+            require_identity(
+                packet,
+                expected,
+                expected_body_sha256=args.expect_body_sha256,
+            )
             sys.stdout.write(project_packet(
                 packet,
                 section_char_cap=args.section_char_cap,

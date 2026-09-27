@@ -1579,6 +1579,18 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        checked = run(sys.executable, str(CHECK), "--root", str(target))
+        assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
+        helper.write_text("#!/usr/bin/env python3\nprint('divergent')\n", encoding="utf-8")
+        divergent = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert divergent.returncode != 0
+        assert "tools/context_epoch.py differs from canonical managed helper" in divergent.stdout
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-custom-context-epoch"
