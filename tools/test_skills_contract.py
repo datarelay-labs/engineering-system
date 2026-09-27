@@ -496,6 +496,79 @@ def test_request_binding_mismatch_denies_reuse() -> None:
         assert reused.reason == "REQUEST_BINDING_MISMATCH"
 
 
+def test_denied_policy_mismatch_does_not_consume_high_risk_dispatch() -> None:
+    """A denied authorization must not burn a valid one-time dispatch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        root = base / "repo"
+        root.mkdir()
+        write_schema(root)
+        priv, pub = fixtures.generate_keypair(base / "keys")
+        _, _, digest = contract.load_effective_state(root)
+        request = {"target": "bucket-a", "op": "put"}
+        binding = base / "binding.json"
+        dispatch = base / "dispatch.json"
+        fixtures.write_binding_assertion(
+            binding,
+            private_key=priv,
+            public_key=pub,
+            profile="production_write",
+            policy_digest=digest,
+            authority_permission="admin",
+            approved_classes=["production_write", "destructive", "external_write", "network"],
+        )
+        fixtures.write_dispatch_assertion(
+            dispatch,
+            private_key=priv,
+            public_key=pub,
+            tool_id="production.write",
+            classes=contract.DEFAULT_TOOL_REGISTRY["production.write"],
+            policy_digest=digest,
+            request_payload=request,
+            dispatch_id="prod-denied-then-valid-1",
+            expires_at_unix=int(time.time()) + 3600,
+        )
+
+        skill = root / "skills" / "demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# demo\n", encoding="utf-8")
+        write_contract(
+            root,
+            {
+                "version": 1,
+                "skills": [{"id": "demo", "trigger": "t", "body": "skills/demo/SKILL.md"}],
+                "hooks": {"pre_tool": [{"id": "changed-policy", "kind": "metadata"}]},
+            },
+        )
+        with trust_anchor(pub, replay=True):
+            denied = contract.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            assert not denied.allowed
+            assert denied.reason == "POLICY_DIGEST_MISMATCH"
+
+            (root / ".engineering" / "skills.yaml").unlink()
+            allowed = contract.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            replay = contract.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+
+        assert allowed.allowed, allowed.reason
+        assert not replay.allowed
+        assert replay.reason == "REPLAY"
+
+
 def test_duplicate_same_request_high_risk_dispatch_is_replay() -> None:
     """P1A-REPLAY-001: same signed high-risk dispatch + same request must not ALLOW twice."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -762,6 +835,7 @@ def main() -> int:
     test_caller_cannot_self_promote_with_own_keypair_against_pinned_anchor()
     test_request_json_cannot_under_classify()
     test_request_binding_mismatch_denies_reuse()
+    test_denied_policy_mismatch_does_not_consume_high_risk_dispatch()
     test_duplicate_same_request_high_risk_dispatch_is_replay()
     test_high_risk_without_replay_boundary_unavailable()
     test_self_minted_readonly_assertions_denied_on_production_cli()
