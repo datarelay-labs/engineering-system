@@ -28,6 +28,7 @@ if str(TOOLS) not in sys.path:
 
 import benchmark_execution
 import benchmark_fixture
+import benchmark_receipt_verify
 import efficiency_telemetry
 
 ROOT = TOOLS.parent
@@ -1422,7 +1423,7 @@ def _host_assertion_body(
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "kind": "benchmark-host-receipt",
+        "kind": benchmark_receipt_verify.RECEIPT_KIND,
         "run_id": descriptor["run_id"],
         "lane": descriptor["lane"],
         "repository": descriptor["repository"],

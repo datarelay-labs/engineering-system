@@ -1206,6 +1206,7 @@ def validate_benchmark_receipt_helper():
         "CALLER_TRUST_PATH",
         "BLOB_MISMATCH",
         "HELPER_MISMATCH",
+        "benchmark-host-receipt-v2",
         "HEAD_MISMATCH",
         "TREE_DIRTY",
         "SIGNING_UNAVAILABLE",

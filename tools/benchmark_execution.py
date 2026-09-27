@@ -29,6 +29,7 @@ if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
 import benchmark_fixture
+import benchmark_receipt_verify
 import efficiency_telemetry
 
 ROOT = TOOLS.parent
@@ -370,7 +371,7 @@ def _bind_observed_fields():
         if not isinstance(validation, dict):
             return False
         return (
-            payload.get("kind") == "benchmark-host-receipt"
+            payload.get("kind") == benchmark_receipt_verify.RECEIPT_KIND
             and payload.get("lifecycle") == "COMPLETE"
             and payload.get("run_id") == parsed.get("run_id")
             and payload.get("lane") == lane

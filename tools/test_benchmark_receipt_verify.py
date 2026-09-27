@@ -32,6 +32,58 @@ HOST_PATHS = (
 )
 RUN_ID = "ab" * 16
 OTHER_RUN_ID = "cd" * 16
+PRIOR_HELPER_COMMIT = "08241955aa0d1fb612211dbeaa28812e154d4019"
+_PRIOR_DRIVER = """
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def provenance(path, *, expect_file):
+    try:
+        if path.is_symlink():
+            return False
+        if expect_file and not path.is_file():
+            return False
+        if not expect_file and not path.is_dir():
+            return False
+        if path.stat().st_mode & 0o022:
+            return False
+        parent = path.parent
+        if parent.is_symlink() or not parent.is_dir():
+            return False
+        if parent.stat().st_mode & 0o022:
+            return False
+    except OSError:
+        return False
+    return True
+
+
+spec = importlib.util.spec_from_file_location("prior_benchmark_receipt_verify", sys.argv[1])
+if spec is None or spec.loader is None:
+    raise SystemExit(2)
+prior = importlib.util.module_from_spec(spec)
+sys.modules["prior_benchmark_receipt_verify"] = prior
+spec.loader.exec_module(prior)
+if hasattr(prior, "_installed_helper_reason"):
+    raise SystemExit(3)
+boundary = prior.HostBoundary(
+    helper=sys.argv[5],
+    anchor=sys.argv[4],
+    private_key=sys.argv[6],
+    receipt_dir=str(Path(sys.argv[3]).parent),
+    openssl="/usr/bin/openssl",
+    git="/usr/bin/git",
+)
+reason = prior._decide_receipt(
+    Path(sys.argv[2]),
+    Path(sys.argv[3]),
+    Path(sys.argv[4]),
+    boundary=boundary,
+    provenance=provenance,
+)
+sys.stdout.write(reason)
+"""
 
 
 def _fail(message: str) -> None:
@@ -151,7 +203,7 @@ def _body(system_head: str, run_id: str = RUN_ID, lane: str = "CONTROL") -> dict
     return {
         "descriptor_digest": "d" * 64,
         "effective_toolset": "write-shell-allowlist",
-        "kind": "benchmark-host-receipt",
+        "kind": helper.RECEIPT_KIND,
         "lane": lane,
         "lifecycle": "COMPLETE",
         "receipt_digest": "e" * 64,
@@ -395,6 +447,106 @@ def test_stale_installed_helper_blocks_decide() -> None:
             _fail(f"restored installed helper returned {_decide(prepared)!r}")
 
 
+def _prior_helper_bytes() -> bytes:
+    completed = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(ROOT),
+            "cat-file",
+            "blob",
+            f"{PRIOR_HELPER_COMMIT}:tools/benchmark_receipt_verify.py",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0 or not completed.stdout:
+        _fail(f"prior helper blob unavailable: {completed.stderr!r}")
+    if b"benchmark-host-receipt-v2" in completed.stdout or b"_installed_helper_reason" in completed.stdout:
+        _fail("prior helper blob is not the pre-v2 helper")
+    if b'kind") != "benchmark-host-receipt"' not in completed.stdout:
+        _fail("prior helper does not require the old receipt kind")
+    return completed.stdout
+
+
+def _prior_decide(prior_path: Path, prepared: dict) -> str:
+    driver = prior_path.parent / "drive_prior_decide.py"
+    driver.write_text(_PRIOR_DRIVER, encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(driver),
+            str(prior_path),
+            str(prepared["repository"]),
+            str(prepared["assertion"]),
+            str(prepared["public"]),
+            str(prepared["boundary"].helper),
+            str(prepared["private"]),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        _fail(f"prior helper process failed ({completed.returncode}): {completed.stderr}")
+    return completed.stdout
+
+
+def test_actual_prior_helper_rejects_current_protocol() -> None:
+    """The 0824195 helper process cannot sign or decide a v2 receipt."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        prepared = _prepare(root)
+        if helper.RECEIPT_KIND == "benchmark-host-receipt":
+            _fail("current protocol did not leave the prior receipt kind")
+        if _decide(prepared) != "":
+            _fail(f"current helper rejected its own protocol: {_decide(prepared)!r}")
+        prior_path = root / "prior_benchmark_receipt_verify.py"
+        prior_path.write_bytes(_prior_helper_bytes())
+        if _prior_decide(prior_path, prepared) != "ASSERTION_INVALID":
+            _fail(f"prior helper decided a v2 receipt as {_prior_decide(prior_path, prepared)!r}")
+        decide_cli = subprocess.run(
+            [
+                sys.executable,
+                str(prior_path),
+                "decide",
+                str(prepared["repository"]),
+                str(prepared["assertion"]),
+                str(prepared["public"]),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if decide_cli.returncode == 0:
+            _fail("prior helper decide CLI accepted a v2 receipt")
+        unsigned = root / "unsigned-v2.json"
+        unsigned.write_text(
+            json.dumps(prepared["payload"], sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        sign_cli = subprocess.run(
+            [sys.executable, str(prior_path), "sign", str(unsigned)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if sign_cli.returncode == 0:
+            _fail("prior helper sign CLI accepted a v2 body")
+        legacy = _body(prepared["head"])
+        legacy["kind"] = "benchmark-host-receipt"
+        legacy_signed = dict(legacy)
+        legacy_signed["signature"] = _sign(prepared["private"], legacy)
+        prepared["assertion"].write_text(
+            json.dumps(legacy_signed, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        if _prior_decide(prior_path, prepared) != "":
+            _fail(f"prior helper rejected its own protocol: {_prior_decide(prior_path, prepared)!r}")
+        if _decide(prepared) != "ASSERTION_INVALID":
+            _fail(f"current helper accepted the prior protocol: {_decide(prepared)!r}")
+
+
 def test_production_provenance_rejects_same_uid_files() -> None:
     if not helper.path_provenance(Path("/usr/bin/openssl"), expect_file=True):
         _fail("fixed openssl failed provenance")
@@ -424,6 +576,7 @@ def main() -> None:
     test_production_provenance_rejects_same_uid_files()
     test_one_signed_receipt_qualifies_and_failures_block()
     test_stale_installed_helper_blocks_decide()
+    test_actual_prior_helper_rejects_current_protocol()
     print("PASS benchmark receipt verify")
 
 

@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 HELPER_PATH = "/usr/lib/engineering-system/benchmark-receipt-verify"
 HELPER_SOURCE = "tools/benchmark_receipt_verify.py"
+RECEIPT_KIND = "benchmark-host-receipt-v2"
 ANCHOR_PATH = "/etc/engineering-system/skills-trust-anchor.pub"
 PRIVATE_KEY_PATH = "/etc/engineering-system/skills-trust-anchor.key"
 RECEIPT_DIR = "/var/lib/engineering-system/benchmark-receipts"
@@ -71,6 +72,7 @@ def provision_contract() -> dict[str, Any]:
     return {
         "helper": HELPER_PATH,
         "helper_source": HELPER_SOURCE,
+        "receipt_kind": RECEIPT_KIND,
         "anchor": ANCHOR_PATH,
         "private_key": PRIVATE_KEY_PATH,
         "private_key_mode": "0600",
@@ -243,7 +245,7 @@ def _receipt_name(payload: dict[str, Any]) -> str | None:
         return None
     if not isinstance(head, str) or HEAD_RE.fullmatch(head) is None:
         return None
-    if payload.get("kind") != "benchmark-host-receipt" or payload.get("lifecycle") != "COMPLETE":
+    if payload.get("kind") != RECEIPT_KIND or payload.get("lifecycle") != "COMPLETE":
         return None
     return f"{run_id}-{lane}.host-receipt.json"
 
@@ -377,7 +379,7 @@ def _sign_unsigned(unsigned_path: Path) -> int:
     if not isinstance(payload, dict) or "signature" in payload:
         sys.stderr.write("ASSERTION_INVALID\n")
         return 1
-    if payload.get("kind") != "benchmark-host-receipt" or payload.get("lifecycle") != "COMPLETE":
+    if payload.get("kind") != RECEIPT_KIND or payload.get("lifecycle") != "COMPLETE":
         sys.stderr.write("ASSERTION_INVALID\n")
         return 1
     run_id = payload.get("run_id")
