@@ -517,7 +517,7 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
 
 
 def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
-    """The canonical post-context-epoch 1.6.5 resume must remain upgradeable."""
+    """Recreate the real cdc54b3 managed cohort and upgrade it end to end."""
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-165-context-resume-upgrade"
         target.mkdir()
@@ -535,25 +535,68 @@ def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
             str(target),
             "--apply",
             "--baseline-sha",
-            BASELINE,
+            CONTEXT_EPOCH_BASELINE,
             "--test-command",
             "go test ./...",
         )
 
-        prior_resume = (
+        # Recreate every adoption-managed file tracked by the immutable cdc54b3
+        # manifest from the actual canonical Git object, not from a synthetic
+        # approximation.  This is the cohort that Atlas PR #82 exposed.
+        manifest = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "file_hashes"
+            / "1.6.5-cdc54b3.sha256"
+        )
+        historical_paths: list[str] = []
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            digest, rel = line.split(None, 1)
+            historical = run(
+                "git",
+                "show",
+                f"{CONTEXT_EPOCH_BASELINE}:{rel}",
+                cwd=ROOT,
+            ).stdout
+            assert hashlib.sha256(historical.encode("utf-8")).hexdigest() == digest
+            path = target / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(historical, encoding="utf-8")
+            historical_paths.append(rel)
+
+        prior_resume = run(
+            "git",
+            "show",
+            f"{CONTEXT_EPOCH_BASELINE}:templates/.cursor/commands/resume.md",
+            cwd=ROOT,
+        ).stdout
+        resume_history = (
             ROOT
             / "tools"
             / "managed_adapter_history"
             / "resume"
             / "1.6.5-context-epoch-pre-thin-router.md"
         ).read_text(encoding="utf-8")
+        assert prior_resume == resume_history
         (target / ".cursor/commands/resume.md").write_text(
             prior_resume, encoding="utf-8"
         )
         (target / ".cursor/commands/work-resume.md").write_text(
             prior_resume, encoding="utf-8"
         )
-        commit_all(target, "simulate canonical post-context-epoch 1.6.5 baseline")
+
+        # work_packet_authority.py became an adoption-managed skills runtime
+        # dependency after cdc54b3.  It must therefore be absent in this exact
+        # historical cohort and installed by the upgrade.
+        authority = target / "tools/work_packet_authority.py"
+        if authority.exists():
+            authority.unlink()
+
+        commit_all(target, "simulate exact canonical cdc54b3 managed cohort")
 
         upgraded = run(
             sys.executable,
@@ -570,9 +613,15 @@ def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
             ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
             in upgraded.stdout
         )
+        assert "tools/context_epoch.py" in upgraded.stdout
+        assert "tools/independent_verifier.py" in upgraded.stdout
+        assert "tools/skills-contract.py" in upgraded.stdout
+        assert "tools/work_packet_authority.py" in upgraded.stdout
+
         project = load_yaml(target / ".engineering/project.yaml")
         assert project["engineering_system"]["version"] == "1.6.5"
         assert project["engineering_system"]["baseline"] == NEW_BASELINE
+
         canonical_resume = (
             ROOT / "templates" / ".cursor" / "commands" / "resume.md"
         ).read_text(encoding="utf-8")
@@ -582,6 +631,34 @@ def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
         assert (target / ".cursor/commands/work-resume.md").read_text(
             encoding="utf-8"
         ) == canonical_resume
+
+        # Every historical managed file now converges to the current canonical
+        # bytes, and the newly managed runtime dependency is installed too.
+        for rel in historical_paths:
+            assert (target / rel).read_bytes() == (ROOT / rel).read_bytes(), rel
+        assert authority.read_bytes() == (ROOT / "tools/work_packet_authority.py").read_bytes()
+
+
+def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
+    """Historical hash manifests must be derived from the named canonical commits."""
+    cases = (
+        ("1.6.5-cdc54b3.sha256", CONTEXT_EPOCH_BASELINE),
+        ("1.6.5-dfe9b2c.sha256", TRUST_HELPER_BASELINE),
+    )
+    history = ROOT / "tools" / "managed_adapter_history" / "file_hashes"
+    for name, revision in cases:
+        manifest = history / name
+        assert manifest.is_file(), name
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            digest, rel = line.split(None, 1)
+            historical = run("git", "show", f"{revision}:{rel}", cwd=ROOT).stdout
+            assert hashlib.sha256(historical.encode("utf-8")).hexdigest() == digest, (
+                name,
+                rel,
+            )
 
 
 def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> None:
@@ -1883,6 +1960,7 @@ def main() -> int:
     test_managed_upgrade_to_1_6()
     test_same_version_1_6_5_pre_context_epoch_upgrade()
     test_same_version_1_6_5_context_epoch_resume_upgrade()
+    test_managed_file_hash_manifests_match_immutable_revisions()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
     test_custom_cursorignore_preserved_on_upgrade()
     test_supported_managed_cursor_rule_history_is_upgradeable()
