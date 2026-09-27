@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
@@ -200,6 +201,60 @@ def known_managed_cursor_rule_texts(canonical_text: str) -> set[str]:
     return known
 
 
+def known_managed_file_hashes(rel: str, canonical_bytes: bytes) -> set[str]:
+    """Return trusted hashes for current and historical adoption-managed files."""
+    known = {hashlib.sha256(canonical_bytes).hexdigest()}
+    history_dir = CANONICAL / "tools" / "managed_adapter_history" / "file_hashes"
+    if not history_dir.is_dir():
+        return known
+    for manifest in sorted(history_dir.glob("*.sha256")):
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                raise SystemExit(f"FAIL malformed managed file hash manifest: {manifest}")
+            digest, candidate_rel = parts[0], parts[1].strip()
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise SystemExit(f"FAIL malformed managed file hash manifest digest: {manifest}")
+            if candidate_rel == rel:
+                known.add(digest)
+    return known
+
+
+def plan_managed_file_install(
+    root: Path, managed: tuple[str, ...], *, label: str
+) -> dict[str, str]:
+    """Plan updates only for current or cryptographically known managed bytes."""
+    planned: dict[str, str] = {}
+    for rel in managed:
+        source = CANONICAL / rel
+        if not source.is_file():
+            raise SystemExit(f"FAIL canonical {rel} missing")
+        canonical_bytes = source.read_bytes()
+        canonical_text = canonical_bytes.decode("utf-8")
+        path = root / rel
+        if not path.exists():
+            planned[rel] = canonical_text
+            continue
+        if not path.is_file():
+            raise SystemExit(
+                f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+            )
+        existing_bytes = path.read_bytes()
+        if existing_bytes == canonical_bytes:
+            continue
+        digest = hashlib.sha256(existing_bytes).hexdigest()
+        if digest in known_managed_file_hashes(rel, canonical_bytes):
+            planned[rel] = canonical_text
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
+    return planned
+
+
 def plan_cursor_rule_update(root: Path) -> str | None:
     source = CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc"
     if not source.is_file():
@@ -301,27 +356,10 @@ def sync_cursor_resume_adapters(root: Path) -> list[str]:
 
 
 def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
-    """Install the optional knowledge-contract helper only when the path is missing.
-
-    Identical canonical copies are left unchanged. A different existing file fails
-    closed before any upgrade mutation. `.engineering/knowledge.yaml` is not created.
-    """
-    planned: dict[str, str] = {}
-    for rel in KNOWLEDGE_CONTRACT_MANAGED:
-        source = CANONICAL / rel
-        if not source.is_file():
-            raise SystemExit(f"FAIL canonical {rel} missing")
-        text = source.read_text(encoding="utf-8")
-        path = root / rel
-        if not path.exists():
-            planned[rel] = text
-            continue
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+    """Install or upgrade only known managed knowledge-contract bytes."""
+    return plan_managed_file_install(
+        root, KNOWLEDGE_CONTRACT_MANAGED, label="knowledge contract"
+    )
 
 
 def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
@@ -335,28 +373,10 @@ def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> lis
 
 
 def plan_runtime_contract_install(root: Path) -> dict[str, str]:
-    """Install the optional runtime-contract helper only when the path is missing.
-
-    Identical canonical copies are left unchanged. A different existing file fails
-    closed before any upgrade mutation. `.engineering/runtime.yaml` is not created,
-    and health, smoke, and E2E commands are not rewritten by this helper.
-    """
-    planned: dict[str, str] = {}
-    for rel in RUNTIME_CONTRACT_MANAGED:
-        source = CANONICAL / rel
-        if not source.is_file():
-            raise SystemExit(f"FAIL canonical {rel} missing")
-        text = source.read_text(encoding="utf-8")
-        path = root / rel
-        if not path.exists():
-            planned[rel] = text
-            continue
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+    """Install or upgrade only known managed runtime-contract bytes."""
+    return plan_managed_file_install(
+        root, RUNTIME_CONTRACT_MANAGED, label="runtime contract"
+    )
 
 
 def apply_runtime_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
@@ -370,27 +390,10 @@ def apply_runtime_contract_install(root: Path, planned: dict[str, str]) -> list[
 
 
 def plan_skills_contract_install(root: Path) -> dict[str, str]:
-    """Install the optional skills-contract helper only when the path is missing.
-
-    Identical canonical copies are left unchanged. A different existing file fails
-    closed before any upgrade mutation. `.engineering/skills.yaml` is not created.
-    """
-    planned: dict[str, str] = {}
-    for rel in SKILLS_CONTRACT_MANAGED:
-        source = CANONICAL / rel
-        if not source.is_file():
-            raise SystemExit(f"FAIL canonical {rel} missing")
-        text = source.read_text(encoding="utf-8")
-        path = root / rel
-        if not path.exists():
-            planned[rel] = text
-            continue
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+    """Install or upgrade only known managed skills-contract bytes."""
+    return plan_managed_file_install(
+        root, SKILLS_CONTRACT_MANAGED, label="skills contract"
+    )
 
 
 def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
@@ -404,27 +407,10 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
 
 
 def plan_context_epoch_install(root: Path) -> dict[str, str]:
-    """Install the managed context-epoch helper only when the path is missing.
-
-    A different existing file fails closed before any upgrade mutation because
-    the managed resume adapter executes this helper as an authority boundary.
-    """
-    planned: dict[str, str] = {}
-    for rel in CONTEXT_EPOCH_MANAGED:
-        source = CANONICAL / rel
-        if not source.is_file():
-            raise SystemExit(f"FAIL canonical {rel} missing")
-        text = source.read_text(encoding="utf-8")
-        path = root / rel
-        if not path.exists():
-            planned[rel] = text
-            continue
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+    """Install or upgrade only known managed context-epoch bytes."""
+    return plan_managed_file_install(
+        root, CONTEXT_EPOCH_MANAGED, label="context epoch"
+    )
 
 
 def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str]:
@@ -438,28 +424,10 @@ def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str
 
 
 def plan_verification_contract_install(root: Path) -> dict[str, str]:
-    """Install the optional verification-contract helper only when the path is missing.
-
-    Identical canonical copies are left unchanged. A different existing file,
-    including the required independent verifier, fails closed before any upgrade
-    mutation. `.engineering/verification.yaml` is not created.
-    """
-    planned: dict[str, str] = {}
-    for rel in VERIFICATION_CONTRACT_MANAGED:
-        source = CANONICAL / rel
-        if not source.is_file():
-            raise SystemExit(f"FAIL canonical {rel} missing")
-        text = source.read_text(encoding="utf-8")
-        path = root / rel
-        if not path.exists():
-            planned[rel] = text
-            continue
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+    """Install or upgrade only known managed verification-contract bytes."""
+    return plan_managed_file_install(
+        root, VERIFICATION_CONTRACT_MANAGED, label="verification contract"
+    )
 
 
 def apply_verification_contract_install(root: Path, planned: dict[str, str]) -> list[str]:

@@ -18,6 +18,8 @@ CHECK = ROOT / "tools" / "check-adoption.py"
 UPGRADE = ROOT / "tools" / "upgrade-adoption.py"
 BASELINE = "a" * 40
 NEW_BASELINE = "b" * 40
+CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
+TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -580,6 +582,53 @@ def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
         assert (target / ".cursor/commands/work-resume.md").read_text(
             encoding="utf-8"
         ) == canonical_resume
+
+
+def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> None:
+    """Historical managed hashes may upgrade; unknown custom bytes remain fail-closed."""
+    upgrade_path = ROOT / "tools" / "upgrade-adoption.py"
+    spec = importlib.util.spec_from_file_location("upgrade_adoption_hash_history", upgrade_path)
+    assert spec and spec.loader
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        canonical = base / "canonical"
+        target = base / "target"
+        rel = "tools/example-managed.py"
+        current = b"current managed bytes\n"
+        prior = b"prior managed bytes\n"
+        custom = b"project custom bytes\n"
+
+        (canonical / rel).parent.mkdir(parents=True, exist_ok=True)
+        (canonical / rel).write_bytes(current)
+        manifest_dir = canonical / "tools/managed_adapter_history/file_hashes"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "fixture.sha256").write_text(
+            f"{hashlib.sha256(prior).hexdigest()}  {rel}\n",
+            encoding="utf-8",
+        )
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+
+        original = upgrade.CANONICAL
+        upgrade.CANONICAL = canonical
+        try:
+            (target / rel).write_bytes(prior)
+            planned = upgrade.plan_managed_file_install(
+                target, (rel,), label="fixture"
+            )
+            assert planned == {rel: current.decode("utf-8")}
+
+            (target / rel).write_bytes(custom)
+            try:
+                upgrade.plan_managed_file_install(target, (rel,), label="fixture")
+            except SystemExit as exc:
+                assert "local/custom changes" in str(exc)
+            else:
+                raise AssertionError("custom managed-file bytes were accepted")
+        finally:
+            upgrade.CANONICAL = original
 
 
 def test_custom_cursorignore_preserved_on_upgrade() -> None:
@@ -1834,6 +1883,7 @@ def main() -> int:
     test_managed_upgrade_to_1_6()
     test_same_version_1_6_5_pre_context_epoch_upgrade()
     test_same_version_1_6_5_context_epoch_resume_upgrade()
+    test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
     test_custom_cursorignore_preserved_on_upgrade()
     test_supported_managed_cursor_rule_history_is_upgradeable()
     test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
