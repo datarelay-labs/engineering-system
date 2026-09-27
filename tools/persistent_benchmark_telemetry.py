@@ -120,6 +120,9 @@ BODY_KEYS = (
     "cursor_version",
 )
 ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+# Native tool_use_id is an opaque correlation token. Bound the raw bytes, then
+# store only a digest. parent_tool_call_id is not a stored correlation key.
+TOOL_USE_ID_MAX_BYTES = 256
 RUN_RE = re.compile(r"^[a-f0-9]{32}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 VERSION_RE = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{6,40}$")
@@ -680,10 +683,26 @@ def _conversation(payload: dict[str, Any]) -> str:
 
 
 def _optional_id(payload: dict[str, Any], key: str) -> str | None:
-    """Accept a native id. Cursor sends an empty string when the id is unresolved."""
+    """Accept one strict id. Cursor sends "" when an optional id is unresolved."""
     if key not in payload or payload[key] is None or payload[key] == "":
         return None
     return _identity(payload[key], "IDENTITY_INVALID")
+
+
+def _tool_use_token(value: Any) -> str | None:
+    """Canonicalize one opaque tool_use_id. Empty stays missing; the raw token is not stored."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise CaptureError("IDENTITY_INVALID")
+    if "/" in value or "\\" in value or ".." in value or value.startswith("~"):
+        raise CaptureError("IDENTITY_INVALID")
+    if efficiency_telemetry.SECRET_VALUE_RE.search(value):
+        raise CaptureError("PROHIBITED_CONTENT")
+    raw = value.encode("utf-8")
+    if not raw or len(raw) > TOOL_USE_ID_MAX_BYTES:
+        raise CaptureError("IDENTITY_INVALID")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _category(payload: dict[str, Any]) -> str | None:
@@ -1196,7 +1215,10 @@ def _apply(
         raise CaptureError("VERSION_MISMATCH")
     conversation = _conversation(payload)
     generation = _optional_id(payload, "generation_id")
-    tool_use = _optional_id(payload, "tool_use_id")
+    if "tool_use_id" in payload:
+        tool_use = _tool_use_token(payload.get("tool_use_id"))
+    else:
+        tool_use = None
     handshake = receipt["handshake"]
     if handshake is None:
         if event_name != "sessionStart":

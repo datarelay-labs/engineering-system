@@ -402,8 +402,9 @@ def test_native_receipt_drops_content_and_duplicates() -> None:
         digest = hmac.new(key, b"read\0" + encoded, hashlib.sha256).hexdigest()
         plain = hashlib.sha256(b"read\0" + encoded).hexdigest()
         fingerprints = json.loads((root / "state" / f"{RUN_ID}-CONTROL.fingerprints.json").read_text(encoding="utf-8"))
-        if fingerprints["fingerprints"].get("tool-1") != digest or digest == plain:
-            _fail("fingerprint was not a run-local HMAC")
+        tool_token = hashlib.sha256(b"tool-1").hexdigest()
+        if fingerprints["fingerprints"].get(tool_token) != digest or digest == plain or "tool-1" in json.dumps(fingerprints):
+            _fail("fingerprint was not a run-local HMAC of a canonical tool id")
         marker = capture.ingest_hook(
             {"hook_event_name": "ES-EVENT", "cursor_version": CURSOR_VERSION, "line": "ES-PTY/es-pty-v1"},
             descriptor_path=descriptor,
@@ -1842,13 +1843,13 @@ def test_profile_binds_from_before_submit_prompt() -> None:
             _fail(f"foreign prompt version returned {version['reason']}")
 
 
-def _native_read(tool_use_id: str, **extra: object) -> dict:
+def _native_tool(event: str, tool_use_id: object, **extra: object) -> dict:
     payload = {
-        "hook_event_name": "preToolUse",
-        "conversation_id": "conv-1",
-        "session_id": "conv-1",
+        "hook_event_name": event,
+        "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+        "session_id": "123e4567-e89b-12d3-a456-426614174000",
         "cursor_version": CURSOR_VERSION,
-        "generation_id": "",
+        "generation_id": "123e4567-e89b-12d3-a456-426614174001",
         "model": "",
         "tool_name": "Read",
         "tool_use_id": tool_use_id,
@@ -1859,40 +1860,56 @@ def _native_read(tool_use_id: str, **extra: object) -> dict:
     return payload
 
 
-def test_native_read_accepts_unresolved_generation_id() -> None:
-    tool_id = "11111111-1111-4111-8111-111111111111"
+def test_opaque_tool_use_id_is_canonical_correlation() -> None:
+    native = "tool_" + ("n" * 77) + "\n"
+    if len(native) != 83 or "\n" not in native or "_" not in native:
+        _fail("fixture is not the observed opaque tool id shape")
+    canonical = hashlib.sha256(native.encode("utf-8")).hexdigest()
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        prepared = _prepare(root, run_id="a1" + "b" * 30)
+        run_id = "a1" + "b" * 30
+        prepared = _prepare(root, run_id=run_id)
         descriptor = Path(prepared["descriptor_path"])
         plugin = Path(prepared["plugin_dir"])
-        _ingest(descriptor, plugin, _session())
-        read = _ingest(descriptor, plugin, _native_read(tool_id))
-        if read["reason"] == "IDENTITY_INVALID" or read["blocked"] is not False:
-            _fail(f"native Read with empty generation_id returned {read}")
-        receipt = json.loads(descriptor.with_name(f"{'a1' + 'b' * 30}-CONTROL.receipt.json").read_text(encoding="utf-8"))
-        event = receipt["events"][-1]
-        if event.get("hook_event_name") != "preToolUse" or event.get("tool_use_id") != tool_id or event.get("generation_id") is not None:
-            _fail(f"native Read event was {event}")
-        stored = descriptor.with_name(f"{'a1' + 'b' * 30}-CONTROL.receipt.json").read_text(encoding="utf-8")
-        if PATH_SECRET in stored or "file_path" in stored or '""' in stored:
-            _fail("native Read retained path content or an empty generation id")
-
-    with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary)
-        prepared = _prepare(root, run_id="a2" + "b" * 30)
-        descriptor = Path(prepared["descriptor_path"])
-        plugin = Path(prepared["plugin_dir"])
-        _ingest(descriptor, plugin, _activation())
-        early = _ingest(descriptor, plugin, _native_read(tool_id))
-        if early["reason"] != "MISSING_PROFILE_EVIDENCE":
-            _fail(f"Read before profile returned {early['reason']}")
+        started = _ingest(
+            descriptor,
+            plugin,
+            _session(conversation="123e4567-e89b-12d3-a456-426614174000", generation_id=""),
+        )
+        if started["reason"] == "IDENTITY_INVALID":
+            _fail("optional empty generation_id blocked sessionStart")
+        read = _ingest(descriptor, plugin, _native_tool("preToolUse", native))
+        if read["blocked"] is not False:
+            _fail(f"opaque preToolUse returned {read}")
+        posted = _ingest(
+            descriptor,
+            plugin,
+            _native_tool("postToolUse", native, tool_output=OUTPUT_SECRET),
+        )
+        if posted["blocked"] is not False:
+            _fail(f"opaque postToolUse returned {posted}")
+        receipt_path = descriptor.with_name(f"{run_id}-CONTROL.receipt.json")
+        fingerprint_path = descriptor.with_name(f"{run_id}-CONTROL.fingerprints.json")
+        stored = receipt_path.read_text(encoding="utf-8") + fingerprint_path.read_text(encoding="utf-8")
+        if native in stored or PATH_SECRET in stored or OUTPUT_SECRET in stored:
+            _fail("receipt retained the raw tool id or tool content")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        tool_events = [item for item in receipt["events"] if item.get("tool_use_id")]
+        if [item["tool_use_id"] for item in tool_events] != [canonical, canonical]:
+            _fail(f"canonical tool correlation was {[item['tool_use_id'] for item in tool_events]}")
+        if receipt["events"][1].get("generation_id") != "123e4567-e89b-12d3-a456-426614174001":
+            _fail("strict generation id was not retained")
+        mismatched = _ingest(descriptor, plugin, _native_tool("postToolUse", native + "x"))
+        if mismatched["reason"] != "MISSING_TELEMETRY":
+            _fail(f"mismatched opaque tool id returned {mismatched['reason']}")
 
     negatives = (
-        ("a3" + "c" * 30, "a" * 81, "IDENTITY_INVALID"),
-        ("a4" + "c" * 30, "/tmp/secret-tool", "IDENTITY_INVALID"),
-        ("a5" + "c" * 30, "sk-live-abcdefghij", "PROHIBITED_CONTENT"),
-        ("a6" + "c" * 30, "", "MISSING_TELEMETRY"),
+        ("a2" + "c" * 30, "", "MISSING_TELEMETRY"),
+        ("a3" + "c" * 30, None, "MISSING_TELEMETRY"),
+        ("a4" + "c" * 30, "a" * (capture.TOOL_USE_ID_MAX_BYTES + 1), "IDENTITY_INVALID"),
+        ("a5" + "c" * 30, "/tmp/secret-tool", "IDENTITY_INVALID"),
+        ("a6" + "c" * 30, "sk-live-abcdefghij", "PROHIBITED_CONTENT"),
+        ("a7" + "d" * 30, 12, "IDENTITY_INVALID"),
     )
     for run_id, tool_use_id, expected in negatives:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1901,7 +1918,11 @@ def test_native_read_accepts_unresolved_generation_id() -> None:
             descriptor = Path(prepared["descriptor_path"])
             plugin = Path(prepared["plugin_dir"])
             _ingest(descriptor, plugin, _session())
-            rejected = _ingest(descriptor, plugin, _native_read(tool_use_id))
+            rejected = _ingest(
+                descriptor,
+                plugin,
+                _native_tool("preToolUse", tool_use_id, conversation_id="conv-1", session_id="conv-1"),
+            )
             if rejected["reason"] != expected:
                 _fail(f"tool id {tool_use_id!r} returned {rejected['reason']}")
 
@@ -1918,7 +1939,7 @@ def main() -> None:
         test_duplicate_prepare_leaves_existing_lane_unchanged,
         test_profile_and_sandbox_parity,
         test_profile_binds_from_before_submit_prompt,
-        test_native_read_accepts_unresolved_generation_id,
+        test_opaque_tool_use_id_is_canonical_correlation,
         test_blocking_hooks_deny_without_handshake,
         test_recorder_does_not_echo_payload,
         test_recorder_fails_closed_without_instrumentation,
