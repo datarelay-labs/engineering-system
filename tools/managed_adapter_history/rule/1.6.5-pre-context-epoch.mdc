@@ -1,0 +1,12 @@
+---
+description: Mandatory Engineering System entry rule
+alwaysApply: true
+---
+
+# Engineering System
+
+Follow repository `AGENTS.md` and `.engineering/project.yaml` under the canonical Engineering System.
+
+Use minimum sufficient context. On an existing branch/PR, inspect the diff first and expand only to required dependencies. Run the smallest correct change and cheapest affected deterministic check first; inspect actionable review feedback before merge.
+
+Do not auto-run expensive/full-suite checks for metadata-only or narrowly scoped changes. Do not spend coding-agent time polling external waits or dumping large command output into context; save verbose logs and surface only exit status plus relevant grep/tail evidence.

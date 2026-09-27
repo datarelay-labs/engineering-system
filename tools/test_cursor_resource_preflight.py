@@ -312,6 +312,7 @@ def test_resource_guard_names_agree() -> None:
         assert executable_env in text
         assert config_env in text
     assert "never threshold YAML" in resume_text
+    assert "from the canonical Engineering System checkout" in resume_text
     assert "never parsed as YAML" in session
     assert "never threshold YAML" in instruction
     assert 'os.environ.get("ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD"' not in tool
@@ -495,15 +496,21 @@ def test_known_resume_upgrades_and_custom_resume_fails_closed() -> None:
     upgrade = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(upgrade)
     canonical = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-    prior = (ROOT / "tools" / "managed_adapter_history" / "resume" / "1.6.4.md").read_text(encoding="utf-8")
-    assert prior != canonical
+    history = ROOT / "tools" / "managed_adapter_history" / "resume"
+    priors = [
+        (history / "1.6.4.md").read_text(encoding="utf-8"),
+        (history / "1.6.5-pre-context-epoch.md").read_text(encoding="utf-8"),
+    ]
+    assert all(prior != canonical for prior in priors)
     assert "cursor-resource-preflight.py" in canonical
+    assert "from the canonical Engineering System checkout" in canonical
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp)
         resume = target / ".cursor" / "commands" / "resume.md"
         resume.parent.mkdir(parents=True)
-        resume.write_text(prior, encoding="utf-8")
-        assert upgrade.plan_cursor_resume_adapters(target)[".cursor/commands/resume.md"] == canonical
+        for prior in priors:
+            resume.write_text(prior, encoding="utf-8")
+            assert upgrade.plan_cursor_resume_adapters(target)[".cursor/commands/resume.md"] == canonical
         resume.write_text("# project-custom resume\n", encoding="utf-8")
         try:
             upgrade.plan_cursor_resume_adapters(target)
