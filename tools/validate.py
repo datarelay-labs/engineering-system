@@ -1205,6 +1205,7 @@ def validate_benchmark_receipt_helper():
         "pkeyutl",
         "CALLER_TRUST_PATH",
         "BLOB_MISMATCH",
+        "HELPER_MISMATCH",
         "HEAD_MISMATCH",
         "TREE_DIRTY",
         "SIGNING_UNAVAILABLE",

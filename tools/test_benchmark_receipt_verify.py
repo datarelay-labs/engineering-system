@@ -192,6 +192,12 @@ def _prepare(root: Path) -> dict:
         openssl="/usr/bin/openssl",
         git="/usr/bin/git",
     )
+    blob = helper._git_blob(boundary, repository, f"HEAD:{helper.HELPER_SOURCE}")
+    if blob is None:
+        _fail("committed helper blob missing")
+    installed = Path(boundary.helper)
+    installed.write_bytes(blob)
+    os.chmod(installed, 0o755)
     return {
         "repository": repository,
         "head": head,
@@ -364,6 +370,31 @@ def test_one_signed_receipt_qualifies_and_failures_block() -> None:
             _fail("group-writable receipt qualified")
 
 
+def test_stale_installed_helper_blocks_decide() -> None:
+    """A root-equivalent installed helper whose bytes differ from HEAD cannot decide."""
+    with tempfile.TemporaryDirectory() as temporary:
+        prepared = _prepare(Path(temporary))
+        if _decide(prepared) != "":
+            _fail(f"matching installed helper returned {_decide(prepared)!r}")
+        installed = Path(prepared["boundary"].helper)
+        installed.write_bytes(installed.read_bytes() + b"# stale\n")
+        os.chmod(installed, 0o755)
+        reason = _decide(prepared)
+        if reason != "HELPER_MISMATCH":
+            _fail(f"stale installed helper returned {reason!r}")
+        blob = helper._git_blob(
+            prepared["boundary"],
+            prepared["repository"],
+            f"HEAD:{helper.HELPER_SOURCE}",
+        )
+        if blob is None:
+            _fail("committed helper blob missing during restore")
+        installed.write_bytes(blob)
+        os.chmod(installed, 0o755)
+        if _decide(prepared) != "":
+            _fail(f"restored installed helper returned {_decide(prepared)!r}")
+
+
 def test_production_provenance_rejects_same_uid_files() -> None:
     if not helper.path_provenance(Path("/usr/bin/openssl"), expect_file=True):
         _fail("fixed openssl failed provenance")
@@ -392,6 +423,7 @@ def main() -> None:
     test_contract_and_cli_do_not_touch_host_paths()
     test_production_provenance_rejects_same_uid_files()
     test_one_signed_receipt_qualifies_and_failures_block()
+    test_stale_installed_helper_blocks_decide()
     print("PASS benchmark receipt verify")
 
 

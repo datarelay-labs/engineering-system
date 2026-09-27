@@ -7,10 +7,11 @@ may prepare an unsigned body. It cannot mint the host signature or select
 the trust path. This module does not import repository verifier code.
 
 ``decide`` exits 0 only when the fixed anchor verifies the signature, the
-repository HEAD matches the signed system head, and the committed terminal
-blobs match a clean worktree. ``sign`` writes a receipt only when this
-process is that installed helper and the effective uid is root. Any other
-invocation fails closed and writes nothing.
+repository HEAD matches the signed system head, the committed terminal
+blobs match a clean worktree, and the installed helper bytes equal
+``HEAD:tools/benchmark_receipt_verify.py``. ``sign`` writes a receipt only
+when this process is that installed helper and the effective uid is root.
+Any other invocation fails closed and writes nothing.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 HELPER_PATH = "/usr/lib/engineering-system/benchmark-receipt-verify"
+HELPER_SOURCE = "tools/benchmark_receipt_verify.py"
 ANCHOR_PATH = "/etc/engineering-system/skills-trust-anchor.pub"
 PRIVATE_KEY_PATH = "/etc/engineering-system/skills-trust-anchor.key"
 RECEIPT_DIR = "/var/lib/engineering-system/benchmark-receipts"
@@ -68,7 +70,7 @@ def provision_contract() -> dict[str, Any]:
     """Return the host-admin contract. This does not create files or keys."""
     return {
         "helper": HELPER_PATH,
-        "helper_source": "tools/benchmark_receipt_verify.py",
+        "helper_source": HELPER_SOURCE,
         "anchor": ANCHOR_PATH,
         "private_key": PRIVATE_KEY_PATH,
         "private_key_mode": "0600",
@@ -84,7 +86,9 @@ def provision_contract() -> dict[str, Any]:
             "a dirty worktree copy. Create the receipt directory root-owned "
             "mode 0755. Create the Ed25519 key with /usr/bin/openssl as root, "
             "mode 0600, and publish only the public key to the anchor "
-            "path mode 0644. Sign only by executing the installed helper."
+            "path mode 0644. Sign only by executing the installed helper. "
+            "decide refuses unless the installed helper bytes equal "
+            "HEAD:tools/benchmark_receipt_verify.py."
         ),
     }
 
@@ -135,6 +139,30 @@ def _git_env() -> dict[str, str]:
         "GIT_PAGER": "cat",
         "GIT_TERMINAL_PROMPT": "0",
     }
+
+
+def _git_blob(boundary: HostBoundary, repository: Path, spec: str) -> bytes | None:
+    """Return raw committed blob bytes. Text mode is not used."""
+    completed = subprocess.run(
+        [
+            boundary.git,
+            "-C",
+            str(repository),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.autocrlf=false",
+            "cat-file",
+            "blob",
+            spec,
+        ],
+        check=False,
+        capture_output=True,
+        env=_git_env(),
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
 
 
 def _git(boundary: HostBoundary, repository: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -258,6 +286,27 @@ def _tree_reason(boundary: HostBoundary, repository: Path, system_head: str) -> 
     return ""
 
 
+def _installed_helper_reason(
+    boundary: HostBoundary,
+    repository: Path,
+    provenance: Provenance,
+) -> str:
+    """Refuse when the installed helper is not the committed helper blob."""
+    helper_path = Path(boundary.helper)
+    if not helper_path.is_absolute() or ".." in helper_path.parts:
+        return "CALLER_TRUST_PATH"
+    if not provenance(helper_path, expect_file=True):
+        return "TRUST_BOUNDARY_UNAVAILABLE"
+    try:
+        installed = helper_path.read_bytes()
+    except OSError:
+        return "TRUST_BOUNDARY_UNAVAILABLE"
+    committed = _git_blob(boundary, repository, f"HEAD:{HELPER_SOURCE}")
+    if committed is None or installed != committed:
+        return "HELPER_MISMATCH"
+    return ""
+
+
 def _decide_receipt(
     repository: Path,
     assertion: Path,
@@ -295,7 +344,10 @@ def _decide_receipt(
         return "ASSERTION_INVALID"
     if not _ed25519_verify(boundary, Path(boundary.anchor), canonical_payload_bytes(payload), payload["signature"]):
         return "SIGNATURE_MISMATCH"
-    return _tree_reason(boundary, repository, str(payload["system_head"]))
+    tree = _tree_reason(boundary, repository, str(payload["system_head"]))
+    if tree:
+        return tree
+    return _installed_helper_reason(boundary, repository, provenance)
 
 
 def _sign_unsigned(unsigned_path: Path) -> int:
