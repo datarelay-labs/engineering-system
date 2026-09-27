@@ -269,6 +269,19 @@ Do not keep accumulating old phase text in the Issue body.
 
 History already exists in Git commits, PRs, CI, Issue edits/comments, and closed Issues.
 
+### Bounded Work Packet projection
+
+Routine resume must not copy an append-only Issue body into model context. After authenticated GitHub retrieval and author-permission verification, pipe the selected body through `tools/context_epoch.py packet-project` and use that bounded current-state projection for ordinary execution.
+
+The projector:
+- emits only canonical current-state metadata and sections;
+- excludes noncanonical/history sections from routine context while reporting their presence as drift;
+- fails closed on duplicate canonical sections or missing required packet structure;
+- reports byte/line/section metrics;
+- uses output safety caps only to bound model context. Those caps are not provider billing thresholds or reset policy.
+
+Packet-size warning thresholds, when used for canaries, are explicit inputs to `packet-lint`; they are not universal constants. Structural duplication/history drift is the primary defect.
+
 ## Deterministic packet resolution
 
 When resuming work:

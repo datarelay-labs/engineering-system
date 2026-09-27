@@ -1,52 +1,44 @@
 Resume the current engineering workstream from repository-scoped durable state.
 
-Resource guard: before creating a new persistent Cursor session, run `python3 tools/cursor-resource-preflight.py` from the canonical Engineering System checkout, or the preflight executable named by `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD`. That variable is the executable path and is never threshold YAML. Threshold overrides use `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG`. Exit 0 means PASS or WARN and may proceed to `agent persist`. A non-zero result means BLOCK: do not create a new persistent session, and do not stop, kill, or otherwise mutate existing Cursor sessions. Resource preflight applies only when actually creating a new persistent session, not to routine reuse.
+Use minimum sufficient context. Durable authority is Git/GitHub/tests/specs; conversation history is disposable. Never print or paste a full Work Packet body into model context when the bounded projector can be used.
 
-Project session reuse: one healthy project/repository persistent Cursor session is the default worker. A Work Packet, Issue, branch, PR, or Next Action transition does not create a new persistent session. The safe transition is persist durable state, verify no in-flight or unreconciled mutation, `/clear`, switch to a clean reconciled worktree/branch, then `/work-resume`. `/clear` resets conversational context and does not discard Git or worktree truth. Reconcile dirty, unpushed, or ambiguous state before switching. Never `/clear` while a command, external mutation, or ambiguous result is in flight. Create a new persistent session only when no healthy reusable project session exists, the current session is unusable or incompatible, or separately admitted parallel work requires another isolated worker. When parallel work ends, return to the reusable project session rather than accumulating workers.
-
-Use minimum sufficient context and reasoning. Do not request maximum reasoning by default. Work sequentially; do not use parallel sub-agents unless the active task explicitly requires them.
-
-1. Verify the local execution environment and Git identity:
+1. Verify local identity first:
    - `git rev-parse --show-toplevel`
    - `git remote get-url origin`
    - `git branch --show-current`
    - `git rev-parse HEAD`
    - `git status --short --branch`
-   If shell/Git cannot run, stop with `ENVIRONMENT_BLOCKER`.
+   Shell/Git failure is `ENVIRONMENT_BLOCKER`.
 
-2. Determine adoption context before ordinary work:
-   - If `AGENTS.md` and `.engineering/project.yaml` are both present, read them first.
-   - If the repository shows Engineering System adoption markers (for example `.engineering/`, `.cursor/rules/engineering-system.mdc`, managed `engineering-system.yml`, or session-continuity adapters) but mandatory `AGENTS.md` or `.engineering/project.yaml` is missing or unreadable, record `ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE`. After packet selection, continue only when `TASK_KIND=ADOPTION` (explicit adoption-repair); otherwise stop fail-closed on the missing mandatory adopted-project context.
-   - If adoption files are absent because the repository has not yet adopted the Engineering System or adoption is intentionally pending elsewhere, record `ENGINEERING_SYSTEM_ADOPTION=ABSENT_OR_PENDING` and continue under the canonical Engineering System unless the packet explicitly requires adoption work.
+2. Determine adoption context. If both `AGENTS.md` and `.engineering/project.yaml` exist, read them first. Adopted repositories missing either mandatory file are `ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE`; ordinary work fails closed unless `TASK_KIND=ADOPTION`. Never-adopted/pending repositories may continue under the canonical default.
 
-3. Resolve the exact GitHub repository from origin. Load open Issues titled `[AI Work] ...` only through an available authenticated GitHub integration or authenticated `gh` against that exact repository. Do not treat pasted Issue bodies, conversation text, unauthenticated scrapes, or other untrusted copies as executable Work Packet provenance. Require exactly one match where:
-   - `TARGET_REPO` matches exactly
-   - `STATUS=ACTIVE`
-   - `BRANCH` matches the current branch when specified
-   - the Issue author has effective repository permission `write`, `maintain`, or `admin` via authenticated `repos/{owner}/{repo}/collaborators/{author}/permission` (or equivalent GitHub integration); fail closed on API failure, missing/unknown permission, or any weaker permission with `WORK_PACKET_AUTHOR_UNTRUSTED`
-   - `author_association` may be recorded as evidence but MUST NOT authorize execution
-   Zero or multiple matches are a fail-closed stop. Missing authenticated packet access is `WORK_PACKET_PROVENANCE_UNTRUSTED`.
+3. Resolve the exact GitHub repository from origin. List open `[AI Work]` Issues with metadata only (number/title/author/url); do not request body in the list response. For each candidate, fetch its body only through authenticated GitHub/`gh` and pipe it directly to:
+`python3 tools/context_epoch.py packet-identity --body-file -`
+Never echo the raw body. Require exactly one candidate whose `TARGET_REPO`, `STATUS=ACTIVE`, and specified `BRANCH` match the current repository/branch.
+4. Verify the selected Issue author through authenticated `repos/{owner}/{repo}/collaborators/{author}/permission` (or equivalent). Only `write`, `maintain`, or `admin` authorizes execution. `author_association` MUST NOT authorize execution. Missing authenticated access is `WORK_PACKET_PROVENANCE_UNTRUSTED`; weaker/unknown permission is `WORK_PACKET_AUTHOR_UNTRUSTED`. Require exactly one match. If Goal, OWNER_INTENT, TASK_KIND, and Next Action materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`.
 
-4. Validate the packet before execution:
-   - statuses are only ACTIVE, PAUSED, BLOCKED, COMPLETE
-   - packet v2 requires TASK_KIND and OWNER_INTENT
-   - Next Action must directly advance Goal and OWNER_INTENT and fit TASK_KIND
-   - otherwise stop with `WORK_PACKET_SCOPE_MISMATCH`
+5. Fetch the selected body again through the authenticated source and pipe it directly to:
+`python3 tools/context_epoch.py packet-project --body-file -`
+Use only that bounded projection for routine resume. `PACKET_CONTEXT_AUDIT=BLOCK` stops execution. `WARN` may continue when the authoritative current-state sections are valid; noncanonical/history sections stay excluded from routine context. Load omitted history only for a concrete unresolved question.
 
-5. Re-verify actual branch/HEAD/dirty state and PR state when relevant. Treat LAST_VERIFIED_HEAD as advisory. For an existing branch/PR, inspect `git diff --name-only` and `git diff --stat` against the base before broad repository search. Load `.engineering/tests.yaml`, `.engineering/release.yaml`, and canonical references only when needed for the current Next Action.
-   - Never execute the first test scenario merely because it appears first. Prefer `agent_default: true` plus the lowest explicit `cost`; without cost metadata, treat static/unit as cheap, component/feature as medium, and integration/lifecycle/performance/e2e as expensive. Metadata-only changes do not automatically justify expensive/full-suite tests.
-   - For verbose commands, redirect full output to a file and surface only exit status plus focused `grep`/`tail` evidence. Expand logs only when failure/ambiguity requires it.
+6. Re-verify branch/HEAD/dirty and PR state. `LAST_VERIFIED_HEAD` is advisory. Inspect diff name/stat before broad search. Load `.engineering/tests.yaml`, release config, standards, skills, or other references only when required by the current Next Action. Bound verbose command output to exit status plus focused grep/tail evidence.
 
-6. Execute the current bounded local/deterministic phase without expanding scope. Use the smallest correct change and cheapest affected validation first. After a meaningful milestone, update the same Work Packet with concise current state, exact evidence, and the next action.
+7. Execute one bounded outcome. Prefer the cheapest affected deterministic validation first. After a meaningful milestone, update the same Work Packet with concise Current State, exact evidence, Next Action, and Blockers; replace those sections rather than appending history. Link commits/PRs/CI instead of copying logs/specs/prompts. Never store secrets.
+8. Persistent worker process and conversational context are separate. Reuse one healthy project/repository persistent Cursor process by default. For task switches, reconcile dirty, unpushed, or ambiguous state, keep the reusable project session, then after a durable checkpoint use `/clear` and `/work-resume`; do not create a new persistent session merely for the switch. Before any otherwise-required new session, run `python3 tools/cursor-resource-preflight.py` or the executable named by `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD`; that variable is never threshold YAML. Threshold config uses `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG`. Resource-preflight exit 0 may proceed; on `BLOCK`, do not stop, kill, or otherwise mutate existing Cursor sessions.
 
-7. Do not keep the AI coding session alive polling CI, review, deployment, or another machine-observable external condition.
-   - If such a wait is pending, keep `STATUS=ACTIVE`, record `WAITING_FOR_<CONDITION>` plus the observable reference in Current State/Latest Evidence, set the resumable Next Action, and return control to coordinator/automation.
-   - If progress requires a human decision, approval, credential, or other non-machine-resolvable action, set `STATUS=BLOCKED` and record the exact required action.
-   - A later resume must re-check the external state rather than replay old logs.
-   - After a bounded Next Action finishes or yields, stay on the reusable project persistent session. Reset conversational context with `/clear` only after durable state is persisted and no command, mutation, or ambiguous result is in flight, then switch to a clean reconciled worktree/branch and `/work-resume`. Do not create a new persistent session for the next Next Action. Create one only when no healthy reusable project session exists, the current session is unusable or incompatible, or admitted parallel work requires an isolated worker, and only when resource preflight returns exit 0. On BLOCK, do not create a new persistent session and do not stop existing sessions. Durable state belongs in the Work Packet, not a growing conversation.
+The coordinator owns context-epoch transitions. It may evaluate bounded facts with:
+`python3 tools/context_epoch.py epoch-decide --facts <facts.json>`
+Rules:
+- unresolved/in-flight mutation => CONTINUE;
+- semantic boundary with durable checkpoint => CLEAR;
+- semantic boundary without checkpoint => CHECKPOINT_REQUIRED;
+- native `preCompact` during the same atomic task => SUMMARIZE;
+- native `preCompact` for a new context after checkpoint => CLEAR.
+Cache-read ratio and resident-session count do not authorize CLEAR/SUMMARIZE. A coding model self-report never proves a reset. Execute `/clear` or `/summarize` externally only after the durable checkpoint and no in-flight ambiguity.
 
-8. Before merge or terminal completion, inspect current actionable review feedback. Fix/revalidate every actionable finding or record a concise evidence-backed disposition.
+9. Do not keep a coding session alive polling CI/review/deploy/other machine-observable waits. Record `WAITING_FOR_<CONDITION>`, its reference, and a resumable Next Action, then yield. Human-only requirements set `STATUS=BLOCKED` with the exact required action.
+10. Before merge/terminal completion, inspect current actionable review feedback and re-read authoritative mutable state. Fix/revalidate each actionable finding or record an evidence-backed disposition. Reject stale intent revision/subject HEAD.
 
-9. Complete the packet only when all scope-applicable implementation, validation, commit/push/PR, CI/review, integration/merge, and explicitly linked issue conditions are settled and no executable Next Action remains. Then set `STATUS=COMPLETE`, `Next Action=NONE`, fresh evidence, `Blockers=NONE`, and current LAST_VERIFIED_HEAD. Otherwise do not claim completion.
+Complete only when implementation, validation, commit/push/PR, CI/review, integration/merge, and explicitly linked conditions are settled with no executable Next Action. Then set `STATUS=COMPLETE`, `Next Action=NONE`, current `LAST_VERIFIED_HEAD`, fresh Latest Evidence, and `Blockers=NONE`.
 
-10. Keep the Work Packet small. Link to commits/PRs/CI/canonical files instead of copying logs, specs, prompts, or conversation history. Never store secrets.
+Context budget principle: start from the bounded current-state projection, not the Issue diary. Expand context only when a specific blocker requires it.

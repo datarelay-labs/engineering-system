@@ -51,6 +51,8 @@ REQUIRED_METHOD_FILES = (
     "tools/upgrade-adoption.py",
     "tools/org-rollout.py",
     "tools/work_packet_authority.py",
+    "tools/context_epoch.py",
+    "tools/test_context_epoch.py",
     "tools/engineering-context.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
@@ -1343,6 +1345,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
