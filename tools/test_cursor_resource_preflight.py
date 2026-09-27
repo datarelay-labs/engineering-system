@@ -500,6 +500,7 @@ def test_known_resume_upgrades_and_custom_resume_fails_closed() -> None:
     priors = [
         (history / "1.6.4.md").read_text(encoding="utf-8"),
         (history / "1.6.5-pre-context-epoch.md").read_text(encoding="utf-8"),
+        (history / "1.6.5-context-epoch-pre-thin-router.md").read_text(encoding="utf-8"),
     ]
     assert all(prior != canonical for prior in priors)
     assert "cursor-resource-preflight.py" in canonical

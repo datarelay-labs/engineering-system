@@ -18,6 +18,8 @@ CHECK = ROOT / "tools" / "check-adoption.py"
 UPGRADE = ROOT / "tools" / "upgrade-adoption.py"
 BASELINE = "a" * 40
 NEW_BASELINE = "b" * 40
+CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
+TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -512,6 +514,198 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
         assert (target / "tools/context_epoch.py").read_bytes() == (
             ROOT / "tools/context_epoch.py"
         ).read_bytes()
+
+
+def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
+    """Recreate the real cdc54b3 managed cohort and upgrade it end to end."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-165-context-resume-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/same-version-context\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            CONTEXT_EPOCH_BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        # Recreate every adoption-managed file tracked by the immutable cdc54b3
+        # manifest from the actual canonical Git object, not from a synthetic
+        # approximation.  This is the cohort that Atlas PR #82 exposed.
+        manifest = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "file_hashes"
+            / "1.6.5-cdc54b3.sha256"
+        )
+        historical_paths: list[str] = []
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            digest, rel = line.split(None, 1)
+            historical = run(
+                "git",
+                "show",
+                f"{CONTEXT_EPOCH_BASELINE}:{rel}",
+                cwd=ROOT,
+            ).stdout
+            assert hashlib.sha256(historical.encode("utf-8")).hexdigest() == digest
+            path = target / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(historical, encoding="utf-8")
+            historical_paths.append(rel)
+
+        prior_resume = run(
+            "git",
+            "show",
+            f"{CONTEXT_EPOCH_BASELINE}:templates/.cursor/commands/resume.md",
+            cwd=ROOT,
+        ).stdout
+        resume_history = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "resume"
+            / "1.6.5-context-epoch-pre-thin-router.md"
+        ).read_text(encoding="utf-8")
+        assert prior_resume == resume_history
+        (target / ".cursor/commands/resume.md").write_text(
+            prior_resume, encoding="utf-8"
+        )
+        (target / ".cursor/commands/work-resume.md").write_text(
+            prior_resume, encoding="utf-8"
+        )
+
+        # work_packet_authority.py became an adoption-managed skills runtime
+        # dependency after cdc54b3.  It must therefore be absent in this exact
+        # historical cohort and installed by the upgrade.
+        authority = target / "tools/work_packet_authority.py"
+        if authority.exists():
+            authority.unlink()
+
+        commit_all(target, "simulate exact canonical cdc54b3 managed cohort")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert (
+            "CURSOR_RESUME_ADAPTERS_SYNCED="
+            ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
+            in upgraded.stdout
+        )
+        assert "tools/context_epoch.py" in upgraded.stdout
+        assert "tools/independent_verifier.py" in upgraded.stdout
+        assert "tools/skills-contract.py" in upgraded.stdout
+        assert "tools/work_packet_authority.py" in upgraded.stdout
+
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["engineering_system"]["version"] == "1.6.5"
+        assert project["engineering_system"]["baseline"] == NEW_BASELINE
+
+        canonical_resume = (
+            ROOT / "templates" / ".cursor" / "commands" / "resume.md"
+        ).read_text(encoding="utf-8")
+        assert (target / ".cursor/commands/resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+        assert (target / ".cursor/commands/work-resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+
+        # Every historical managed file now converges to the current canonical
+        # bytes, and the newly managed runtime dependency is installed too.
+        for rel in historical_paths:
+            assert (target / rel).read_bytes() == (ROOT / rel).read_bytes(), rel
+        assert authority.read_bytes() == (ROOT / "tools/work_packet_authority.py").read_bytes()
+
+
+def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
+    """Historical hash manifests must be derived from the named canonical commits."""
+    cases = (
+        ("1.6.5-cdc54b3.sha256", CONTEXT_EPOCH_BASELINE),
+        ("1.6.5-dfe9b2c.sha256", TRUST_HELPER_BASELINE),
+    )
+    history = ROOT / "tools" / "managed_adapter_history" / "file_hashes"
+    for name, revision in cases:
+        manifest = history / name
+        assert manifest.is_file(), name
+        for raw in manifest.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            digest, rel = line.split(None, 1)
+            historical = run("git", "show", f"{revision}:{rel}", cwd=ROOT).stdout
+            assert hashlib.sha256(historical.encode("utf-8")).hexdigest() == digest, (
+                name,
+                rel,
+            )
+
+
+def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> None:
+    """Historical managed hashes may upgrade; unknown custom bytes remain fail-closed."""
+    upgrade_path = ROOT / "tools" / "upgrade-adoption.py"
+    spec = importlib.util.spec_from_file_location("upgrade_adoption_hash_history", upgrade_path)
+    assert spec and spec.loader
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        canonical = base / "canonical"
+        target = base / "target"
+        rel = "tools/example-managed.py"
+        current = b"current managed bytes\n"
+        prior = b"prior managed bytes\n"
+        custom = b"project custom bytes\n"
+
+        (canonical / rel).parent.mkdir(parents=True, exist_ok=True)
+        (canonical / rel).write_bytes(current)
+        manifest_dir = canonical / "tools/managed_adapter_history/file_hashes"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "fixture.sha256").write_text(
+            f"{hashlib.sha256(prior).hexdigest()}  {rel}\n",
+            encoding="utf-8",
+        )
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+
+        original = upgrade.CANONICAL
+        upgrade.CANONICAL = canonical
+        try:
+            (target / rel).write_bytes(prior)
+            planned = upgrade.plan_managed_file_install(
+                target, (rel,), label="fixture"
+            )
+            assert planned == {rel: current.decode("utf-8")}
+
+            (target / rel).write_bytes(custom)
+            try:
+                upgrade.plan_managed_file_install(target, (rel,), label="fixture")
+            except SystemExit as exc:
+                assert "local/custom changes" in str(exc)
+            else:
+                raise AssertionError("custom managed-file bytes were accepted")
+        finally:
+            upgrade.CANONICAL = original
 
 
 def test_custom_cursorignore_preserved_on_upgrade() -> None:
@@ -1765,6 +1959,9 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_same_version_1_6_5_pre_context_epoch_upgrade()
+    test_same_version_1_6_5_context_epoch_resume_upgrade()
+    test_managed_file_hash_manifests_match_immutable_revisions()
+    test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
     test_custom_cursorignore_preserved_on_upgrade()
     test_supported_managed_cursor_rule_history_is_upgradeable()
     test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
