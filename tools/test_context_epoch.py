@@ -328,6 +328,17 @@ def test_hook_sanitizer_is_content_free() -> None:
         fail(f"documented Cursor model_params shape was not preserved safely: {safe}")
 
 
+def test_adoption_compliance_carries_context_helper_baseline() -> None:
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for token in (
+        ".engineering-system-runtime/tools/context_epoch.py",
+        "tools/context_epoch.py differs from canonical managed helper",
+        "references context-epoch helper but missing tools/context_epoch.py",
+    ):
+        if token not in workflow:
+            fail(f"adoption compliance missing context helper contract: {token}")
+
+
 def test_resume_commands_are_thin_and_in_parity() -> None:
     root = (ROOT / ".cursor/commands/work-resume.md").read_text(encoding="utf-8")
     template = (ROOT / "templates/.cursor/commands/work-resume.md").read_text(encoding="utf-8")
@@ -382,6 +393,7 @@ def main() -> None:
         test_epoch_semantic_boundary,
         test_epoch_native_precompact,
         test_hook_sanitizer_is_content_free,
+        test_adoption_compliance_carries_context_helper_baseline,
         test_resume_commands_are_thin_and_in_parity,
         test_cli_lint_and_identity,
     ]
