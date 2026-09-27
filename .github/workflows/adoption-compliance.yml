@@ -28,7 +28,9 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .engineering-system-runtime
           persist-credentials: false
-          sparse-checkout: tools/ci_policy_audit.py
+          sparse-checkout: |
+            tools/ci_policy_audit.py
+            tools/context_epoch.py
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -99,6 +101,25 @@ jobs:
                   for rel in continuity_required:
                       if not Path(rel).is_file():
                           failures.append(f"Engineering System >=1.3.0 missing session-continuity file: {rel}")
+
+              context_epoch_referenced = any(
+                  path.is_file() and "tools/context_epoch.py" in path.read_text(encoding="utf-8")
+                  for path in (
+                      Path(".cursor/commands/resume.md"),
+                      Path(".cursor/commands/work-resume.md"),
+                  )
+              )
+              if context_epoch_referenced:
+                  target_helper = Path("tools/context_epoch.py")
+                  canonical_helper = Path(".engineering-system-runtime/tools/context_epoch.py")
+                  if not target_helper.is_file():
+                      failures.append(
+                          "Cursor resume adapter references context-epoch helper but missing tools/context_epoch.py"
+                      )
+                  elif not canonical_helper.is_file():
+                      failures.append("canonical compliance runtime missing tools/context_epoch.py")
+                  elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                      failures.append("tools/context_epoch.py differs from canonical managed helper")
 
               if version_tuple >= (1, 4, 0):
                   if mode not in {"canonical", "adopted"}:

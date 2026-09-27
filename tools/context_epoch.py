@@ -1,0 +1,517 @@
+#!/usr/bin/env python3
+"""Bounded Work Packet projection and content-free context-epoch policy."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+META_RE = re.compile(r"^([A-Z][A-Z0-9_]+)=(.*)$")
+HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
+ALLOWED_STATUSES = {"ACTIVE", "PAUSED", "BLOCKED", "COMPLETE"}
+SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SAFE_WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
+SAFE_TASK_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_-]{0,63}$")
+SAFE_HOOK_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
+REQUIRED_META_V2 = (
+    "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
+    "TASK_KIND", "OWNER_INTENT",
+)
+META_ORDER = (
+    "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
+    "TASK_KIND", "OWNER_INTENT", "LAST_VERIFIED_HEAD", "PRIORITY",
+    "INTENT_REVISION", "CHANGE_RISK",
+)
+CANONICAL_SECTIONS = (
+    "Goal",
+    "Current State",
+    "Next Action",
+    "Handoff Sizing",
+    "Completion Contract",
+    "Follow-up Discoveries",
+    "Constraints",
+    "Canonical References",
+    "Latest Evidence",
+    "Blockers",
+)
+REQUIRED_SECTIONS = ("Goal", "Current State", "Next Action", "Blockers")
+PROJECT_SECTIONS = (
+    "Goal", "Current State", "Next Action", "Blockers",
+    "Handoff Sizing", "Completion Contract", "Constraints",
+    "Canonical References", "Latest Evidence",
+)
+IDENTITY_KEYS = (
+    "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
+    "TASK_KIND", "INTENT_REVISION",
+)
+MISSING_IDENTITY_VALUE = "<missing>"
+DEFAULT_META_VALUE_CAP = 512
+DEFAULT_SECTION_CHAR_CAP = 3500
+DEFAULT_PROJECTION_CHAR_CAP = 14000
+PROJECTION_TAIL_RESERVE = 512
+NATIVE_EVENTS = {
+    "sessionStart", "sessionEnd", "beforeSubmitPrompt", "preCompact", "stop",
+    "subagentStart", "subagentStop",
+}
+
+
+class ContextError(ValueError):
+    """Fail-closed input error."""
+
+
+@dataclass(frozen=True)
+class Packet:
+    metadata: dict[str, str]
+    sections: dict[str, str]
+    duplicate_metadata: tuple[str, ...]
+    duplicate_sections: tuple[str, ...]
+    headings: tuple[str, ...]
+    char_count: int
+    line_count: int
+    body_sha256: str
+
+
+def _read_text(path: str) -> str:
+    if path == "-":
+        return sys.stdin.read()
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ContextError("PACKET_UNREADABLE") from exc
+
+
+def parse_packet(text: str) -> Packet:
+    metadata: dict[str, str] = {}
+    sections: dict[str, list[str]] = {}
+    duplicate_metadata: list[str] = []
+    duplicates: list[str] = []
+    headings: list[str] = []
+    current: str | None = None
+    before_heading = True
+    for raw in text.splitlines():
+        heading = HEADING_RE.match(raw)
+        if heading:
+            before_heading = False
+            current = heading.group(1).strip()
+            headings.append(current)
+            if current in sections:
+                duplicates.append(current)
+            sections.setdefault(current, [])
+            continue
+        if before_heading:
+            match = META_RE.match(raw)
+            if match:
+                key = match.group(1)
+                if key in metadata:
+                    duplicate_metadata.append(key)
+                else:
+                    metadata[key] = match.group(2).strip()
+        if current is not None:
+            sections[current].append(raw)
+    rendered = {name: "\n".join(lines).strip() for name, lines in sections.items()}
+    return Packet(
+        metadata,
+        rendered,
+        tuple(duplicate_metadata),
+        tuple(duplicates),
+        tuple(headings),
+        len(text),
+        len(text.splitlines()),
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    )
+
+
+def analyze_packet(
+    packet: Packet,
+    *,
+    warn_chars: int | None = None,
+    warn_lines: int | None = None,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    blocking: list[str] = []
+    if packet.metadata.get("PACKET_VERSION") == "2":
+        missing = [key for key in REQUIRED_META_V2 if not packet.metadata.get(key)]
+        blocking.extend(f"MISSING_META:{key}" for key in missing)
+    for key in packet.duplicate_metadata:
+        blocking.append(f"DUPLICATE_META:{key}")
+    version = packet.metadata.get("PACKET_VERSION")
+    if version and version not in {"1", "2"}:
+        blocking.append("PACKET_VERSION_INVALID")
+    repository = packet.metadata.get("TARGET_REPO")
+    if repository and (
+        len(repository) > 200 or SAFE_REPO_RE.fullmatch(repository) is None
+    ):
+        blocking.append("TARGET_REPO_INVALID")
+    workstream = packet.metadata.get("WORKSTREAM")
+    if workstream and SAFE_WORKSTREAM_RE.fullmatch(workstream) is None:
+        blocking.append("WORKSTREAM_INVALID")
+    branch = packet.metadata.get("BRANCH")
+    if branch and (
+        SAFE_BRANCH_RE.fullmatch(branch) is None
+        or ".." in branch
+        or branch.endswith("/")
+    ):
+        blocking.append("BRANCH_INVALID")
+    task_kind = packet.metadata.get("TASK_KIND")
+    if task_kind and SAFE_TASK_KIND_RE.fullmatch(task_kind) is None:
+        blocking.append("TASK_KIND_INVALID")
+    revision = packet.metadata.get("INTENT_REVISION")
+    if revision and (not revision.isdigit() or int(revision) < 1):
+        blocking.append("INTENT_REVISION_INVALID")
+    status = packet.metadata.get("STATUS")
+    if status and status not in ALLOWED_STATUSES:
+        blocking.append("STATUS_INVALID")
+    for section in REQUIRED_SECTIONS:
+        if section not in packet.sections:
+            blocking.append(f"MISSING_SECTION:{section}")
+    for section in packet.duplicate_sections:
+        if section in CANONICAL_SECTIONS:
+            blocking.append(f"DUPLICATE_SECTION:{section}")
+    noncanonical = sorted(set(packet.headings).difference(CANONICAL_SECTIONS))
+    if noncanonical:
+        reasons.append("NONCANONICAL_HISTORY_SECTIONS")
+    if warn_chars is not None and packet.char_count > warn_chars:
+        reasons.append("CHAR_CANARY_EXCEEDED")
+    if warn_lines is not None and packet.line_count > warn_lines:
+        reasons.append("LINE_CANARY_EXCEEDED")
+    state = "BLOCK" if blocking else ("WARN" if reasons else "PASS")
+    return {
+        "status": state,
+        "blocking": sorted(set(blocking)),
+        "warnings": sorted(set(reasons)),
+        "metrics": {
+            "chars": packet.char_count,
+            "lines": packet.line_count,
+            "sections": len(packet.headings),
+            "noncanonical_sections": len(noncanonical),
+        },
+        "noncanonical_sections": noncanonical,
+    }
+
+
+def _bounded_section(text: str, cap: int) -> tuple[str, bool]:
+    if len(text) <= cap:
+        return text, False
+    suffix = "\n...[SECTION_TRUNCATED: inspect authoritative Issue only if required]"
+    keep = max(0, cap - len(suffix))
+    return text[:keep].rstrip() + suffix, True
+
+
+def project_packet(
+    packet: Packet,
+    *,
+    section_char_cap: int = DEFAULT_SECTION_CHAR_CAP,
+    projection_char_cap: int = DEFAULT_PROJECTION_CHAR_CAP,
+) -> str:
+    if section_char_cap < 256 or projection_char_cap < 1024:
+        raise ContextError("PROJECTION_BOUND_INVALID")
+    audit = analyze_packet(packet)
+    if audit["status"] == "BLOCK":
+        raise ContextError("PACKET_STRUCTURE_INVALID:" + ",".join(audit["blocking"]))
+    content_cap = projection_char_cap - PROJECTION_TAIL_RESERVE
+    if content_cap < 512:
+        raise ContextError("PROJECTION_BOUND_INVALID")
+    required_cap = max(256, (content_cap - 2048) // len(REQUIRED_SECTIONS))
+    effective_section_cap = min(section_char_cap, required_cap)
+    chunks: list[str] = []
+    truncated_metadata: list[str] = []
+    for key in META_ORDER:
+        value = packet.metadata.get(key)
+        if not value:
+            continue
+        bounded, clipped = _bounded_section(value, DEFAULT_META_VALUE_CAP)
+        bounded = bounded.replace("\n", " ")
+        if clipped:
+            truncated_metadata.append(key)
+        chunks.append(f"{key}={bounded}")
+    chunks.append(
+        "PACKET_CONTEXT_AUDIT="
+        + audit["status"]
+        + ";warnings="
+        + (",".join(audit["warnings"]) or "NONE")
+    )
+    chunks.append(
+        "PACKET_CONTEXT_METRICS="
+        + json.dumps(audit["metrics"], sort_keys=True, separators=(",", ":"))
+    )
+    truncated: list[str] = []
+    optional_omitted = False
+    for name in PROJECT_SECTIONS:
+        if name not in packet.sections:
+            continue
+        body, clipped = _bounded_section(packet.sections[name], effective_section_cap)
+        if clipped:
+            truncated.append(name)
+        candidate = "\n\n".join(chunks + [f"## {name}\n\n{body}".rstrip()])
+        if len(candidate) > content_cap:
+            if name in REQUIRED_SECTIONS:
+                raise ContextError(f"PROJECTION_REQUIRED_SECTION_UNFIT:{name}")
+            optional_omitted = True
+            break
+        chunks.append(f"## {name}\n\n{body}".rstrip())
+    if truncated_metadata:
+        chunks.append("TRUNCATED_METADATA=" + ",".join(truncated_metadata))
+    if truncated:
+        chunks.append("TRUNCATED_SECTIONS=" + ",".join(truncated))
+    if optional_omitted:
+        chunks.append("PROJECTION_TRUNCATED=YES")
+    chunks.append("PACKET_PROJECTION=PASS")
+    rendered = "\n\n".join(chunks) + "\n"
+    if len(rendered) > projection_char_cap:
+        raise ContextError("PROJECTION_BOUND_EXCEEDED")
+    return rendered
+
+
+def packet_identity(packet: Packet) -> str:
+    """Emit only bounded structural identity safe for pre-authority selection."""
+    audit = analyze_packet(packet)
+    if audit["status"] == "BLOCK":
+        raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
+    lines = [
+        f"{key}={packet.metadata.get(key, MISSING_IDENTITY_VALUE)}"
+        for key in IDENTITY_KEYS
+    ]
+    lines.append(f"PACKET_BODY_SHA256={packet.body_sha256}")
+    lines.append(f"PACKET_CONTEXT_AUDIT={audit['status']}")
+    lines.append("PACKET_IDENTITY=PASS")
+    return "\n".join(lines) + "\n"
+
+
+def require_identity(
+    packet: Packet,
+    expected: dict[str, str | None],
+    *,
+    expected_body_sha256: str | None = None,
+) -> None:
+    """Fail closed when a refetched packet no longer matches selected bytes."""
+    audit = analyze_packet(packet)
+    if audit["status"] == "BLOCK":
+        raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
+    mismatches: list[str] = []
+    for key in IDENTITY_KEYS:
+        value = expected.get(key)
+        if value is None:
+            continue
+        actual = packet.metadata.get(key)
+        if value == MISSING_IDENTITY_VALUE:
+            if actual is not None:
+                mismatches.append(key)
+        elif actual != value:
+            mismatches.append(key)
+    if expected_body_sha256 is not None:
+        if re.fullmatch(r"[0-9a-f]{64}", expected_body_sha256) is None:
+            raise ContextError("PACKET_BODY_SHA256_INVALID")
+        if packet.body_sha256 != expected_body_sha256:
+            mismatches.append("PACKET_BODY_SHA256")
+    if mismatches:
+        raise ContextError("PACKET_IDENTITY_MISMATCH:" + ",".join(mismatches))
+
+
+def _bool(facts: dict[str, Any], key: str, default: bool = False) -> bool:
+    value = facts.get(key, default)
+    if not isinstance(value, bool):
+        raise ContextError(f"FACT_INVALID:{key}")
+    return value
+
+
+def _validate_precompact(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ContextError("PRECOMPACT_INVALID")
+    result: dict[str, Any] = {}
+    for key in ("context_tokens", "context_window_size", "message_count", "messages_to_compact"):
+        item = value.get(key)
+        if item is not None:
+            if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+                raise ContextError(f"PRECOMPACT_INVALID:{key}")
+            result[key] = item
+    percent = value.get("context_usage_percent")
+    if percent is not None:
+        if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not 0 <= percent <= 100:
+            raise ContextError("PRECOMPACT_INVALID:context_usage_percent")
+        result["context_usage_percent"] = percent
+    for key in ("trigger", "is_first_compaction"):
+        if key in value:
+            item = value[key]
+            if key == "is_first_compaction" and not isinstance(item, bool):
+                raise ContextError("PRECOMPACT_INVALID:is_first_compaction")
+            if key == "trigger" and item not in {"auto", "manual"}:
+                raise ContextError("PRECOMPACT_INVALID:trigger")
+            result[key] = item
+    return result
+
+
+def decide_epoch(facts: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(facts, dict):
+        raise ContextError("FACTS_INVALID")
+    in_flight = _bool(facts, "in_flight")
+    unreconciled = _bool(facts, "unreconciled_mutation")
+    checkpoint = _bool(facts, "durable_checkpoint")
+    same_atomic = _bool(facts, "same_atomic_task", True)
+    boundary = any(
+        _bool(facts, key)
+        for key in (
+            "logical_boundary", "workstream_changed", "next_action_changed",
+            "profile_change_pending", "repeated_failure",
+        )
+    )
+    precompact = _validate_precompact(facts.get("precompact"))
+    if in_flight or unreconciled:
+        return {"action": "CONTINUE", "reason": "MUTATION_IN_FLIGHT"}
+    if boundary and not checkpoint:
+        return {"action": "CHECKPOINT_REQUIRED", "reason": "DURABLE_STATE_REQUIRED"}
+    if boundary and checkpoint:
+        return {"action": "CLEAR", "reason": "SEMANTIC_BOUNDARY"}
+    if precompact is not None:
+        if same_atomic:
+            return {
+                "action": "SUMMARIZE",
+                "reason": "NATIVE_PRECOMPACT_SAME_ATOMIC_TASK",
+                "precompact": precompact,
+            }
+        if checkpoint:
+            return {
+                "action": "CLEAR",
+                "reason": "NATIVE_PRECOMPACT_NEW_CONTEXT",
+                "precompact": precompact,
+            }
+        return {
+            "action": "CHECKPOINT_REQUIRED",
+            "reason": "NATIVE_PRECOMPACT_NEEDS_CHECKPOINT",
+            "precompact": precompact,
+        }
+    return {"action": "CONTINUE", "reason": "NO_BOUNDARY"}
+
+
+def _hash_id(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def sanitize_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ContextError("HOOK_INVALID")
+    event = payload.get("hook_event_name")
+    if not isinstance(event, str) or event not in NATIVE_EVENTS:
+        raise ContextError("HOOK_EVENT_UNSUPPORTED")
+    result: dict[str, Any] = {"hook_event_name": event}
+    for key in ("conversation_id", "generation_id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            result[key + "_hash"] = _hash_id(value)
+    for key in ("cursor_version", "model", "model_id", "trigger", "status"):
+        value = payload.get(key)
+        if isinstance(value, str) and SAFE_HOOK_LABEL_RE.fullmatch(value):
+            result[key] = value
+    params = payload.get("model_params")
+    if isinstance(params, list):
+        safe_params: list[dict[str, str]] = []
+        for item in params:
+            if not isinstance(item, dict):
+                continue
+            param_id = item.get("id")
+            param_value = item.get("value")
+            if (
+                param_id in {"effort", "reasoning", "thinking", "context"}
+                and isinstance(param_value, str)
+                and SAFE_HOOK_LABEL_RE.fullmatch(param_value)
+            ):
+                safe_params.append({"id": param_id, "value": param_value})
+        if safe_params:
+            result["model_params"] = safe_params
+    for key in (
+        "context_tokens", "context_window_size", "message_count",
+        "messages_to_compact", "loop_count", "duration_ms",
+    ):
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            result[key] = value
+    percent = payload.get("context_usage_percent")
+    if isinstance(percent, (int, float)) and not isinstance(percent, bool) and 0 <= percent <= 100:
+        result["context_usage_percent"] = percent
+    first = payload.get("is_first_compaction")
+    if isinstance(first, bool):
+        result["is_first_compaction"] = first
+    return result
+
+
+def _load_json(path: str) -> Any:
+    text = _read_text(path)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ContextError("JSON_INVALID") from exc
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    identity = sub.add_parser("packet-identity")
+    identity.add_argument("--body-file", required=True)
+
+    project = sub.add_parser("packet-project")
+    project.add_argument("--body-file", required=True)
+    project.add_argument("--section-char-cap", type=int, default=DEFAULT_SECTION_CHAR_CAP)
+    project.add_argument("--projection-char-cap", type=int, default=DEFAULT_PROJECTION_CHAR_CAP)
+    for key in IDENTITY_KEYS:
+        project.add_argument("--expect-" + key.lower().replace("_", "-"))
+    project.add_argument("--expect-body-sha256")
+
+    lint = sub.add_parser("packet-lint")
+    lint.add_argument("--body-file", required=True)
+    lint.add_argument("--warn-chars", type=int)
+    lint.add_argument("--warn-lines", type=int)
+
+    decide = sub.add_parser("epoch-decide")
+    decide.add_argument("--facts", required=True)
+
+    hook = sub.add_parser("sanitize-hook")
+    hook.add_argument("--event", required=True)
+
+    args = parser.parse_args()
+    try:
+        if args.command == "packet-identity":
+            sys.stdout.write(packet_identity(parse_packet(_read_text(args.body_file))))
+        elif args.command == "packet-project":
+            packet = parse_packet(_read_text(args.body_file))
+            expected = {
+                key: getattr(args, "expect_" + key.lower())
+                for key in IDENTITY_KEYS
+            }
+            require_identity(
+                packet,
+                expected,
+                expected_body_sha256=args.expect_body_sha256,
+            )
+            sys.stdout.write(project_packet(
+                packet,
+                section_char_cap=args.section_char_cap,
+                projection_char_cap=args.projection_char_cap,
+            ))
+        elif args.command == "packet-lint":
+            result = analyze_packet(
+                parse_packet(_read_text(args.body_file)),
+                warn_chars=args.warn_chars,
+                warn_lines=args.warn_lines,
+            )
+            print(json.dumps(result, sort_keys=True))
+            return 2 if result["status"] == "BLOCK" else 0
+        elif args.command == "epoch-decide":
+            print(json.dumps(decide_epoch(_load_json(args.facts)), sort_keys=True))
+        else:
+            print(json.dumps(sanitize_hook(_load_json(args.event)), sort_keys=True))
+    except ContextError as exc:
+        print(f"CONTEXT_EPOCH=BLOCK reason={exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

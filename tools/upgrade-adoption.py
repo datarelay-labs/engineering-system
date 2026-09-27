@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from adopt import (
+    CONTEXT_EPOCH_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
@@ -402,6 +403,40 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
     return installed
 
 
+def plan_context_epoch_install(root: Path) -> dict[str, str]:
+    """Install the managed context-epoch helper only when the path is missing.
+
+    A different existing file fails closed before any upgrade mutation because
+    the managed resume adapter executes this helper as an authority boundary.
+    """
+    planned: dict[str, str] = {}
+    for rel in CONTEXT_EPOCH_MANAGED:
+        source = CANONICAL / rel
+        if not source.is_file():
+            raise SystemExit(f"FAIL canonical {rel} missing")
+        text = source.read_text(encoding="utf-8")
+        path = root / rel
+        if not path.exists():
+            planned[rel] = text
+            continue
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
+        )
+    return planned
+
+
+def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_verification_contract_install(root: Path) -> dict[str, str]:
     """Install the optional verification-contract helper only when the path is missing.
 
@@ -767,6 +802,7 @@ def main() -> int:
     planned_runtime_contract = plan_runtime_contract_install(root)
     planned_skills_contract = plan_skills_contract_install(root)
     planned_verification_contract = plan_verification_contract_install(root)
+    planned_context_epoch = plan_context_epoch_install(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -810,6 +846,12 @@ def main() -> int:
         print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
     else:
         print("VERIFICATION_CONTRACT_INSTALLED=<none>")
+
+    installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
+    if installed_context_epoch:
+        print("CONTEXT_EPOCH_INSTALLED=" + ",".join(installed_context_epoch))
+    else:
+        print("CONTEXT_EPOCH_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:

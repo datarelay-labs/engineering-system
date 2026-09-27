@@ -147,6 +147,30 @@ def main() -> int:
             if not (root / rel).is_file():
                 failures.append(f"Engineering System >=1.3.0 missing session-continuity file: {rel}")
 
+    context_epoch_referenced = any(
+        path.is_file()
+        and "tools/context_epoch.py" in path.read_text(encoding="utf-8", errors="replace")
+        for path in (
+            root / ".cursor/commands/resume.md",
+            root / ".cursor/commands/work-resume.md",
+        )
+    )
+    if context_epoch_referenced:
+        target_context_epoch = root / "tools/context_epoch.py"
+        canonical_context_epoch = Path(__file__).resolve().parent / "context_epoch.py"
+        if not target_context_epoch.is_file():
+            failures.append(
+                "Cursor resume adapter references context-epoch helper but missing tools/context_epoch.py"
+            )
+        elif not canonical_context_epoch.is_file():
+            failures.append(
+                "canonical adoption checker is missing tools/context_epoch.py"
+            )
+        elif target_context_epoch.read_bytes() != canonical_context_epoch.read_bytes():
+            failures.append(
+                "tools/context_epoch.py differs from canonical managed helper"
+            )
+
     agents_path = root / "AGENTS.md"
     if agents_path.is_file():
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")

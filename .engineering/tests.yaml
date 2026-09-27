@@ -43,6 +43,10 @@ paths:
     domains: [session-continuity]
   "tools/test_work_packet_authority.py":
     domains: [session-continuity]
+  "tools/context_epoch.py":
+    domains: [session-continuity, workflows]
+  "tools/test_context_epoch.py":
+    domains: [session-continuity]
   "tools/cursor-resource-preflight.py":
     domains: [session-continuity, workflows]
   "tools/test_cursor_resource_preflight.py":
@@ -219,6 +223,24 @@ scenarios:
     command: "python3 tools/test_work_packet_authority.py"
     invariants:
       - "executable Work Packet authors require write/maintain/admin effective permission"
+    release_gate: true
+
+  - id: ENG-CONTEXT-EPOCH-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Context epoch and bounded Work Packet projection
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_epoch.py"
+    invariants:
+      - "routine resume excludes append-only Work Packet history from model context"
+      - "context reset is coordinator-owned and never derived from cache-read ratio or resident session count"
+      - "native hook reduction retains no raw prompt transcript tool payload or workspace path"
     release_gate: true
 
   - id: ENG-RESOURCE-001

@@ -269,6 +269,23 @@ Do not keep accumulating old phase text in the Issue body.
 
 History already exists in Git commits, PRs, CI, Issue edits/comments, and closed Issues.
 
+### Bounded Work Packet projection
+
+Routine resume must not copy an append-only Issue body into model context. After authenticated GitHub retrieval and author-permission verification, pipe the selected body through `tools/context_epoch.py packet-project` and use that bounded current-state projection for ordinary execution.
+
+`tools/context_epoch.py` is a managed adoption helper because the Cursor resume adapter invokes it in adopted repositories. Bootstrap and managed upgrade install the byte-identical canonical helper; a missing copy makes the adopted execution surface incomplete and must fail closed rather than falling back to the raw Issue body. Bootstrap and managed upgrade also reject an incompatible pre-existing helper before mutation.
+
+Candidate selection and routine projection are two separate authenticated reads, so the second read must be bound to both the structural values and the content digest emitted by `packet-identity`. `packet-project` validates `PACKET_VERSION`, `TARGET_REPO`, `WORKSTREAM`, `STATUS`, `BRANCH`, `TASK_KIND`, `INTENT_REVISION`, and `PACKET_BODY_SHA256` against the exact same bytes it projects. This catches body-only changes such as a modified Goal, OWNER_INTENT, Current State, or Next Action even when structural metadata is unchanged. Any mismatch fails closed and restarts candidate resolution; never project a refetched body first and validate its identity afterward.
+
+The projector:
+- emits only canonical current-state metadata and sections;
+- excludes noncanonical/history sections from routine context while reporting their presence as drift;
+- fails closed on duplicate canonical sections or missing required packet structure;
+- reports byte/line/section metrics;
+- uses output safety caps only to bound model context. Those caps are not provider billing thresholds or reset policy.
+
+Packet-size warning thresholds, when used for canaries, are explicit inputs to `packet-lint`; they are not universal constants. Structural duplication/history drift is the primary defect.
+
 ## Deterministic packet resolution
 
 When resuming work:

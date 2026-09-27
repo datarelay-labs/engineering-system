@@ -57,6 +57,12 @@ VERIFICATION_CONTRACT_MANAGED = (
     "schemas/trust-evidence-boundary.schema.json",
 )
 
+# Context-epoch projection is invoked by the managed Cursor resume adapter, so
+# adopted repositories must carry the exact canonical helper beside that adapter.
+CONTEXT_EPOCH_MANAGED = (
+    "tools/context_epoch.py",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -71,6 +77,7 @@ REQUIRED_MANAGED = (
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
+    *CONTEXT_EPOCH_MANAGED,
 )
 
 # Known Cursor resume aliases kept in sync when present or installed as managed adapters.
@@ -879,6 +886,20 @@ def ensure_knowledge_contract_compatible(root: Path) -> None:
         )
 
 
+def ensure_context_epoch_compatible(root: Path) -> None:
+    """Reject a custom context-epoch helper before adoption writes any files."""
+    for rel in CONTEXT_EPOCH_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_verification_contract_compatible(root: Path) -> None:
     """Reject an incompatible helper or schema before adoption writes any files.
 
@@ -1129,6 +1150,7 @@ def main() -> int:
     ensure_runtime_contract_compatible(root)
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
+    ensure_context_epoch_compatible(root)
 
     written: list[str] = []
     skipped: list[str] = []
@@ -1163,6 +1185,7 @@ def main() -> int:
         *RUNTIME_CONTRACT_MANAGED,
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
+        *CONTEXT_EPOCH_MANAGED,
     ):
         write_missing(
             root,
