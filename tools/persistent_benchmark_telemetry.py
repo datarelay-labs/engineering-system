@@ -29,7 +29,6 @@ if str(TOOLS) not in sys.path:
 import benchmark_execution
 import benchmark_fixture
 import efficiency_telemetry
-import terminal_code_identity
 
 ROOT = TOOLS.parent
 PLUGIN_ROOT = ROOT / "benchmarks" / "persistent-instrumentation"
@@ -1415,13 +1414,6 @@ def _qualified_record(
     )
 
 
-def _terminal_code_id() -> str:
-    try:
-        return terminal_code_identity.require_terminal_code_id()
-    except terminal_code_identity.TerminalCodeError as exc:
-        raise CaptureError(exc.code) from exc
-
-
 def _host_assertion_body(
     descriptor: dict[str, Any],
     bounded: dict[str, Any],
@@ -1441,7 +1433,6 @@ def _host_assertion_body(
         "telemetry_digest": benchmark_execution.canonical_telemetry_digest(record),
         "lifecycle": "COMPLETE",
         "effective_toolset": REQUIRED_TOOLSET,
-        "terminal_code_id": _terminal_code_id(),
     }
 
 
@@ -1471,13 +1462,14 @@ def _receipt_verifier_accepts(
     verifier: Path,
     assertion: Path,
     anchor: Path,
+    repository: Path,
     *,
     posix_spawn: Any = os.posix_spawn,
     waitpid: Any = os.waitpid,
     exitcode: Any = os.waitstatus_to_exitcode,
     access: Any = os.access,
 ) -> bool:
-    """Accept only a provenance-checked root helper. This function does not verify Ed25519."""
+    """Run the fixed root helper. This function does not verify Ed25519 or code identity."""
     try:
         if verifier.is_symlink() or not verifier.is_file():
             return False
@@ -1500,7 +1492,7 @@ def _receipt_verifier_accepts(
         )
         pid = posix_spawn(
             str(verifier),
-            [str(verifier), str(assertion), str(anchor)],
+            [str(verifier), "decide", str(repository), str(assertion), str(anchor)],
             {"PATH": "/usr/bin", "LC_ALL": "C"},
             file_actions=file_actions,
         )
@@ -1515,6 +1507,7 @@ def _bind_host_finalizer():
     anchor = HOST_RECEIPT_ANCHOR
     directory = HOST_RECEIPT_DIR
     verifier = Path("/usr/lib/engineering-system/benchmark-receipt-verify")
+    repository = TOOLS.parent
     accepts = _receipt_verifier_accepts
     anchor_ok = _host_anchor_ok
     directory_ok = _host_dir_ok
@@ -1529,7 +1522,7 @@ def _bind_host_finalizer():
     def verify_signed_assertion(assertion: Path, expected: dict[str, Any]) -> bool:
         if not anchor_ok(anchor) or not directory_ok(directory) or not anchor_ok(assertion):
             return False
-        if not accepts(verifier, assertion, anchor):
+        if not accepts(verifier, assertion, anchor, repository):
             return False
         try:
             payload = json.loads(assertion.read_text(encoding="utf-8"))

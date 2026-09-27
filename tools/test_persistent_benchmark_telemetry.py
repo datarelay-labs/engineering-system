@@ -2053,13 +2053,31 @@ def test_replaced_skills_contract_cannot_record_telemetry() -> None:
             execution.write_bytes(execution_original)
             if hasattr(capture.benchmark_execution, "host_signed_payload"):
                 delattr(capture.benchmark_execution, "host_signed_payload")
-        if finalized["reason"] != "TERMINAL_CODE_DIRTY" or "record" in finalized or finalized["execute_worker"] is not False:
+        if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized or finalized["execute_worker"] is not False:
             _fail(f"replaced same-UID verifier recorded telemetry as {finalized}")
         if sentinel.exists():
             _fail("replaced same-UID verifier was executed during finalization")
         recorded = checkout / ".git" / "engineering-system" / "telemetry" / f"{run_id}.json"
         if recorded.exists():
             _fail("replaced same-UID verifier wrote a telemetry record")
+
+
+def _root_helper_probe() -> str:
+    return (
+        "import json, os, sys\n"
+        "helper = '/usr/lib/engineering-system/benchmark-receipt-verify'\n"
+        "def blocked(reason):\n"
+        "    sys.stdout.write(json.dumps({'status': 'BLOCK', 'reason': reason, 'execute_worker': False}))\n"
+        "try:\n"
+        "    st = os.lstat(helper)\n"
+        "except OSError:\n"
+        "    blocked('TRUST_BOUNDARY_UNAVAILABLE')\n"
+        "    raise SystemExit(0)\n"
+        "if stat_link(st) or st.st_uid != 0 or (st.st_mode & 0o022):\n"
+        "    blocked('TRUST_BOUNDARY_UNAVAILABLE')\n"
+        "    raise SystemExit(0)\n"
+        "os.execv(helper, [helper, 'finalize'])\n"
+    ).replace("stat_link(st)", "os.path.islink(helper)")
 
 
 def test_preimport_finalizer_replacement_blocks_terminal_telemetry() -> None:
@@ -2076,16 +2094,9 @@ def test_preimport_finalizer_replacement_blocks_terminal_telemetry() -> None:
             "    return {'status': 'READY', 'reason': 'TELEMETRY_RECORDED', 'execute_worker': False, 'record': {'forged': True}}\n",
             encoding="utf-8",
         )
-        script = (
-            "import json\n"
-            "from pathlib import Path\n"
-            "import terminal_code_identity as gate\n"
-            "result = gate.finalize_lane(Path('missing.json'), root=Path('missing-root'))\n"
-            "print(json.dumps(result))\n"
-        )
         try:
             completed = subprocess.run(
-                [sys.executable, "-c", script],
+                [sys.executable, "-c", _root_helper_probe()],
                 cwd=ROOT,
                 env={**os.environ, "PYTHONPATH": str(ROOT / "tools")},
                 text=True,
@@ -2103,10 +2114,94 @@ def test_preimport_finalizer_replacement_blocks_terminal_telemetry() -> None:
             result = json.loads(completed.stdout)
         except json.JSONDecodeError:
             _fail(f"pre-import finalizer probe returned {completed.stdout!r} {completed.stderr!r}")
-        if result.get("status") != "BLOCK" or result.get("reason") != "TERMINAL_CODE_DIRTY" or result.get("execute_worker") is not False or "record" in result:
+        if result.get("status") != "BLOCK" or result.get("reason") != "TRUST_BOUNDARY_UNAVAILABLE" or result.get("execute_worker") is not False or "record" in result:
             _fail(f"pre-import finalizer replacement returned {result}")
         if sentinel.exists():
             _fail("pre-import finalizer replacement was executed")
+
+
+def test_preimport_bootstrap_replacement_blocks_terminal_decision() -> None:
+    bootstrap = ROOT / "tools" / "terminal_code_identity.py"
+    original = bootstrap.read_bytes()
+    head = _git(ROOT, "rev-parse", "HEAD")
+    finalizer_source = (ROOT / "tools" / "persistent_benchmark_telemetry.py").read_text(encoding="utf-8")
+    consumer_source = (ROOT / "tools" / "benchmark_execution.py").read_text(encoding="utf-8")
+    if "terminal_code_identity" in finalizer_source or "terminal_code_identity" in consumer_source:
+        _fail("terminal modules still import the same-UID bootstrap")
+    with tempfile.TemporaryDirectory() as temporary:
+        sentinel = Path(temporary) / "bootstrap-executed"
+        bootstrap.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(sentinel)!r}).write_text('executed', encoding='utf-8')\n"
+            "def finalize_lane(*_args, **_kwargs):\n"
+            f"    Path({str(sentinel)!r}).write_text('finalized', encoding='utf-8')\n"
+            "    return {'status': 'READY', 'reason': 'TELEMETRY_RECORDED', 'execute_worker': False, 'record': {'forged': True}}\n"
+            "def derive_observed_fields(*_args, **_kwargs):\n"
+            f"    Path({str(sentinel)!r}).write_text('consumed', encoding='utf-8')\n"
+            "    return {'forged': True}\n"
+            "def require_terminal_code_id(*_args, **_kwargs):\n"
+            f"    Path({str(sentinel)!r}).write_text('identity', encoding='utf-8')\n"
+            "    return 'forged'\n",
+            encoding="utf-8",
+        )
+        script = (
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, 'tools')\n"
+            "import persistent_benchmark_telemetry as finalizer\n"
+            "import benchmark_execution as consumer\n"
+            "decision = finalizer.finalize_lane(Path('missing.json'), root=Path('missing-root'))\n"
+            "consumed = None\n"
+            "try:\n"
+            "    consumer.derive_observed_fields({'forged': True}, lane='CONTROL', system_head='a'*40, profile={}, run_id='a'*32)\n"
+            "except consumer.ExecutionError as exc:\n"
+            "    consumed = exc.code\n"
+            "print(json.dumps({'finalize': decision, 'consume': consumed}))\n"
+        )
+        try:
+            helper = subprocess.run(
+                [sys.executable, "-c", _root_helper_probe()],
+                cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "tools")},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "tools")},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        finally:
+            bootstrap.write_bytes(original)
+        if _git(ROOT, "rev-parse", "HEAD") != head:
+            _fail("bootstrap replacement changed HEAD")
+        if helper.returncode != 0:
+            _fail(f"root helper probe exited {helper.returncode}: {helper.stderr}")
+        try:
+            helper_result = json.loads(helper.stdout)
+        except json.JSONDecodeError:
+            _fail(f"root helper probe returned {helper.stdout!r} {helper.stderr!r}")
+        if helper_result.get("status") != "BLOCK" or helper_result.get("reason") != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in helper_result:
+            _fail(f"root helper accepted a terminal result as {helper_result}")
+        if completed.returncode != 0:
+            _fail(f"bootstrap production import exited {completed.returncode}: {completed.stderr}")
+        try:
+            result = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            _fail(f"bootstrap production import returned {completed.stdout!r} {completed.stderr!r}")
+        finalize = result.get("finalize")
+        if not isinstance(finalize, dict) or finalize.get("reason") == "TELEMETRY_RECORDED" or "record" in finalize or finalize.get("execute_worker") is not False:
+            _fail(f"bootstrap replacement finalized as {result}")
+        if result.get("consume") in (None, "PASS") or result.get("consume") == "TELEMETRY_RECORDED":
+            _fail(f"bootstrap replacement consumed forged telemetry as {result}")
+        if sentinel.exists():
+            _fail("replaced terminal_code_identity.py executed during a fresh terminal process")
 
 
 def test_optional_empty_generation_is_not_a_prompt_id() -> None:
@@ -2170,6 +2265,7 @@ def main() -> None:
         test_signed_subset_records_allowlist,
         test_replaced_skills_contract_cannot_record_telemetry,
         test_preimport_finalizer_replacement_blocks_terminal_telemetry,
+        test_preimport_bootstrap_replacement_blocks_terminal_decision,
     )
     for test in tests:
         print(f"RUN {test.__name__}", flush=True)

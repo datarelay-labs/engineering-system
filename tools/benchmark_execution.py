@@ -30,7 +30,6 @@ if str(TOOLS) not in sys.path:
 
 import benchmark_fixture
 import efficiency_telemetry
-import terminal_code_identity
 
 ROOT = TOOLS.parent
 SCHEMA_PATH = ROOT / "schemas" / "benchmark-execution.schema.json"
@@ -277,13 +276,14 @@ def _receipt_verifier_accepts(
     verifier: Path,
     assertion: Path,
     anchor: Path,
+    repository: Path,
     *,
     posix_spawn: Any = os.posix_spawn,
     waitpid: Any = os.waitpid,
     exitcode: Any = os.waitstatus_to_exitcode,
     access: Any = os.access,
 ) -> bool:
-    """Accept only a provenance-checked root helper. This function does not verify Ed25519."""
+    """Run the fixed root helper. This function does not verify Ed25519 or code identity."""
     try:
         if verifier.is_symlink() or not verifier.is_file():
             return False
@@ -306,7 +306,7 @@ def _receipt_verifier_accepts(
         )
         pid = posix_spawn(
             str(verifier),
-            [str(verifier), str(assertion), str(anchor)],
+            [str(verifier), "decide", str(repository), str(assertion), str(anchor)],
             {"PATH": "/usr/bin", "LC_ALL": "C"},
             file_actions=file_actions,
         )
@@ -327,6 +327,7 @@ def _bind_observed_fields():
     anchor = Path("/etc/engineering-system/skills-trust-anchor.pub")
     directory = Path("/var/lib/engineering-system/benchmark-receipts")
     verifier = Path("/usr/lib/engineering-system/benchmark-receipt-verify")
+    repository = TOOLS.parent
     accepts = _receipt_verifier_accepts
 
     def path_ok(path: Path, *, expect_file: bool) -> bool:
@@ -352,16 +353,12 @@ def _bind_observed_fields():
         return True
 
     def assertion_binds(parsed: dict[str, Any], lane: str) -> bool:
-        try:
-            code_id = terminal_code_identity.require_terminal_code_id()
-        except terminal_code_identity.TerminalCodeError:
-            return False
         if not path_ok(anchor, expect_file=True) or not path_ok(directory, expect_file=False):
             return False
         assertion = directory / f"{parsed['run_id']}-{lane}.host-receipt.json"
         if not path_ok(assertion, expect_file=True):
             return False
-        if not accepts(verifier, assertion, anchor):
+        if not accepts(verifier, assertion, anchor, repository):
             return False
         try:
             payload = json.loads(assertion.read_text(encoding="utf-8"))
@@ -380,7 +377,6 @@ def _bind_observed_fields():
             and payload.get("repository") == parsed.get("repo")
             and payload.get("system_head") == validation.get("exact_head")
             and payload.get("telemetry_digest") == canonical_telemetry_digest(parsed)
-            and payload.get("terminal_code_id") == code_id
         )
 
     def derive_observed_fields(
