@@ -44,6 +44,7 @@ RUNTIME_CONTRACT_MANAGED = (
 # adopted AGENTS.md instructions resolve. The skills profile itself is never created.
 SKILLS_CONTRACT_MANAGED = (
     "tools/skills-contract.py",
+    "tools/work_packet_authority.py",
     "schemas/skills-contract.schema.json",
 )
 

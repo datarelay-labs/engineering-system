@@ -1191,7 +1191,11 @@ def test_runtime_contract_preserves_existing_authority_commands() -> None:
 
 
 def assert_installed_skills_contract(root: Path) -> None:
-    for rel in ("tools/skills-contract.py", "schemas/skills-contract.schema.json"):
+    for rel in (
+        "tools/skills-contract.py",
+        "tools/work_packet_authority.py",
+        "schemas/skills-contract.schema.json",
+    ):
         assert (root / rel).read_text(encoding="utf-8") == (ROOT / rel).read_text(encoding="utf-8"), rel
     assert not (root / ".engineering" / "skills.yaml").exists()
     # Test-only fixture minting helper must not be adoption-managed.
@@ -1223,7 +1227,7 @@ def test_optional_skills_contract_adoption_and_upgrade() -> None:
         assert "tools/skills-contract.py" in agents
         checked = run(
             sys.executable,
-            str(ROOT / "tools" / "skills-contract.py"),
+            str(target / "tools" / "skills-contract.py"),
             "check",
             "--root",
             str(target),
@@ -1232,7 +1236,11 @@ def test_optional_skills_contract_adoption_and_upgrade() -> None:
         assert "SKILLS_CONTRACT=ABSENT" in checked.stdout
         assert "RESULT=PASS" in checked.stdout
 
-        for rel in ("tools/skills-contract.py", "schemas/skills-contract.schema.json"):
+        for rel in (
+            "tools/skills-contract.py",
+            "tools/work_packet_authority.py",
+            "schemas/skills-contract.schema.json",
+        ):
             (target / rel).unlink()
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)
@@ -1252,7 +1260,7 @@ def test_optional_skills_contract_adoption_and_upgrade() -> None:
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert (
-            "SKILLS_CONTRACT_INSTALLED=tools/skills-contract.py,schemas/skills-contract.schema.json"
+            "SKILLS_CONTRACT_INSTALLED=tools/skills-contract.py,tools/work_packet_authority.py,schemas/skills-contract.schema.json"
             in upgraded.stdout
         )
         assert_installed_skills_contract(target)
@@ -1373,6 +1381,20 @@ def test_skills_compliance_reports_missing_referenced_helper() -> None:
             "--test-command",
             "go test ./...",
         )
+        dependency = target / "tools" / "work_packet_authority.py"
+        canonical_dependency = dependency.read_bytes()
+        dependency.unlink()
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert "work_packet_authority.py" in checked.stdout
+
+        dependency.write_bytes(canonical_dependency)
         (target / "tools" / "skills-contract.py").unlink()
         checked = run(
             sys.executable,
