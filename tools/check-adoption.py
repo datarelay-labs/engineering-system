@@ -202,6 +202,7 @@ def main() -> int:
         if "tools/skills-contract.py" in agents_text:
             for rel in (
                 "tools/skills-contract.py",
+                "tools/work_packet_authority.py",
                 "schemas/skills-contract.schema.json",
             ):
                 if not (root / rel).is_file():
