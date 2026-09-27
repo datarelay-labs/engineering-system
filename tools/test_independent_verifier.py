@@ -172,6 +172,29 @@ def test_low_medium_without_distinct_verifier() -> None:
     assert medium["DECISION"] == "PASS"
 
 
+def test_high_requires_every_declared_mutable_kind_including_ci() -> None:
+    """A passing review record cannot substitute for declared exact-head CI."""
+    report = evaluate(
+        base(
+            mutable=[
+                {
+                    "kind": "review",
+                    "subject_id": "pr-55",
+                    "version_id": "review-rev-9",
+                    "result": "PASS",
+                }
+            ],
+            expected_mutable={
+                "ci": {"subject_id": "pr-55", "version_id": HEAD},
+                "review": {"subject_id": "pr-55", "version_id": "review-rev-9"},
+            },
+        )
+    )
+    assert report["DECISION"] == "DENY"
+    assert report["DENY_CLASS"] == "MUTABLE_MISSING"
+    assert "ci" in report["REASON"]
+
+
 def test_p1b_verifier_001_stale_ci_denied() -> None:
     """Coordinator repro: HIGH with exact-head oracle but stale CI must DENY."""
     report = evaluate(
@@ -232,6 +255,7 @@ def main() -> int:
     test_review_open_denied_fixed_allowed()
     test_mutable_requires_subject_version_identity()
     test_low_medium_without_distinct_verifier()
+    test_high_requires_every_declared_mutable_kind_including_ci()
     test_p1b_verifier_001_stale_ci_denied()
     test_critical_requires_human_approval()
     test_forbids_execution_payload_keys()

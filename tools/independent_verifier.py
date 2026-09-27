@@ -328,8 +328,10 @@ def evaluate(request: dict[str, Any]) -> dict[str, str]:
             CHANGE_RISK=change_risk,
             VERIFIER_REQUIRED="YES" if verifier_required else "NO",
         )
+    observed_mutable_kinds: set[str] = set()
     for index, item in enumerate(mutable_raw):
         mutable = parse_mutable(item, f"mutable_evidence[{index}]")
+        observed_mutable_kinds.add(mutable["kind"])
         if mutable["result"] != ORACLE_PASS:
             return deny(
                 f"mutable {mutable['kind']} evidence result {mutable['result']} is not PASS",
@@ -359,6 +361,17 @@ def evaluate(request: dict[str, Any]) -> dict[str, str]:
                     CHANGE_RISK=change_risk,
                     VERIFIER_REQUIRED="YES" if verifier_required else "NO",
                 )
+
+    if change_risk in {"HIGH", "CRITICAL"} and expected_mutable is not None:
+        missing_kinds = sorted(set(expected_mutable) - observed_mutable_kinds)
+        if missing_kinds:
+            return deny(
+                "required mutable evidence kinds are missing: " + ",".join(missing_kinds),
+                "MUTABLE_MISSING",
+                SUBJECT_HEAD=subject_head,
+                CHANGE_RISK=change_risk,
+                VERIFIER_REQUIRED="YES" if verifier_required else "NO",
+            )
 
     if change_risk == "CRITICAL":
         approval = request.get("human_approval")

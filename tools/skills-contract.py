@@ -983,6 +983,7 @@ def authorize(
     if not isinstance(classes, list):
         return Decision(False, "CLASSIFICATION_TAMPER")
     class_set = frozenset(str(item) for item in classes)
+    high_risk_dispatch_id: str | None = None
     if class_set & HIGH_RISK_CLASSES:
         dispatch_id = dispatch_payload.get("dispatch_id")
         expires = dispatch_payload.get("expires_at_unix")
@@ -992,14 +993,7 @@ def authorize(
             return Decision(False, "REPLAY_CONTRACT_INCOMPLETE")
         if int(time.time()) >= expires:
             return Decision(False, "DISPATCH_EXPIRED")
-        if consume_replay:
-            consumed = consume_dispatch_once(str(dispatch_id))
-            if consumed == "unavailable":
-                return Decision(False, "BOUNDARY_UNAVAILABLE")
-            if consumed == "replay":
-                return Decision(False, "REPLAY")
-            if consumed != "ok":
-                return Decision(False, "BOUNDARY_UNAVAILABLE")
+        high_risk_dispatch_id = dispatch_id
     profiles, _, digest = load_effective_state(root)
     if binding_payload.get("policy_digest") != digest:
         return Decision(False, "POLICY_DIGEST_MISMATCH")
@@ -1018,7 +1012,18 @@ def authorize(
     request = action_request_for_tool(tool_id)
     if sorted(request.classes) != sorted(class_set):
         return Decision(False, "CLASSIFICATION_TAMPER")
-    return evaluate_action(binding, request, profiles=profiles, expected_digest=digest)
+    decision = evaluate_action(binding, request, profiles=profiles, expected_digest=digest)
+    if not decision.allowed:
+        return decision
+    if high_risk_dispatch_id is not None and consume_replay:
+        consumed = consume_dispatch_once(high_risk_dispatch_id)
+        if consumed == "unavailable":
+            return Decision(False, "BOUNDARY_UNAVAILABLE")
+        if consumed == "replay":
+            return Decision(False, "REPLAY")
+        if consumed != "ok":
+            return Decision(False, "BOUNDARY_UNAVAILABLE")
+    return decision
 
 
 def emit_check(root: Path, report: dict[str, object], max_findings: int, mode: str) -> None:
