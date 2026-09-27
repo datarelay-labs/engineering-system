@@ -273,6 +273,10 @@ History already exists in Git commits, PRs, CI, Issue edits/comments, and closed
 
 Routine resume must not copy an append-only Issue body into model context. After authenticated GitHub retrieval and author-permission verification, pipe the selected body through `tools/context_epoch.py packet-project` and use that bounded current-state projection for ordinary execution.
 
+`tools/context_epoch.py` is a managed adoption helper because the Cursor resume adapter invokes it in adopted repositories. Bootstrap and managed upgrade install the byte-identical canonical helper; a missing or locally modified copy makes the adopted execution surface incomplete and must fail closed rather than falling back to the raw Issue body.
+
+Candidate selection and routine projection are two separate authenticated reads, so the second read must be identity-bound. `packet-project` receives the structural values previously emitted by `packet-identity` (`PACKET_VERSION`, `TARGET_REPO`, `WORKSTREAM`, `STATUS`, `BRANCH`, `TASK_KIND`, `INTENT_REVISION`) and validates them against the exact same bytes it projects. Any mismatch fails closed and restarts candidate resolution; never project a refetched body first and validate its identity afterward.
+
 The projector:
 - emits only canonical current-state metadata and sections;
 - excludes noncanonical/history sections from routine context while reporting their presence as drift;

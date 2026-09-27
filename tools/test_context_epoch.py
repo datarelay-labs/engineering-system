@@ -96,6 +96,34 @@ def test_preauthority_identity_is_structural_only() -> None:
             fail(f"pre-authority identity missing {token}")
 
 
+def test_refetched_projection_identity_binding() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "packet.md"
+        path.write_text(packet(), encoding="utf-8")
+        expected = [
+            "--expect-packet-version", "2",
+            "--expect-target-repo", "datarelay-labs/engineering-system",
+            "--expect-workstream", "context-epoch-packet-projection",
+            "--expect-status", "ACTIVE",
+            "--expect-branch", "feat/context-epoch-packet-projection",
+            "--expect-task-kind", "IMPLEMENTATION",
+            "--expect-intent-revision", "1",
+        ]
+        matched = subprocess.run(
+            ["python3", str(ROOT / "tools/context_epoch.py"), "packet-project", "--body-file", str(path), *expected],
+            cwd=ROOT, text=True, capture_output=True, check=False,
+        )
+        if matched.returncode != 0 or "PACKET_PROJECTION=PASS" not in matched.stdout:
+            fail(f"identity-bound projection failed: {matched.stdout} {matched.stderr}")
+        path.write_text(packet().replace("INTENT_REVISION=1", "INTENT_REVISION=2"), encoding="utf-8")
+        stale = subprocess.run(
+            ["python3", str(ROOT / "tools/context_epoch.py"), "packet-project", "--body-file", str(path), *expected],
+            cwd=ROOT, text=True, capture_output=True, check=False,
+        )
+        if stale.returncode != 2 or "PACKET_IDENTITY_MISMATCH:INTENT_REVISION" not in stale.stderr:
+            fail(f"refetched identity drift did not block: {stale.stdout} {stale.stderr}")
+
+
 def test_duplicate_metadata_and_unsafe_identity_block() -> None:
     duplicate = ce.parse_packet(
         packet().replace(
@@ -258,6 +286,10 @@ def test_resume_commands_are_thin_and_in_parity() -> None:
         fail("root/template work-resume drift")
     if "context_epoch.py packet-project" not in root or "Never echo the raw body" not in root:
         fail("bounded packet projection is not required")
+    if "--expect-intent-revision" not in root or "PACKET_IDENTITY_MISMATCH" not in root:
+        fail("refetched packet projection is not identity-bound")
+    if "adoption-managed canonical helper" not in root:
+        fail("resume adapter does not require the managed context helper")
     if "context_epoch.py epoch-decide" not in root:
         fail("context epoch coordinator decision missing")
     if len(root) >= 7646:
@@ -288,6 +320,7 @@ def main() -> None:
     tests = [
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
+        test_refetched_projection_identity_binding,
         test_duplicate_metadata_and_unsafe_identity_block,
         test_duplicate_canonical_section_blocks,
         test_optional_canary_is_warning_only,

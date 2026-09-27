@@ -685,6 +685,7 @@ def _managed_upgrade_file_snapshot(root: Path) -> dict[str, bytes]:
         "README.md",
         ".cursor/commands/resume.md",
         ".cursor/commands/work-resume.md",
+        "tools/context_epoch.py",
     )
     return {rel: (root / rel).read_bytes() for rel in rels if (root / rel).is_file()}
 
@@ -1521,6 +1522,94 @@ def test_fresh_adoption_installs_verification_t4_dependency() -> None:
         assert not (target / ".engineering" / "verification.yaml").exists()
 
 
+def test_context_epoch_helper_adoption_and_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-context-epoch"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/context-epoch\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        helper = target / "tools" / "context_epoch.py"
+        assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        resume = (target / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
+        assert "adoption-managed canonical helper" in resume
+
+        helper.unlink()
+        compliance = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert compliance.returncode != 0
+        assert "references context-epoch helper but missing tools/context_epoch.py" in compliance.stdout
+
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "drop context helper before upgrade")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-context-epoch"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/custom-context\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        helper = target / "tools" / "context_epoch.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("#!/usr/bin/env python3\nprint('custom')\n", encoding="utf-8")
+        commit_all(target)
+        failed = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/context_epoch.py contains local/custom changes" in failed.stdout
+        assert "ADOPTION_BOOTSTRAP=PASS" not in failed.stdout
+        assert not (target / "AGENTS.md").exists()
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -1566,6 +1655,7 @@ def main() -> int:
     test_byte_identical_skills_contract_preserved_on_upgrade()
     test_custom_skills_schema_fails_closed_before_upgrade_mutation()
     test_fresh_adoption_installs_verification_t4_dependency()
+    test_context_epoch_helper_adoption_and_upgrade()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

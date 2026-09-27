@@ -45,6 +45,11 @@ PROJECT_SECTIONS = (
     "Handoff Sizing", "Completion Contract", "Constraints",
     "Canonical References", "Latest Evidence",
 )
+IDENTITY_KEYS = (
+    "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
+    "TASK_KIND", "INTENT_REVISION",
+)
+MISSING_IDENTITY_VALUE = "<missing>"
 DEFAULT_META_VALUE_CAP = 512
 DEFAULT_SECTION_CHAR_CAP = 3500
 DEFAULT_PROJECTION_CHAR_CAP = 14000
@@ -68,6 +73,7 @@ class Packet:
     headings: tuple[str, ...]
     char_count: int
     line_count: int
+    body_sha256: str
 
 
 def _read_text(path: str) -> str:
@@ -116,6 +122,7 @@ def parse_packet(text: str) -> Packet:
         tuple(headings),
         len(text),
         len(text.splitlines()),
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
 
 
@@ -265,14 +272,23 @@ def packet_identity(packet: Packet) -> str:
     audit = analyze_packet(packet)
     if audit["status"] == "BLOCK":
         raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
-    keys = (
-        "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
-        "TASK_KIND", "INTENT_REVISION",
-    )
-    lines = [f"{key}={packet.metadata.get(key, '<missing>')}" for key in keys]
+    lines = [f"{key}={packet.metadata.get(key, '<missing>')}" for key in IDENTITY_KEYS]
     lines.append(f"PACKET_CONTEXT_AUDIT={audit['status']}")
     lines.append("PACKET_IDENTITY=PASS")
     return "\n".join(lines) + "\n"
+
+
+def require_identity(packet: Packet, expected: dict[str, str | None]) -> None:
+    """Fail closed when a refetched packet no longer matches selected identity."""
+    audit = analyze_packet(packet)
+    if audit["status"] == "BLOCK":
+        raise ContextError("PACKET_IDENTITY_INVALID:" + ",".join(audit["blocking"]))
+    mismatches = [
+        key for key in IDENTITY_KEYS
+        if expected.get(key) is not None and packet.metadata.get(key) != expected[key]
+    ]
+    if mismatches:
+        raise ContextError("PACKET_IDENTITY_MISMATCH:" + ",".join(mismatches))
 
 
 def _bool(facts: dict[str, Any], key: str, default: bool = False) -> bool:
@@ -415,6 +431,8 @@ def main() -> int:
     project.add_argument("--body-file", required=True)
     project.add_argument("--section-char-cap", type=int, default=DEFAULT_SECTION_CHAR_CAP)
     project.add_argument("--projection-char-cap", type=int, default=DEFAULT_PROJECTION_CHAR_CAP)
+    for key in IDENTITY_KEYS:
+        project.add_argument("--expect-" + key.lower().replace("_", "-"))
 
     lint = sub.add_parser("packet-lint")
     lint.add_argument("--body-file", required=True)
@@ -432,8 +450,14 @@ def main() -> int:
         if args.command == "packet-identity":
             sys.stdout.write(packet_identity(parse_packet(_read_text(args.body_file))))
         elif args.command == "packet-project":
+            packet = parse_packet(_read_text(args.body_file))
+            expected = {
+                key: getattr(args, "expect_" + key.lower())
+                for key in IDENTITY_KEYS
+            }
+            require_identity(packet, expected)
             sys.stdout.write(project_packet(
-                parse_packet(_read_text(args.body_file)),
+                packet,
                 section_char_cap=args.section_char_cap,
                 projection_char_cap=args.projection_char_cap,
             ))
