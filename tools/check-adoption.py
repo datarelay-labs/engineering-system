@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+import ci_policy_audit
+
 REQUIRED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -232,6 +234,15 @@ def main() -> int:
                             )
         except Exception as exc:
             failures.append(f"cannot parse tests.yaml: {exc}")
+
+    if project_path.is_file() and tests_path.is_file():
+        try:
+            for finding in ci_policy_audit.audit(root):
+                failures.append(f"CI policy: {finding}")
+        except SystemExit as exc:
+            failures.append(f"CI policy audit failed: {exc}")
+        except Exception as exc:
+            failures.append(f"CI policy audit failed: {exc}")
 
     release_path = root / ".engineering/release.yaml"
     release: dict = {}

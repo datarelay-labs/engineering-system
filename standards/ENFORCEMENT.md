@@ -120,6 +120,8 @@ Adopted repositories should validate required Engineering System files and use f
 
 Shared workflows must not force duplicate project-native qualification. Expensive full-suite/lifecycle/platform/performance/operational gates belong at the appropriate release boundary.
 
+Adoption compliance fails closed when ordinary PR validation duplicates the same native workflow through overlapping push+pull_request, and when expensive release_gate scenarios are default affected/pr work or are invoked unconditionally by ordinary PR jobs.
+
 ## Fail-closed behavior
 
 Missing or contradictory mandatory engineering context is a configuration defect. Do not silently continue as if repository-specific compliance had been established.
