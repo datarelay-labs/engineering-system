@@ -514,6 +514,74 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
         ).read_bytes()
 
 
+def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
+    """The canonical post-context-epoch 1.6.5 resume must remain upgradeable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-165-context-resume-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/same-version-context\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        prior_resume = (
+            ROOT
+            / "tools"
+            / "managed_adapter_history"
+            / "resume"
+            / "1.6.5-context-epoch-pre-thin-router.md"
+        ).read_text(encoding="utf-8")
+        (target / ".cursor/commands/resume.md").write_text(
+            prior_resume, encoding="utf-8"
+        )
+        (target / ".cursor/commands/work-resume.md").write_text(
+            prior_resume, encoding="utf-8"
+        )
+        commit_all(target, "simulate canonical post-context-epoch 1.6.5 baseline")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert (
+            "CURSOR_RESUME_ADAPTERS_SYNCED="
+            ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
+            in upgraded.stdout
+        )
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["engineering_system"]["version"] == "1.6.5"
+        assert project["engineering_system"]["baseline"] == NEW_BASELINE
+        canonical_resume = (
+            ROOT / "templates" / ".cursor" / "commands" / "resume.md"
+        ).read_text(encoding="utf-8")
+        assert (target / ".cursor/commands/resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+        assert (target / ".cursor/commands/work-resume.md").read_text(
+            encoding="utf-8"
+        ) == canonical_resume
+
+
 def test_custom_cursorignore_preserved_on_upgrade() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-custom-ignore"
@@ -1765,6 +1833,7 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_same_version_1_6_5_pre_context_epoch_upgrade()
+    test_same_version_1_6_5_context_epoch_resume_upgrade()
     test_custom_cursorignore_preserved_on_upgrade()
     test_supported_managed_cursor_rule_history_is_upgradeable()
     test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
