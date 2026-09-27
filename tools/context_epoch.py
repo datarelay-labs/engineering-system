@@ -13,6 +13,7 @@ from typing import Any
 
 META_RE = re.compile(r"^([A-Z][A-Z0-9_]+)=(.*)$")
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
+FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 ALLOWED_STATUSES = {"ACTIVE", "PAUSED", "BLOCKED", "COMPLETE"}
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -51,6 +52,7 @@ IDENTITY_KEYS = (
     "TASK_KIND", "INTENT_REVISION",
 )
 MISSING_IDENTITY_VALUE = "<missing>"
+IDENTITY_BINDING_KEYS = IDENTITY_KEYS + ("PACKET_BODY_SHA256",)
 DEFAULT_META_VALUE_CAP = 512
 DEFAULT_SECTION_CHAR_CAP = 3500
 DEFAULT_PROJECTION_CHAR_CAP = 14000
@@ -94,7 +96,22 @@ def parse_packet(text: str) -> Packet:
     headings: list[str] = []
     current: str | None = None
     before_heading = True
+    fence: str | None = None
     for raw in text.splitlines():
+        fence_match = FENCE_RE.match(raw)
+        if fence_match:
+            family = fence_match.group(1)[0]
+            if fence is None:
+                fence = family
+            elif fence == family:
+                fence = None
+            if current is not None:
+                sections[current].append(raw)
+            continue
+        if fence is not None:
+            if current is not None:
+                sections[current].append(raw)
+            continue
         heading = HEADING_RE.match(raw)
         if heading:
             before_heading = False
@@ -283,6 +300,34 @@ def packet_identity(packet: Packet) -> str:
     return "\n".join(lines) + "\n"
 
 
+def load_identity_binding(path: str) -> tuple[dict[str, str], str]:
+    """Load bounded structural identity emitted by packet-identity."""
+    text = _read_text(path)
+    if len(text) > 4096 or len(text.splitlines()) > 16:
+        raise ContextError("PACKET_IDENTITY_BINDING_OVERSIZED")
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        match = META_RE.fullmatch(raw)
+        if not match:
+            raise ContextError("PACKET_IDENTITY_BINDING_INVALID")
+        key, value = match.group(1), match.group(2).strip()
+        if key in values:
+            raise ContextError(f"PACKET_IDENTITY_BINDING_DUPLICATE:{key}")
+        values[key] = value
+    if values.get("PACKET_IDENTITY") != "PASS":
+        raise ContextError("PACKET_IDENTITY_BINDING_NOT_PASS")
+    audit = values.get("PACKET_CONTEXT_AUDIT")
+    if audit not in {"PASS", "WARN"}:
+        raise ContextError("PACKET_IDENTITY_BINDING_AUDIT_INVALID")
+    missing = [key for key in IDENTITY_BINDING_KEYS if key not in values]
+    if missing:
+        raise ContextError("PACKET_IDENTITY_BINDING_MISSING:" + ",".join(missing))
+    digest = values["PACKET_BODY_SHA256"]
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ContextError("PACKET_BODY_SHA256_INVALID")
+    return {key: values[key] for key in IDENTITY_KEYS}, digest
+
+
 def require_identity(
     packet: Packet,
     expected: dict[str, str | None],
@@ -460,6 +505,7 @@ def main() -> int:
     project.add_argument("--body-file", required=True)
     project.add_argument("--section-char-cap", type=int, default=DEFAULT_SECTION_CHAR_CAP)
     project.add_argument("--projection-char-cap", type=int, default=DEFAULT_PROJECTION_CHAR_CAP)
+    project.add_argument("--expect-identity-file")
     for key in IDENTITY_KEYS:
         project.add_argument("--expect-" + key.lower().replace("_", "-"))
     project.add_argument("--expect-body-sha256")
@@ -481,14 +527,23 @@ def main() -> int:
             sys.stdout.write(packet_identity(parse_packet(_read_text(args.body_file))))
         elif args.command == "packet-project":
             packet = parse_packet(_read_text(args.body_file))
-            expected = {
+            direct_expected = {
                 key: getattr(args, "expect_" + key.lower())
                 for key in IDENTITY_KEYS
             }
+            if args.expect_identity_file and (
+                any(value is not None for value in direct_expected.values())
+                or args.expect_body_sha256 is not None
+            ):
+                raise ContextError("PACKET_IDENTITY_BINDING_AMBIGUOUS")
+            if args.expect_identity_file:
+                expected, expected_digest = load_identity_binding(args.expect_identity_file)
+            else:
+                expected, expected_digest = direct_expected, args.expect_body_sha256
             require_identity(
                 packet,
                 expected,
-                expected_body_sha256=args.expect_body_sha256,
+                expected_body_sha256=expected_digest,
             )
             sys.stdout.write(project_packet(
                 packet,

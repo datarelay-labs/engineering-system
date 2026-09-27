@@ -150,6 +150,47 @@ def test_refetched_projection_identity_binding() -> None:
             fail("missing identity value was not bound across refetch")
 
 
+def test_identity_file_binding_and_fenced_examples() -> None:
+    body = packet(current="""- current fact
+
+```md
+## Next Action
+STATUS=BLOCKED
+```""")
+    parsed = ce.parse_packet(body)
+    audit = ce.analyze_packet(parsed)
+    if audit["status"] != "PASS":
+        fail(f"fenced example changed packet structure: {audit}")
+    if parsed.duplicate_sections:
+        fail(f"fenced heading counted as duplicate: {parsed.duplicate_sections}")
+    with tempfile.TemporaryDirectory() as tmp:
+        packet_path = Path(tmp) / "packet.md"
+        identity_path = Path(tmp) / "identity.txt"
+        packet_path.write_text(body, encoding="utf-8")
+        identity_path.write_text(ce.packet_identity(parsed), encoding="utf-8")
+        matched = subprocess.run(
+            [
+                "python3", str(ROOT / "tools/context_epoch.py"),
+                "packet-project", "--body-file", str(packet_path),
+                "--expect-identity-file", str(identity_path),
+            ],
+            cwd=ROOT, text=True, capture_output=True, check=False,
+        )
+        if matched.returncode != 0 or "PACKET_PROJECTION=PASS" not in matched.stdout:
+            fail(f"identity-file projection failed: {matched.stdout} {matched.stderr}")
+        packet_path.write_text(body.replace("Implement and validate.", "Changed intent."), encoding="utf-8")
+        stale = subprocess.run(
+            [
+                "python3", str(ROOT / "tools/context_epoch.py"),
+                "packet-project", "--body-file", str(packet_path),
+                "--expect-identity-file", str(identity_path),
+            ],
+            cwd=ROOT, text=True, capture_output=True, check=False,
+        )
+        if stale.returncode != 2 or "PACKET_IDENTITY_MISMATCH:PACKET_BODY_SHA256" not in stale.stderr:
+            fail(f"identity-file body drift did not block: {stale.stdout} {stale.stderr}")
+
+
 def test_duplicate_metadata_and_unsafe_identity_block() -> None:
     duplicate = ce.parse_packet(
         packet().replace(
@@ -346,18 +387,14 @@ def test_resume_commands_are_thin_and_in_parity() -> None:
         fail("root/template work-resume drift")
     if "context_epoch.py packet-project" not in root or "Never echo the raw body" not in root:
         fail("bounded packet projection is not required")
-    if (
-        "--expect-intent-revision" not in root
-        or "--expect-body-sha256" not in root
-        or "PACKET_IDENTITY_MISMATCH" not in root
-    ):
+    if "--expect-identity-file" not in root or "PACKET_IDENTITY_MISMATCH" not in root:
         fail("refetched packet projection is not identity/body-bound")
     if "adoption-managed canonical helper" not in root:
         fail("resume adapter does not require the managed context helper")
     if "context_epoch.py epoch-decide" not in root:
         fail("context epoch coordinator decision missing")
-    if len(root) >= 7646:
-        fail(f"work-resume was not reduced: {len(root)} chars")
+    if len(root.encode("utf-8")) > 3584:
+        fail(f"work-resume exceeded 3.5 KiB budget: {len(root.encode('utf-8'))} bytes")
 
 
 def test_cli_lint_and_identity() -> None:
@@ -385,6 +422,7 @@ def main() -> None:
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
         test_refetched_projection_identity_binding,
+        test_identity_file_binding_and_fenced_examples,
         test_duplicate_metadata_and_unsafe_identity_block,
         test_duplicate_canonical_section_blocks,
         test_optional_canary_is_warning_only,
