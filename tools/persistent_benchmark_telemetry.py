@@ -29,6 +29,7 @@ if str(TOOLS) not in sys.path:
 import benchmark_execution
 import benchmark_fixture
 import efficiency_telemetry
+import terminal_code_identity
 
 ROOT = TOOLS.parent
 PLUGIN_ROOT = ROOT / "benchmarks" / "persistent-instrumentation"
@@ -1414,6 +1415,13 @@ def _qualified_record(
     )
 
 
+def _terminal_code_id() -> str:
+    try:
+        return terminal_code_identity.require_terminal_code_id()
+    except terminal_code_identity.TerminalCodeError as exc:
+        raise CaptureError(exc.code) from exc
+
+
 def _host_assertion_body(
     descriptor: dict[str, Any],
     bounded: dict[str, Any],
@@ -1433,6 +1441,7 @@ def _host_assertion_body(
         "telemetry_digest": benchmark_execution.canonical_telemetry_digest(record),
         "lifecycle": "COMPLETE",
         "effective_toolset": REQUIRED_TOOLSET,
+        "terminal_code_id": _terminal_code_id(),
     }
 
 

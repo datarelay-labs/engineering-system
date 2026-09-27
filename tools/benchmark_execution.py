@@ -30,6 +30,7 @@ if str(TOOLS) not in sys.path:
 
 import benchmark_fixture
 import efficiency_telemetry
+import terminal_code_identity
 
 ROOT = TOOLS.parent
 SCHEMA_PATH = ROOT / "schemas" / "benchmark-execution.schema.json"
@@ -351,6 +352,10 @@ def _bind_observed_fields():
         return True
 
     def assertion_binds(parsed: dict[str, Any], lane: str) -> bool:
+        try:
+            code_id = terminal_code_identity.require_terminal_code_id()
+        except terminal_code_identity.TerminalCodeError:
+            return False
         if not path_ok(anchor, expect_file=True) or not path_ok(directory, expect_file=False):
             return False
         assertion = directory / f"{parsed['run_id']}-{lane}.host-receipt.json"
@@ -375,6 +380,7 @@ def _bind_observed_fields():
             and payload.get("repository") == parsed.get("repo")
             and payload.get("system_head") == validation.get("exact_head")
             and payload.get("telemetry_digest") == canonical_telemetry_digest(parsed)
+            and payload.get("terminal_code_id") == code_id
         )
 
     def derive_observed_fields(

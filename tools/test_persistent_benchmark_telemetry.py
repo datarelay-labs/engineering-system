@@ -2053,13 +2053,60 @@ def test_replaced_skills_contract_cannot_record_telemetry() -> None:
             execution.write_bytes(execution_original)
             if hasattr(capture.benchmark_execution, "host_signed_payload"):
                 delattr(capture.benchmark_execution, "host_signed_payload")
-        if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized or finalized["execute_worker"] is not False:
+        if finalized["reason"] != "TERMINAL_CODE_DIRTY" or "record" in finalized or finalized["execute_worker"] is not False:
             _fail(f"replaced same-UID verifier recorded telemetry as {finalized}")
         if sentinel.exists():
             _fail("replaced same-UID verifier was executed during finalization")
         recorded = checkout / ".git" / "engineering-system" / "telemetry" / f"{run_id}.json"
         if recorded.exists():
             _fail("replaced same-UID verifier wrote a telemetry record")
+
+
+def test_preimport_finalizer_replacement_blocks_terminal_telemetry() -> None:
+    finalizer = ROOT / "tools" / "persistent_benchmark_telemetry.py"
+    original = finalizer.read_bytes()
+    head = _git(ROOT, "rev-parse", "HEAD")
+    with tempfile.TemporaryDirectory() as temporary:
+        sentinel = Path(temporary) / "finalizer-executed"
+        finalizer.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(sentinel)!r}).write_text('executed', encoding='utf-8')\n"
+            "def finalize_lane(descriptor_path, *, root):\n"
+            f"    Path({str(sentinel)!r}).write_text('recorded', encoding='utf-8')\n"
+            "    return {'status': 'READY', 'reason': 'TELEMETRY_RECORDED', 'execute_worker': False, 'record': {'forged': True}}\n",
+            encoding="utf-8",
+        )
+        script = (
+            "import json\n"
+            "from pathlib import Path\n"
+            "import terminal_code_identity as gate\n"
+            "result = gate.finalize_lane(Path('missing.json'), root=Path('missing-root'))\n"
+            "print(json.dumps(result))\n"
+        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "tools")},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        finally:
+            finalizer.write_bytes(original)
+        if _git(ROOT, "rev-parse", "HEAD") != head:
+            _fail("pre-import replacement changed HEAD")
+        if completed.returncode != 0:
+            _fail(f"pre-import finalizer probe exited {completed.returncode}: {completed.stderr}")
+        try:
+            result = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            _fail(f"pre-import finalizer probe returned {completed.stdout!r} {completed.stderr!r}")
+        if result.get("status") != "BLOCK" or result.get("reason") != "TERMINAL_CODE_DIRTY" or result.get("execute_worker") is not False or "record" in result:
+            _fail(f"pre-import finalizer replacement returned {result}")
+        if sentinel.exists():
+            _fail("pre-import finalizer replacement was executed")
 
 
 def test_optional_empty_generation_is_not_a_prompt_id() -> None:
@@ -2122,6 +2169,7 @@ def main() -> None:
         test_toolset_and_receipt_are_not_worker_authoritative,
         test_signed_subset_records_allowlist,
         test_replaced_skills_contract_cannot_record_telemetry,
+        test_preimport_finalizer_replacement_blocks_terminal_telemetry,
     )
     for test in tests:
         print(f"RUN {test.__name__}", flush=True)
