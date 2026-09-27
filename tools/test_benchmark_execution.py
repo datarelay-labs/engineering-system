@@ -822,6 +822,44 @@ def test_forged_canonical_record_does_not_qualify() -> None:
             sys.modules["skills_contract"] = previous_skills
 
 
+def test_replaced_skills_contract_cannot_qualify_forged_telemetry() -> None:
+    skills = ROOT / "tools" / "skills-contract.py"
+    original = skills.read_bytes()
+    source = TOOL.read_text(encoding="utf-8")
+    if "skills-contract.py" in source or "exec_module" in source:
+        _fail("consumer still loads tools/skills-contract.py")
+    record = _telemetry_record()
+    record["counts"]["retries"] = 999
+    record["counts"]["human_interventions"] = 777
+    record["validation"] = {
+        "ids": ["ENG-BENCH-EXEC-001"],
+        "exact_head": EXEC.benchmark_fixture.CONTROL_HEAD,
+        "evidence_state": "EXACT_HEAD",
+        "outcome": "PASS",
+    }
+    record["terminal"] = "PASS"
+    with tempfile.TemporaryDirectory() as temporary:
+        sentinel = Path(temporary) / "skills-contract-executed"
+        skills.write_text(
+            "HOST_OPENSSL_PATH = '/usr/bin/openssl'\n"
+            "def verify_signed_json(path, anchor):\n"
+            f"    open({str(sentinel)!r}, 'w').write('executed')\n"
+            "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
+            encoding="utf-8",
+        )
+        try:
+            derived = _derive(record)
+        except EXEC.ExecutionError as exc:
+            if exc.code != "TELEMETRY_UNAUTHENTICATED":
+                _fail(f"replaced skills-contract returned {exc.code}")
+        else:
+            _fail(f"replaced skills-contract qualified forged telemetry as {derived}")
+        finally:
+            skills.write_bytes(original)
+        if sentinel.exists():
+            _fail("replaced skills-contract was executed during consumption")
+
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -834,6 +872,7 @@ def main() -> None:
     test_frozen_manifest_content_must_match_revision()
     test_telemetry_lane_binding_rejects_swaps_and_unrelated_records()
     test_forged_canonical_record_does_not_qualify()
+    test_replaced_skills_contract_cannot_qualify_forged_telemetry()
     test_telemetry_rejects_other_case_repository_and_workstream()
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()

@@ -12,11 +12,13 @@ telemetry record. It does not start a model, agent, or network call.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
-import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -271,6 +273,88 @@ def _bind_telemetry_lane(
         raise ExecutionError("TELEMETRY_LANE_MISMATCH")
 
 
+def _bind_host_verifier():
+    """Verify host assertions with fixed OpenSSL. Repository Python is not loaded."""
+    openssl = Path("/usr/bin/openssl")
+    posix_spawn = os.posix_spawn
+    waitpid = os.waitpid
+    exitcode = os.waitstatus_to_exitcode
+    file_actions = (
+        (os.POSIX_SPAWN_OPEN, 3, "/dev/null", os.O_WRONLY, 0),
+        (os.POSIX_SPAWN_DUP2, 3, 1),
+        (os.POSIX_SPAWN_DUP2, 3, 2),
+        (os.POSIX_SPAWN_CLOSE, 3),
+    )
+    spawn_env = {"PATH": "/usr/bin", "LC_ALL": "C"}
+
+    def openssl_ok(path: Path) -> bool:
+        try:
+            if path.is_symlink() or not path.is_file():
+                return False
+            stat = path.stat()
+            if stat.st_uid != 0 or stat.st_mode & 0o022:
+                return False
+            parent = path.parent
+            if parent.is_symlink():
+                return False
+            parent_stat = parent.stat()
+            if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
+                return False
+            if not os.access(path, os.X_OK):
+                return False
+        except OSError:
+            return False
+        return True
+
+    def verified_payload(assertion: Path, anchor: Path) -> dict[str, Any] | None:
+        if not openssl_ok(openssl):
+            return None
+        try:
+            payload = json.loads(assertion.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get("signature"), str):
+            return None
+        try:
+            signature = base64.b64decode(payload["signature"], validate=True)
+        except (ValueError, TypeError):
+            return None
+        body = {key: payload[key] for key in sorted(payload) if key != "signature"}
+        message = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                message_path = Path(temporary) / "msg"
+                signature_path = Path(temporary) / "sig"
+                message_path.write_bytes(message)
+                signature_path.write_bytes(signature)
+                argv = [
+                    str(openssl),
+                    "pkeyutl",
+                    "-verify",
+                    "-pubin",
+                    "-inkey",
+                    str(anchor),
+                    "-rawin",
+                    "-in",
+                    str(message_path),
+                    "-sigfile",
+                    str(signature_path),
+                ]
+                pid = posix_spawn(str(openssl), argv, spawn_env, file_actions=file_actions)
+                _child, status = waitpid(pid, 0)
+        except OSError:
+            return None
+        if exitcode(status) != 0:
+            return None
+        return payload
+
+    return verified_payload
+
+
+host_signed_payload = _bind_host_verifier()
+del _bind_host_verifier
+
+
 def canonical_telemetry_digest(record: dict[str, Any]) -> str:
     """Digest the parsed canonical record. This does not establish host trust."""
     payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -281,11 +365,7 @@ def _bind_observed_fields():
     """Capture fixed host provenance for terminal telemetry qualification."""
     anchor = Path("/etc/engineering-system/skills-trust-anchor.pub")
     directory = Path("/var/lib/engineering-system/benchmark-receipts")
-    skills_file = (TOOLS / "skills-contract.py").resolve()
-    spec_from_file_location = importlib.util.spec_from_file_location
-    module_from_spec = importlib.util.module_from_spec
-    modules = sys.modules
-    verifier_name = "_es_benchmark_consumer_verify"
+    verify_payload = host_signed_payload
 
     def path_ok(path: Path, *, expect_file: bool) -> bool:
         try:
@@ -315,27 +395,7 @@ def _bind_observed_fields():
         assertion = directory / f"{parsed['run_id']}-{lane}.host-receipt.json"
         if not path_ok(assertion, expect_file=True):
             return False
-        spec = spec_from_file_location(verifier_name, skills_file)
-        if spec is None or spec.loader is None:
-            return False
-        module = module_from_spec(spec)
-        modules[verifier_name] = module
-        try:
-            spec.loader.exec_module(module)
-            loaded = getattr(module, "__file__", None)
-            if loaded is None or Path(loaded).resolve() != skills_file:
-                return False
-            if getattr(module, "HOST_OPENSSL_PATH", None) != "/usr/bin/openssl":
-                return False
-            verifier = getattr(module, "verify_signed_json", None)
-            if not callable(verifier):
-                return False
-            payload = verifier(assertion, anchor)
-        except (OSError, json.JSONDecodeError, SystemExit, ImportError, SyntaxError, ValueError, TypeError):
-            return False
-        finally:
-            if modules.get(verifier_name) is module:
-                del modules[verifier_name]
+        payload = verify_payload(assertion, anchor)
         if not isinstance(payload, dict):
             return False
         validation = parsed.get("validation")

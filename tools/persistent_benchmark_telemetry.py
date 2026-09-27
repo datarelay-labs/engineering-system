@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import importlib.util
 import json
 import re
 import secrets
@@ -1462,11 +1461,7 @@ def _bind_host_finalizer():
     """Capture fixed provenance so later module-global mutation cannot select it."""
     anchor = HOST_RECEIPT_ANCHOR
     directory = HOST_RECEIPT_DIR
-    skills_file = (TOOLS / "skills-contract.py").resolve()
-    spec_from_file_location = importlib.util.spec_from_file_location
-    module_from_spec = importlib.util.module_from_spec
-    modules = sys.modules
-    verifier_name = "_es_benchmark_skills_verify"
+    verify_payload = benchmark_execution.host_signed_payload
     anchor_ok = _host_anchor_ok
     directory_ok = _host_dir_ok
     git_head = efficiency_telemetry.git_head
@@ -1480,27 +1475,7 @@ def _bind_host_finalizer():
     def verify_signed_assertion(assertion: Path, expected: dict[str, Any]) -> bool:
         if not anchor_ok(anchor) or not directory_ok(directory) or not anchor_ok(assertion):
             return False
-        spec = spec_from_file_location(verifier_name, skills_file)
-        if spec is None or spec.loader is None:
-            return False
-        module = module_from_spec(spec)
-        modules[verifier_name] = module
-        try:
-            spec.loader.exec_module(module)
-            loaded = getattr(module, "__file__", None)
-            if loaded is None or Path(loaded).resolve() != skills_file:
-                return False
-            if getattr(module, "HOST_OPENSSL_PATH", None) != "/usr/bin/openssl":
-                return False
-            verifier = getattr(module, "verify_signed_json", None)
-            if not callable(verifier):
-                return False
-            payload = verifier(assertion, anchor)
-        except (OSError, json.JSONDecodeError, SystemExit, ImportError, SyntaxError, ValueError, TypeError):
-            return False
-        finally:
-            if modules.get(verifier_name) is module:
-                del modules[verifier_name]
+        payload = verify_payload(assertion, anchor)
         if not isinstance(payload, dict):
             return False
         unsigned = {key: value for key, value in payload.items() if key != "signature"}

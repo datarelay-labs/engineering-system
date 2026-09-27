@@ -2001,6 +2001,45 @@ def test_cursor_model_id_binds_profile_and_base_projection() -> None:
             _fail(f"non-list model_params returned {malformed['reason']}")
 
 
+def test_replaced_skills_contract_cannot_record_telemetry() -> None:
+    skills = ROOT / "tools" / "skills-contract.py"
+    original = skills.read_bytes()
+    source = (ROOT / "tools" / "persistent_benchmark_telemetry.py").read_text(encoding="utf-8")
+    if "skills-contract.py" in source or "exec_module" in source:
+        _fail("finalizer still loads tools/skills-contract.py")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        sentinel = root / "skills-contract-executed"
+        run_id = "c1" + "a" * 30
+        prepared = _prepare(root, run_id=run_id)
+        descriptor = Path(prepared["descriptor_path"])
+        plugin = Path(prepared["plugin_dir"])
+        for payload in (_session(), _shell(), _stop()):
+            result = _ingest(descriptor, plugin, payload)
+        if result["reason"] != "LOOP_CHECKPOINT":
+            _fail(f"replacement setup returned {result['reason']}")
+        checkout = root / "control"
+        _control_checkout(checkout)
+        skills.write_text(
+            "HOST_OPENSSL_PATH = '/usr/bin/openssl'\n"
+            "def verify_signed_json(path, anchor):\n"
+            f"    open({str(sentinel)!r}, 'w').write('executed')\n"
+            "    return {'kind': 'benchmark-host-receipt', 'lifecycle': 'COMPLETE', 'signature': 'forged'}\n",
+            encoding="utf-8",
+        )
+        try:
+            finalized = capture.finalize_lane(descriptor, root=checkout)
+        finally:
+            skills.write_bytes(original)
+        if finalized["reason"] != "TRUST_BOUNDARY_UNAVAILABLE" or "record" in finalized or finalized["execute_worker"] is not False:
+            _fail(f"replaced skills-contract recorded telemetry as {finalized}")
+        if sentinel.exists():
+            _fail("replaced skills-contract was executed during finalization")
+        recorded = checkout / ".git" / "engineering-system" / "telemetry" / f"{run_id}.json"
+        if recorded.exists():
+            _fail("replaced skills-contract wrote a telemetry record")
+
+
 def test_optional_empty_generation_is_not_a_prompt_id() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -2060,6 +2099,7 @@ def main() -> None:
         test_task_checkout_binds_frozen_identity,
         test_toolset_and_receipt_are_not_worker_authoritative,
         test_signed_subset_records_allowlist,
+        test_replaced_skills_contract_cannot_record_telemetry,
     )
     for test in tests:
         print(f"RUN {test.__name__}", flush=True)
