@@ -61,6 +61,12 @@ paths:
     domains: [session-continuity, ai]
   "schemas/context-canary-comparison.schema.json":
     domains: [schemas, session-continuity, ai]
+  "tools/context_shadow_gate.py":
+    domains: [session-continuity, ai, workflows]
+  "tools/test_context_shadow_gate.py":
+    domains: [session-continuity, ai]
+  "schemas/context-shadow-comparison.schema.json":
+    domains: [schemas, session-continuity, ai]
   "tools/context_fold.py":
     domains: [session-continuity, ai, workflows]
   "tools/test_context_fold.py":
@@ -204,7 +210,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -324,6 +330,25 @@ scenarios:
       - "each live run carries an authoritative telemetry run id and wrapper-only telemetry swaps fail closed"
       - "profile switches unknown usage and cost/head mismatches fail closed"
       - "reports are factual only and emit no winner ranking or optimizer recommendation"
+    release_gate: true
+
+  - id: ENG-CONTEXT-SHADOW-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Shadow context action-equivalence gate
+    level: static
+    domains: [session-continuity, ai, schemas]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_shadow_gate.py"
+    invariants:
+      - "shadow evaluation is unavailable unless the live canary comparison is eligible"
+      - "every observation binds to the authoritative arm case and telemetry run identity"
+      - "material action and target traces must be strictly equivalent to the control and terminate at COMPLETE"
+      - "shadow reports are content-free factual metadata and never rank or authorize optimizer promotion"
     release_gate: true
 
   - id: ENG-CONTEXT-FOLD-001
