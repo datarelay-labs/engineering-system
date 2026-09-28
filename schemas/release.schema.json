@@ -16,6 +16,10 @@
     "artifact_hash_required": {"type": "boolean"},
     "provenance_required": {"type": "boolean"},
     "sbom_required": {"type": "boolean"},
+    "execution_context": {
+      "type": "string",
+      "enum": ["github-hosted", "protected-production"]
+    },
     "setup_command": {"type": "string"},
     "preflight_required": {"type": "boolean"},
     "preflight_command": {"type": "string"},

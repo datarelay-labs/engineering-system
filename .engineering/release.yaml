@@ -4,6 +4,8 @@ exact_head_required: true
 artifact_hash_required: false
 provenance_required: true
 sbom_required: false
+# github-hosted | protected-production
+execution_context: github-hosted
 setup_command: ""
 preflight_required: false
 preflight_command: ""

@@ -106,6 +106,19 @@ public_smoke_command
 
 `operational_e2e_command` and `public_smoke_command` remain the only command authorities for operational E2E and public smoke. The optional runtime contract references these fields and must not store a second copy.
 
+### Release execution context
+
+`.engineering/release.yaml` may declare one bounded `execution_context`:
+
+- `github-hosted` — the backward-compatible default; release commands execute on `ubuntu-latest`.
+- `protected-production` — a protected self-hosted execution boundary for commands that require production-only network reachability, credentials, or evidence.
+
+The release profile never names arbitrary runner labels. The reusable workflow maps `protected-production` to the centrally controlled `self-hosted + engineering-release-production` labels. Before that runner can be scheduled, an `ubuntu-latest` authorization job must prove that the invocation is a `workflow_dispatch` from the caller repository's default branch and that `expected_sha` is in that default-branch history. PR-only or otherwise untrusted candidate SHAs therefore cannot cross into the protected runner path.
+
+The protected runner must expose the operator-managed marker `ENGINEERING_RELEASE_CONTEXT=protected-production`. This marker, production credentials, files, and network access belong to the trusted execution environment and must not be committed to repository configuration. The execution job rechecks the authorized context, runner boundary, canonical `.engineering/release.yaml` path, and exact candidate HEAD before any release command runs.
+
+Missing `execution_context` is interpreted as `github-hosted` for backward compatibility. Unknown contexts fail closed. Adoption and upgrade tooling may write only the two allowlisted values.
+
 A required evidence flag without its corresponding command is invalid. The reusable release contract executes cheap blockers first and stops immediately on failure.
 
 The generated project workflow has two explicit phases:

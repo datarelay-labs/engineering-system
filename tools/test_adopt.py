@@ -2063,6 +2063,101 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         assert token in workflow, token
 
 
+def test_release_execution_context_is_bounded_and_upgradeable() -> None:
+    reusable = (ROOT / ".github" / "workflows" / "release-contract.yml").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "authorize:\n    runs-on: ubuntu-latest",
+        'runner = ["self-hosted", "engineering-release-production"]',
+        'if os.environ.get("CALLER_EVENT_NAME") != "workflow_dispatch"',
+        "protected-production candidate must be in default-branch history",
+        'ENGINEERING_RELEASE_CONTEXT:-',
+        'profile_path.as_posix() != ".engineering/release.yaml"',
+        "runs-on: ${{ fromJSON(needs.authorize.outputs.runner_json) }}",
+        "ref: ${{ inputs.expected_sha }}",
+    )
+    for token in required:
+        assert token in reusable, token
+    assert "runs-on: ${{ inputs." not in reusable
+    assert "runs-on: ${{ github.event.inputs" not in reusable
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-protected-release"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/protected-release\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (target / "RUNBOOK.md").write_text("# Operations Runbook\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--operations-mode",
+            "production",
+            "--runbook-path",
+            "RUNBOOK.md",
+            "--health-command",
+            "true",
+            "--operational-e2e-command",
+            "true",
+            "--public-smoke-command",
+            "true",
+            "--full-e2e-passes",
+            "1",
+            "--release-execution-context",
+            "protected-production",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        release_path = target / ".engineering" / "release.yaml"
+        release = load_yaml(release_path)
+        assert release["execution_context"] == "protected-production"
+        caller = (target / ".github/workflows/engineering-release.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "engineering-release-production" not in caller
+        assert "runner_json" not in caller
+
+        release["execution_context"] = "attacker-controlled"
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        rejected = run(
+            sys.executable, str(CHECK), "--root", str(target), check=False
+        )
+        assert rejected.returncode != 0
+        assert "release.yaml execution_context is unsupported" in rejected.stdout
+
+        release["execution_context"] = "protected-production"
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare protected release upgrade")
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        upgraded_release = load_yaml(release_path)
+        assert upgraded_release["execution_context"] == "protected-production"
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -2115,6 +2210,7 @@ def main() -> int:
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
+    test_release_execution_context_is_bounded_and_upgradeable()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

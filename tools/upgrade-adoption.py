@@ -585,6 +585,7 @@ def main() -> int:
     parser.add_argument("--artifact-hash-command", default="")
     parser.add_argument("--provenance-command", default="")
     parser.add_argument("--sbom-command", default="")
+    parser.add_argument("--release-execution-context", default="", choices=("", "github-hosted", "protected-production"))
     parser.add_argument("--operational-e2e-command", default="")
     parser.add_argument("--public-smoke-command", default="")
     parser.add_argument("--full-e2e-passes", type=int, default=-1)
@@ -704,6 +705,10 @@ def main() -> int:
     sbom_command = coalesce(args.sbom_command, release.get("sbom_command"))
     operational_e2e_command = coalesce(args.operational_e2e_command, release.get("operational_e2e_command"))
     public_smoke_command = coalesce(args.public_smoke_command, release.get("public_smoke_command"))
+    release_execution_context = (
+        args.release_execution_context.strip()
+        or str(release.get("execution_context") or "github-hosted").strip()
+    )
 
     full_e2e_passes = args.full_e2e_passes
     if full_e2e_passes < 0:
@@ -765,6 +770,7 @@ def main() -> int:
     operations["rollback_command"] = rollback_command
     project["operations"] = operations
 
+    release["execution_context"] = release_execution_context
     release["setup_command"] = setup_command
     release["preflight_command"] = preflight_command
     release["preflight_required"] = bool(preflight_command)
