@@ -31,6 +31,7 @@ jobs:
           sparse-checkout: |
             tools/ci_policy_audit.py
             tools/context_epoch.py
+            tools/engineering-context.py
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -120,6 +121,25 @@ jobs:
                       failures.append("canonical compliance runtime missing tools/context_epoch.py")
                   elif target_helper.read_bytes() != canonical_helper.read_bytes():
                       failures.append("tools/context_epoch.py differs from canonical managed helper")
+
+              engineering_context_referenced = any(
+                  path.is_file() and "tools/engineering-context.py" in path.read_text(encoding="utf-8")
+                  for path in (
+                      Path(".cursor/commands/resume.md"),
+                      Path(".cursor/commands/work-resume.md"),
+                  )
+              )
+              if engineering_context_referenced:
+                  target_helper = Path("tools/engineering-context.py")
+                  canonical_helper = Path(".engineering-system-runtime/tools/engineering-context.py")
+                  if not target_helper.is_file():
+                      failures.append(
+                          "Cursor resume adapter references engineering-context helper but missing tools/engineering-context.py"
+                      )
+                  elif not canonical_helper.is_file():
+                      failures.append("canonical compliance runtime missing tools/engineering-context.py")
+                  elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                      failures.append("tools/engineering-context.py differs from canonical managed helper")
 
               if version_tuple >= (1, 4, 0):
                   if mode not in {"canonical", "adopted"}:

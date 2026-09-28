@@ -138,6 +138,8 @@ AGENTS.md
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
+Managed Cursor resume adapters invoke both `tools/context_epoch.py` and `tools/engineering-context.py`. Bootstrap and managed upgrade install exact canonical copies of both helpers when missing, and fail closed before mutation when a pre-existing copy differs. This keeps resume/context-orientation commands executable in adopted repositories without vendoring the full Engineering System.
+
 Adopted `AGENTS.md` may route optional knowledge freshness through `python3 tools/knowledge-contract.py`. Bootstrap and managed upgrade install that helper and `schemas/knowledge-index.schema.json` when the paths are missing, so the instructed command exists in the adopted repository. A pre-existing different copy fails closed before bootstrap writes any files, and managed upgrade fails closed the same way. `.engineering/knowledge.yaml` stays optional and is never created or rewritten. Repositories whose `AGENTS.md` does not reference the helper remain valid without those files.
 
 Adopted `AGENTS.md` may route optional runtime checks through `python3 tools/runtime-contract.py check`. Bootstrap and managed upgrade install that helper and `schemas/runtime-contract.schema.json` when the paths are missing. A pre-existing different copy fails closed before any adoption or upgrade writes. `.engineering/runtime.yaml` stays optional and is never created or rewritten. Health, smoke, and operational E2E commands remain in the project and release profiles.

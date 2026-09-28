@@ -972,6 +972,7 @@ def _managed_upgrade_file_snapshot(root: Path) -> dict[str, bytes]:
         ".cursor/commands/resume.md",
         ".cursor/commands/work-resume.md",
         "tools/context_epoch.py",
+        "tools/engineering-context.py",
     )
     return {rel: (root / rel).read_bytes() for rel in rels if (root / rel).is_file()}
 
@@ -1930,6 +1931,138 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert not (target / "AGENTS.md").exists()
 
 
+def test_engineering_context_helper_adoption_and_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-engineering-context"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/engineering-context\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        helper = target / "tools" / "engineering-context.py"
+        assert helper.read_bytes() == (ROOT / "tools" / "engineering-context.py").read_bytes()
+        resume = (target / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
+        assert "tools/engineering-context.py" in resume
+
+        helper.unlink()
+        compliance = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert compliance.returncode != 0
+        assert "references engineering-context helper but missing tools/engineering-context.py" in compliance.stdout
+
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "drop engineering context helper before upgrade")
+
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "ENGINEERING_CONTEXT_INSTALLED=tools/engineering-context.py" in upgraded.stdout
+        assert helper.read_bytes() == (ROOT / "tools" / "engineering-context.py").read_bytes()
+        checked = run(sys.executable, str(CHECK), "--root", str(target))
+        assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
+
+        helper.unlink()
+        commit_all(target, "remove current-baseline engineering context helper")
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ENGINEERING_CONTEXT_REPAIR=REQUIRED" in repaired.stdout
+        assert "ENGINEERING_CONTEXT_INSTALLED=tools/engineering-context.py" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in repaired.stdout
+        assert helper.read_bytes() == (ROOT / "tools" / "engineering-context.py").read_bytes()
+
+        helper.write_text("#!/usr/bin/env python3\nprint('divergent')\n", encoding="utf-8")
+        divergent = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert divergent.returncode != 0
+        assert "tools/engineering-context.py differs from canonical managed helper" in divergent.stdout
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-custom-engineering-context"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/custom-engineering-context\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        helper = target / "tools" / "engineering-context.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("#!/usr/bin/env python3\nprint('custom')\n", encoding="utf-8")
+        commit_all(target)
+        failed = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "tools/engineering-context.py contains local/custom changes" in failed.stdout
+        assert "ADOPTION_BOOTSTRAP=PASS" not in failed.stdout
+        assert not (target / "AGENTS.md").exists()
+
+
+def test_adoption_compliance_workflow_checks_engineering_context_helper() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "adoption-compliance.yml").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "tools/engineering-context.py",
+        ".engineering-system-runtime/tools/engineering-context.py",
+        "references engineering-context helper but missing tools/engineering-context.py",
+        "tools/engineering-context.py differs from canonical managed helper",
+    )
+    for token in required:
+        assert token in workflow, token
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -1980,6 +2113,8 @@ def main() -> int:
     test_custom_skills_schema_fails_closed_before_upgrade_mutation()
     test_fresh_adoption_installs_verification_t4_dependency()
     test_context_epoch_helper_adoption_and_upgrade()
+    test_engineering_context_helper_adoption_and_upgrade()
+    test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
