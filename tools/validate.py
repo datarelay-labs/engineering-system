@@ -785,7 +785,7 @@ def validate_context_economics_contract():
     if schema.get("additionalProperties") is not False:
         raise SystemExit("FAIL context economics report permits freeform top-level fields")
     candidates = schema.get("properties", {}).get("candidates", {})
-    if candidates.get("minItems") != 1 or candidates.get("maxItems") != 63:
+    if candidates.get("minItems") != 1 or candidates.get("maxItems") != 255:
         raise SystemExit("FAIL context economics candidate bounds drifted")
     candidate = schema.get("$defs", {}).get("candidate", {})
     if candidate.get("additionalProperties") is not False:

@@ -182,6 +182,12 @@ def test_shadow_and_control_bindings_fail_closed() -> None:
 
 
 def test_envelope_and_schema_are_strict() -> None:
+    schema = json.loads((ROOT / "schemas/context-economics-report.schema.json").read_text(encoding="utf-8"))
+    if schema["properties"]["arm_count"].get("maximum") != 256:
+        fail("economics arm bound is narrower than upstream 256-record comparison capacity")
+    if schema["properties"]["candidates"].get("maxItems") != 255:
+        fail("economics candidate bound is narrower than control plus 255 candidate arms")
+
     doc = envelope()
     doc["note"] = "freeform"
     expect_error("ENVELOPE_INVALID", lambda: economics.evaluate_economics(doc))
