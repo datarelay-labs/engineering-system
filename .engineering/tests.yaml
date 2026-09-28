@@ -55,6 +55,10 @@ paths:
     domains: [session-continuity, ai, workflows]
   "tools/test_context_optimization_benchmark.py":
     domains: [session-continuity, ai]
+  "tools/engineering-context.py":
+    domains: [session-continuity, workflows]
+  "tools/test_engineering_context.py":
+    domains: [session-continuity]
   "evals/context-optimization/**":
     domains: [session-continuity, ai]
   "tools/cursor-resource-preflight.py":
@@ -287,6 +291,24 @@ scenarios:
       - "offline context fixtures retain protected state and required evidence deterministically"
       - "cost per verified solved task is derived only from measured model cost"
       - "reports do not invent winners or weighted scores"
+    release_gate: true
+
+  - id: ENG-CONTEXT-ROUTER-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Exact-HEAD repository orientation and JIT routing
+    level: static
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_engineering_context.py"
+    invariants:
+      - "task orientation is exact-HEAD-bound deterministic and content-free"
+      - "orientation returns only bounded tracked relative paths and fails closed on dirty state"
+      - "legacy diff/domain routing is unchanged without task orientation"
     release_gate: true
 
   - id: ENG-RESOURCE-001

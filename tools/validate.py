@@ -58,6 +58,7 @@ REQUIRED_METHOD_FILES = (
     "tools/context_optimization_benchmark.py",
     "tools/test_context_optimization_benchmark.py",
     "tools/engineering-context.py",
+    "tools/test_engineering_context.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -643,7 +644,7 @@ def validate_token_efficiency_contract():
 
     context_tool = (ROOT / "tools/engineering-context.py").read_text(encoding="utf-8")
     test_tool = (ROOT / "tools/engineering-test.py").read_text(encoding="utf-8")
-    for token in ("CHANGED_FILE", "AFFECTED_DOMAINS", "CONTEXT_ROUTER=PASS"):
+    for token in ("CHANGED_FILE", "AFFECTED_DOMAINS", "ORIENTATION_HEAD", "ORIENTATION_FILE_JSON", "orientation requires a clean worktree", "CONTEXT_ROUTER=PASS"):
         if token not in context_tool:
             raise SystemExit(f"FAIL engineering-context helper missing token: {token}")
     for token in ("TEST_COST", "SKIP_EXPENSIVE_METADATA_ONLY", "agent-logs"):
@@ -1385,6 +1386,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_security_profile.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_engineering_context.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)
