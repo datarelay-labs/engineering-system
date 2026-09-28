@@ -108,6 +108,25 @@ def test_frozen_fixture_manifest_and_retention() -> None:
             fail(f"fixture report leaked source content/reference: {forbidden}")
 
 
+def test_fixture_expected_ids_form_complete_partition() -> None:
+    raw = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    raw["cases"][0]["blocks"].append({
+        "id": "undeclared-optional",
+        "kind": "docs",
+        "text": "unrelated context that must be explicitly classified",
+        "reference": "docs:undeclared",
+        "protected": False,
+        "priority": 100,
+    })
+    try:
+        bench.validate_manifest(raw)
+    except bench.BenchmarkError as exc:
+        if str(exc) != "CASE_EXPECTED_ID_PARTITION_INVALID":
+            fail(f"wrong incomplete partition rejection: {exc}")
+    else:
+        fail("fixture accepted a block missing from keep/drop expectations")
+
+
 def test_fixture_report_is_byte_stable() -> None:
     raw = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     first = json.dumps(bench.evaluate_manifest(raw), sort_keys=True, separators=(",", ":"))
@@ -262,6 +281,7 @@ def test_fixture_manifest_hash_is_frozen() -> None:
 def main() -> int:
     tests = [
         test_frozen_fixture_manifest_and_retention,
+        test_fixture_expected_ids_form_complete_partition,
         test_fixture_report_is_byte_stable,
         test_unknown_cost_stays_unknown,
         test_measured_cost_per_verified_solved_task,

@@ -155,6 +155,9 @@ def validate_manifest(raw: Any) -> dict[str, Any]:
             raise BenchmarkError("CASE_EXPECTED_ID_MISSING")
         if (set(protected_ids) & set(kept_ids)) or (set(protected_ids) & set(dropped_ids)) or (set(kept_ids) & set(dropped_ids)):
             raise BenchmarkError("CASE_EXPECTED_ID_OVERLAP")
+        expected_ids = set(protected_ids) | set(kept_ids) | set(dropped_ids)
+        if expected_ids != all_ids:
+            raise BenchmarkError("CASE_EXPECTED_ID_PARTITION_INVALID")
         actual_protected = {item.block_id for item in parsed_blocks if item.protected}
         if set(protected_ids) != actual_protected:
             raise BenchmarkError("CASE_PROTECTED_IDS_MISMATCH")
