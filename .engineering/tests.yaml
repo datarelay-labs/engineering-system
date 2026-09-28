@@ -51,6 +51,12 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_context_compiler.py":
     domains: [session-continuity]
+  "tools/context_optimization_benchmark.py":
+    domains: [session-continuity, ai, workflows]
+  "tools/test_context_optimization_benchmark.py":
+    domains: [session-continuity, ai]
+  "evals/context-optimization/**":
+    domains: [session-continuity, ai]
   "tools/cursor-resource-preflight.py":
     domains: [session-continuity, workflows]
   "tools/test_cursor_resource_preflight.py":
@@ -263,6 +269,24 @@ scenarios:
       - "protected engineering state is never dropped or rewritten to satisfy a context budget"
       - "optional context selection is deterministic provider-neutral and byte-bounded"
       - "compiler telemetry retains metrics only and no source content"
+    release_gate: true
+
+  - id: ENG-CONTEXT-OPT-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Context optimization measurement harness
+    level: static
+    domains: [session-continuity, ai]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_optimization_benchmark.py"
+    invariants:
+      - "offline context fixtures retain protected state and required evidence deterministically"
+      - "cost per verified solved task is derived only from measured model cost"
+      - "reports do not invent winners or weighted scores"
     release_gate: true
 
   - id: ENG-RESOURCE-001

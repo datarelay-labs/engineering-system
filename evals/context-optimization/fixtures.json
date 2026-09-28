@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "kind": "context-optimization-fixture-manifest",
+  "cases": [
+    {
+      "id": "CTX-STALE-001",
+      "task": "fix context compiler budget selection while preserving current work packet next action",
+      "budget_bytes": 926,
+      "blocks": [
+        {
+          "id": "goal",
+          "kind": "work_packet",
+          "text": "Keep the bounded context compiler correct and deterministic.",
+          "reference": "issue:106",
+          "protected": true,
+          "protection_class": "goal",
+          "priority": 0
+        },
+        {
+          "id": "next",
+          "kind": "work_packet",
+          "text": "Implement the measurement harness and validate exact fixture retention.",
+          "reference": "issue:106",
+          "protected": true,
+          "protection_class": "next_action",
+          "priority": 0
+        },
+        {
+          "id": "identity",
+          "kind": "work_packet",
+          "text": "repo=datarelay-labs/engineering-system branch=feat/context-optimization-measurement-harness HEAD=972c273ba0e380d1fdba6a242d042658a2a6c20e INTENT_REVISION=1",
+          "reference": "issue:106",
+          "protected": true,
+          "protection_class": "repository_identity",
+          "priority": 0
+        },
+        {
+          "id": "relevant-code",
+          "kind": "code",
+          "text": "context compiler budget selection retained block measurement harness",
+          "reference": "tools/context_optimization_benchmark.py",
+          "protected": false,
+          "priority": 0
+        },
+        {
+          "id": "old-log",
+          "kind": "log",
+          "text": "historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss historical unrelated build output warning retry cache miss ",
+          "reference": "historical:test-log",
+          "protected": false,
+          "priority": 0
+        },
+        {
+          "id": "old-docs",
+          "kind": "docs",
+          "text": "legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler legacy release migration notes unrelated to context compiler ",
+          "reference": "historical:docs",
+          "protected": false,
+          "priority": 0
+        }
+      ],
+      "required_protected_ids": [
+        "goal",
+        "next",
+        "identity"
+      ],
+      "required_optional_kept_ids": [
+        "relevant-code"
+      ],
+      "required_dropped_ids": [
+        "old-log",
+        "old-docs"
+      ],
+      "required_references": {
+        "identity": "issue:106"
+      }
+    },
+    {
+      "id": "CTX-RELEVANCE-002",
+      "task": "implement context optimization scorer exact head evidence cost per verified solved task",
+      "budget_bytes": 462,
+      "blocks": [
+        {
+          "id": "state",
+          "kind": "work_packet",
+          "text": "Current state: deterministic compiler is merged and scoring is the active bounded outcome.",
+          "reference": "issue:106",
+          "protected": true,
+          "protection_class": "current_state",
+          "priority": 0
+        },
+        {
+          "id": "code",
+          "kind": "code",
+          "text": "def scoreRunSet(exactHeadEvidence, modelCost): return cost_per_verified_solved_task",
+          "reference": "tools/context_optimization_benchmark.py",
+          "protected": false,
+          "priority": 0
+        },
+        {
+          "id": "docs",
+          "kind": "docs",
+          "text": "restaurant reservation travel itinerary hotel checkout",
+          "reference": "docs:unrelated",
+          "protected": false,
+          "priority": 100
+        }
+      ],
+      "required_protected_ids": [
+        "state"
+      ],
+      "required_optional_kept_ids": [
+        "code"
+      ],
+      "required_dropped_ids": [
+        "docs"
+      ],
+      "required_references": {
+        "state": "issue:106"
+      }
+    },
+    {
+      "id": "CTX-SECURITY-003",
+      "task": "audit security evidence exact head and preserve fail closed boundary references",
+      "budget_bytes": 856,
+      "blocks": [
+        {
+          "id": "security",
+          "kind": "work_packet",
+          "text": "Never weaken fail-closed authority or expose raw credentials.",
+          "reference": "standard:security",
+          "protected": true,
+          "protection_class": "security_constraint",
+          "priority": 0
+        },
+        {
+          "id": "evidence",
+          "kind": "work_packet",
+          "text": "Required evidence: exact-head CI and independent audit must both PASS.",
+          "reference": "ci:176",
+          "protected": true,
+          "protection_class": "evidence_reference",
+          "priority": 0
+        },
+        {
+          "id": "failure",
+          "kind": "work_packet",
+          "text": "Unresolved failure code must remain visible: TRUST_BOUNDARY_UNAVAILABLE.",
+          "reference": "issue:85",
+          "protected": true,
+          "protection_class": "unresolved_failure",
+          "priority": 0
+        },
+        {
+          "id": "audit-code",
+          "kind": "code",
+          "text": "verify exact head evidence security boundary fail closed audit",
+          "reference": "tools/independent_verifier.py",
+          "protected": false,
+          "priority": 0
+        },
+        {
+          "id": "noise",
+          "kind": "log",
+          "text": "old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green old successful test output green green green ",
+          "reference": "historical:ci",
+          "protected": false,
+          "priority": 0
+        }
+      ],
+      "required_protected_ids": [
+        "security",
+        "evidence",
+        "failure"
+      ],
+      "required_optional_kept_ids": [
+        "audit-code"
+      ],
+      "required_dropped_ids": [
+        "noise"
+      ],
+      "required_references": {
+        "security": "standard:security",
+        "evidence": "ci:176",
+        "failure": "issue:85"
+      }
+    }
+  ]
+}

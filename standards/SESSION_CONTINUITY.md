@@ -305,6 +305,18 @@ Protected classes include current Work Packet Goal, Current State, Next Action, 
 
 Semantic compression services are a later measured adapter/canary. They must be compared against this deterministic baseline and cannot weaken protected-state, provenance, exact-head, validation, or independent-verification gates.
 
+### Context-optimization measurement lane
+
+Context reduction is not a success metric by itself. `tools/context_optimization_benchmark.py` provides the deterministic P0.5 measurement contract for #104. It has two bounded surfaces:
+- frozen offline fixtures exercise the canonical Context Compiler against stale/log-heavy, relevance-selection, and security/evidence-retention cases; and
+- factual run-set scoring aggregates exact-head/correctness/evidence status, context volume, retries/rework/human intervention, and caller-supplied model cost.
+
+A run counts as `VERIFIED_SOLVED` only when terminal status and correct behavior PASS, no safety regression exists, exact-head evidence PASSes **and is explicitly bound to that record's `SYSTEM_HEAD` SHA**, and required evidence retention PASSes. `BENCH-*` cases reuse the canonical frozen benchmark authority: their fixture IDs must bind through `benchmark_fixture.bind_fixture_id()` to the exact manifest revision frozen by `benchmark_execution.PILOT_MANIFEST_HEAD`, not merely match a 40-hex prefix shape. Model cost remains `UNKNOWN` if any record in an arm lacks a measured numeric value. `cost_per_verified_solved_task` is emitted only when the entire arm has measured model cost and at least one verified solved task; bytes are never converted into provider tokens or cost.
+
+One arm represents one exact system HEAD, one arm/case pair may appear only once, every arm in a scored comparison must cover the same case set, and the same case ID must bind to the same frozen fixture ID across arms. Reports are ordered facts only: they do not emit a winner, ranking, weighted score, or aggregate quality score. Promotion decisions remain outside this helper and must apply the #104 correctness, privacy, cache, and economics gates.
+
+The measurement helper is offline/read-only: it launches no worker, calls no provider/model/network service, mutates no GitHub/runtime state, and retains no raw context text, prompt, absolute path, credential, or tool output in its reports.
+
 ## Deterministic packet resolution
 
 When resuming work:
