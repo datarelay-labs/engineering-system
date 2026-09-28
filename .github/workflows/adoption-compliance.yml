@@ -234,6 +234,9 @@ jobs:
           release_path = Path(".engineering/release.yaml")
           if release_path.is_file():
               release = load(release_path)
+              execution_context = release.get("execution_context", "github-hosted")
+              if execution_context not in {"github-hosted", "protected-production"}:
+                  failures.append("release.yaml execution_context is unsupported")
               if bool(release.get("preflight_required")) and not str(release.get("preflight_command") or "").strip():
                   failures.append("preflight_required=true but preflight_command is empty")
               match = semver_re.fullmatch(version)

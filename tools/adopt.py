@@ -754,6 +754,7 @@ def release_yaml(
     provenance_command: str,
     sbom_command: str,
     operations_mode: str,
+    release_execution_context: str,
     operational_e2e_command: str,
     full_e2e_passes: int,
     public_smoke_command: str,
@@ -765,6 +766,7 @@ def release_yaml(
         f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}\n"
         f"provenance_required: {'true' if provenance_command else 'false'}\n"
         f"sbom_required: {'true' if sbom_command else 'false'}\n"
+        f"execution_context: {yaml_scalar(release_execution_context)}\n"
         f"setup_command: {yaml_scalar(release_setup_command)}\n"
         f"preflight_required: {'true' if preflight_command else 'false'}\n"
         f"preflight_command: {yaml_scalar(preflight_command)}\n"
@@ -1000,6 +1002,7 @@ def main() -> int:
     parser.add_argument("--artifact-hash-command", default="")
     parser.add_argument("--provenance-command", default="")
     parser.add_argument("--sbom-command", default="")
+    parser.add_argument("--release-execution-context", default="github-hosted", choices=("github-hosted", "protected-production"))
     parser.add_argument("--operational-e2e-command", default="")
     parser.add_argument("--public-smoke-command", default="")
     parser.add_argument("--full-e2e-passes", type=int, default=1)
@@ -1269,6 +1272,7 @@ def main() -> int:
             args.provenance_command.strip(),
             args.sbom_command.strip(),
             operations_mode,
+            args.release_execution_context,
             operational_e2e_command,
             args.full_e2e_passes,
             public_smoke_command,

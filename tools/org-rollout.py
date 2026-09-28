@@ -55,6 +55,7 @@ ADOPT_SCALAR_FLAGS = {
     "artifact_hash_command": "--artifact-hash-command",
     "provenance_command": "--provenance-command",
     "sbom_command": "--sbom-command",
+    "release_execution_context": "--release-execution-context",
     "operational_e2e_command": "--operational-e2e-command",
     "public_smoke_command": "--public-smoke-command",
     "baseline_sha": "--baseline-sha",
@@ -85,6 +86,7 @@ UPGRADE_SCALAR_FLAGS = {
     "artifact_hash_command": "--artifact-hash-command",
     "provenance_command": "--provenance-command",
     "sbom_command": "--sbom-command",
+    "release_execution_context": "--release-execution-context",
     "operational_e2e_command": "--operational-e2e-command",
     "public_smoke_command": "--public-smoke-command",
 }

@@ -298,6 +298,9 @@ def main() -> int:
     if release_path.is_file():
         try:
             release = load_yaml(release_path) or {}
+            execution_context = release.get("execution_context", "github-hosted")
+            if execution_context not in {"github-hosted", "protected-production"}:
+                failures.append("release.yaml execution_context is unsupported")
             if bool(release.get("preflight_required")) and not str(release.get("preflight_command") or "").strip():
                 failures.append("release.yaml preflight_required=true but preflight_command is empty")
             if version_at_least(version, (1, 5, 0)) and bool(operations.get("production_oriented")):

@@ -106,6 +106,21 @@ public_smoke_command
 
 `operational_e2e_command` and `public_smoke_command` remain the only command authorities for operational E2E and public smoke. The optional runtime contract references these fields and must not store a second copy.
 
+### Release execution context
+
+`.engineering/release.yaml` may declare one bounded `execution_context`:
+
+- `github-hosted` — the backward-compatible default; release commands execute on `ubuntu-latest`.
+- `protected-production` — a protected self-hosted execution boundary for commands that require production-only network reachability, credentials, or evidence.
+
+The release profile never names arbitrary runner labels. The reusable workflow maps `protected-production` to the centrally controlled `self-hosted + engineering-release-production` labels. Before that runner can be scheduled, an `ubuntu-latest` authorization job must prove that the invocation is a `workflow_dispatch` from the caller repository's protected default branch and that `expected_sha` is in that default-branch history. PR-only or otherwise untrusted candidate SHAs therefore cannot cross into the protected runner path.
+
+The protected job targets the fixed runner group `engineering-release-production` and also requires the `self-hosted` and `engineering-release-production` labels. The runner group is an access-control boundary, not only a routing convention. Organization/enterprise runner-group configuration must set repository access to **Selected repositories** containing only explicitly approved production caller repositories, and workflow access to **Selected workflows** containing only the canonical reusable workflow for the active immutable Engineering System baseline, for example `datarelay-labs/engineering-system/.github/workflows/release-contract.yml@<baseline-sha>`. The group must not grant general repository or workflow access. When the approved caller set or Engineering System baseline changes, update these runner-group selections deliberately before protected release execution. If either external runner-group restriction is absent or stale, `protected-production` is not operationally qualified.
+
+The protected runner must expose the operator-managed marker `ENGINEERING_RELEASE_CONTEXT=protected-production`. This marker, production credentials, files, and network access belong to the trusted execution environment and must not be committed to repository configuration. Candidate source is checked out only into a dedicated `candidate/` subdirectory. Trusted Python setup/dependency installation occurs before that checkout, and authorization/contract parsing runs from runner-temporary storage with isolated Python import mode so candidate files such as `yaml.py` or `pip/` cannot shadow trusted modules. The execution job rechecks the authorized context, runner boundary, canonical `.engineering/release.yaml` path, and exact candidate HEAD before any release command runs; only then may the declared release commands execute with the candidate directory as their working directory.
+
+Missing `execution_context` is interpreted as `github-hosted` for backward compatibility. Unknown contexts fail closed. Adoption and upgrade tooling may write only the two allowlisted values, and upgrade audit/apply validates inherited values before reporting PASS or mutating managed files.
+
 A required evidence flag without its corresponding command is invalid. The reusable release contract executes cheap blockers first and stops immediately on failure.
 
 The generated project workflow has two explicit phases:

@@ -2063,6 +2063,346 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         assert token in workflow, token
 
 
+def test_release_execution_context_is_bounded_and_upgradeable() -> None:
+    reusable = (ROOT / ".github" / "workflows" / "release-contract.yml").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "authorize:\n    runs-on: ubuntu-latest",
+        'if os.environ.get("CALLER_EVENT_NAME") != "workflow_dispatch"',
+        'CALLER_REF_PROTECTED: ${{ github.ref_protected }}',
+        "protected-production requires a protected default-branch ref",
+        "protected-production candidate must be in default-branch history",
+        'ENGINEERING_RELEASE_CONTEXT:-',
+        'profile_rel.as_posix() != ".engineering/release.yaml"',
+        "release-contract-hosted:",
+        "release-contract-protected:",
+        'working-directory: ${{ runner.temp }}',
+        "python -I - <<'PY'",
+        "release profile path must stay inside candidate root",
+        "group: engineering-release-production",
+        "- self-hosted",
+        "- engineering-release-production",
+        "ref: ${{ inputs.expected_sha }}",
+    )
+    for token in required:
+        assert token in reusable, token
+    assert "runs-on: ${{ inputs." not in reusable
+    assert "runs-on: ${{ github.event.inputs" not in reusable
+    assert "runner_json" not in reusable
+
+    workflow = yaml.safe_load(reusable)
+    assert workflow["jobs"]["release-contract-hosted"]["runs-on"] == "ubuntu-latest"
+    protected_runs_on = workflow["jobs"]["release-contract-protected"]["runs-on"]
+    assert protected_runs_on["group"] == "engineering-release-production"
+    assert protected_runs_on["labels"] == [
+        "self-hosted",
+        "engineering-release-production",
+    ]
+    authorize_steps = workflow["jobs"]["authorize"]["steps"]
+    hosted_steps = workflow["jobs"]["release-contract-hosted"]["steps"]
+    protected_steps = workflow["jobs"]["release-contract-protected"]["steps"]
+
+    authorize_setup_at = next(
+        index
+        for index, step in enumerate(authorize_steps)
+        if "actions/setup-python@" in str(step.get("uses", ""))
+    )
+    authorize_install_at = next(
+        index
+        for index, step in enumerate(authorize_steps)
+        if step.get("name") == "Install authorization dependency"
+    )
+    authorize_checkout_at = next(
+        index
+        for index, step in enumerate(authorize_steps)
+        if "actions/checkout@" in str(step.get("uses", ""))
+    )
+    authorize_run_at = next(
+        index
+        for index, step in enumerate(authorize_steps)
+        if step.get("name") == "Authorize release execution context"
+    )
+    assert authorize_setup_at < authorize_install_at < authorize_checkout_at < authorize_run_at
+    assert authorize_steps[authorize_install_at]["working-directory"] == "${{ runner.temp }}"
+    assert "python -I -m pip install" in authorize_steps[authorize_install_at]["run"]
+    assert authorize_steps[authorize_checkout_at]["with"]["path"] == "candidate"
+    assert authorize_steps[authorize_run_at]["working-directory"] == "${{ runner.temp }}"
+    assert "python -I -" in authorize_steps[authorize_run_at]["run"]
+    hosted_execute = next(
+        step for step in hosted_steps if step.get("name") == "Execute release contract"
+    )
+    protected_execute = next(
+        step for step in protected_steps if step.get("name") == "Execute release contract"
+    )
+    assert hosted_execute["run"] == protected_execute["run"]
+    for steps in (hosted_steps, protected_steps):
+        setup_at = next(
+            index
+            for index, step in enumerate(steps)
+            if "actions/setup-python@" in str(step.get("uses", ""))
+        )
+        install_at = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Install release contract dependency"
+        )
+        checkout_at = next(
+            index for index, step in enumerate(steps) if "actions/checkout@" in str(step.get("uses", ""))
+        )
+        execute_at = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Execute release contract"
+        )
+        assert setup_at < install_at < checkout_at < execute_at
+        assert steps[install_at]["working-directory"] == "${{ runner.temp }}"
+        assert "python -I -m pip install" in steps[install_at]["run"]
+        assert steps[checkout_at]["with"]["path"] == "candidate"
+        assert steps[execute_at]["working-directory"] == "${{ runner.temp }}"
+        assert "python -I -" in steps[execute_at]["run"]
+    release_standard = (ROOT / "standards" / "RELEASE.md").read_text(encoding="utf-8")
+    assert "repository access to **Selected repositories**" in release_standard
+    assert "workflow access to **Selected workflows**" in release_standard
+    assert "only explicitly approved production caller repositories" in release_standard
+    assert "release-contract.yml@<baseline-sha>" in release_standard
+    assert "dedicated `candidate/` subdirectory" in release_standard
+    assert "isolated Python import mode" in release_standard
+    authorize_step = next(
+        step
+        for step in workflow["jobs"]["authorize"]["steps"]
+        if step.get("name") == "Authorize release execution context"
+    )
+    match = re.search(r"python(?: -I)? - <<'PY'\n(.*?)\n\s*PY\s*$", authorize_step["run"], re.S)
+    assert match is not None
+    authorization_code = match.group(1)
+
+    with tempfile.TemporaryDirectory() as auth_tmp:
+        auth_root = Path(auth_tmp) / "candidate"
+        auth_root.mkdir()
+        run("git", "init", "-q", "-b", "main", str(auth_root))
+        run("git", "config", "user.email", "test@example.invalid", cwd=auth_root)
+        run("git", "config", "user.name", "Release Auth Test", cwd=auth_root)
+        (auth_root / ".engineering").mkdir()
+        (auth_root / ".engineering/release.yaml").write_text(
+            "version: 1\nexact_head_required: true\nexecution_context: protected-production\n",
+            encoding="utf-8",
+        )
+        (auth_root / "yaml.py").write_text(
+            "import os\n"
+            "from pathlib import Path\n"
+            "Path(os.environ['MALICIOUS_IMPORT_MARKER']).write_text('imported', encoding='utf-8')\n"
+            "def safe_load(_value):\n"
+            "    return {'execution_context': 'github-hosted'}\n",
+            encoding="utf-8",
+        )
+        commit_all(auth_root)
+        remote = Path(auth_tmp) / "origin.git"
+        run("git", "clone", "-q", "--bare", str(auth_root), str(remote))
+        run("git", "remote", "add", "origin", str(remote), cwd=auth_root)
+        candidate = run("git", "rev-parse", "HEAD", cwd=auth_root).stdout.strip()
+        output = Path(auth_tmp) / "github-output"
+        malicious_import_marker = Path(auth_tmp) / "malicious-imported"
+        runner_temp = Path(auth_tmp) / "runner-temp"
+        runner_temp.mkdir()
+
+        def authorize(**overrides: str) -> subprocess.CompletedProcess[str]:
+            import os
+            env = {
+                "EXPECTED_SHA": candidate,
+                "RELEASE_PROFILE": ".engineering/release.yaml",
+                "CANDIDATE_ROOT": str(auth_root),
+                "CALLER_EVENT_NAME": "workflow_dispatch",
+                "CALLER_REF": "refs/heads/main",
+                "CALLER_REF_PROTECTED": "true",
+                "DEFAULT_BRANCH": "main",
+                "GITHUB_OUTPUT": str(output),
+                "MALICIOUS_IMPORT_MARKER": str(malicious_import_marker),
+            }
+            env.update(overrides)
+            return subprocess.run(
+                [sys.executable, "-I", "-c", authorization_code],
+                cwd=runner_temp,
+                env={**os.environ, **env},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+
+        release_profile = auth_root / ".engineering" / "release.yaml"
+        for explicit_invalid in ("false", "null", "0", '""', '" github-hosted "'):
+            release_profile.write_text(
+                "version: 1\n"
+                "exact_head_required: true\n"
+                f"execution_context: {explicit_invalid}\n",
+                encoding="utf-8",
+            )
+            invalid_context = authorize()
+            assert invalid_context.returncode != 0, explicit_invalid
+            assert "unsupported release execution_context" in invalid_context.stdout
+        release_profile.write_text(
+            "version: 1\nexact_head_required: true\nexecution_context: protected-production\n",
+            encoding="utf-8",
+        )
+
+        path_escape = authorize(RELEASE_PROFILE="../escape.yaml")
+        assert path_escape.returncode != 0
+        assert "release profile path must stay inside candidate root" in path_escape.stdout
+
+        absolute_escape = authorize(RELEASE_PROFILE=str(Path(auth_tmp) / "outside.yaml"))
+        assert absolute_escape.returncode != 0
+        assert "release profile path must stay inside candidate root" in absolute_escape.stdout
+
+        unprotected = authorize(CALLER_REF_PROTECTED="false")
+        assert unprotected.returncode != 0
+        assert "requires a protected default-branch ref" in unprotected.stdout
+
+        pr_event = authorize(CALLER_EVENT_NAME="pull_request")
+        assert pr_event.returncode != 0
+        assert "requires workflow_dispatch" in pr_event.stdout
+
+        wrong_ref = authorize(CALLER_REF="refs/heads/feature")
+        assert wrong_ref.returncode != 0
+        assert "must be dispatched from the default branch" in wrong_ref.stdout
+
+        not_in_history = authorize(EXPECTED_SHA="f" * 40)
+        assert not_in_history.returncode != 0
+        assert "candidate must be in default-branch history" in not_in_history.stdout
+
+        if output.exists():
+            output.unlink()
+        allowed = authorize()
+        assert allowed.returncode == 0, allowed.stdout
+        assert not malicious_import_marker.exists()
+        emitted = output.read_text(encoding="utf-8")
+        assert "execution_context=protected-production" in emitted
+        assert "runner_json" not in emitted
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-protected-release"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/protected-release\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (target / "RUNBOOK.md").write_text("# Operations Runbook\n", encoding="utf-8")
+        commit_all(target)
+        applied = run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+            "--operations-mode",
+            "production",
+            "--runbook-path",
+            "RUNBOOK.md",
+            "--health-command",
+            "true",
+            "--operational-e2e-command",
+            "true",
+            "--public-smoke-command",
+            "true",
+            "--full-e2e-passes",
+            "1",
+            "--release-execution-context",
+            "protected-production",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        release_path = target / ".engineering" / "release.yaml"
+        release = load_yaml(release_path)
+        assert release["execution_context"] == "protected-production"
+        caller = (target / ".github/workflows/engineering-release.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "engineering-release-production" not in caller
+        assert "runner_json" not in caller
+
+        release["execution_context"] = "attacker-controlled"
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        rejected = run(
+            sys.executable, str(CHECK), "--root", str(target), check=False
+        )
+        assert rejected.returncode != 0
+        assert "release.yaml execution_context is unsupported" in rejected.stdout
+        commit_all(target, "prepare invalid same-version release context")
+
+        no_change_invalid = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert no_change_invalid.returncode != 0
+        assert "release execution_context is unsupported" in no_change_invalid.stdout, no_change_invalid.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in no_change_invalid.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" not in no_change_invalid.stdout
+
+        release["execution_context"] = False
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare falsey same-version release context")
+        falsey_no_change = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert falsey_no_change.returncode != 0
+        assert "release execution_context is unsupported" in falsey_no_change.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in falsey_no_change.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" not in falsey_no_change.stdout
+
+        project_path = target / ".engineering" / "project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare invalid inherited release context")
+        invalid_upgrade = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert invalid_upgrade.returncode != 0
+        assert "release execution_context is unsupported" in invalid_upgrade.stdout
+        assert run("git", "status", "--porcelain", cwd=target).stdout == ""
+
+        release["execution_context"] = "protected-production"
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare protected release upgrade")
+        upgraded = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        upgraded_release = load_yaml(release_path)
+        assert upgraded_release["execution_context"] == "protected-production"
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -2115,6 +2455,7 @@ def main() -> int:
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
+    test_release_execution_context_is_bounded_and_upgradeable()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0
