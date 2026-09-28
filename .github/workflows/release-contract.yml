@@ -30,9 +30,10 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import re
 
@@ -41,38 +42,48 @@ jobs:
               raise SystemExit("FAIL expected_sha must be one full lowercase commit SHA")
           PY
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.expected_sha }}
-          fetch-depth: 0
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
       - name: Install authorization dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          path: candidate
 
       - name: Authorize release execution context
         id: authorize
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           RELEASE_PROFILE: ${{ inputs.profile_path }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/candidate
           CALLER_EVENT_NAME: ${{ github.event_name }}
           CALLER_REF: ${{ github.ref }}
           CALLER_REF_PROTECTED: ${{ github.ref_protected }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import subprocess
           from pathlib import Path
 
-          profile_path = Path(os.environ["RELEASE_PROFILE"])
+          candidate_root = Path(os.environ["CANDIDATE_ROOT"]).resolve()
+          profile_rel = Path(os.environ["RELEASE_PROFILE"])
+          if profile_rel.is_absolute() or ".." in profile_rel.parts:
+              raise SystemExit("FAIL release profile path must stay inside candidate root")
+          profile_path = (candidate_root / profile_rel).resolve()
+          if candidate_root not in profile_path.parents:
+              raise SystemExit("FAIL release profile path escapes candidate root")
           if not profile_path.is_file():
-              raise SystemExit(f"FAIL missing release profile: {profile_path}")
+              raise SystemExit(f"FAIL missing release profile: {profile_rel}")
           import yaml
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
           context = str(profile.get("execution_context") or "github-hosted").strip()
@@ -81,7 +92,7 @@ jobs:
               raise SystemExit(f"FAIL unsupported release execution_context: {context}")
 
           if context == "protected-production":
-              if profile_path.as_posix() != ".engineering/release.yaml":
+              if profile_rel.as_posix() != ".engineering/release.yaml":
                   raise SystemExit("FAIL protected-production requires canonical .engineering/release.yaml")
               default_branch = os.environ.get("DEFAULT_BRANCH", "").strip()
               if not default_branch:
@@ -94,10 +105,21 @@ jobs:
                   raise SystemExit("FAIL protected-production requires a protected default-branch ref")
               remote_ref = f"refs/remotes/origin/{default_branch}"
               fetch_ref = f"+refs/heads/{default_branch}:{remote_ref}"
-              subprocess.run(["git", "fetch", "origin", fetch_ref], check=True)
+              subprocess.run(
+                  ["git", "-C", str(candidate_root), "fetch", "origin", fetch_ref],
+                  check=True,
+              )
               candidate = os.environ["EXPECTED_SHA"]
               ancestor = subprocess.run(
-                  ["git", "merge-base", "--is-ancestor", candidate, remote_ref],
+                  [
+                      "git",
+                      "-C",
+                      str(candidate_root),
+                      "merge-base",
+                      "--is-ancestor",
+                      candidate,
+                      remote_ref,
+                  ],
                   check=False,
               )
               if ancestor.returncode != 0:
@@ -134,37 +156,47 @@ jobs:
             }
           fi
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.expected_sha }}
-          fetch-depth: 0
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
       - name: Install release contract dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          path: candidate
 
       - name: Execute release contract
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           RELEASE_PHASE: ${{ inputs.phase }}
           RELEASE_PROFILE: ${{ inputs.profile_path }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/candidate
           AUTHORIZED_EXECUTION_CONTEXT: ${{ needs.authorize.outputs.execution_context }}
         shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import subprocess
           from pathlib import Path
 
           import yaml
 
-          profile_path = Path(os.environ["RELEASE_PROFILE"])
+          candidate_root = Path(os.environ["CANDIDATE_ROOT"]).resolve()
+          profile_rel = Path(os.environ["RELEASE_PROFILE"])
+          if profile_rel.is_absolute() or ".." in profile_rel.parts:
+              raise SystemExit("FAIL release profile path must stay inside candidate root")
+          profile_path = (candidate_root / profile_rel).resolve()
+          if candidate_root not in profile_path.parents:
+              raise SystemExit("FAIL release profile path escapes candidate root")
           if not profile_path.is_file():
-              raise SystemExit(f"FAIL missing release profile: {profile_path}")
+              raise SystemExit(f"FAIL missing release profile: {profile_rel}")
 
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
           context = str(profile.get("execution_context") or "github-hosted").strip()
@@ -175,14 +207,17 @@ jobs:
               raise SystemExit(
                   f"FAIL release execution context changed after authorization: {authorized} -> {context}"
               )
-          if context == "protected-production" and profile_path.as_posix() != ".engineering/release.yaml":
+          if context == "protected-production" and profile_rel.as_posix() != ".engineering/release.yaml":
               raise SystemExit("FAIL protected-production requires canonical .engineering/release.yaml")
 
           phase = os.environ.get("RELEASE_PHASE", "qualify").strip()
           if phase not in {"qualify", "post-release"}:
               raise SystemExit(f"FAIL invalid release phase: {phase}")
 
-          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          actual = subprocess.check_output(
+              ["git", "-C", str(candidate_root), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
           expected = os.environ.get("EXPECTED_SHA", "").strip()
           print(f"CANDIDATE_HEAD={actual}")
           print(f"RELEASE_EXECUTION_CONTEXT={context}")
@@ -215,7 +250,10 @@ jobs:
                   return
               print(f"=== {label} ===", flush=True)
               print(f"$ {value}", flush=True)
-              result = subprocess.run(["bash", "-lc", value])
+              result = subprocess.run(
+                  ["bash", "-lc", value],
+                  cwd=candidate_root,
+              )
               if result.returncode:
                   raise SystemExit(f"FAIL {label} exit={result.returncode}")
               print(f"PASS {label}", flush=True)
@@ -275,37 +313,47 @@ jobs:
             }
           fi
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.expected_sha }}
-          fetch-depth: 0
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
       - name: Install release contract dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          path: candidate
 
       - name: Execute release contract
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           RELEASE_PHASE: ${{ inputs.phase }}
           RELEASE_PROFILE: ${{ inputs.profile_path }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/candidate
           AUTHORIZED_EXECUTION_CONTEXT: ${{ needs.authorize.outputs.execution_context }}
         shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import subprocess
           from pathlib import Path
 
           import yaml
 
-          profile_path = Path(os.environ["RELEASE_PROFILE"])
+          candidate_root = Path(os.environ["CANDIDATE_ROOT"]).resolve()
+          profile_rel = Path(os.environ["RELEASE_PROFILE"])
+          if profile_rel.is_absolute() or ".." in profile_rel.parts:
+              raise SystemExit("FAIL release profile path must stay inside candidate root")
+          profile_path = (candidate_root / profile_rel).resolve()
+          if candidate_root not in profile_path.parents:
+              raise SystemExit("FAIL release profile path escapes candidate root")
           if not profile_path.is_file():
-              raise SystemExit(f"FAIL missing release profile: {profile_path}")
+              raise SystemExit(f"FAIL missing release profile: {profile_rel}")
 
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
           context = str(profile.get("execution_context") or "github-hosted").strip()
@@ -316,14 +364,17 @@ jobs:
               raise SystemExit(
                   f"FAIL release execution context changed after authorization: {authorized} -> {context}"
               )
-          if context == "protected-production" and profile_path.as_posix() != ".engineering/release.yaml":
+          if context == "protected-production" and profile_rel.as_posix() != ".engineering/release.yaml":
               raise SystemExit("FAIL protected-production requires canonical .engineering/release.yaml")
 
           phase = os.environ.get("RELEASE_PHASE", "qualify").strip()
           if phase not in {"qualify", "post-release"}:
               raise SystemExit(f"FAIL invalid release phase: {phase}")
 
-          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          actual = subprocess.check_output(
+              ["git", "-C", str(candidate_root), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
           expected = os.environ.get("EXPECTED_SHA", "").strip()
           print(f"CANDIDATE_HEAD={actual}")
           print(f"RELEASE_EXECUTION_CONTEXT={context}")
@@ -356,7 +407,10 @@ jobs:
                   return
               print(f"=== {label} ===", flush=True)
               print(f"$ {value}", flush=True)
-              result = subprocess.run(["bash", "-lc", value])
+              result = subprocess.run(
+                  ["bash", "-lc", value],
+                  cwd=candidate_root,
+              )
               if result.returncode:
                   raise SystemExit(f"FAIL {label} exit={result.returncode}")
               print(f"PASS {label}", flush=True)
