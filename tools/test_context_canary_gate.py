@@ -159,7 +159,7 @@ def expect_error(code: str, callback) -> None:
 
 def valid_document() -> dict[str, object]:
     runs = [
-        run_record("baseline", "CTX-LIVE-001", cost=1.0),
+        run_record("baseline", "CTX-LIVE-001", cost=1.0, rework=3),
         run_record("baseline", "CTX-LIVE-002", cost=2.0),
         run_record("candidate", "CTX-LIVE-001", cost=0.8),
         run_record("candidate", "CTX-LIVE-002", cost=1.2),
@@ -170,7 +170,13 @@ def valid_document() -> dict[str, object]:
             "CTX-LIVE-001",
             telemetry_record(
                 cost=1.0,
-                record_counts=counts(tool_turns=4, rereads=1),
+                record_counts=counts(
+                    tool_turns=4,
+                    rereads=1,
+                    pr_rework=1,
+                    ci_rework=1,
+                    review_rework=1,
+                ),
                 record_usage=usage(
                     1.0,
                     input_tokens=1000,
@@ -257,6 +263,13 @@ def test_valid_live_canary_is_eligible_and_factual() -> None:
         fail(f"baseline cost per solved wrong: {baseline}")
     if baseline["tool_turns_total"] != 9 or baseline["rereads_total"] != 1:
         fail(f"baseline count totals wrong: {baseline}")
+    if (
+        baseline["pr_rework_total"] != 1
+        or baseline["ci_rework_total"] != 1
+        or baseline["review_rework_total"] != 1
+        or baseline["rework_total"] != 3
+    ):
+        fail(f"baseline canonical rework totals wrong: {baseline}")
     if candidate["input_tokens_total"] != 1500:
         fail(f"candidate input total wrong: {candidate}")
     if candidate["provider_cost_total"] != "2":
@@ -304,8 +317,18 @@ def test_binding_completeness_and_uniqueness_fail_closed() -> None:
     )
 
     doc = valid_document()
+    doc["telemetry_bindings"][1]["telemetry"]["run_id"] = (
+        doc["telemetry_bindings"][0]["telemetry"]["run_id"]
+    )
+    expect_error(
+        "TELEMETRY_RUN_ID_DUPLICATE",
+        lambda: gate.evaluate_comparison(doc),
+    )
+
+    doc = valid_document()
     extra = copy.deepcopy(doc["telemetry_bindings"][0])
     extra["case_id"] = "CTX-LIVE-999"
+    extra["telemetry"]["run_id"] = "f" * 32
     doc["telemetry_bindings"].append(extra)
     expect_error("TELEMETRY_BINDING_UNKNOWN", lambda: gate.evaluate_comparison(doc))
 

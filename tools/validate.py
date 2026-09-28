@@ -696,6 +696,8 @@ def validate_context_canary_gate_contract():
         "telemetry.parse_document",
         "PROFILE_SWITCHED",
         "USAGE_INCOMPLETE",
+        "TELEMETRY_RUN_ID_DUPLICATE",
+        "telemetry.rework_count",
         "SYSTEM_HEAD_MISMATCH",
         "MODEL_COST_MISMATCH",
         "VERIFIED_OUTCOME_INCOMPLETE",

@@ -145,11 +145,17 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
     system_head = next(iter(system_heads))
 
     bindings: dict[tuple[str, str], dict[str, Any]] = {}
+    telemetry_run_ids: set[str] = set()
     for item in envelope["telemetry_bindings"]:
         identity = _identity(item["arm_id"], item["case_id"])
         if identity in bindings:
             raise CanaryError("TELEMETRY_BINDING_DUPLICATE")
-        bindings[identity] = _validate_telemetry(item["telemetry"])
+        record = _validate_telemetry(item["telemetry"])
+        run_id = record["run_id"]
+        if run_id in telemetry_run_ids:
+            raise CanaryError("TELEMETRY_RUN_ID_DUPLICATE")
+        telemetry_run_ids.add(run_id)
+        bindings[identity] = record
     if set(bindings) != set(expected):
         missing = set(expected) - set(bindings)
         extra = set(bindings) - set(expected)
@@ -178,7 +184,7 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
         counts = record["counts"]
         if counts["retries"] != run["RETRIES"]:
             raise CanaryError("RETRIES_MISMATCH")
-        if counts["review_rework"] != run["REVIEW_REWORK"]:
+        if telemetry.rework_count(counts) != run["REVIEW_REWORK"]:
             raise CanaryError("REVIEW_REWORK_MISMATCH")
         if counts["human_interventions"] != run["HUMAN_INTERVENTIONS"]:
             raise CanaryError("HUMAN_INTERVENTIONS_MISMATCH")
@@ -218,6 +224,9 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
             field: sum(record["counts"][field] for record in telemetry_records)
             for field in telemetry.COUNT_FIELDS
         }
+        rework_total = sum(
+            telemetry.rework_count(record["counts"]) for record in telemetry_records
+        )
         arm_reports.append(
             {
                 "arm_id": arm_id,
@@ -231,6 +240,7 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
                 "cost_per_verified_solved_task": score_item[
                     "cost_per_verified_solved_task"
                 ],
+                "rework_total": rework_total,
                 **{f"{field}_total": value for field, value in usage_totals.items()},
                 **{f"{field}_total": value for field, value in counts.items()},
             }
