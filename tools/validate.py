@@ -63,6 +63,10 @@ REQUIRED_METHOD_FILES = (
     "tools/context_shadow_gate.py",
     "tools/test_context_shadow_gate.py",
     "schemas/context-shadow-comparison.schema.json",
+    "tools/context_learned_admission.py",
+    "tools/test_context_learned_admission.py",
+    "schemas/context-learned-canary-admission.schema.json",
+    "evals/context-optimization/learned-candidates.json",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
     "tools/context_tool_output.py",
@@ -772,6 +776,71 @@ def validate_context_shadow_gate_contract():
     if tests.count("def test_") < 11:
         raise SystemExit("FAIL context shadow regression suite is unexpectedly incomplete")
     print("PASS shadow context action-equivalence contract")
+
+
+def validate_context_learned_admission_contract():
+    tool = (ROOT / "tools/context_learned_admission.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_learned_admission.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/context-learned-canary-admission.schema.json")
+    registry = load_json(ROOT / "evals/context-optimization/learned-candidates.json")
+    if schema.get("additionalProperties") is not False:
+        raise SystemExit("FAIL learned admission envelope permits freeform top-level fields")
+    runtime = schema.get("properties", {}).get("runtime_facts", {})
+    if runtime.get("additionalProperties") is not False:
+        raise SystemExit("FAIL learned admission runtime facts permit freeform fields")
+    binding = schema.get("properties", {}).get("runtime_binding", {})
+    if binding.get("additionalProperties") is not False:
+        raise SystemExit("FAIL learned admission runtime binding permits freeform fields")
+    candidates = registry.get("candidates")
+    if not isinstance(candidates, list) or len(candidates) != 1:
+        raise SystemExit("FAIL learned admission initial registry is not singleton")
+    expected = {
+        "candidate_id": "paritok-local",
+        "source_repo": "Paritok-official/paritok-4b-v1",
+        "source_commit": "2c913302073367f2402d8bc4bb1a929a3f70a030",
+        "package_version": "1.3.13",
+        "license": "Apache-2.0",
+        "integration_mode": "LOCAL_SELF_HOST",
+    }
+    if candidates[0] != expected:
+        raise SystemExit("FAIL learned admission initial Paritok source pin drifted")
+    for token in (
+        "SOURCE_COMMIT_RE",
+        "INTEGRATION_MODES",
+        "EXECUTION_MODE_NOT_LOCAL",
+        "EXTERNAL_EGRESS_NOT_DENIED",
+        "PROTECTED_STATE_NOT_BYPASSED",
+        "LIVE_COMPARABILITY_GATE_UNAVAILABLE",
+        "SHADOW_EQUIVALENCE_GATE_UNAVAILABLE",
+        "TrustedCoordinatorBoundary",
+        "TRUST_BOUNDARY_REQUIRED",
+        "TRUST_BOUNDARY_UNTRUSTED",
+        "TRUST_RUNTIME_SUBJECT_MISMATCH",
+        "TRUST_EVIDENCE_NOT_PASS",
+        '"decision": "CANARY_READY" if canary_ready else "SETUP_ALLOWED"',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL learned admission helper missing contract token: {token}")
+    for token in (
+        "CONTEXT_LEARNED_ADMISSION_TESTS=PASS",
+        "test_all_verified_local_facts_are_canary_ready",
+        "test_setup_allowed_can_be_not_canary_ready",
+        "test_runtime_mode_boundaries_block_readiness",
+        "test_every_boolean_safety_fact_blocks_when_false_null_or_missing",
+        "test_registry_is_source_pinned_bounded_and_strict",
+        "test_trust_boundary_uses_canonical_verification_module",
+        "test_verification_module_rejects_preloaded_wrong_origin",
+        "test_trust_boundary_is_required_and_raw_dict_is_untrusted",
+        "test_trust_boundary_binds_artifact_environment_and_revision",
+        "test_trust_evidence_set_fails_closed",
+        "test_cli_and_source_are_offline_provider_free",
+        'if __name__ == "__main__":',
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL learned admission test missing contract token: {token}")
+    if tests.count("def test_") < 13:
+        raise SystemExit("FAIL learned admission regression suite is unexpectedly incomplete")
+    print("PASS learned compressor local-canary admission contract")
 
 
 def validate_token_efficiency_contract():
@@ -1487,6 +1556,7 @@ def main():
     validate_context_tool_output_contract()
     validate_context_canary_gate_contract()
     validate_context_shadow_gate_contract()
+    validate_context_learned_admission_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1528,6 +1598,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_shadow_gate.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_learned_admission.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
