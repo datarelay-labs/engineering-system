@@ -620,10 +620,14 @@ def main() -> int:
         raise SystemExit("FAIL existing adoption has invalid ci_mode")
 
     release_execution_context = (
-        args.release_execution_context.strip()
-        or str(release.get("execution_context") or "github-hosted").strip()
+        args.release_execution_context
+        if args.release_execution_context
+        else release.get("execution_context", "github-hosted")
     )
-    if release_execution_context not in {"github-hosted", "protected-production"}:
+    if (
+        not isinstance(release_execution_context, str)
+        or release_execution_context not in {"github-hosted", "protected-production"}
+    ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
     if semver_tuple(old_version) > semver_tuple(current_version):

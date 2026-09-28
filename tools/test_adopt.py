@@ -2229,6 +2229,22 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
                 stderr=subprocess.STDOUT,
             )
 
+        release_profile = auth_root / ".engineering" / "release.yaml"
+        for explicit_invalid in ("false", "null", "0", '""', '" github-hosted "'):
+            release_profile.write_text(
+                "version: 1\n"
+                "exact_head_required: true\n"
+                f"execution_context: {explicit_invalid}\n",
+                encoding="utf-8",
+            )
+            invalid_context = authorize()
+            assert invalid_context.returncode != 0, explicit_invalid
+            assert "unsupported release execution_context" in invalid_context.stdout
+        release_profile.write_text(
+            "version: 1\nexact_head_required: true\nexecution_context: protected-production\n",
+            encoding="utf-8",
+        )
+
         path_escape = authorize(RELEASE_PROFILE="../escape.yaml")
         assert path_escape.returncode != 0
         assert "release profile path must stay inside candidate root" in path_escape.stdout
@@ -2331,6 +2347,24 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
         assert "release execution_context is unsupported" in no_change_invalid.stdout, no_change_invalid.stdout
         assert "ADOPTION_UPGRADE=NO_CHANGE" not in no_change_invalid.stdout
         assert "ADOPTION_UPGRADE_AUDIT=PASS" not in no_change_invalid.stdout
+
+        release["execution_context"] = False
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare falsey same-version release context")
+        falsey_no_change = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert falsey_no_change.returncode != 0
+        assert "release execution_context is unsupported" in falsey_no_change.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in falsey_no_change.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" not in falsey_no_change.stdout
 
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)

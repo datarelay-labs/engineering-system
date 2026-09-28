@@ -86,10 +86,10 @@ jobs:
               raise SystemExit(f"FAIL missing release profile: {profile_rel}")
           import yaml
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
-          context = str(profile.get("execution_context") or "github-hosted").strip()
+          context = profile.get("execution_context", "github-hosted")
           allowed = {"github-hosted", "protected-production"}
-          if context not in allowed:
-              raise SystemExit(f"FAIL unsupported release execution_context: {context}")
+          if not isinstance(context, str) or context not in allowed:
+              raise SystemExit(f"FAIL unsupported release execution_context: {context!r}")
 
           if context == "protected-production":
               if profile_rel.as_posix() != ".engineering/release.yaml":
@@ -199,9 +199,9 @@ jobs:
               raise SystemExit(f"FAIL missing release profile: {profile_rel}")
 
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
-          context = str(profile.get("execution_context") or "github-hosted").strip()
-          if context not in {"github-hosted", "protected-production"}:
-              raise SystemExit(f"FAIL unsupported release execution_context: {context}")
+          context = profile.get("execution_context", "github-hosted")
+          if not isinstance(context, str) or context not in {"github-hosted", "protected-production"}:
+              raise SystemExit(f"FAIL unsupported release execution_context: {context!r}")
           authorized = os.environ.get("AUTHORIZED_EXECUTION_CONTEXT", "").strip()
           if context != authorized:
               raise SystemExit(
@@ -356,9 +356,9 @@ jobs:
               raise SystemExit(f"FAIL missing release profile: {profile_rel}")
 
           profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
-          context = str(profile.get("execution_context") or "github-hosted").strip()
-          if context not in {"github-hosted", "protected-production"}:
-              raise SystemExit(f"FAIL unsupported release execution_context: {context}")
+          context = profile.get("execution_context", "github-hosted")
+          if not isinstance(context, str) or context not in {"github-hosted", "protected-production"}:
+              raise SystemExit(f"FAIL unsupported release execution_context: {context!r}")
           authorized = os.environ.get("AUTHORIZED_EXECUTION_CONTEXT", "").strip()
           if context != authorized:
               raise SystemExit(
