@@ -629,7 +629,24 @@ def main() -> int:
         )
 
     if old_version == current_version and old_baseline == new_baseline:
-        print("ADOPTION_UPGRADE=NO_CHANGE")
+        planned_engineering_context = plan_engineering_context_install(root)
+        if not planned_engineering_context:
+            print("ADOPTION_UPGRADE=NO_CHANGE")
+            return 0
+        print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if args.audit or not args.apply:
+            print("ADOPTION_UPGRADE_AUDIT=PASS")
+            if not args.apply:
+                return 0
+        installed_engineering_context = apply_engineering_context_install(
+            root, planned_engineering_context
+        )
+        print("ENGINEERING_CONTEXT_INSTALLED=" + ",".join(installed_engineering_context))
+        checker = CANONICAL / "tools" / "check-adoption.py"
+        result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
+        if result.returncode:
+            raise SystemExit(result.returncode)
+        print("ADOPTION_UPGRADE=PASS")
         return 0
 
     old_workflow = workflow_path.read_text(encoding="utf-8")
