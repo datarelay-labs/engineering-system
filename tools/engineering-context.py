@@ -9,7 +9,10 @@ import re
 import subprocess
 from pathlib import Path
 
-import yaml
+try:
+    import yaml  # type: ignore
+except ModuleNotFoundError:
+    yaml = None
 
 
 MAX_ORIENTATION_FILES = 40
@@ -173,7 +176,7 @@ def tracked_files(root: Path) -> list[str]:
 
 def knowledge_scores(root: Path, task_terms: frozenset[str]) -> dict[str, int]:
     index = root / ".engineering/knowledge.yaml"
-    if not index.is_file():
+    if not index.is_file() or yaml is None:
         return {}
     try:
         data = yaml.safe_load(index.read_text(encoding="utf-8")) or {}
@@ -243,15 +246,55 @@ def matches(pattern: str, path: str) -> bool:
     return False
 
 
+def _fallback_test_path_domains(text: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Parse only the managed tests.yaml path->inline-domains subset."""
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    in_paths = False
+    current_pattern: str | None = None
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if raw == "paths:":
+            in_paths = True
+            current_pattern = None
+            continue
+        if in_paths and not raw.startswith(" "):
+            break
+        if not in_paths:
+            continue
+        pattern_match = re.fullmatch(r'  (?:"([^"]+)"|([^:]+)):', raw)
+        if pattern_match:
+            current_pattern = pattern_match.group(1) or pattern_match.group(2)
+            continue
+        domain_match = re.fullmatch(r"    domains:\s*\[([^\]]*)\]\s*", raw)
+        if domain_match and current_pattern:
+            domains = tuple(
+                item.strip().strip('"').strip("'")
+                for item in domain_match.group(1).split(",")
+                if item.strip()
+            )
+            entries.append((current_pattern, domains))
+            current_pattern = None
+    return entries
+
+
 def affected_domains(root: Path, files: list[str]) -> list[str]:
     manifest = root / ".engineering/tests.yaml"
     if not manifest.is_file():
         return []
-    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+    text = manifest.read_text(encoding="utf-8")
     domains: set[str] = set()
-    for pattern, spec in (data.get("paths") or {}).items():
-        if any(matches(str(pattern), path) for path in files):
-            domains.update(str(item) for item in (spec or {}).get("domains") or [])
+    if yaml is not None:
+        data = yaml.safe_load(text) or {}
+        entries = [
+            (str(pattern), tuple(str(item) for item in (spec or {}).get("domains") or []))
+            for pattern, spec in (data.get("paths") or {}).items()
+        ]
+    else:
+        entries = _fallback_test_path_domains(text)
+    for pattern, mapped_domains in entries:
+        if any(matches(pattern, path) for path in files):
+            domains.update(mapped_domains)
     return sorted(domains)
 
 
