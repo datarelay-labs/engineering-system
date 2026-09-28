@@ -59,6 +59,10 @@ paths:
     domains: [session-continuity, ai, workflows]
   "tools/test_context_fold.py":
     domains: [session-continuity, ai]
+  "tools/context_tool_output.py":
+    domains: [session-continuity, ai, workflows]
+  "tools/test_context_tool_output.py":
+    domains: [session-continuity, ai]
   "tools/engineering-context.py":
     domains: [session-continuity, workflows]
   "tools/test_engineering_context.py":
@@ -313,6 +317,24 @@ scenarios:
       - "only explicitly selected optional context can fold; protected state fails closed"
       - "folded UTF-8 content is recoverable byte-exactly from a bounded private Git-local store"
       - "store-local handles and telemetry do not expose raw content or claim provider token/cost savings"
+    release_gate: true
+
+  - id: ENG-CONTEXT-TOOL-OUTPUT-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Reversible structural tool-output reduction
+    level: static
+    domains: [session-continuity, ai]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_tool_output.py"
+    invariants:
+      - "explicit optional tool output is reduced with deterministic bounded line windows only"
+      - "the exact original remains recoverable from the existing private Git-local fold store"
+      - "bypass is store-free and telemetry retains no source task handle path or secret material"
     release_gate: true
 
   - id: ENG-CONTEXT-ROUTER-001

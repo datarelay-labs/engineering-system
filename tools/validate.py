@@ -59,6 +59,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_context_optimization_benchmark.py",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
+    "tools/context_tool_output.py",
+    "tools/test_context_tool_output.py",
     "tools/engineering-context.py",
     "tools/test_engineering_context.py",
     "tools/engineering-test.py",
@@ -645,6 +647,34 @@ def validate_context_fold_contract():
     if tests.count("def test_") < 10:
         raise SystemExit("FAIL context fold regression suite is unexpectedly incomplete")
     print("PASS reversible context fold contract")
+
+
+def validate_context_tool_output_contract():
+    tool = (ROOT / "tools/context_tool_output.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_tool_output.py").read_text(encoding="utf-8")
+    for token in (
+        "context_fold.put",
+        "PROTECTED_TOOL_OUTPUT_REDUCTION_FORBIDDEN",
+        "DIAGNOSTIC_TERMS",
+        '"recovery_marker"',
+        '"omitted_ranges"',
+        "TOOL_OUTPUT_REDUCER=PASS",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL context tool-output helper missing contract token: {token}")
+    for token in (
+        "CONTEXT_TOOL_OUTPUT_TESTS=PASS",
+        "test_relevant_windows_order_budget_and_recovery",
+        "test_bypass_is_exact_and_store_free",
+        "test_telemetry_privacy_and_control_injection",
+        "test_cli_output_is_private_and_source_is_provider_neutral",
+        'if __name__ == "__main__":',
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL context tool-output test missing contract token: {token}")
+    if tests.count("def test_") < 8:
+        raise SystemExit("FAIL context tool-output regression suite is unexpectedly incomplete")
+    print("PASS reversible structural tool-output reduction contract")
 
 
 def validate_token_efficiency_contract():
@@ -1357,6 +1387,7 @@ def main():
     validate_coordinator_watch_host_contract()
     validate_worker_adapter_contract()
     validate_context_fold_contract()
+    validate_context_tool_output_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1395,6 +1426,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_tool_output.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
