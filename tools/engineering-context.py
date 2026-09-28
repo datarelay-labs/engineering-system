@@ -19,11 +19,16 @@ MAX_ORIENTATION_FILES = 40
 MAX_TRACKED_FILES = 50000
 MAX_TASK_BYTES = 4096
 MAX_PATH_BYTES = 2048
+MAX_SLICE_FILE_BYTES = 1024 * 1024
+MAX_SLICE_LINES = 64
+MAX_SLICE_CONTEXT = 5
+MAX_SLICE_LINE_BYTES = 2048
 HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 TERM_RE = re.compile(r"[\w][\w.-]{1,}", re.UNICODE)
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 TOKEN_SEPARATOR_RE = re.compile(r"[_/:=.-]+")
 MANDATORY_CONTEXT_PATHS = frozenset({"AGENTS.md", ".engineering/project.yaml"})
+NON_SLICEABLE_PATHS = MANDATORY_CONTEXT_PATHS | frozenset({".cursor/rules/engineering-system.mdc"})
 
 
 def fail_context(message: str) -> None:
@@ -238,6 +243,140 @@ def orientation(root: Path, task: str, max_files: int) -> dict[str, object]:
     }
 
 
+def safe_slice_path(raw: str) -> str:
+    if (
+        not raw
+        or raw.startswith(("/", "\\"))
+        or "\\" in raw
+        or ":" in raw
+        or "\n" in raw
+        or "\r" in raw
+        or len(raw.encode("utf-8")) > MAX_PATH_BYTES
+        or any(part in ("", ".", "..") for part in Path(raw).parts)
+    ):
+        fail_context("unsafe slice path")
+    if raw in NON_SLICEABLE_PATHS:
+        fail_context("mandatory context cannot be sliced")
+    return raw
+
+
+def exact_head_text(root: Path, head: str, path: str) -> str:
+    safe = safe_slice_path(path)
+    tree = run_git_bytes(root, "ls-tree", "-z", head, "--", safe)
+    if tree.returncode != 0:
+        fail_context("unable to inspect exact-HEAD slice path")
+    records = nul_records(tree.stdout or b"")
+    if len(records) != 1 or b"\t" not in records[0]:
+        fail_context("slice path is not a tracked regular file")
+    metadata, raw_path = records[0].split(b"\t", 1)
+    fields = metadata.split()
+    if (
+        len(fields) != 3
+        or fields[0] not in {b"100644", b"100755"}
+        or fields[1] != b"blob"
+        or decode_git_path(raw_path) != safe
+    ):
+        fail_context("slice path is not a tracked regular file")
+    completed = run_git_bytes(root, "show", f"{head}:{safe}")
+    if completed.returncode != 0:
+        fail_context("unable to read exact-HEAD slice blob")
+    payload = completed.stdout or b""
+    if len(payload) > MAX_SLICE_FILE_BYTES:
+        fail_context("slice file exceeds size bound")
+    if b"\x00" in payload:
+        fail_context("binary slice file is not supported")
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        fail_context("slice file is not UTF-8 text")
+    raise AssertionError("unreachable")
+
+
+def slice_context(
+    root: Path,
+    task: str,
+    path: str,
+    max_lines: int,
+    context_lines: int,
+) -> dict[str, object]:
+    if not task.strip() or len(task.encode("utf-8")) > MAX_TASK_BYTES:
+        fail_context("slice task is empty or exceeds bound")
+    if max_lines < 1 or max_lines > MAX_SLICE_LINES:
+        fail_context("max slice lines is outside bound")
+    if context_lines < 0 or context_lines > MAX_SLICE_CONTEXT:
+        fail_context("slice context lines is outside bound")
+    if worktree_paths(root):
+        fail_context("slice requires a clean worktree")
+    head = git(root, "rev-parse", "HEAD")
+    if HEAD_RE.fullmatch(head) is None:
+        fail_context("slice requires an exact HEAD")
+    task_terms = lexical_terms(task)
+    if not task_terms:
+        fail_context("slice task has no usable terms")
+    safe = safe_slice_path(path)
+    text = exact_head_text(root, head, safe)
+    lines = text.splitlines()
+    hits: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        overlap = len(task_terms & lexical_terms(line))
+        if overlap:
+            hits.append((-overlap, index))
+    hits.sort()
+
+    desired: set[int] = set()
+    for _negative_score, index in hits:
+        start = max(0, index - context_lines)
+        end = min(len(lines), index + context_lines + 1)
+        desired.update(range(start, end))
+
+    selected: set[int] = set()
+    for _negative_score, index in hits:
+        ranked_window = [index]
+        for distance in range(1, context_lines + 1):
+            ranked_window.extend((index - distance, index + distance))
+        for candidate in ranked_window:
+            if candidate < 0 or candidate >= len(lines) or candidate in selected:
+                continue
+            if len(selected) >= max_lines:
+                break
+            selected.add(candidate)
+        if len(selected) >= max_lines:
+            break
+
+    ordered = sorted(selected)
+    records: list[dict[str, object]] = []
+    for index in ordered:
+        line = lines[index]
+        if len(line.encode("utf-8")) > MAX_SLICE_LINE_BYTES:
+            fail_context("selected slice line exceeds size bound")
+        records.append({"line": index + 1, "text": line})
+    final_head = git(root, "rev-parse", "HEAD")
+    if final_head != head or worktree_paths(root):
+        fail_context("slice repository state changed during read")
+    return {
+        "head": head,
+        "path": safe,
+        "decision": "READY" if hits else "NO_MATCH",
+        "total_lines": len(lines),
+        "matched_lines": len(hits),
+        "selected_lines": len(records),
+        "truncated": bool(hits) and len(selected) < len(desired),
+        "records": records,
+    }
+
+
+def emit_slice(report: dict[str, object]) -> None:
+    print(f"SLICE_HEAD={report['head']}")
+    print("SLICE_PATH_JSON=" + json.dumps(report["path"], ensure_ascii=True))
+    print(f"SLICE_DECISION={report['decision']}")
+    print(f"SLICE_TOTAL_LINES={report['total_lines']}")
+    print(f"SLICE_MATCHED_LINES={report['matched_lines']}")
+    print(f"SLICE_SELECTED_LINES={report['selected_lines']}")
+    print(f"SLICE_TRUNCATED={'YES' if report['truncated'] else 'NO'}")
+    for record in report["records"]:
+        print("SLICE_LINE_JSON=" + json.dumps(record, ensure_ascii=True, separators=(",", ":")))
+
+
 def matches(pattern: str, path: str) -> bool:
     if fnmatch.fnmatch(path, pattern):
         return True
@@ -305,9 +444,24 @@ def main() -> int:
     parser.add_argument("--max-files", type=int, default=40)
     parser.add_argument("--task", default="")
     parser.add_argument("--max-orientation", type=int, default=12)
+    parser.add_argument("--slice-path", default="")
+    parser.add_argument("--max-slice-lines", type=int, default=24)
+    parser.add_argument("--slice-context", type=int, default=2)
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
+    if args.slice_path:
+        report = slice_context(
+            root,
+            args.task,
+            args.slice_path,
+            args.max_slice_lines,
+            args.slice_context,
+        )
+        emit_slice(report)
+        print("CONTEXT_ROUTER=PASS")
+        return 0
+
     base = resolve_base(root, args.base)
     files = changed_files(root, base)
     domains = affected_domains(root, files)

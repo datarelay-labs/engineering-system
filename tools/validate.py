@@ -671,7 +671,7 @@ def validate_token_efficiency_contract():
 
     context_tool = (ROOT / "tools/engineering-context.py").read_text(encoding="utf-8")
     test_tool = (ROOT / "tools/engineering-test.py").read_text(encoding="utf-8")
-    for token in ("CHANGED_FILE", "AFFECTED_DOMAINS", "ORIENTATION_HEAD", "ORIENTATION_FILE_JSON", "orientation requires a clean worktree", "CONTEXT_ROUTER=PASS"):
+    for token in ("CHANGED_FILE", "AFFECTED_DOMAINS", "ORIENTATION_HEAD", "ORIENTATION_FILE_JSON", "SLICE_HEAD", "SLICE_LINE_JSON", "mandatory context cannot be sliced", "orientation requires a clean worktree", "CONTEXT_ROUTER=PASS"):
         if token not in context_tool:
             raise SystemExit(f"FAIL engineering-context helper missing token: {token}")
     for token in ("TEST_COST", "SKIP_EXPENSIVE_METADATA_ONLY", "agent-logs"):
