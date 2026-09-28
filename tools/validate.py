@@ -807,8 +807,9 @@ def validate_context_learned_admission_contract():
     for token in (
         "SOURCE_COMMIT_RE",
         "INTEGRATION_MODES",
-        "EXECUTION_MODE_NOT_LOCAL",
-        "EXTERNAL_EGRESS_NOT_DENIED",
+        "COMPRESSION_BACKEND_EXECUTION_NOT_LOCAL",
+        "COMPRESSION_BACKEND_ENDPOINT_NOT_LOOPBACK",
+        "COMPRESSION_BACKEND_EGRESS_NOT_DENIED",
         "PROTECTED_STATE_NOT_BYPASSED",
         "LIVE_COMPARABILITY_GATE_UNAVAILABLE",
         "SHADOW_EQUIVALENCE_GATE_UNAVAILABLE",
@@ -824,6 +825,7 @@ def validate_context_learned_admission_contract():
     for token in (
         "CONTEXT_LEARNED_ADMISSION_TESTS=PASS",
         "test_all_verified_local_facts_are_canary_ready",
+        "test_legacy_ambiguous_egress_contract_fails_closed",
         "test_setup_allowed_can_be_not_canary_ready",
         "test_runtime_mode_boundaries_block_readiness",
         "test_every_boolean_safety_fact_blocks_when_false_null_or_missing",
@@ -838,7 +840,7 @@ def validate_context_learned_admission_contract():
     ):
         if token not in tests:
             raise SystemExit(f"FAIL learned admission test missing contract token: {token}")
-    if tests.count("def test_") < 13:
+    if tests.count("def test_") < 14:
         raise SystemExit("FAIL learned admission regression suite is unexpectedly incomplete")
     print("PASS learned compressor local-canary admission contract")
 
