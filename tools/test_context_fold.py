@@ -263,11 +263,12 @@ def test_private_permissions_and_shared_parent_compatibility() -> None:
         entries = cf.entries_directory(repo, create=False)
 
         key = store / cf.KEY_NAME
+        lock = store / cf.LOCK_NAME
         entry = entry_path(repo, marker)
         if mode(store) != 0o700 or mode(entries) != 0o700:
             fail("private store directories are not mode 0700")
-        if mode(key) != 0o600 or mode(entry) != 0o600:
-            fail("key/raw entry files are not mode 0600")
+        if mode(key) != 0o600 or mode(lock) != 0o600 or mode(entry) != 0o600:
+            fail("key/lock/raw entry files are not mode 0600")
         if mode(shared_parent) != 0o755:
             fail("folding rewrote unrelated shared retention parent permissions")
         status = subprocess.check_output(
@@ -303,6 +304,19 @@ def test_symlink_boundaries_fail_closed() -> None:
             "STORE_SYMLINK_FORBIDDEN",
             lambda: cf.fold_request(
                 repo_key, request([block("x", "log", "payload")], ["x"])
+            ),
+        )
+
+        repo_lock = init_repo(root / "repo-lock")
+        store = cf.store_directory(repo_lock, create=True)
+        outside_lock = root / "outside.lock"
+        outside_lock.write_bytes(b"lock")
+        os.chmod(outside_lock, 0o600)
+        (store / cf.LOCK_NAME).symlink_to(outside_lock)
+        expect_error(
+            "STORE_SYMLINK_FORBIDDEN",
+            lambda: cf.fold_request(
+                repo_lock, request([block("x", "log", "payload")], ["x"])
             ),
         )
 
@@ -370,6 +384,86 @@ def test_store_limits_fail_before_raw_partial_write() -> None:
         cf.MAX_ENTRIES = old_entries
         cf.MAX_TOTAL_BYTES = old_total
         cf.MAX_ENTRY_BYTES = old_entry
+
+
+def test_concurrent_writers_preserve_store_limit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = init_repo(Path(tmp) / "repo")
+        cf.put(repo, "seed payload")
+        entries = cf.entries_directory(repo, create=False)
+        index = 1
+        while len(list(entries.glob("*.bin"))) < cf.MAX_ENTRIES - 1:
+            path = entries / f"{index:064x}.bin"
+            index += 1
+            if path.exists():
+                continue
+            path.write_bytes(b"x")
+            os.chmod(path, 0o600)
+
+        worker = r'''
+import sys
+import time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import context_fold as cf
+real_scan = cf._scan_entries
+def slow_scan(root):
+    result = real_scan(root)
+    time.sleep(0.25)
+    return result
+cf._scan_entries = slow_scan
+payload = sys.argv[3]
+raw = {
+    "task": "concurrent fold limit",
+    "blocks": [{
+        "id": "log",
+        "kind": "log",
+        "text": payload,
+        "reference": None,
+        "protected": False,
+        "protection_class": None,
+        "priority": 0,
+    }],
+    "fold_ids": ["log"],
+    "enabled": True,
+}
+try:
+    cf.fold_request(Path(sys.argv[2]), raw)
+except cf.FoldError as exc:
+    print("ERR:" + str(exc))
+else:
+    print("OK")
+'''
+        workers = [
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    worker,
+                    str(TOOLS),
+                    str(repo),
+                    f"worker-{i}-payload",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            for i in range(4)
+        ]
+        outputs = []
+        for proc in workers:
+            stdout, _ = proc.communicate(timeout=10)
+            outputs.append((proc.returncode, stdout.strip()))
+        ok = [item for item in outputs if item == (0, "OK")]
+        limited = [
+            item for item in outputs
+            if item == (0, "ERR:STORE_LIMIT_EXCEEDED")
+        ]
+        if len(ok) != 1 or len(limited) != 3:
+            fail(f"concurrent writers were not serialized at the limit: {outputs}")
+        count, _ = cf._scan_entries(repo)
+        if count != cf.MAX_ENTRIES:
+            fail(f"concurrent writers left {count} entries, expected {cf.MAX_ENTRIES}")
 
 
 def test_disabled_bypass_is_exact_and_store_free() -> None:
@@ -574,6 +668,7 @@ def main() -> int:
         test_private_permissions_and_shared_parent_compatibility,
         test_symlink_boundaries_fail_closed,
         test_store_limits_fail_before_raw_partial_write,
+        test_concurrent_writers_preserve_store_limit,
         test_disabled_bypass_is_exact_and_store_free,
         test_input_authority_and_telemetry_are_bounded,
         test_purge_is_explicit_and_preserves_local_key_identity,

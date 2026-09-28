@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import hmac
 import json
@@ -12,8 +13,9 @@ import secrets
 import stat
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import context_compiler
 
@@ -21,6 +23,7 @@ import context_compiler
 STORE_PARENT = "engineering-system"
 STORE_NAME = "context-fold-v1"
 KEY_NAME = "store.key"
+LOCK_NAME = "store.lock"
 ENTRIES_NAME = "entries"
 KEY_BYTES = 32
 MAX_ENTRY_BYTES = context_compiler.MAX_BLOCK_TEXT_BYTES
@@ -207,6 +210,39 @@ def _read_private_bytes(path: Path, *, missing: str, unreadable: str) -> bytes:
             os.close(fd)
 
 
+@contextmanager
+def _exclusive_store_lock(root: Path) -> Iterator[None]:
+    store = store_directory(root, create=True)
+    lock_path = store / LOCK_NAME
+    if lock_path.is_symlink():
+        raise FoldError("STORE_SYMLINK_FORBIDDEN")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise FoldError("STORE_LOCK_FAILED") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise FoldError("STORE_BOUNDARY_INVALID")
+        os.fchmod(fd, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError as exc:
+            raise FoldError("STORE_LOCK_FAILED") from exc
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
+
+
 def _load_key(root: Path, *, create: bool) -> bytes:
     store = store_directory(root, create=create)
     key_path = store / KEY_NAME
@@ -284,7 +320,7 @@ def _content_bytes(text: Any) -> bytes:
     return content
 
 
-def _preflight_fold_batch(root: Path, texts: list[str]) -> None:
+def _preflight_fold_batch_locked(root: Path, texts: list[str]) -> None:
     key = _load_key(root, create=True)
     directory = entries_directory(root, create=True)
     count, total = _scan_entries(root)
@@ -310,7 +346,7 @@ def _preflight_fold_batch(root: Path, texts: list[str]) -> None:
         raise FoldError("STORE_LIMIT_EXCEEDED")
 
 
-def put(root: Path, text: str) -> tuple[str, bool]:
+def _put_locked(root: Path, text: str) -> tuple[str, bool]:
     content = _content_bytes(text)
     key = _load_key(root, create=True)
     handle = _handle(key, content)
@@ -334,8 +370,20 @@ def put(root: Path, text: str) -> tuple[str, bool]:
     try:
         _write_private_new(destination, content)
     except FileExistsError:
-        return put(root, text)
+        existing = _read_private_bytes(
+            destination,
+            missing="STORE_ENTRY_MISSING",
+            unreadable="STORE_ENTRY_UNREADABLE",
+        )
+        if existing != content or not hmac.compare_digest(_handle(key, existing), handle):
+            raise FoldError("STORE_ENTRY_CORRUPT")
+        return _marker(handle, len(content)), True
     return _marker(handle, len(content)), False
+
+
+def put(root: Path, text: str) -> tuple[str, bool]:
+    with _exclusive_store_lock(root):
+        return _put_locked(root, text)
 
 
 def expand(root: Path, marker: str) -> str:
@@ -367,21 +415,25 @@ def purge(root: Path) -> dict[str, int | str]:
     directory = entries_directory(root, create=False)
     if not directory.exists():
         return {"decision": "PURGED", "entries_deleted": 0, "bytes_deleted": 0}
-    count = 0
-    total = 0
-    for item in sorted(directory.iterdir(), key=lambda value: value.name):
-        if item.is_symlink():
-            raise FoldError("STORE_SYMLINK_FORBIDDEN")
-        if not item.name.endswith(".bin") or not HANDLE_RE.fullmatch(item.stem):
-            raise FoldError("STORE_ENTRY_INVALID")
-        _assert_private(item, directory=False)
-        total += item.stat().st_size
-        try:
-            item.unlink()
-        except OSError as exc:
-            raise FoldError("STORE_PURGE_FAILED") from exc
-        count += 1
-    return {"decision": "PURGED", "entries_deleted": count, "bytes_deleted": total}
+    with _exclusive_store_lock(root):
+        directory = entries_directory(root, create=False)
+        if not directory.exists():
+            return {"decision": "PURGED", "entries_deleted": 0, "bytes_deleted": 0}
+        count = 0
+        total = 0
+        for item in sorted(directory.iterdir(), key=lambda value: value.name):
+            if item.is_symlink():
+                raise FoldError("STORE_SYMLINK_FORBIDDEN")
+            if not item.name.endswith(".bin") or not HANDLE_RE.fullmatch(item.stem):
+                raise FoldError("STORE_ENTRY_INVALID")
+            info = _assert_private(item, directory=False)
+            total += info.st_size
+            try:
+                item.unlink()
+            except OSError as exc:
+                raise FoldError("STORE_PURGE_FAILED") from exc
+            count += 1
+        return {"decision": "PURGED", "entries_deleted": count, "bytes_deleted": total}
 
 
 def _fold_ids(raw: Any, block_ids: set[str], *, enabled: bool) -> list[str]:
@@ -438,19 +490,21 @@ def fold_request(root: Path, raw: Any) -> dict[str, Any]:
         if by_id[block_id].protected:
             raise FoldError("PROTECTED_BLOCK_FOLD_FORBIDDEN")
 
-    _preflight_fold_batch(root, [by_id[block_id].text for block_id in fold_ids])
-
     replacements: dict[str, str] = {}
     original_bytes = 0
     marker_bytes = 0
     deduplicated = 0
-    for block_id in fold_ids:
-        block = by_id[block_id]
-        marker, was_deduplicated = put(root, block.text)
-        replacements[block_id] = marker
-        original_bytes += len(block.text.encode("utf-8"))
-        marker_bytes += len(marker.encode("utf-8"))
-        deduplicated += int(was_deduplicated)
+    with _exclusive_store_lock(root):
+        _preflight_fold_batch_locked(
+            root, [by_id[block_id].text for block_id in fold_ids]
+        )
+        for block_id in fold_ids:
+            block = by_id[block_id]
+            marker, was_deduplicated = _put_locked(root, block.text)
+            replacements[block_id] = marker
+            original_bytes += len(block.text.encode("utf-8"))
+            marker_bytes += len(marker.encode("utf-8"))
+            deduplicated += int(was_deduplicated)
     output_blocks: list[dict[str, Any]] = []
     for raw_block in raw["blocks"]:
         item = dict(raw_block)
