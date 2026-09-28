@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from decimal import Decimal, InvalidOperation
@@ -71,6 +72,35 @@ def _identity(arm_id: Any, case_id: Any) -> tuple[str, str]:
     if not isinstance(case_id, str) or benchmark.RUN_CASE_RE.fullmatch(case_id) is None:
         raise CanaryError("CASE_ID_INVALID")
     return arm_id, case_id
+
+
+def _run_set_digest(
+    *,
+    repo: str,
+    task_kind: str,
+    system_head: str,
+    expected: dict[tuple[str, str], dict[str, Any]],
+) -> str:
+    identity = {
+        "repo": repo,
+        "task_kind": task_kind,
+        "system_head": system_head,
+        "runs": [
+            {
+                "arm_id": arm_id,
+                "case_id": case_id,
+                "telemetry_run_id": expected[(arm_id, case_id)]["TELEMETRY_RUN_ID"],
+            }
+            for arm_id, case_id in sorted(expected)
+        ],
+    }
+    encoded = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _profile_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -211,6 +241,14 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
         if item["cost_status_reason"] != "MEASURED":
             raise CanaryError("ECONOMICS_INCOMPLETE")
 
+    repo = next(iter(repos))
+    task_kind = next(iter(task_kinds))
+    run_set_digest = _run_set_digest(
+        repo=repo,
+        task_kind=task_kind,
+        system_head=system_head,
+        expected=expected,
+    )
     profile_values = next(iter(profile_keys))
     profile = dict(zip(PROFILE_FIELDS, profile_values))
     arm_reports: list[dict[str, Any]] = []
@@ -255,13 +293,14 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
         )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "context-canary-eligibility-report",
         "decision": "ELIGIBLE",
         "system_head": system_head,
         "profile": profile,
-        "repo": next(iter(repos)),
-        "task_kind": next(iter(task_kinds)),
+        "repo": repo,
+        "task_kind": task_kind,
+        "run_set_digest": run_set_digest,
         "record_count": len(expected),
         "arm_count": len(arm_reports),
         "arms": arm_reports,

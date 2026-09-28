@@ -328,6 +328,7 @@ scenarios:
     invariants:
       - "live optimizer economics are eligible only when provider model reasoning toolset exact-head case mapping and provider-measured usage are comparable"
       - "each live run carries an authoritative telemetry run id and wrapper-only telemetry swaps fail closed"
+      - "v2 reports bind repository task kind exact head arm/case identities and telemetry run ids into one deterministic content-free run-set digest"
       - "profile switches unknown usage and cost/head mismatches fail closed"
       - "reports are factual only and emit no winner ranking or optimizer recommendation"
     release_gate: true
@@ -347,6 +348,7 @@ scenarios:
     invariants:
       - "shadow evaluation is unavailable unless the live canary comparison is eligible"
       - "every observation binds to the authoritative arm case and telemetry run identity"
+      - "v2 shadow reports preserve the exact canary repository task kind and run-set digest binding"
       - "material action and target traces must be strictly equivalent to the control and terminate at COMPLETE"
       - "shadow reports are content-free factual metadata and never rank or authorize optimizer promotion"
     release_gate: true
