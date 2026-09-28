@@ -177,6 +177,17 @@ def test_measured_cost_per_verified_solved_task() -> None:
             fail(f"automatic ranking field emitted: {forbidden_field}")
 
 
+def test_arm_report_retains_validated_system_head() -> None:
+    result = bench.score_run_set(run_set([
+        record("baseline", "BENCH-BUG-001", head="a" * 40, cost=1),
+        record("compiler", "BENCH-BUG-001", head="b" * 40, cost=1),
+    ]))
+    if arm(result, "baseline")["system_head"] != "a" * 40:
+        fail("baseline arm report lost its validated system head")
+    if arm(result, "compiler")["system_head"] != "b" * 40:
+        fail("compiler arm report lost its validated system head")
+
+
 def test_exact_head_correctness_and_evidence_gate_solved() -> None:
     records = [
         record("compiler", "CTX-STALE-001", exact="MISSING", cost=1),
@@ -285,6 +296,7 @@ def main() -> int:
         test_fixture_report_is_byte_stable,
         test_unknown_cost_stays_unknown,
         test_measured_cost_per_verified_solved_task,
+        test_arm_report_retains_validated_system_head,
         test_exact_head_correctness_and_evidence_gate_solved,
         test_bench_fixture_requires_canonical_manifest_revision,
         test_pass_evidence_requires_exact_subject_head,

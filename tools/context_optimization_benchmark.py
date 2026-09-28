@@ -361,6 +361,7 @@ def score_run_set(raw: Any) -> dict[str, Any]:
         heads = {item["SYSTEM_HEAD"] for item in items}
         if len(heads) != 1:
             raise BenchmarkError("ARM_SYSTEM_HEAD_MISMATCH")
+        system_head = next(iter(heads))
         original = sum(item["ORIGINAL_CONTEXT_BYTES"] for item in items)
         kept = sum(item["KEPT_CONTEXT_BYTES"] for item in items)
         solved = sum(1 for item in items if item["VERIFIED_SOLVED"])
@@ -381,6 +382,7 @@ def score_run_set(raw: Any) -> dict[str, Any]:
         reduction = 0.0 if original == 0 else round(1.0 - (kept / original), 6)
         arm_reports.append({
             "arm_id": arm,
+            "system_head": system_head,
             "run_count": len(items),
             "verified_solved_count": solved,
             "original_context_bytes": original,
