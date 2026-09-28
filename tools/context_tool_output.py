@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +130,10 @@ def _parse_request(raw: Any) -> dict[str, Any]:
         minimum=0,
         maximum=MAX_CONTEXT_LINES,
     )
-    if head_lines + tail_lines > max_lines:
+    required_indexes = set(range(min(head_lines, len(lines))))
+    tail_start = max(0, len(lines) - tail_lines)
+    required_indexes.update(range(tail_start, len(lines)))
+    if len(required_indexes) > max_lines:
         raise ToolOutputError("VISIBLE_LINE_BUDGET_TOO_SMALL")
 
     return {
@@ -245,36 +249,32 @@ def _select_lines(parsed: dict[str, Any]) -> tuple[list[dict[str, Any]], list[di
     return records, _omitted_ranges(len(lines), selected), matched_lines, selected_bytes
 
 
-def reduce_request(root: Path, raw: Any) -> dict[str, Any]:
-    parsed = _parse_request(raw)
-    if not parsed["enabled"]:
-        return {
+def _bypass_result(parsed: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "decision": "BYPASS",
+        "text": parsed["text"],
+        "recovery_marker": None,
+        "records": [],
+        "omitted_ranges": [],
+        "telemetry": {
             "decision": "BYPASS",
-            "text": parsed["text"],
-            "recovery_marker": None,
-            "records": [],
-            "omitted_ranges": [],
-            "telemetry": {
-                "decision": "BYPASS",
-                "original_bytes": len(parsed["text_bytes"]),
-                "original_lines": len(parsed["lines"]),
-                "visible_bytes": len(parsed["text_bytes"]),
-                "visible_lines": len(parsed["lines"]),
-                "matched_lines": 0,
-                "omitted_lines": 0,
-                "truncated": False,
-            },
-        }
+            "original_bytes": len(parsed["text_bytes"]),
+            "original_lines": len(parsed["lines"]),
+            "visible_bytes": len(parsed["text_bytes"]),
+            "visible_lines": len(parsed["lines"]),
+            "matched_lines": 0,
+            "omitted_lines": 0,
+            "truncated": False,
+        },
+    }
 
-    if parsed["protected"]:
-        raise ToolOutputError("PROTECTED_TOOL_OUTPUT_REDUCTION_FORBIDDEN")
 
-    records, omitted_ranges, matched_lines, visible_bytes = _select_lines(parsed)
-    try:
-        marker, _deduplicated = context_fold.put(root, parsed["text"])
-    except context_fold.FoldError as exc:
-        raise ToolOutputError(f"RECOVERY_STORE:{exc}") from exc
-
+def _reduced_result(
+    parsed: dict[str, Any],
+    marker: str,
+    selection: tuple[list[dict[str, Any]], list[dict[str, int]], int, int],
+) -> dict[str, Any]:
+    records, omitted_ranges, matched_lines, visible_bytes = selection
     visible_lines = len(records)
     original_lines = len(parsed["lines"])
     omitted_lines = original_lines - visible_lines
@@ -298,6 +298,27 @@ def reduce_request(root: Path, raw: Any) -> dict[str, Any]:
     }
 
 
+def _prepare_reduction(
+    parsed: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, int]], int, int]:
+    if parsed["protected"]:
+        raise ToolOutputError("PROTECTED_TOOL_OUTPUT_REDUCTION_FORBIDDEN")
+    return _select_lines(parsed)
+
+
+def reduce_request(root: Path, raw: Any) -> dict[str, Any]:
+    parsed = _parse_request(raw)
+    if not parsed["enabled"]:
+        return _bypass_result(parsed)
+
+    selection = _prepare_reduction(parsed)
+    try:
+        marker, _deduplicated = context_fold.put(root, parsed["text"])
+    except context_fold.FoldError as exc:
+        raise ToolOutputError(f"RECOVERY_STORE:{exc}") from exc
+    return _reduced_result(parsed, marker, selection)
+
+
 def _read_json(path: str) -> Any:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -313,14 +334,15 @@ def _write_json_private(path: str, value: Any) -> None:
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
     ).encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    temp_path: Path | None = None
+    fd = -1
     try:
-        fd = os.open(target, flags, 0o600)
-    except OSError as exc:
-        raise ToolOutputError("OUTPUT_WRITE_FAILED") from exc
-    try:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=str(target.parent),
+        )
+        temp_path = Path(temp_name)
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise ToolOutputError("OUTPUT_WRITE_FAILED")
@@ -332,8 +354,26 @@ def _write_json_private(path: str, value: Any) -> None:
                 raise ToolOutputError("OUTPUT_WRITE_FAILED")
             view = view[written:]
         os.fsync(fd)
-    finally:
         os.close(fd)
+        fd = -1
+        if target.is_symlink():
+            raise ToolOutputError("OUTPUT_SYMLINK_FORBIDDEN")
+        os.replace(temp_path, target)
+        temp_path = None
+    except ToolOutputError:
+        raise
+    except OSError as exc:
+        raise ToolOutputError("OUTPUT_WRITE_FAILED") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -349,8 +389,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = reduce_request(Path(args.root), _read_json(args.input))
-        _write_json_private(args.output, result)
+        root = Path(args.root)
+        parsed = _parse_request(_read_json(args.input))
+        if not parsed["enabled"]:
+            result = _bypass_result(parsed)
+            _write_json_private(args.output, result)
+        else:
+            selection = _prepare_reduction(parsed)
+            try:
+                with context_fold.staged_put(root, parsed["text"]) as marker:
+                    result = _reduced_result(parsed, marker, selection)
+                    _write_json_private(args.output, result)
+            except context_fold.FoldError as exc:
+                raise ToolOutputError(f"RECOVERY_STORE:{exc}") from exc
         telemetry = result["telemetry"]
         print(
             "TOOL_OUTPUT_REDUCER=PASS "

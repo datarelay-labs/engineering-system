@@ -194,6 +194,30 @@ def test_unicode_and_determinism() -> None:
             fail(f"unicode relevance was lost: {first['records']}")
 
 
+
+def test_overlapping_head_tail_windows_use_unique_required_lines() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = init_repo(Path(tmp) / "repo")
+        result = cto.reduce_request(
+            repo,
+            request(
+                "only line\n",
+                task="only line",
+                max_lines=1,
+                max_bytes=64,
+                head_lines=1,
+                tail_lines=1,
+                context_lines=0,
+            ),
+        )
+        if result["telemetry"]["visible_lines"] != 1:
+            fail(f"overlapping required window duplicated/rejected: {result}")
+        if result["records"] != [{"line": 1, "text": "only line"}]:
+            fail(f"overlapping required window drifted: {result['records']}")
+        if context_fold.expand(repo, str(result["recovery_marker"])) != "only line\n":
+            fail("overlapping required window lost exact recovery")
+
+
 def test_protected_and_invalid_inputs_fail_closed() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         repo = init_repo(Path(tmp) / "repo")
@@ -317,6 +341,72 @@ def test_tampered_recovery_marker_fails_closed() -> None:
             fail("tampered recovery marker was accepted")
 
 
+
+def test_failed_cli_publication_rolls_back_new_entry_but_keeps_dedup() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = init_repo(root / "repo")
+        source = root / "input.json"
+        missing_output = root / "missing-parent" / "result.json"
+        original = "start\nERROR publish failure target\nend\n"
+        source.write_text(
+            json.dumps(
+                request(
+                    original,
+                    max_lines=3,
+                    head_lines=1,
+                    tail_lines=1,
+                    context_lines=0,
+                )
+            ),
+            encoding="utf-8",
+        )
+
+        run = subprocess.run(
+            [
+                sys.executable,
+                str(TOOL),
+                "--root",
+                str(repo),
+                "--input",
+                str(source),
+                "--output",
+                str(missing_output),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if run.returncode != 2 or "OUTPUT_WRITE_FAILED" not in run.stderr:
+            fail(f"failed publication did not fail closed: {run.stdout} {run.stderr}")
+        entries = context_fold.entries_directory(repo, create=False)
+        if entries.exists() and list(entries.glob("*.bin")):
+            fail("failed publication retained an unreachable new raw entry")
+
+        marker, _ = context_fold.put(repo, original)
+        run = subprocess.run(
+            [
+                sys.executable,
+                str(TOOL),
+                "--root",
+                str(repo),
+                "--input",
+                str(source),
+                "--output",
+                str(missing_output),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if run.returncode != 2 or "OUTPUT_WRITE_FAILED" not in run.stderr:
+            fail(f"dedup publication failure did not fail closed: {run.stdout} {run.stderr}")
+        if context_fold.expand(repo, marker) != original:
+            fail("failed publication removed a pre-existing deduplicated entry")
+        if len(list(context_fold.entries_directory(repo, create=False).glob("*.bin"))) != 1:
+            fail("failed dedup publication changed retained entry count")
+
+
 def test_cli_output_is_private_and_source_is_provider_neutral() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -384,10 +474,12 @@ def main() -> int:
         test_relevant_windows_order_budget_and_recovery,
         test_diagnostic_lines_survive_without_task_overlap,
         test_unicode_and_determinism,
+        test_overlapping_head_tail_windows_use_unique_required_lines,
         test_protected_and_invalid_inputs_fail_closed,
         test_bypass_is_exact_and_store_free,
         test_telemetry_privacy_and_control_injection,
         test_tampered_recovery_marker_fails_closed,
+        test_failed_cli_publication_rolls_back_new_entry_but_keeps_dedup,
         test_cli_output_is_private_and_source_is_provider_neutral,
     ]
     for test in tests:

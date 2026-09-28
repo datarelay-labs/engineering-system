@@ -629,6 +629,8 @@ def validate_context_fold_contract():
         "STORE_LIMIT_EXCEEDED",
         "fcntl.flock",
         "LOCK_NAME",
+        "def staged_put(",
+        "STORE_ROLLBACK_FAILED",
         '"decision": "BYPASS"',
         "def purge(",
     ):
@@ -639,6 +641,7 @@ def validate_context_fold_contract():
         "test_restrictive_umask_restores_required_owner_permissions",
         "test_concurrent_first_use_is_idempotent",
         "test_concurrent_writers_preserve_store_limit",
+        "test_staged_put_rolls_back_only_new_unpublished_entry",
         'if __name__ == "__main__":',
         "raise SystemExit(main())",
     ):
@@ -665,8 +668,10 @@ def validate_context_tool_output_contract():
     for token in (
         "CONTEXT_TOOL_OUTPUT_TESTS=PASS",
         "test_relevant_windows_order_budget_and_recovery",
+        "test_overlapping_head_tail_windows_use_unique_required_lines",
         "test_bypass_is_exact_and_store_free",
         "test_telemetry_privacy_and_control_injection",
+        "test_failed_cli_publication_rolls_back_new_entry_but_keeps_dedup",
         "test_cli_output_is_private_and_source_is_provider_neutral",
         'if __name__ == "__main__":',
     ):

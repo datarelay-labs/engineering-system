@@ -407,6 +407,43 @@ def put(root: Path, text: str) -> tuple[str, bool]:
         return _put_locked(root, text)
 
 
+def _rollback_new_entry_locked(root: Path, marker: str, text: str) -> None:
+    content = _content_bytes(text)
+    handle, expected_size = parse_marker(marker)
+    if len(content) != expected_size:
+        raise FoldError("STORE_ROLLBACK_FAILED")
+    key = _load_key(root, create=False)
+    if not hmac.compare_digest(_handle(key, content), handle):
+        raise FoldError("STORE_ROLLBACK_FAILED")
+    directory = entries_directory(root, create=False)
+    path = directory / f"{handle}.bin"
+    existing = _read_private_bytes(
+        path,
+        missing="STORE_ROLLBACK_FAILED",
+        unreadable="STORE_ROLLBACK_FAILED",
+    )
+    if existing != content:
+        raise FoldError("STORE_ROLLBACK_FAILED")
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise FoldError("STORE_ROLLBACK_FAILED") from exc
+
+
+@contextmanager
+def staged_put(root: Path, text: str) -> Iterator[str]:
+    """Retain raw content only when the caller successfully publishes its marker."""
+    with _exclusive_store_lock(root):
+        marker, deduplicated = _put_locked(root, text)
+        committed = False
+        try:
+            yield marker
+            committed = True
+        finally:
+            if not committed and not deduplicated:
+                _rollback_new_entry_locked(root, marker, text)
+
+
 def expand(root: Path, marker: str) -> str:
     handle, expected_size = parse_marker(marker)
     key = _load_key(root, create=False)

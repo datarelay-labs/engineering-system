@@ -681,6 +681,38 @@ def test_purge_is_explicit_and_preserves_local_key_identity() -> None:
             fail("purge replaced the store key")
 
 
+
+def test_staged_put_rolls_back_only_new_unpublished_entry() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = init_repo(Path(tmp) / "repo")
+        text = "staged publication payload"
+        try:
+            with cf.staged_put(repo, text):
+                raise RuntimeError("publication failed")
+        except RuntimeError:
+            pass
+        else:
+            fail("staged publication failure did not propagate")
+        entries = cf.entries_directory(repo, create=False)
+        if entries.exists() and list(entries.glob("*.bin")):
+            fail("staged publication failure retained a new raw entry")
+
+        marker, _ = cf.put(repo, text)
+        try:
+            with cf.staged_put(repo, text) as staged_marker:
+                if staged_marker != marker:
+                    fail("staged dedup marker drifted")
+                raise RuntimeError("publication failed")
+        except RuntimeError:
+            pass
+        else:
+            fail("staged dedup publication failure did not propagate")
+        if cf.expand(repo, marker) != text:
+            fail("staged rollback removed a pre-existing deduplicated entry")
+        if len(list(cf.entries_directory(repo, create=False).glob("*.bin"))) != 1:
+            fail("staged dedup rollback changed retained entry count")
+
+
 def test_cli_round_trip_uses_private_outputs() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -782,6 +814,7 @@ def main() -> int:
         test_disabled_bypass_is_exact_and_store_free,
         test_input_authority_and_telemetry_are_bounded,
         test_purge_is_explicit_and_preserves_local_key_identity,
+        test_staged_put_rolls_back_only_new_unpublished_entry,
         test_cli_round_trip_uses_private_outputs,
         test_source_has_no_network_or_model_dependency,
     ]
