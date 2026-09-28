@@ -73,6 +73,16 @@ def run_cli(root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_cli_without_site(root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-S", str(MODULE_PATH), "--root", str(root), *extra],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def parse_orientation_paths(output: str) -> list[str]:
     result: list[str] = []
     for line in output.splitlines():
@@ -169,6 +179,35 @@ def test_orientation_rejects_head_change_during_scan() -> None:
         ctx.tracked_files = original
 
 
+def test_adopted_helper_runs_without_pyyaml_site_packages() -> None:
+    root = make_repo()
+    (root / ".engineering/tests.yaml").write_text(
+        """version: 1
+
+paths:
+  "tools/**":
+    domains: [workflows, session-continuity]
+""",
+        encoding="utf-8",
+    )
+    git(root, "add", ".engineering/tests.yaml")
+    git(root, "commit", "-m", "add tests manifest")
+    run = run_cli_without_site(root, "--task", "context routing", "--max-orientation", "2")
+    if run.returncode != 0:
+        fail(f"stdlib-only adopted helper failed: {run.stdout} {run.stderr}")
+    if "CONTEXT_ROUTER=PASS" not in run.stdout:
+        fail(f"stdlib-only helper did not complete: {run.stdout}")
+    paths = parse_orientation_paths(run.stdout)
+    if "tools/context_router.py" not in paths:
+        fail(f"stdlib-only task path relevance was lost: {paths}")
+
+    (root / "tools/context_router.py").write_text("changed\n", encoding="utf-8")
+    legacy = run_cli_without_site(root)
+    if legacy.returncode != 0:
+        fail(f"stdlib-only legacy routing failed: {legacy.stdout} {legacy.stderr}")
+    if "AFFECTED_DOMAINS=session-continuity,workflows" not in legacy.stdout:
+        fail(f"stdlib-only tests.yaml fallback lost domains: {legacy.stdout}")
+
 def test_legacy_router_output_is_unchanged_without_task() -> None:
     root = make_repo()
     run = run_cli(root)
@@ -206,6 +245,7 @@ def main() -> int:
         test_unicode_task_terms_are_supported,
         test_dirty_worktree_fails_closed,
         test_orientation_rejects_head_change_during_scan,
+        test_adopted_helper_runs_without_pyyaml_site_packages,
         test_legacy_router_output_is_unchanged_without_task,
         test_invalid_orientation_inputs_fail_closed,
     ]
