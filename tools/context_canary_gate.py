@@ -138,6 +138,12 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
         identity = _identity(run["ARM_ID"], run["CASE_ID"])
         if identity in expected:
             raise CanaryError("RUN_RECORD_DUPLICATE")
+        telemetry_run_id = run.get("TELEMETRY_RUN_ID")
+        if (
+            not isinstance(telemetry_run_id, str)
+            or benchmark.TELEMETRY_RUN_ID_RE.fullmatch(telemetry_run_id) is None
+        ):
+            raise CanaryError("TELEMETRY_RUN_ID_REQUIRED")
         expected[identity] = run
         system_heads.add(run["SYSTEM_HEAD"])
     if len(system_heads) != 1:
@@ -169,6 +175,8 @@ def evaluate_comparison(raw: Any) -> dict[str, Any]:
     task_kinds: set[str] = set()
     for identity, run in expected.items():
         record = bindings[identity]
+        if record["run_id"] != run["TELEMETRY_RUN_ID"]:
+            raise CanaryError("TELEMETRY_RUN_ID_MISMATCH")
         profile_keys.add(_profile_key(record))
         repos.add(record["repo"])
         task_kinds.add(record["task_kind"])

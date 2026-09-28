@@ -321,6 +321,7 @@ scenarios:
     command: "python3 tools/test_context_canary_gate.py"
     invariants:
       - "live optimizer economics are eligible only when provider model reasoning toolset exact-head case mapping and provider-measured usage are comparable"
+      - "each live run carries an authoritative telemetry run id and wrapper-only telemetry swaps fail closed"
       - "profile switches unknown usage and cost/head mismatches fail closed"
       - "reports are factual only and emit no winner ranking or optimizer recommendation"
     release_gate: true

@@ -31,6 +31,12 @@ PROFILE = {
     "reasoning": "medium",
     "toolset": "engineering-default",
 }
+RUN_IDS = {
+    ("baseline", "CTX-LIVE-001"): "1" * 32,
+    ("baseline", "CTX-LIVE-002"): "2" * 32,
+    ("candidate", "CTX-LIVE-001"): "3" * 32,
+    ("candidate", "CTX-LIVE-002"): "4" * 32,
+}
 
 
 def fail(message: str) -> None:
@@ -71,6 +77,7 @@ def telemetry_record(
     terminal: str = "PASS",
     record_counts: dict[str, int] | None = None,
     record_usage: dict[str, int | float | None] | None = None,
+    run_id: str = "f" * 32,
 ) -> dict[str, object]:
     return telemetry.build_record(
         repo="datarelay-labs/engineering-system",
@@ -85,6 +92,7 @@ def telemetry_record(
         terminal=terminal,
         budget=telemetry.TaskBudget(None, None),
         usage=usage(cost) if record_usage is None else record_usage,
+        run_id=run_id,
         root=ROOT,
     )
 
@@ -103,8 +111,9 @@ def run_record(
     retries: int = 0,
     rework: int = 0,
     human: int = 0,
+    telemetry_run_id: str | None = None,
 ) -> dict[str, object]:
-    return {
+    record = {
         "ARM_ID": arm,
         "CASE_ID": case_id,
         "SYSTEM_HEAD": head,
@@ -122,6 +131,9 @@ def run_record(
         "REVIEW_REWORK": rework,
         "HUMAN_INTERVENTIONS": human,
     }
+    if telemetry_run_id is not None:
+        record["TELEMETRY_RUN_ID"] = telemetry_run_id
+    return record
 
 
 def run_set(records: list[dict[str, object]]) -> dict[str, object]:
@@ -159,10 +171,31 @@ def expect_error(code: str, callback) -> None:
 
 def valid_document() -> dict[str, object]:
     runs = [
-        run_record("baseline", "CTX-LIVE-001", cost=1.0, rework=3),
-        run_record("baseline", "CTX-LIVE-002", cost=2.0),
-        run_record("candidate", "CTX-LIVE-001", cost=0.8),
-        run_record("candidate", "CTX-LIVE-002", cost=1.2),
+        run_record(
+            "baseline",
+            "CTX-LIVE-001",
+            cost=1.0,
+            rework=3,
+            telemetry_run_id=RUN_IDS[("baseline", "CTX-LIVE-001")],
+        ),
+        run_record(
+            "baseline",
+            "CTX-LIVE-002",
+            cost=2.0,
+            telemetry_run_id=RUN_IDS[("baseline", "CTX-LIVE-002")],
+        ),
+        run_record(
+            "candidate",
+            "CTX-LIVE-001",
+            cost=0.8,
+            telemetry_run_id=RUN_IDS[("candidate", "CTX-LIVE-001")],
+        ),
+        run_record(
+            "candidate",
+            "CTX-LIVE-002",
+            cost=1.2,
+            telemetry_run_id=RUN_IDS[("candidate", "CTX-LIVE-002")],
+        ),
     ]
     bindings = [
         (
@@ -170,6 +203,7 @@ def valid_document() -> dict[str, object]:
             "CTX-LIVE-001",
             telemetry_record(
                 cost=1.0,
+                run_id=RUN_IDS[("baseline", "CTX-LIVE-001")],
                 record_counts=counts(
                     tool_turns=4,
                     rereads=1,
@@ -191,6 +225,7 @@ def valid_document() -> dict[str, object]:
             "CTX-LIVE-002",
             telemetry_record(
                 cost=2.0,
+                run_id=RUN_IDS[("baseline", "CTX-LIVE-002")],
                 record_counts=counts(tool_turns=5, compactions=1),
                 record_usage=usage(
                     2.0,
@@ -206,6 +241,7 @@ def valid_document() -> dict[str, object]:
             "CTX-LIVE-001",
             telemetry_record(
                 cost=0.8,
+                run_id=RUN_IDS[("candidate", "CTX-LIVE-001")],
                 record_counts=counts(tool_turns=3),
                 record_usage=usage(
                     0.8,
@@ -221,6 +257,7 @@ def valid_document() -> dict[str, object]:
             "CTX-LIVE-002",
             telemetry_record(
                 cost=1.2,
+                run_id=RUN_IDS[("candidate", "CTX-LIVE-002")],
                 record_counts=counts(tool_turns=4, rereads=1),
                 record_usage=usage(
                     1.2,
@@ -281,6 +318,25 @@ def test_valid_live_canary_is_eligible_and_factual() -> None:
     for forbidden in ("winner", "ranking", "recommendation", "weighted_score"):
         if forbidden in encoded:
             fail(f"automatic optimizer judgment leaked into report: {forbidden}")
+
+
+def test_authoritative_telemetry_identity_fails_closed() -> None:
+    doc = valid_document()
+    del doc["run_set"]["records"][0]["TELEMETRY_RUN_ID"]
+    expect_error(
+        "TELEMETRY_RUN_ID_REQUIRED",
+        lambda: gate.evaluate_comparison(doc),
+    )
+
+    doc = valid_document()
+    first = doc["telemetry_bindings"][0]["telemetry"]
+    third = doc["telemetry_bindings"][2]["telemetry"]
+    doc["telemetry_bindings"][0]["telemetry"] = third
+    doc["telemetry_bindings"][2]["telemetry"] = first
+    expect_error(
+        "TELEMETRY_RUN_ID_MISMATCH",
+        lambda: gate.evaluate_comparison(doc),
+    )
 
 
 def test_profile_and_switch_mismatches_fail_closed() -> None:
@@ -489,6 +545,7 @@ def test_source_has_no_provider_or_network_dependency() -> None:
 def main() -> int:
     tests = [
         test_valid_live_canary_is_eligible_and_factual,
+        test_authoritative_telemetry_identity_fails_closed,
         test_profile_and_switch_mismatches_fail_closed,
         test_binding_completeness_and_uniqueness_fail_closed,
         test_multi_arm_and_head_usage_mismatches_fail_closed,

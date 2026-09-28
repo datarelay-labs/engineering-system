@@ -697,6 +697,8 @@ def validate_context_canary_gate_contract():
         "PROFILE_SWITCHED",
         "USAGE_INCOMPLETE",
         "TELEMETRY_RUN_ID_DUPLICATE",
+        "TELEMETRY_RUN_ID_REQUIRED",
+        "TELEMETRY_RUN_ID_MISMATCH",
         "telemetry.rework_count",
         "SYSTEM_HEAD_MISMATCH",
         "MODEL_COST_MISMATCH",
@@ -708,6 +710,7 @@ def validate_context_canary_gate_contract():
     for token in (
         "CONTEXT_CANARY_GATE_TESTS=PASS",
         "test_valid_live_canary_is_eligible_and_factual",
+        "test_authoritative_telemetry_identity_fails_closed",
         "test_profile_and_switch_mismatches_fail_closed",
         "test_binding_completeness_and_uniqueness_fail_closed",
         "test_multi_arm_and_head_usage_mismatches_fail_closed",
