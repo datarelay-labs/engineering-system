@@ -60,6 +60,9 @@ REQUIRED_METHOD_FILES = (
     "tools/context_canary_gate.py",
     "tools/test_context_canary_gate.py",
     "schemas/context-canary-comparison.schema.json",
+    "tools/context_shadow_gate.py",
+    "tools/test_context_shadow_gate.py",
+    "schemas/context-shadow-comparison.schema.json",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
     "tools/context_tool_output.py",
@@ -722,6 +725,53 @@ def validate_context_canary_gate_contract():
     if tests.count("def test_") < 9:
         raise SystemExit("FAIL context canary regression suite is unexpectedly incomplete")
     print("PASS live context canary comparability contract")
+
+
+def validate_context_shadow_gate_contract():
+    tool = (ROOT / "tools/context_shadow_gate.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_shadow_gate.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/context-shadow-comparison.schema.json")
+    if schema.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context shadow envelope permits freeform top-level fields")
+    observations = schema.get("properties", {}).get("observations", {})
+    if observations.get("maxItems") != 256:
+        raise SystemExit("FAIL context shadow observation count is not bounded")
+    observation = observations.get("items", {})
+    if observation.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context shadow observation permits freeform fields")
+    actions = observation.get("properties", {}).get("actions", {})
+    if actions.get("minItems") != 1 or actions.get("maxItems") != 16:
+        raise SystemExit("FAIL context shadow action trace bounds drifted")
+    action = actions.get("items", {})
+    if action.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context shadow action item permits freeform fields")
+    for token in (
+        "canary_gate.evaluate_comparison",
+        "OBSERVATION_TELEMETRY_ID_MISMATCH",
+        "OBSERVATION_TELEMETRY_ID_DUPLICATE",
+        "ACTION_TRACE_DIVERGED",
+        "TERMINAL_COMPLETE_REQUIRED",
+        '"decision": "EQUIVALENT"',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL context shadow helper missing contract token: {token}")
+    for token in (
+        "CONTEXT_SHADOW_GATE_TESTS=PASS",
+        "test_identical_material_actions_are_equivalent",
+        "test_canary_and_control_fail_closed",
+        "test_observation_mapping_fail_closed",
+        "test_swapped_observation_identity_is_rejected",
+        "test_action_trace_structure_fail_closed",
+        "test_block_and_wait_actions_are_compared_not_rejected",
+        "test_content_bearing_fields_are_rejected",
+        "test_material_action_or_target_divergence_fails_closed",
+        'if __name__ == "__main__":',
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL context shadow test missing contract token: {token}")
+    if tests.count("def test_") < 11:
+        raise SystemExit("FAIL context shadow regression suite is unexpectedly incomplete")
+    print("PASS shadow context action-equivalence contract")
 
 
 def validate_token_efficiency_contract():
@@ -1436,6 +1486,7 @@ def main():
     validate_context_fold_contract()
     validate_context_tool_output_contract()
     validate_context_canary_gate_contract()
+    validate_context_shadow_gate_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1474,6 +1525,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_canary_gate.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_shadow_gate.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
