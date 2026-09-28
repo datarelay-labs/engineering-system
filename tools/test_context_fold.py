@@ -386,6 +386,70 @@ def test_store_limits_fail_before_raw_partial_write() -> None:
         cf.MAX_ENTRY_BYTES = old_entry
 
 
+def test_concurrent_first_use_is_idempotent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = init_repo(Path(tmp) / "repo")
+        worker = r'''
+import sys
+import time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import context_fold as cf
+real_mkdir = Path.mkdir
+def delayed_mkdir(self, *args, **kwargs):
+    if self.name in {cf.STORE_PARENT, cf.STORE_NAME, cf.ENTRIES_NAME}:
+        time.sleep(0.25)
+    return real_mkdir(self, *args, **kwargs)
+Path.mkdir = delayed_mkdir
+payload = sys.argv[3]
+raw = {
+    "task": "concurrent first use",
+    "blocks": [{
+        "id": "log",
+        "kind": "log",
+        "text": payload,
+        "reference": None,
+        "protected": False,
+        "protection_class": None,
+        "priority": 0,
+    }],
+    "fold_ids": ["log"],
+    "enabled": True,
+}
+try:
+    cf.fold_request(Path(sys.argv[2]), raw)
+except cf.FoldError as exc:
+    print("ERR:" + str(exc))
+else:
+    print("OK")
+'''
+        workers = [
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    worker,
+                    str(TOOLS),
+                    str(repo),
+                    f"first-use-{i}-payload",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            for i in range(4)
+        ]
+        outputs = []
+        for proc in workers:
+            stdout, _ = proc.communicate(timeout=10)
+            outputs.append((proc.returncode, stdout.strip()))
+        if outputs != [(0, "OK")] * 4:
+            fail(f"concurrent first-use initialization was not idempotent: {outputs}")
+        count, _ = cf._scan_entries(repo)
+        if count != 4:
+            fail(f"concurrent first use stored {count} entries, expected 4")
+
+
 def test_concurrent_writers_preserve_store_limit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         repo = init_repo(Path(tmp) / "repo")
@@ -668,6 +732,7 @@ def main() -> int:
         test_private_permissions_and_shared_parent_compatibility,
         test_symlink_boundaries_fail_closed,
         test_store_limits_fail_before_raw_partial_write,
+        test_concurrent_first_use_is_idempotent,
         test_concurrent_writers_preserve_store_limit,
         test_disabled_bypass_is_exact_and_store_free,
         test_input_authority_and_telemetry_are_bounded,

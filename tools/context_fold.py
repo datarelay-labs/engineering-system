@@ -100,10 +100,8 @@ def _ensure_private_directory(path: Path, *, parent: Path) -> Path:
     else:
         try:
             path.mkdir(mode=0o700)
-        except OSError as exc:
-            raise FoldError("STORE_CREATE_FAILED") from exc
-        try:
-            os.chmod(path, 0o700)
+        except FileExistsError:
+            pass
         except OSError as exc:
             raise FoldError("STORE_CREATE_FAILED") from exc
         _assert_private(path, directory=True)
@@ -124,9 +122,14 @@ def store_directory(root: Path, *, create: bool) -> Path:
     elif create:
         try:
             parent.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
         except OSError as exc:
             raise FoldError("STORE_CREATE_FAILED") from exc
+        _assert_node(parent, directory=True, private=False)
         parent_resolved = parent.resolve(strict=True)
+        if not parent_resolved.is_relative_to(git_dir):
+            raise FoldError("STORE_OUT_OF_BOUNDS")
     else:
         return parent / STORE_NAME
 
