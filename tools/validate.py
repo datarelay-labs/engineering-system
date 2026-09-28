@@ -625,6 +625,8 @@ def validate_context_fold_contract():
         "PROTECTED_BLOCK_FOLD_FORBIDDEN",
         "STORE_SYMLINK_FORBIDDEN",
         "STORE_LIMIT_EXCEEDED",
+        "fcntl.flock",
+        "LOCK_NAME",
         '"decision": "BYPASS"',
         "def purge(",
     ):
@@ -632,6 +634,9 @@ def validate_context_fold_contract():
             raise SystemExit(f"FAIL context fold helper missing contract token: {token}")
     for token in (
         "CONTEXT_FOLD_TESTS=PASS",
+        "test_restrictive_umask_restores_required_owner_permissions",
+        "test_concurrent_first_use_is_idempotent",
+        "test_concurrent_writers_preserve_store_limit",
         'if __name__ == "__main__":',
         "raise SystemExit(main())",
     ):
