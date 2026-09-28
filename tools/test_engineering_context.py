@@ -39,7 +39,11 @@ def make_repo() -> Path:
     (root / ".engineering").mkdir()
     (root / "docs").mkdir()
     (root / "scratch").mkdir()
+    (root / "services/api").mkdir(parents=True)
     (root / "AGENTS.md").write_text("mandatory router\n", encoding="utf-8")
+    (root / "services/api/AGENTS.md").write_text(
+        "scoped mandatory api instructions\n", encoding="utf-8"
+    )
     (root / ".engineering/project.yaml").write_text("project:\n  name: fixture\n", encoding="utf-8")
     (root / ".gitignore").write_text("scratch/\n", encoding="utf-8")
     (root / "tools/context_router.py").write_text(
@@ -271,6 +275,14 @@ def test_slice_fail_closed_boundaries() -> None:
     mandatory = run_cli(root, "--task", "router", "--slice-path", "AGENTS.md")
     if mandatory.returncode == 0 or "mandatory context cannot be sliced" not in mandatory.stderr:
         fail(f"mandatory context slicing was not blocked: {mandatory.stderr}")
+    scoped_mandatory = run_cli(
+        root, "--task", "api instructions", "--slice-path", "services/api/AGENTS.md"
+    )
+    if (
+        scoped_mandatory.returncode == 0
+        or "mandatory context cannot be sliced" not in scoped_mandatory.stderr
+    ):
+        fail(f"scoped AGENTS slicing was not blocked: {scoped_mandatory.stderr}")
     symlink = run_cli(root, "--task", "context", "--slice-path", "docs/linked.py")
     if symlink.returncode == 0 or "tracked regular file" not in symlink.stderr:
         fail(f"symlink slice was not blocked: {symlink.stderr}")
@@ -322,6 +334,39 @@ def test_slice_size_and_line_bounds() -> None:
     )
     if too_wide.returncode == 0:
         fail("out-of-bound slice context was accepted")
+
+
+def test_slice_oversize_preflights_before_blob_read() -> None:
+    root = make_repo()
+    (root / "docs/oversize-preflight.txt").write_bytes(
+        b"x" * (ctx.MAX_SLICE_FILE_BYTES + 1)
+    )
+    git(root, "add", "docs/oversize-preflight.txt")
+    git(root, "commit", "-m", "add oversize preflight fixture")
+    original = ctx.run_git_bytes
+
+    def guarded(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+        if (args and args[0] == "show") or args[:2] == ("cat-file", "blob"):
+            fail("oversized blob content was read before the size gate")
+        return original(repo, *args)
+
+    ctx.run_git_bytes = guarded
+    try:
+        try:
+            ctx.slice_context(
+                root,
+                "oversize preflight",
+                "docs/oversize-preflight.txt",
+                5,
+                1,
+            )
+        except SystemExit as exc:
+            if "slice file exceeds size bound" not in str(exc):
+                fail(f"wrong oversize preflight failure: {exc}")
+        else:
+            fail("oversized blob passed the preflight size gate")
+    finally:
+        ctx.run_git_bytes = original
 
 
 def test_dirty_worktree_fails_closed() -> None:
@@ -425,6 +470,7 @@ def main() -> int:
         test_slice_no_match_and_unicode,
         test_slice_fail_closed_boundaries,
         test_slice_size_and_line_bounds,
+        test_slice_oversize_preflights_before_blob_read,
         test_dirty_worktree_fails_closed,
         test_orientation_rejects_head_change_during_scan,
         test_adopted_helper_runs_without_pyyaml_site_packages,
