@@ -57,6 +57,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_context_compiler.py",
     "tools/context_optimization_benchmark.py",
     "tools/test_context_optimization_benchmark.py",
+    "tools/context_fold.py",
+    "tools/test_context_fold.py",
     "tools/engineering-context.py",
     "tools/test_engineering_context.py",
     "tools/engineering-test.py",
@@ -1359,6 +1361,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_optimization_benchmark.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
