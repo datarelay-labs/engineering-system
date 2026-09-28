@@ -66,6 +66,9 @@ REQUIRED_METHOD_FILES = (
     "tools/context_learned_admission.py",
     "tools/test_context_learned_admission.py",
     "schemas/context-learned-canary-admission.schema.json",
+    "tools/context_learned_runtime.py",
+    "tools/test_context_learned_runtime.py",
+    "schemas/context-learned-runtime-evidence.schema.json",
     "evals/context-optimization/learned-candidates.json",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
@@ -845,6 +848,52 @@ def validate_context_learned_admission_contract():
     print("PASS learned compressor local-canary admission contract")
 
 
+def validate_context_learned_runtime_contract():
+    tool = (ROOT / "tools/context_learned_runtime.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_learned_runtime.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/context-learned-runtime-evidence.schema.json")
+    if schema.get("additionalProperties") is not False:
+        raise SystemExit("FAIL learned runtime evidence envelope permits freeform fields")
+    for block in ("candidate", "sandbox", "backend"):
+        props = schema.get("properties", {}).get(block, {})
+        if props.get("additionalProperties") is not False:
+            raise SystemExit(f"FAIL learned runtime evidence {block} permits freeform fields")
+    for token in (
+        "SYSTEM_HEAD_MISMATCH",
+        "REPOSITORY_DIRTY",
+        "NETWORK_MODE_NOT_NONE",
+        "EXTERNAL_CONNECT_NOT_BLOCKED",
+        "HOSTED_COMPRESSION_BACKEND",
+        "SANDBOX_QUALIFIED",
+        "LOCAL_MODEL_QUALIFIED",
+        '"authority": "EVIDENCE_ONLY"',
+        '"canary_ready": False',
+        '"provider_call_authority": "NONE"',
+        '"promotion_authority": "NONE"',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL learned runtime assessor missing contract token: {token}")
+    for forbidden in ("docker run", "docker exec", "openai", "anthropic", "ollama pull"):
+        if forbidden in tool:
+            raise SystemExit(f"FAIL learned runtime assessor gained forbidden execution/provider path: {forbidden}")
+    for token in (
+        "CONTEXT_LEARNED_RUNTIME_TESTS=PASS",
+        "test_valid_sandbox_is_qualified_but_not_model_or_canary_ready",
+        "test_valid_local_model_probe_is_qualified_and_content_free",
+        "test_system_head_is_exact_and_fail_closed",
+        "test_candidate_identity_reuses_existing_registry",
+        "test_sandbox_boundaries_fail_closed",
+        "test_schema_rejects_provider_content_and_freeform_fields",
+        "test_output_is_deterministic_bounded_and_non_authorizing",
+        "test_cli_is_offline_and_fails_closed_on_bad_input",
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL learned runtime test missing contract token: {token}")
+    if tests.count("def test_") < 9:
+        raise SystemExit("FAIL learned runtime regression suite is unexpectedly incomplete")
+    print("PASS learned compressor local runtime evidence contract")
+
+
 def validate_token_efficiency_contract():
     rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
     rule_template = (ROOT / "templates/.cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
@@ -1559,6 +1608,7 @@ def main():
     validate_context_canary_gate_contract()
     validate_context_shadow_gate_contract()
     validate_context_learned_admission_contract()
+    validate_context_learned_runtime_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1603,6 +1653,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_learned_admission.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_learned_runtime.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
