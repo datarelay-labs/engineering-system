@@ -709,6 +709,8 @@ def main() -> int:
         args.release_execution_context.strip()
         or str(release.get("execution_context") or "github-hosted").strip()
     )
+    if release_execution_context not in {"github-hosted", "protected-production"}:
+        raise SystemExit("FAIL release execution_context is unsupported")
 
     full_e2e_passes = args.full_e2e_passes
     if full_e2e_passes < 0:

@@ -2069,18 +2069,118 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
     )
     required = (
         "authorize:\n    runs-on: ubuntu-latest",
-        'runner = ["self-hosted", "engineering-release-production"]',
         'if os.environ.get("CALLER_EVENT_NAME") != "workflow_dispatch"',
+        'CALLER_REF_PROTECTED: ${{ github.ref_protected }}',
+        "protected-production requires a protected default-branch ref",
         "protected-production candidate must be in default-branch history",
         'ENGINEERING_RELEASE_CONTEXT:-',
         'profile_path.as_posix() != ".engineering/release.yaml"',
-        "runs-on: ${{ fromJSON(needs.authorize.outputs.runner_json) }}",
+        "release-contract-hosted:",
+        "release-contract-protected:",
+        "group: engineering-release-production",
+        "- self-hosted",
+        "- engineering-release-production",
         "ref: ${{ inputs.expected_sha }}",
     )
     for token in required:
         assert token in reusable, token
     assert "runs-on: ${{ inputs." not in reusable
     assert "runs-on: ${{ github.event.inputs" not in reusable
+    assert "runner_json" not in reusable
+
+    workflow = yaml.safe_load(reusable)
+    assert workflow["jobs"]["release-contract-hosted"]["runs-on"] == "ubuntu-latest"
+    protected_runs_on = workflow["jobs"]["release-contract-protected"]["runs-on"]
+    assert protected_runs_on["group"] == "engineering-release-production"
+    assert protected_runs_on["labels"] == [
+        "self-hosted",
+        "engineering-release-production",
+    ]
+    hosted_execute = next(
+        step
+        for step in workflow["jobs"]["release-contract-hosted"]["steps"]
+        if step.get("name") == "Execute release contract"
+    )
+    protected_execute = next(
+        step
+        for step in workflow["jobs"]["release-contract-protected"]["steps"]
+        if step.get("name") == "Execute release contract"
+    )
+    assert hosted_execute["run"] == protected_execute["run"]
+    release_standard = (ROOT / "standards" / "RELEASE.md").read_text(encoding="utf-8")
+    assert "workflow access to **Selected workflows**" in release_standard
+    assert "release-contract.yml@<baseline-sha>" in release_standard
+    authorize_step = next(
+        step
+        for step in workflow["jobs"]["authorize"]["steps"]
+        if step.get("name") == "Authorize release execution context"
+    )
+    match = re.search(r"python - <<'PY'\n(.*?)\n\s*PY\s*$", authorize_step["run"], re.S)
+    assert match is not None
+    authorization_code = match.group(1)
+
+    with tempfile.TemporaryDirectory() as auth_tmp:
+        auth_root = Path(auth_tmp) / "candidate"
+        auth_root.mkdir()
+        run("git", "init", "-q", "-b", "main", str(auth_root))
+        run("git", "config", "user.email", "test@example.invalid", cwd=auth_root)
+        run("git", "config", "user.name", "Release Auth Test", cwd=auth_root)
+        (auth_root / ".engineering").mkdir()
+        (auth_root / ".engineering/release.yaml").write_text(
+            "version: 1\nexact_head_required: true\nexecution_context: protected-production\n",
+            encoding="utf-8",
+        )
+        commit_all(auth_root)
+        remote = Path(auth_tmp) / "origin.git"
+        run("git", "clone", "-q", "--bare", str(auth_root), str(remote))
+        run("git", "remote", "add", "origin", str(remote), cwd=auth_root)
+        candidate = run("git", "rev-parse", "HEAD", cwd=auth_root).stdout.strip()
+        output = Path(auth_tmp) / "github-output"
+
+        def authorize(**overrides: str) -> subprocess.CompletedProcess[str]:
+            import os
+            env = {
+                "EXPECTED_SHA": candidate,
+                "RELEASE_PROFILE": ".engineering/release.yaml",
+                "CALLER_EVENT_NAME": "workflow_dispatch",
+                "CALLER_REF": "refs/heads/main",
+                "CALLER_REF_PROTECTED": "true",
+                "DEFAULT_BRANCH": "main",
+                "GITHUB_OUTPUT": str(output),
+            }
+            env.update(overrides)
+            return subprocess.run(
+                [sys.executable, "-c", authorization_code],
+                cwd=auth_root,
+                env={**os.environ, **env},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+
+        unprotected = authorize(CALLER_REF_PROTECTED="false")
+        assert unprotected.returncode != 0
+        assert "requires a protected default-branch ref" in unprotected.stdout
+
+        pr_event = authorize(CALLER_EVENT_NAME="pull_request")
+        assert pr_event.returncode != 0
+        assert "requires workflow_dispatch" in pr_event.stdout
+
+        wrong_ref = authorize(CALLER_REF="refs/heads/feature")
+        assert wrong_ref.returncode != 0
+        assert "must be dispatched from the default branch" in wrong_ref.stdout
+
+        not_in_history = authorize(EXPECTED_SHA="f" * 40)
+        assert not_in_history.returncode != 0
+        assert "candidate must be in default-branch history" in not_in_history.stdout
+
+        if output.exists():
+            output.unlink()
+        allowed = authorize()
+        assert allowed.returncode == 0, allowed.stdout
+        emitted = output.read_text(encoding="utf-8")
+        assert "execution_context=protected-production" in emitted
+        assert "runner_json" not in emitted
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-protected-release"
@@ -2136,13 +2236,28 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
         assert rejected.returncode != 0
         assert "release.yaml execution_context is unsupported" in rejected.stdout
 
-        release["execution_context"] = "protected-production"
-        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)
         project["engineering_system"]["version"] = "1.6.4"
         project["engineering_system"]["baseline"] = BASELINE
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "prepare invalid inherited release context")
+        invalid_upgrade = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert invalid_upgrade.returncode != 0
+        assert "release execution_context is unsupported" in invalid_upgrade.stdout
+        assert run("git", "status", "--porcelain", cwd=target).stdout == ""
+
+        release["execution_context"] = "protected-production"
+        release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
         commit_all(target, "prepare protected release upgrade")
         upgraded = run(
             sys.executable,

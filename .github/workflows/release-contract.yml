@@ -25,7 +25,6 @@ jobs:
       contents: read
     outputs:
       execution_context: ${{ steps.authorize.outputs.execution_context }}
-      runner_json: ${{ steps.authorize.outputs.runner_json }}
     steps:
       - name: Validate candidate identity
         env:
@@ -61,12 +60,12 @@ jobs:
           RELEASE_PROFILE: ${{ inputs.profile_path }}
           CALLER_EVENT_NAME: ${{ github.event_name }}
           CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
           import os
           import subprocess
           from pathlib import Path
@@ -91,6 +90,8 @@ jobs:
                   raise SystemExit("FAIL protected-production requires workflow_dispatch")
               if os.environ.get("CALLER_REF") != f"refs/heads/{default_branch}":
                   raise SystemExit("FAIL protected-production must be dispatched from the default branch")
+              if os.environ.get("CALLER_REF_PROTECTED", "").strip().lower() != "true":
+                  raise SystemExit("FAIL protected-production requires a protected default-branch ref")
               remote_ref = f"refs/remotes/origin/{default_branch}"
               fetch_ref = f"+refs/heads/{default_branch}:{remote_ref}"
               subprocess.run(["git", "fetch", "origin", fetch_ref], check=True)
@@ -103,19 +104,156 @@ jobs:
                   raise SystemExit(
                       "FAIL protected-production candidate must be in default-branch history"
                   )
-              runner = ["self-hosted", "engineering-release-production"]
-          else:
-              runner = ["ubuntu-latest"]
-
           output = Path(os.environ["GITHUB_OUTPUT"])
           with output.open("a", encoding="utf-8") as fh:
               fh.write(f"execution_context={context}\n")
-              fh.write("runner_json=" + json.dumps(runner, separators=(",", ":")) + "\n")
           PY
 
-  release-contract:
+  release-contract-hosted:
     needs: authorize
-    runs-on: ${{ fromJSON(needs.authorize.outputs.runner_json) }}
+    if: needs.authorize.outputs.execution_context == 'github-hosted'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify trusted execution boundary
+        env:
+          AUTHORIZED_EXECUTION_CONTEXT: ${{ needs.authorize.outputs.execution_context }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$AUTHORIZED_EXECUTION_CONTEXT" == "protected-production" ]]; then
+            [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]] || {
+              echo "FAIL protected-production did not land on a self-hosted runner" >&2
+              exit 1
+            }
+            [[ "${ENGINEERING_RELEASE_CONTEXT:-}" == "protected-production" ]] || {
+              echo "FAIL protected-production runner marker is absent" >&2
+              exit 1
+            }
+          fi
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install release contract dependency
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Execute release contract
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          RELEASE_PROFILE: ${{ inputs.profile_path }}
+          AUTHORIZED_EXECUTION_CONTEXT: ${{ needs.authorize.outputs.execution_context }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import yaml
+
+          profile_path = Path(os.environ["RELEASE_PROFILE"])
+          if not profile_path.is_file():
+              raise SystemExit(f"FAIL missing release profile: {profile_path}")
+
+          profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {}
+          context = str(profile.get("execution_context") or "github-hosted").strip()
+          if context not in {"github-hosted", "protected-production"}:
+              raise SystemExit(f"FAIL unsupported release execution_context: {context}")
+          authorized = os.environ.get("AUTHORIZED_EXECUTION_CONTEXT", "").strip()
+          if context != authorized:
+              raise SystemExit(
+                  f"FAIL release execution context changed after authorization: {authorized} -> {context}"
+              )
+          if context == "protected-production" and profile_path.as_posix() != ".engineering/release.yaml":
+              raise SystemExit("FAIL protected-production requires canonical .engineering/release.yaml")
+
+          phase = os.environ.get("RELEASE_PHASE", "qualify").strip()
+          if phase not in {"qualify", "post-release"}:
+              raise SystemExit(f"FAIL invalid release phase: {phase}")
+
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          expected = os.environ.get("EXPECTED_SHA", "").strip()
+          print(f"CANDIDATE_HEAD={actual}")
+          print(f"RELEASE_EXECUTION_CONTEXT={context}")
+          if bool(profile.get("exact_head_required", True)):
+              if not expected:
+                  raise SystemExit("FAIL exact_head_required=true but expected_sha is empty")
+              if actual != expected:
+                  raise SystemExit(f"FAIL expected {expected} but checked out {actual}")
+          elif expected and actual != expected:
+              raise SystemExit(f"FAIL expected {expected} but checked out {actual}")
+
+          def command(name):
+              return str(profile.get(name) or "").strip()
+
+          def require_command(flag, command_name):
+              if bool(profile.get(flag)) and not command(command_name):
+                  raise SystemExit(f"FAIL {flag}=true but {command_name} is empty")
+          require_command("preflight_required", "preflight_command")
+          require_command("artifact_hash_required", "artifact_hash_command")
+          require_command("provenance_required", "provenance_command")
+          require_command("sbom_required", "sbom_command")
+          require_command("operational_e2e_required", "operational_e2e_command")
+          require_command("public_smoke_required", "public_smoke_command")
+
+          if bool(profile.get("operational_e2e_required")) and int(profile.get("full_e2e_passes") or 0) < 1:
+              raise SystemExit("FAIL operational_e2e_required=true but full_e2e_passes<1")
+
+          def run(label, value):
+              if not value:
+                  return
+              print(f"=== {label} ===", flush=True)
+              print(f"$ {value}", flush=True)
+              result = subprocess.run(["bash", "-lc", value])
+              if result.returncode:
+                  raise SystemExit(f"FAIL {label} exit={result.returncode}")
+              print(f"PASS {label}", flush=True)
+
+          run("release setup", command("setup_command"))
+
+          if phase == "qualify":
+              if bool(profile.get("preflight_required")) or command("preflight_command"):
+                  run("release preflight", command("preflight_command"))
+              run("release qualification", command("qualification_command"))
+              if bool(profile.get("artifact_hash_required")) or command("artifact_hash_command"):
+                  run("artifact hash verification", command("artifact_hash_command"))
+              if bool(profile.get("provenance_required")) or command("provenance_command"):
+                  run("provenance verification", command("provenance_command"))
+              if bool(profile.get("sbom_required")) or command("sbom_command"):
+                  run("SBOM verification", command("sbom_command"))
+              if bool(profile.get("operational_e2e_required")) or command("operational_e2e_command"):
+                  e2e = command("operational_e2e_command")
+                  passes = int(profile.get("full_e2e_passes") or 0)
+                  if e2e and passes < 1:
+                      passes = 1
+                  for index in range(1, passes + 1):
+                      run(f"operational E2E pass {index}/{passes}", e2e)
+              print("RELEASE_QUALIFICATION_CONTRACT=PASS")
+          else:
+              if bool(profile.get("public_smoke_required")) or command("public_smoke_command"):
+                  run("post-release public smoke", command("public_smoke_command"))
+              print("POST_RELEASE_CONTRACT=PASS")
+          PY
+
+  release-contract-protected:
+    needs: authorize
+    if: needs.authorize.outputs.execution_context == 'protected-production'
+    runs-on:
+      group: engineering-release-production
+      labels:
+        - self-hosted
+        - engineering-release-production
     permissions:
       contents: read
     steps:
