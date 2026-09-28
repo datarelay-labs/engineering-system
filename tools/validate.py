@@ -617,6 +617,31 @@ def validate_worker_adapter_contract():
     print("PASS trusted worker external-write adapter contract")
 
 
+def validate_context_fold_contract():
+    tool = (ROOT / "tools/context_fold.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_fold.py").read_text(encoding="utf-8")
+    for token in (
+        "hmac.new",
+        "PROTECTED_BLOCK_FOLD_FORBIDDEN",
+        "STORE_SYMLINK_FORBIDDEN",
+        "STORE_LIMIT_EXCEEDED",
+        '"decision": "BYPASS"',
+        "def purge(",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL context fold helper missing contract token: {token}")
+    for token in (
+        "CONTEXT_FOLD_TESTS=PASS",
+        'if __name__ == "__main__":',
+        "raise SystemExit(main())",
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL context fold test entrypoint missing token: {token}")
+    if tests.count("def test_") < 10:
+        raise SystemExit("FAIL context fold regression suite is unexpectedly incomplete")
+    print("PASS reversible context fold contract")
+
+
 def validate_token_efficiency_contract():
     rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
     rule_template = (ROOT / "templates/.cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
@@ -1326,6 +1351,7 @@ def main():
     validate_coordinator_watch_contract()
     validate_coordinator_watch_host_contract()
     validate_worker_adapter_contract()
+    validate_context_fold_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
