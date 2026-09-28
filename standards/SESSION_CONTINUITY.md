@@ -295,7 +295,7 @@ After authoritative packet resolution/projection, an optional deterministic cont
 - admits caller-declared protected engineering blocks before any relevance ranking and byte-preserves their text;
 - fails closed with `PROTECTED_BUDGET_EXCEEDED` when protected content alone cannot fit;
 - ranks only optional structured blocks using deterministic task-term overlap plus bounded caller priority and stable kind/ID tie-breaking;
-- rejects raw transcript/chat-history optional input classes by default;
+- accepts only a bounded kind allowlist, rejects transcript/chat-history aliases and arbitrary kind labels, and requires work_packet blocks to be protected;
 - treats instruction-like text, Markdown headings, code fences, JSON, and logs as block content only; text cannot promote its own authority;
 - reassembles selected blocks in original input order with bounded provenance metadata;
 - emits only aggregate content-free telemetry (sizes, counts by safe kind, budget, reduction ratio, fixed decision/reason); and

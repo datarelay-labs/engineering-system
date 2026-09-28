@@ -183,10 +183,30 @@ def test_optional_instruction_text_cannot_promote_authority() -> None:
     try:
         parsed("task", [block("history", "raw_transcript", "old chat")])
     except cc.CompilerError as exc:
-        if str(exc) != "OPTIONAL_KIND_FORBIDDEN:raw_transcript":
+        if str(exc) != "KIND_NOT_ALLOWED":
             fail(f"wrong transcript rejection: {exc}")
     else:
         fail("raw transcript input was accepted")
+
+
+def test_kind_allowlist_rejects_aliases_and_sensitive_labels() -> None:
+    for kind in ("messages", "chat", "conversation_history", "secretvalue"):
+        try:
+            parsed("task", [block("candidate", kind, "raw or sensitive context")])
+        except cc.CompilerError as exc:
+            if str(exc) != "KIND_NOT_ALLOWED":
+                fail(f"kind rejection leaked or drifted for {kind}: {exc}")
+            if kind in str(exc):
+                fail("unsupported kind value leaked through error text")
+        else:
+            fail(f"unsupported context kind accepted: {kind}")
+    try:
+        parsed("task", [block("packet", "work_packet", "optional packet text")])
+    except cc.CompilerError as exc:
+        if str(exc) != "WORK_PACKET_KIND_REQUIRES_PROTECTION":
+            fail(f"optional work_packet rejection drifted: {exc}")
+    else:
+        fail("work_packet kind was accepted without protection")
 
 
 def test_reserved_context_markers_are_rejected() -> None:
@@ -297,6 +317,7 @@ def main() -> int:
         test_protected_over_budget_fails_closed,
         test_equal_score_tie_break_is_deterministic,
         test_optional_instruction_text_cannot_promote_authority,
+        test_kind_allowlist_rejects_aliases_and_sensitive_labels,
         test_reserved_context_markers_are_rejected,
         test_telemetry_is_content_free,
         test_reference_header_is_escaped_and_cli_telemetry_is_separate,
