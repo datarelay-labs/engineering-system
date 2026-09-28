@@ -2108,7 +2108,9 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
     )
     assert hosted_execute["run"] == protected_execute["run"]
     release_standard = (ROOT / "standards" / "RELEASE.md").read_text(encoding="utf-8")
+    assert "repository access to **Selected repositories**" in release_standard
     assert "workflow access to **Selected workflows**" in release_standard
+    assert "only explicitly approved production caller repositories" in release_standard
     assert "release-contract.yml@<baseline-sha>" in release_standard
     authorize_step = next(
         step
