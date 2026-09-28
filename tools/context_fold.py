@@ -94,6 +94,24 @@ def _assert_private(path: Path, *, directory: bool) -> os.stat_result:
     return _assert_node(path, directory=directory, private=True)
 
 
+def _ensure_directory_owner_access(path: Path, *, private: bool) -> None:
+    info = _assert_node(path, directory=True, private=private)
+    current = stat.S_IMODE(info.st_mode)
+    target = 0o700 if private else (current | 0o700)
+    if current != target:
+        try:
+            os.chmod(path, target)
+        except OSError as exc:
+            raise FoldError("STORE_PERMISSION_FAILED") from exc
+    info = _assert_node(path, directory=True, private=private)
+    final_mode = stat.S_IMODE(info.st_mode)
+    if private:
+        if final_mode != 0o700:
+            raise FoldError("STORE_PERMISSIONS_UNSAFE")
+    elif final_mode & 0o700 != 0o700:
+        raise FoldError("STORE_PERMISSIONS_UNSAFE")
+
+
 def _ensure_private_directory(path: Path, *, parent: Path) -> Path:
     if path.exists() or path.is_symlink():
         _assert_private(path, directory=True)
@@ -104,7 +122,7 @@ def _ensure_private_directory(path: Path, *, parent: Path) -> Path:
             pass
         except OSError as exc:
             raise FoldError("STORE_CREATE_FAILED") from exc
-        _assert_private(path, directory=True)
+    _ensure_directory_owner_access(path, private=True)
     resolved = path.resolve(strict=True)
     if not resolved.is_relative_to(parent):
         raise FoldError("STORE_OUT_OF_BOUNDS")
@@ -115,7 +133,7 @@ def store_directory(root: Path, *, create: bool) -> Path:
     if parent.is_symlink():
         raise FoldError("STORE_SYMLINK_FORBIDDEN")
     if parent.exists():
-        _assert_node(parent, directory=True, private=False)
+        _ensure_directory_owner_access(parent, private=False)
         parent_resolved = parent.resolve(strict=True)
         if not parent_resolved.is_relative_to(git_dir):
             raise FoldError("STORE_OUT_OF_BOUNDS")
@@ -126,7 +144,7 @@ def store_directory(root: Path, *, create: bool) -> Path:
             pass
         except OSError as exc:
             raise FoldError("STORE_CREATE_FAILED") from exc
-        _assert_node(parent, directory=True, private=False)
+        _ensure_directory_owner_access(parent, private=False)
         parent_resolved = parent.resolve(strict=True)
         if not parent_resolved.is_relative_to(git_dir):
             raise FoldError("STORE_OUT_OF_BOUNDS")

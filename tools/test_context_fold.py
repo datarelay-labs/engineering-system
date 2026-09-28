@@ -279,6 +279,50 @@ def test_private_permissions_and_shared_parent_compatibility() -> None:
             fail(f"git-local store leaked into worktree status: {status}")
 
 
+def test_restrictive_umask_restores_required_owner_permissions() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = init_repo(root / "repo-existing-parent")
+        shared_parent = git_dir(repo) / cf.STORE_PARENT
+        shared_parent.mkdir(mode=0o755)
+        os.chmod(shared_parent, 0o755)
+        old_umask = os.umask(0o777)
+        try:
+            result = cf.fold_request(
+                repo,
+                request([block("log", "log", "umask payload")], ["log"]),
+            )
+        finally:
+            os.umask(old_umask)
+        marker = marker_from(result, "log")
+        store = cf.store_directory(repo, create=False)
+        entries = cf.entries_directory(repo, create=False)
+        if mode(shared_parent) != 0o755:
+            fail("shared retention parent permissions drifted under restrictive umask")
+        if mode(store) != 0o700 or mode(entries) != 0o700:
+            fail("restrictive umask prevented private directory owner access")
+        for path in (store / cf.KEY_NAME, store / cf.LOCK_NAME, entry_path(repo, marker)):
+            if mode(path) != 0o600:
+                fail(f"restrictive umask prevented private file mode: {path}")
+
+        repo2 = init_repo(root / "repo-pristine")
+        old_umask = os.umask(0o777)
+        try:
+            cf.fold_request(
+                repo2,
+                request([block("log", "log", "pristine umask payload")], ["log"]),
+            )
+        finally:
+            os.umask(old_umask)
+        parent2 = git_dir(repo2) / cf.STORE_PARENT
+        store2 = cf.store_directory(repo2, create=False)
+        entries2 = cf.entries_directory(repo2, create=False)
+        if mode(parent2) & 0o700 != 0o700:
+            fail("new shared retention parent lacks owner rwx under restrictive umask")
+        if mode(store2) != 0o700 or mode(entries2) != 0o700:
+            fail("new private directories are not 0700 under restrictive umask")
+
+
 def test_symlink_boundaries_fail_closed() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -730,6 +774,7 @@ def main() -> int:
         test_tamper_missing_and_wrong_store_fail_closed,
         test_wrong_store_with_copied_entry_fails_keyed_digest,
         test_private_permissions_and_shared_parent_compatibility,
+        test_restrictive_umask_restores_required_owner_permissions,
         test_symlink_boundaries_fail_closed,
         test_store_limits_fail_before_raw_partial_write,
         test_concurrent_first_use_is_idempotent,
