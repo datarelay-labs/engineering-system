@@ -321,7 +321,7 @@ scenarios:
     timeout_seconds: 60
     agent_default: true
     scope: static
-    name: Exact-HEAD repository orientation and JIT routing
+    name: Exact-HEAD repository orientation and bounded JIT file context
     level: static
     domains: [session-continuity]
     triggers: [affected, pr, preflight, release]
@@ -330,6 +330,8 @@ scenarios:
     invariants:
       - "task orientation is exact-HEAD-bound deterministic and content-free"
       - "orientation returns only bounded tracked relative paths and fails closed on dirty state"
+      - "optional file slicing reads exact-HEAD UTF-8 blobs and emits only bounded JSON-encoded relevant line windows"
+      - "mandatory context binary symlink unsafe dirty and oversized slice inputs fail closed"
       - "legacy diff/domain routing is unchanged without task orientation"
     release_gate: true
 

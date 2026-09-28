@@ -46,11 +46,24 @@ def make_repo() -> Path:
         "SOURCE_SENTINEL_SHOULD_NEVER_APPEAR = True\n", encoding="utf-8"
     )
     (root / "tools/unrelated_release.py").write_text("pass\n", encoding="utf-8")
+    (root / "tools/large_context.py").write_text(
+        "alpha setup\n"
+        "unrelated release path\n"
+        "def context_router():\n"
+        "SLICE_HEAD=ATTACK\n"
+        "    routing_target = 'primary'\n"
+        "    return routing_target\n"
+        "unrelated footer\n"
+        "context routing fallback\n",
+        encoding="utf-8",
+    )
     (root / "standards/SESSION_CONTINUITY.md").write_text(
         "canonical session context rules\n", encoding="utf-8"
     )
     (root / "docs/hotel.md").write_text("unrelated travel notes\n", encoding="utf-8")
-    (root / "docs/컨텍스트.md").write_text("unicode path fixture\n", encoding="utf-8")
+    (root / "docs/컨텍스트.md").write_text("컨텍스트 관련 fixture\n", encoding="utf-8")
+    (root / "docs/binary.dat").write_bytes(b"binary\x00payload\n")
+    (root / "docs/linked.py").symlink_to("../tools/large_context.py")
     (root / ".engineering/knowledge.yaml").write_text(
         "version: 1\n"
         "domains:\n"
@@ -91,6 +104,14 @@ def parse_orientation_paths(output: str) -> list[str]:
         encoded = line.removeprefix("ORIENTATION_FILE_JSON=").split(" REASON=", 1)[0]
         result.append(json.loads(encoded))
     return result
+
+
+def parse_slice_records(output: str) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for line in output.splitlines():
+        if line.startswith("SLICE_LINE_JSON="):
+            records.append(json.loads(line.removeprefix("SLICE_LINE_JSON=")))
+    return records
 
 
 def test_orientation_is_exact_head_bounded_and_content_free() -> None:
@@ -145,6 +166,162 @@ def test_unicode_task_terms_are_supported() -> None:
     paths = parse_orientation_paths(run.stdout)
     if "docs/컨텍스트.md" not in paths:
         fail(f"unicode task/path relevance was lost: {paths}")
+
+
+def test_slice_is_exact_head_deterministic_and_bounded() -> None:
+    root = make_repo()
+    expected_head = git(root, "rev-parse", "HEAD")
+    args = (
+        "--task", "routing target",
+        "--slice-path", "tools/large_context.py",
+        "--max-slice-lines", "5",
+        "--slice-context", "1",
+    )
+    first = run_cli(root, *args)
+    second = run_cli(root, *args)
+    if first.returncode != 0 or second.returncode != 0:
+        fail(f"slice CLI failed: {first.stderr} {second.stderr}")
+    if first.stdout != second.stdout:
+        fail("same exact HEAD slice was not byte-stable")
+    if f"SLICE_HEAD={expected_head}" not in first.stdout:
+        fail("slice is not bound to exact HEAD")
+    if "SLICE_PATH_JSON=\"tools/large_context.py\"" not in first.stdout:
+        fail("slice path metadata drifted")
+    records = parse_slice_records(first.stdout)
+    if not records or len(records) > 5:
+        fail(f"slice line bound failed: {records}")
+    line_numbers = [int(item["line"]) for item in records]
+    if line_numbers != sorted(line_numbers):
+        fail(f"slice lines were not reassembled in source order: {line_numbers}")
+    if not any("routing_target" in str(item["text"]) for item in records):
+        fail(f"relevant source line missing: {records}")
+    if "\nSLICE_HEAD=ATTACK\n" in first.stdout:
+        fail("source content injected a slice control record")
+    if not any(item["text"] == "SLICE_HEAD=ATTACK" for item in records):
+        fail("control-looking source line was not safely JSON encoded")
+    if str(root) in first.stdout or "routing target" in first.stdout:
+        fail("slice leaked absolute path or task text")
+
+    tiny = run_cli(
+        root,
+        "--task", "routing target",
+        "--slice-path", "tools/large_context.py",
+        "--max-slice-lines", "1",
+        "--slice-context", "2",
+    )
+    tiny_records = parse_slice_records(tiny.stdout)
+    if tiny.returncode != 0 or len(tiny_records) != 1 or "routing_target" not in str(tiny_records[0]["text"]):
+        fail(f"tiny slice did not retain the highest-relevance match: {tiny.stdout} {tiny.stderr}")
+    if "SLICE_TRUNCATED=YES" not in tiny.stdout:
+        fail(f"tiny slice failed to report truncated relevant context: {tiny.stdout}")
+
+    git(root, "update-index", "--assume-unchanged", "tools/large_context.py")
+    (root / "tools/large_context.py").write_text("MUTATED_WORKTREE_SENTINEL\n", encoding="utf-8")
+    hidden = run_cli(root, *args)
+    if hidden.returncode != 0:
+        fail(f"exact-head hidden-worktree probe failed: {hidden.stderr}")
+    if hidden.stdout != first.stdout or "MUTATED_WORKTREE_SENTINEL" in hidden.stdout:
+        fail("slice read mutable worktree content instead of exact HEAD blob")
+
+
+def test_slice_rejects_head_change_during_read() -> None:
+    root = make_repo()
+    original = ctx.exact_head_text
+
+    def changing_blob(repo: Path, head: str, path: str) -> str:
+        text = original(repo, head, path)
+        (repo / "tools/concurrent_slice.py").write_text("pass\n", encoding="utf-8")
+        git(repo, "add", "tools/concurrent_slice.py")
+        git(repo, "commit", "-m", "concurrent slice change")
+        return text
+
+    ctx.exact_head_text = changing_blob
+    try:
+        try:
+            ctx.slice_context(root, "routing target", "tools/large_context.py", 5, 1)
+        except SystemExit as exc:
+            if "slice repository state changed during read" not in str(exc):
+                fail(f"wrong concurrent slice failure: {exc}")
+        else:
+            fail("slice accepted content after HEAD changed during read")
+    finally:
+        ctx.exact_head_text = original
+
+
+def test_slice_no_match_and_unicode() -> None:
+    root = make_repo()
+    no_match = run_cli(root, "--task", "zebrafjord", "--slice-path", "tools/large_context.py")
+    if no_match.returncode != 0:
+        fail(f"slice no-match failed: {no_match.stderr}")
+    if "SLICE_DECISION=NO_MATCH" not in no_match.stdout or "SLICE_SELECTED_LINES=0" not in no_match.stdout:
+        fail(f"slice no-match decision drifted: {no_match.stdout}")
+    if "SLICE_LINE_JSON=" in no_match.stdout:
+        fail("slice no-match emitted source content")
+
+    unicode_run = run_cli(root, "--task", "컨텍스트", "--slice-path", "docs/컨텍스트.md")
+    if unicode_run.returncode != 0:
+        fail(f"unicode slice failed: {unicode_run.stderr}")
+    records = parse_slice_records(unicode_run.stdout)
+    if not records or "컨텍스트" not in str(records[0]["text"]):
+        fail(f"unicode slice relevance was lost: {records}")
+
+
+def test_slice_fail_closed_boundaries() -> None:
+    root = make_repo()
+    mandatory = run_cli(root, "--task", "router", "--slice-path", "AGENTS.md")
+    if mandatory.returncode == 0 or "mandatory context cannot be sliced" not in mandatory.stderr:
+        fail(f"mandatory context slicing was not blocked: {mandatory.stderr}")
+    symlink = run_cli(root, "--task", "context", "--slice-path", "docs/linked.py")
+    if symlink.returncode == 0 or "tracked regular file" not in symlink.stderr:
+        fail(f"symlink slice was not blocked: {symlink.stderr}")
+    binary = run_cli(root, "--task", "binary", "--slice-path", "docs/binary.dat")
+    if binary.returncode == 0 or "binary slice file" not in binary.stderr:
+        fail(f"binary slice was not blocked: {binary.stderr}")
+    unsafe = run_cli(root, "--task", "context", "--slice-path", "../escape.txt")
+    if unsafe.returncode == 0 or "unsafe slice path" not in unsafe.stderr:
+        fail(f"unsafe slice path was not blocked: {unsafe.stderr}")
+
+    (root / "tools/unrelated_release.py").write_text("dirty\n", encoding="utf-8")
+    dirty = run_cli(root, "--task", "context", "--slice-path", "tools/large_context.py")
+    if dirty.returncode == 0 or "slice requires a clean worktree" not in dirty.stderr:
+        fail(f"dirty slice was not blocked: {dirty.stderr}")
+
+
+def test_slice_size_and_line_bounds() -> None:
+    root = make_repo()
+    (root / "docs/oversize.txt").write_bytes(b"x" * (ctx.MAX_SLICE_FILE_BYTES + 1))
+    git(root, "add", "docs/oversize.txt")
+    git(root, "commit", "-m", "add oversize fixture")
+    oversize = run_cli(root, "--task", "oversize", "--slice-path", "docs/oversize.txt")
+    if oversize.returncode == 0 or "slice file exceeds size bound" not in oversize.stderr:
+        fail(f"oversize slice was not blocked: {oversize.stderr}")
+
+    (root / "docs/long.txt").write_text(
+        "target " + ("x" * (ctx.MAX_SLICE_LINE_BYTES + 5)) + "\n",
+        encoding="utf-8",
+    )
+    git(root, "add", "docs/long.txt")
+    git(root, "commit", "-m", "add long-line fixture")
+    long_line = run_cli(root, "--task", "target", "--slice-path", "docs/long.txt")
+    if long_line.returncode == 0 or "selected slice line exceeds size bound" not in long_line.stderr:
+        fail(f"overlong selected line was not blocked: {long_line.stderr}")
+
+    too_many = run_cli(
+        root,
+        "--task", "target",
+        "--slice-path", "tools/large_context.py",
+        "--max-slice-lines", str(ctx.MAX_SLICE_LINES + 1),
+    )
+    if too_many.returncode == 0:
+        fail("out-of-bound max slice lines was accepted")
+    too_wide = run_cli(
+        root,
+        "--task", "target",
+        "--slice-path", "tools/large_context.py",
+        "--slice-context", str(ctx.MAX_SLICE_CONTEXT + 1),
+    )
+    if too_wide.returncode == 0:
+        fail("out-of-bound slice context was accepted")
 
 
 def test_dirty_worktree_fails_closed() -> None:
@@ -243,6 +420,11 @@ def main() -> int:
         test_orientation_is_exact_head_bounded_and_content_free,
         test_orientation_limit_and_no_match,
         test_unicode_task_terms_are_supported,
+        test_slice_is_exact_head_deterministic_and_bounded,
+        test_slice_rejects_head_change_during_read,
+        test_slice_no_match_and_unicode,
+        test_slice_fail_closed_boundaries,
+        test_slice_size_and_line_bounds,
         test_dirty_worktree_fails_closed,
         test_orientation_rejects_head_change_during_scan,
         test_adopted_helper_runs_without_pyyaml_site_packages,
