@@ -788,6 +788,9 @@ def validate_context_learned_admission_contract():
     runtime = schema.get("properties", {}).get("runtime_facts", {})
     if runtime.get("additionalProperties") is not False:
         raise SystemExit("FAIL learned admission runtime facts permit freeform fields")
+    binding = schema.get("properties", {}).get("runtime_binding", {})
+    if binding.get("additionalProperties") is not False:
+        raise SystemExit("FAIL learned admission runtime binding permits freeform fields")
     candidates = registry.get("candidates")
     if not isinstance(candidates, list) or len(candidates) != 1:
         raise SystemExit("FAIL learned admission initial registry is not singleton")
@@ -809,6 +812,11 @@ def validate_context_learned_admission_contract():
         "PROTECTED_STATE_NOT_BYPASSED",
         "LIVE_COMPARABILITY_GATE_UNAVAILABLE",
         "SHADOW_EQUIVALENCE_GATE_UNAVAILABLE",
+        "TrustedCoordinatorBoundary",
+        "TRUST_BOUNDARY_REQUIRED",
+        "TRUST_BOUNDARY_UNTRUSTED",
+        "TRUST_RUNTIME_SUBJECT_MISMATCH",
+        "TRUST_EVIDENCE_NOT_PASS",
         '"decision": "CANARY_READY" if canary_ready else "SETUP_ALLOWED"',
     ):
         if token not in tool:
@@ -820,12 +828,16 @@ def validate_context_learned_admission_contract():
         "test_runtime_mode_boundaries_block_readiness",
         "test_every_boolean_safety_fact_blocks_when_false_null_or_missing",
         "test_registry_is_source_pinned_bounded_and_strict",
+        "test_trust_boundary_uses_canonical_verification_module",
+        "test_trust_boundary_is_required_and_raw_dict_is_untrusted",
+        "test_trust_boundary_binds_artifact_environment_and_revision",
+        "test_trust_evidence_set_fails_closed",
         "test_cli_and_source_are_offline_provider_free",
         'if __name__ == "__main__":',
     ):
         if token not in tests:
             raise SystemExit(f"FAIL learned admission test missing contract token: {token}")
-    if tests.count("def test_") < 9:
+    if tests.count("def test_") < 12:
         raise SystemExit("FAIL learned admission regression suite is unexpectedly incomplete")
     print("PASS learned compressor local-canary admission contract")
 

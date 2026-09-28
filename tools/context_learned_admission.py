@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import re
 import sys
@@ -20,6 +22,21 @@ PACKAGE_VERSION_RE = re.compile(r"^[A-Za-z0-9_.+-]{1,40}$")
 LICENSE_RE = re.compile(r"^[A-Za-z0-9.-]{1,40}$")
 SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 INTEGRATION_MODES = frozenset({"LOCAL_SELF_HOST"})
+VERIFICATION_TOOL = ROOT / "tools/verification-contract.py"
+TRUST_WORKSTREAM_PREFIX = "learned-canary-"
+TRUST_EVIDENCE = (
+    ("execution_mode", "runtime", "learned.execution-mode"),
+    ("endpoint_class", "runtime", "learned.endpoint-class"),
+    ("external_egress", "runtime", "learned.external-egress"),
+    ("protected_state_route", "runtime", "learned.protected-state-route"),
+    ("deterministic_bypass", "test", "learned.deterministic-bypass"),
+    ("exact_original_recovery_verified", "test", "learned.exact-recovery"),
+    ("identifier_preservation_verified", "test", "learned.identifier-preservation"),
+    ("cache_behavior_verified", "test", "learned.cache-behavior"),
+    ("provider_usage_capture_ready", "runtime", "learned.provider-usage-capture"),
+    ("live_comparability_gate_available", "test", "learned.live-comparability"),
+    ("shadow_equivalence_gate_available", "test", "learned.shadow-equivalence"),
+)
 
 
 class AdmissionError(ValueError):
@@ -108,7 +125,10 @@ def _load_registry() -> dict[str, dict[str, Any]]:
             or LICENSE_RE.fullmatch(item["license"]) is None
         ):
             raise AdmissionError("REGISTRY_INVALID")
-        if item["integration_mode"] not in INTEGRATION_MODES:
+        if (
+            not isinstance(item["integration_mode"], str)
+            or item["integration_mode"] not in INTEGRATION_MODES
+        ):
             raise AdmissionError("REGISTRY_INVALID")
         indexed[candidate_id] = item
     return indexed
@@ -130,6 +150,102 @@ def _candidate(request: dict[str, Any]) -> dict[str, Any]:
     return candidate
 
 
+def _verification_module() -> Any:
+    name = "verification_contract"
+    cached = sys.modules.get(name)
+    if cached is not None and hasattr(cached, "TrustedCoordinatorBoundary"):
+        return cached
+    spec = importlib.util.spec_from_file_location(name, VERIFICATION_TOOL)
+    if spec is None or spec.loader is None:
+        raise AdmissionError("TRUST_CONTRACT_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise AdmissionError("TRUST_CONTRACT_UNAVAILABLE") from exc
+    return module
+
+
+def _trust_workstream(candidate: dict[str, Any]) -> str:
+    return TRUST_WORKSTREAM_PREFIX + candidate["candidate_id"]
+
+
+def _runtime_subject(candidate: dict[str, Any], binding: dict[str, Any]) -> str:
+    payload = {
+        "candidate_id": candidate["candidate_id"],
+        "source_repo": candidate["source_repo"],
+        "source_commit": candidate["source_commit"],
+        "package_version": candidate["package_version"],
+        "artifact_digest": binding["artifact_digest"],
+        "environment_id": binding["environment_id"],
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "learned-canary:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _trusted_runtime_evidence(
+    candidate: dict[str, Any],
+    request: dict[str, Any],
+    boundary: Any,
+) -> tuple[bool, list[str]]:
+    binding = request.get("runtime_binding")
+    if not isinstance(binding, dict):
+        return False, ["RUNTIME_BINDING_REQUIRED"]
+    if boundary is None:
+        return False, ["TRUST_BOUNDARY_REQUIRED"]
+    verification = _verification_module()
+    if type(boundary) is not verification.TrustedCoordinatorBoundary:
+        return False, ["TRUST_BOUNDARY_UNTRUSTED"]
+    payload = boundary.payload()
+    try:
+        verification.reject_untrusted(payload, "boundary")
+        errors = verification.schema_errors(
+            verification.load_schema(
+                ROOT,
+                verification.BOUNDARY_SCHEMA_REL,
+            ),
+            payload,
+        )
+    except Exception:
+        return False, ["TRUST_BOUNDARY_INVALID"]
+    if errors or not isinstance(payload, dict):
+        return False, ["TRUST_BOUNDARY_INVALID"]
+    if payload["target_repo"] != candidate["source_repo"]:
+        return False, ["TRUST_REPO_MISMATCH"]
+    if payload["workstream"] != _trust_workstream(candidate):
+        return False, ["TRUST_WORKSTREAM_MISMATCH"]
+    if payload["intent_revision"] != binding["evidence_revision"]:
+        return False, ["TRUST_REVISION_MISMATCH"]
+    if payload["subject_head"] != candidate["source_commit"]:
+        return False, ["TRUST_SUBJECT_HEAD_MISMATCH"]
+    if payload.get("runtime_subject") != _runtime_subject(candidate, binding):
+        return False, ["TRUST_RUNTIME_SUBJECT_MISMATCH"]
+
+    expected = {(authority, evidence_id) for _field, authority, evidence_id in TRUST_EVIDENCE}
+    observed: dict[tuple[str, str], str] = {}
+    for item in payload["evidence"]:
+        if item["subject_head"] != payload["subject_head"]:
+            return False, ["TRUST_EVIDENCE_STALE_HEAD"]
+        if item["intent_revision"] != payload["intent_revision"]:
+            return False, ["TRUST_EVIDENCE_STALE_REVISION"]
+        key = (item["authority"], item["id"])
+        if key in observed:
+            return False, ["TRUST_EVIDENCE_DUPLICATE"]
+        observed[key] = item["status"]
+    if set(observed) - expected:
+        return False, ["TRUST_EVIDENCE_UNKNOWN"]
+    if expected - set(observed):
+        return False, ["TRUST_EVIDENCE_MISSING"]
+    if any(observed[key] != "PASS" for key in expected):
+        return False, ["TRUST_EVIDENCE_NOT_PASS"]
+    return True, []
+
+
 def _requirements(runtime: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
     results: dict[str, bool] = {}
     blockers: list[str] = []
@@ -146,10 +262,17 @@ def _requirements(runtime: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
     return results, blockers
 
 
-def evaluate_admission(raw: Any) -> dict[str, Any]:
+def evaluate_admission(raw: Any, boundary: Any = None) -> dict[str, Any]:
     request = _validate_request(raw)
     candidate = _candidate(request)
     requirements, blockers = _requirements(request["runtime_facts"])
+    trusted, trust_blockers = _trusted_runtime_evidence(
+        candidate,
+        request,
+        boundary,
+    )
+    requirements["trusted_runtime_evidence"] = trusted
+    blockers.extend(trust_blockers)
     canary_ready = not blockers
     return {
         "schema_version": 1,

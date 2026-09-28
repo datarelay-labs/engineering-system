@@ -375,7 +375,7 @@ scenarios:
     command: "python3 tools/test_context_learned_admission.py"
     invariants:
       - "learned compressor setup is source-pinned to a bounded immutable candidate registry"
-      - "CANARY_READY requires local-only loopback no-egress protected-state bypass and every runtime safety fact verified"
+      - "CANARY_READY requires local-only loopback no-egress protected-state bypass every runtime safety fact verified and an artifact/environment-bound TrustedCoordinatorBoundary"
       - "missing unknown false or hosted runtime facts remain SETUP_ALLOWED at most and never silently become ready"
       - "admission is offline content-free factual metadata only and grants no optimizer promotion authority"
     release_gate: true
