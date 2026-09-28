@@ -2237,6 +2237,22 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
         )
         assert rejected.returncode != 0
         assert "release.yaml execution_context is unsupported" in rejected.stdout
+        commit_all(target, "prepare invalid same-version release context")
+
+        no_change_invalid = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert no_change_invalid.returncode != 0
+        assert "release execution_context is unsupported" in no_change_invalid.stdout, no_change_invalid.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in no_change_invalid.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" not in no_change_invalid.stdout
 
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)

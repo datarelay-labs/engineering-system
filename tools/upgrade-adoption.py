@@ -619,6 +619,13 @@ def main() -> int:
     if ci_mode not in {"shared", "native"}:
         raise SystemExit("FAIL existing adoption has invalid ci_mode")
 
+    release_execution_context = (
+        args.release_execution_context.strip()
+        or str(release.get("execution_context") or "github-hosted").strip()
+    )
+    if release_execution_context not in {"github-hosted", "protected-production"}:
+        raise SystemExit("FAIL release execution_context is unsupported")
+
     if semver_tuple(old_version) > semver_tuple(current_version):
         raise SystemExit(
             f"FAIL target adoption {old_version} is newer than canonical {current_version}"
@@ -705,13 +712,6 @@ def main() -> int:
     sbom_command = coalesce(args.sbom_command, release.get("sbom_command"))
     operational_e2e_command = coalesce(args.operational_e2e_command, release.get("operational_e2e_command"))
     public_smoke_command = coalesce(args.public_smoke_command, release.get("public_smoke_command"))
-    release_execution_context = (
-        args.release_execution_context.strip()
-        or str(release.get("execution_context") or "github-hosted").strip()
-    )
-    if release_execution_context not in {"github-hosted", "protected-production"}:
-        raise SystemExit("FAIL release execution_context is unsupported")
-
     full_e2e_passes = args.full_e2e_passes
     if full_e2e_passes < 0:
         full_e2e_passes = int(release.get("full_e2e_passes") or (1 if production else 0))
