@@ -27,8 +27,9 @@ TERM_RE = re.compile(r"[\w][\w.-]{1,}", re.UNICODE)
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 TOKEN_SEPARATOR_RE = re.compile(r"[_/:=]+")
 RESERVED_CONTEXT_MARKERS = ("<<<CONTEXT_BLOCK", "<<<END_CONTEXT_BLOCK>>>")
-FORBIDDEN_OPTIONAL_KINDS = frozenset({
-    "chat_history", "conversation", "raw_transcript", "transcript",
+ALLOWED_KINDS = frozenset({
+    "code", "config", "diff", "docs", "git", "json",
+    "log", "repo_map", "test", "tool", "work_packet",
 })
 REQUEST_FIELDS = frozenset({"task", "blocks"})
 BLOCK_FIELDS = frozenset({
@@ -90,6 +91,8 @@ def parse_block(raw: Any) -> ContextBlock:
     kind = safe_text(raw.get("kind"), field="kind", max_bytes=64).casefold()
     if SAFE_KIND_RE.fullmatch(kind) is None:
         raise CompilerError("INVALID_KIND")
+    if kind not in ALLOWED_KINDS:
+        raise CompilerError("KIND_NOT_ALLOWED")
     text = safe_text(
         raw.get("text"), field="block_text", max_bytes=MAX_BLOCK_TEXT_BYTES,
         allow_empty=False,
@@ -112,8 +115,8 @@ def parse_block(raw: Any) -> ContextBlock:
             raise CompilerError("INVALID_PROTECTION_CLASS")
     elif protection_class is not None:
         raise CompilerError("OPTIONAL_PROTECTION_CLASS_FORBIDDEN")
-    if not protected and kind in FORBIDDEN_OPTIONAL_KINDS:
-        raise CompilerError(f"OPTIONAL_KIND_FORBIDDEN:{kind}")
+    if kind == "work_packet" and not protected:
+        raise CompilerError("WORK_PACKET_KIND_REQUIRES_PROTECTION")
     priority = raw.get("priority", 0)
     if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
         raise CompilerError("INVALID_PRIORITY")
