@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datarelay.run/schemas/context-economics-report.schema.json",
+  "title": "Context net economics factual delta report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "authority",
+    "promotion_authority",
+    "control_arm_id",
+    "system_head",
+    "repo",
+    "task_kind",
+    "run_set_digest",
+    "profile",
+    "case_count",
+    "arm_count",
+    "candidates"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "context-net-economics-report"},
+    "authority": {"type": "string", "const": "EVIDENCE_ONLY"},
+    "promotion_authority": {"type": "string", "const": "NONE"},
+    "control_arm_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "system_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+    "task_kind": {
+      "type": "string",
+      "enum": [
+        "DESIGN", "DEVELOPMENT", "TEST", "REVIEW", "RELEASE",
+        "OPERATIONS", "ADOPTION", "DOCUMENTATION", "CLEANUP", "MIXED"
+      ]
+    },
+    "run_set_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "reasoning", "toolset"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1, "maxLength": 80},
+        "model": {"type": "string", "minLength": 1, "maxLength": 80},
+        "reasoning": {"type": "string", "minLength": 1, "maxLength": 80},
+        "toolset": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "case_count": {"type": "integer", "minimum": 1, "maximum": 256},
+    "arm_count": {"type": "integer", "minimum": 2, "maximum": 64},
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 63,
+      "items": {"$ref": "#/$defs/candidate"}
+    }
+  },
+  "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arm_id",
+        "provider_cost_delta",
+        "provider_cost_delta_percent",
+        "original_context_bytes_delta",
+        "kept_context_bytes_delta",
+        "input_tokens_delta",
+        "output_tokens_delta",
+        "cache_read_tokens_delta",
+        "cache_write_tokens_delta",
+        "tool_turns_delta",
+        "retries_delta",
+        "rereads_delta",
+        "compactions_delta",
+        "pr_rework_delta",
+        "ci_rework_delta",
+        "review_rework_delta",
+        "rework_delta",
+        "human_interventions_delta"
+      ],
+      "properties": {
+        "arm_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "provider_cost_delta": {"$ref": "#/$defs/decimal"},
+        "provider_cost_delta_percent": {
+          "oneOf": [
+            {"$ref": "#/$defs/decimal"},
+            {"type": "null"}
+          ]
+        },
+        "original_context_bytes_delta": {"type": "integer"},
+        "kept_context_bytes_delta": {"type": "integer"},
+        "input_tokens_delta": {"type": "integer"},
+        "output_tokens_delta": {"type": "integer"},
+        "cache_read_tokens_delta": {"type": "integer"},
+        "cache_write_tokens_delta": {"type": "integer"},
+        "tool_turns_delta": {"type": "integer"},
+        "retries_delta": {"type": "integer"},
+        "rereads_delta": {"type": "integer"},
+        "compactions_delta": {"type": "integer"},
+        "pr_rework_delta": {"type": "integer"},
+        "ci_rework_delta": {"type": "integer"},
+        "review_rework_delta": {"type": "integer"},
+        "rework_delta": {"type": "integer"},
+        "human_interventions_delta": {"type": "integer"}
+      }
+    }
+  }
+}
