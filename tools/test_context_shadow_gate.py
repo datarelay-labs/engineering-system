@@ -206,6 +206,15 @@ def test_identical_material_actions_are_equivalent() -> None:
         fail(f"control arm drifted: {report}")
     if report["system_head"] != HEAD or report["profile"] != PROFILE:
         fail(f"head/profile facts drifted: {report}")
+    canary_report = shadow.canary_gate.evaluate_comparison(shadow_document()["canary"])
+    if report["schema_version"] != 2:
+        fail(f"shadow report schema version drifted: {report}")
+    if report["repo"] != canary_report["repo"]:
+        fail(f"shadow repo binding drifted: {report}")
+    if report["task_kind"] != canary_report["task_kind"]:
+        fail(f"shadow task-kind binding drifted: {report}")
+    if report["run_set_digest"] != canary_report["run_set_digest"]:
+        fail(f"shadow run-set binding drifted: {report}")
     if (
         report["case_count"] != 2
         or report["arm_count"] != 2
@@ -229,6 +238,8 @@ def test_identical_material_actions_are_equivalent() -> None:
         "confidence",
         "telemetry_run_id",
         "ACTION_TRACE",
+        "CTX-SHADOW-001",
+        "CTX-SHADOW-002",
     ):
         if forbidden in encoded:
             fail(f"shadow report leaked judgment/raw trace field: {forbidden}")

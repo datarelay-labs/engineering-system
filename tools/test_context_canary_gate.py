@@ -287,6 +287,19 @@ def test_valid_live_canary_is_eligible_and_factual() -> None:
         fail(f"profile/head binding drifted: {report}")
     if report["record_count"] != 4 or report["arm_count"] != 2:
         fail(f"report counts drifted: {report}")
+    if report["schema_version"] != 2:
+        fail(f"report schema version drifted: {report}")
+    if report["repo"] != "datarelay-labs/engineering-system":
+        fail(f"report repo binding drifted: {report}")
+    if report["task_kind"] != "DEVELOPMENT":
+        fail(f"report task-kind binding drifted: {report}")
+    digest = report["run_set_digest"]
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        fail(f"report run-set digest is invalid: {report}")
 
     baseline = report_arm(report, "baseline")
     candidate = report_arm(report, "candidate")
@@ -318,6 +331,50 @@ def test_valid_live_canary_is_eligible_and_factual() -> None:
     for forbidden in ("winner", "ranking", "recommendation", "weighted_score"):
         if forbidden in encoded:
             fail(f"automatic optimizer judgment leaked into report: {forbidden}")
+
+
+def test_run_set_digest_binds_exact_experiment_identity() -> None:
+    base = gate.evaluate_comparison(valid_document())["run_set_digest"]
+
+    repo_doc = valid_document()
+    for item in repo_doc["telemetry_bindings"]:
+        item["telemetry"]["repo"] = "datarelay-labs/other-repo"
+    if gate.evaluate_comparison(repo_doc)["run_set_digest"] == base:
+        fail("run-set digest did not bind repository")
+
+    task_doc = valid_document()
+    for item in task_doc["telemetry_bindings"]:
+        item["telemetry"]["task_kind"] = "TEST"
+    if gate.evaluate_comparison(task_doc)["run_set_digest"] == base:
+        fail("run-set digest did not bind task kind")
+
+    case_doc = valid_document()
+    for run in case_doc["run_set"]["records"]:
+        if run["CASE_ID"] == "CTX-LIVE-002":
+            run["CASE_ID"] = "CTX-LIVE-009"
+            run["FIXTURE_ID"] = "fixture:CTX-LIVE-009"
+    for item in case_doc["telemetry_bindings"]:
+        if item["case_id"] == "CTX-LIVE-002":
+            item["case_id"] = "CTX-LIVE-009"
+    if gate.evaluate_comparison(case_doc)["run_set_digest"] == base:
+        fail("run-set digest did not bind case identity")
+
+    run_doc = valid_document()
+    replacement_id = "a" * 32
+    run_doc["run_set"]["records"][0]["TELEMETRY_RUN_ID"] = replacement_id
+    run_doc["telemetry_bindings"][0]["telemetry"]["run_id"] = replacement_id
+    if gate.evaluate_comparison(run_doc)["run_set_digest"] == base:
+        fail("run-set digest did not bind telemetry run identity")
+
+    head_doc = valid_document()
+    replacement_head = "b" * 40
+    for run in head_doc["run_set"]["records"]:
+        run["SYSTEM_HEAD"] = replacement_head
+        run["EXACT_HEAD_SUBJECT"] = replacement_head
+    for item in head_doc["telemetry_bindings"]:
+        item["telemetry"]["validation"]["exact_head"] = replacement_head
+    if gate.evaluate_comparison(head_doc)["run_set_digest"] == base:
+        fail("run-set digest did not bind exact source head")
 
 
 def test_authoritative_telemetry_identity_fails_closed() -> None:
@@ -545,6 +602,7 @@ def test_source_has_no_provider_or_network_dependency() -> None:
 def main() -> int:
     tests = [
         test_valid_live_canary_is_eligible_and_factual,
+        test_run_set_digest_binds_exact_experiment_identity,
         test_authoritative_telemetry_identity_fails_closed,
         test_profile_and_switch_mismatches_fail_closed,
         test_binding_completeness_and_uniqueness_fail_closed,

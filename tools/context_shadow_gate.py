@@ -174,11 +174,14 @@ def evaluate_shadow(raw: Any) -> dict[str, Any]:
         arm_action_counts[arm_id] = total
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "context-shadow-equivalence-report",
         "decision": "EQUIVALENT",
         "control_arm_id": control_arm,
         "system_head": canary_report["system_head"],
+        "repo": canary_report["repo"],
+        "task_kind": canary_report["task_kind"],
+        "run_set_digest": canary_report["run_set_digest"],
         "profile": canary_report["profile"],
         "case_count": len(case_ids),
         "arm_count": len(arms),
