@@ -255,7 +255,7 @@ def safe_slice_path(raw: str) -> str:
         or any(part in ("", ".", "..") for part in Path(raw).parts)
     ):
         fail_context("unsafe slice path")
-    if raw in NON_SLICEABLE_PATHS:
+    if raw in NON_SLICEABLE_PATHS or Path(raw).name == "AGENTS.md":
         fail_context("mandatory context cannot be sliced")
     return raw
 
@@ -277,12 +277,24 @@ def exact_head_text(root: Path, head: str, path: str) -> str:
         or decode_git_path(raw_path) != safe
     ):
         fail_context("slice path is not a tracked regular file")
-    completed = run_git_bytes(root, "show", f"{head}:{safe}")
+    try:
+        blob_oid = fields[2].decode("ascii")
+    except UnicodeDecodeError:
+        fail_context("unable to inspect exact-HEAD slice blob")
+    if HEAD_RE.fullmatch(blob_oid) is None:
+        fail_context("unable to inspect exact-HEAD slice blob")
+    size_result = run_git(root, "cat-file", "-s", blob_oid)
+    if size_result.returncode != 0 or not size_result.stdout.strip().isdigit():
+        fail_context("unable to inspect exact-HEAD slice blob")
+    blob_size = int(size_result.stdout.strip())
+    if blob_size > MAX_SLICE_FILE_BYTES:
+        fail_context("slice file exceeds size bound")
+    completed = run_git_bytes(root, "cat-file", "blob", blob_oid)
     if completed.returncode != 0:
         fail_context("unable to read exact-HEAD slice blob")
     payload = completed.stdout or b""
-    if len(payload) > MAX_SLICE_FILE_BYTES:
-        fail_context("slice file exceeds size bound")
+    if len(payload) != blob_size:
+        fail_context("unable to read exact-HEAD slice blob")
     if b"\x00" in payload:
         fail_context("binary slice file is not supported")
     try:
