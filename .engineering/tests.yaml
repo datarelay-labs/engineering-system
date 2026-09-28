@@ -67,6 +67,12 @@ paths:
     domains: [session-continuity, ai]
   "schemas/context-shadow-comparison.schema.json":
     domains: [schemas, session-continuity, ai]
+  "tools/context_economics.py":
+    domains: [session-continuity, ai, workflows]
+  "tools/test_context_economics.py":
+    domains: [session-continuity, ai]
+  "schemas/context-economics-report.schema.json":
+    domains: [schemas, session-continuity, ai]
   "tools/context_fold.py":
     domains: [session-continuity, ai, workflows]
   "tools/test_context_fold.py":
@@ -210,7 +216,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -353,6 +359,25 @@ scenarios:
       - "shadow reports are content-free factual metadata and never rank or authorize optimizer promotion"
     release_gate: true
 
+
+  - id: ENG-CONTEXT-ECONOMICS-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Net context economics factual delta
+    level: static
+    domains: [session-continuity, ai, schemas]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_economics.py"
+    invariants:
+      - "economics deltas are emitted only after live comparability and strict shadow action equivalence"
+      - "provider cost input output cache read cache write retry rework and human deltas remain separate factual measurements"
+      - "zero-cost controls never fabricate percentage deltas and reports never select an optimizer"
+      - "the helper is offline EVIDENCE_ONLY and grants no promotion routing merge release or deployment authority"
+    release_gate: true
 
   - id: ENG-CONTEXT-FOLD-001
     cost: cheap

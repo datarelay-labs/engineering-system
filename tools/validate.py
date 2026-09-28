@@ -63,6 +63,9 @@ REQUIRED_METHOD_FILES = (
     "tools/context_shadow_gate.py",
     "tools/test_context_shadow_gate.py",
     "schemas/context-shadow-comparison.schema.json",
+    "tools/context_economics.py",
+    "tools/test_context_economics.py",
+    "schemas/context-economics-report.schema.json",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
     "tools/context_tool_output.py",
@@ -773,6 +776,51 @@ def validate_context_shadow_gate_contract():
         raise SystemExit("FAIL context shadow regression suite is unexpectedly incomplete")
     print("PASS shadow context action-equivalence contract")
 
+
+
+def validate_context_economics_contract():
+    tool = (ROOT / "tools/context_economics.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_economics.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/context-economics-report.schema.json")
+    if schema.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context economics report permits freeform top-level fields")
+    candidates = schema.get("properties", {}).get("candidates", {})
+    if candidates.get("minItems") != 1 or candidates.get("maxItems") != 255:
+        raise SystemExit("FAIL context economics candidate bounds drifted")
+    candidate = schema.get("$defs", {}).get("candidate", {})
+    if candidate.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context economics candidate permits freeform fields")
+    for token in (
+        "shadow_gate.evaluate_shadow",
+        "CONTROL_ARM_MISMATCH",
+        "RUN_SET_BINDING_MISMATCH",
+        "provider_cost_delta_percent",
+        "cache_read_tokens",
+        "output_tokens",
+        "retries",
+        '"authority": "EVIDENCE_ONLY"',
+        '"promotion_authority": "NONE"',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL context economics helper missing contract token: {token}")
+    for forbidden in ("subprocess", "urllib", "requests", "ollama", "paritok"):
+        if forbidden in tool.lower():
+            raise SystemExit(f"FAIL context economics helper gained forbidden runtime path: {forbidden}")
+    for token in (
+        "CONTEXT_ECONOMICS_TESTS=PASS",
+        "test_lower_cost_with_compensation_is_reported_factually",
+        "test_same_and_higher_cost_are_not_relabelled_as_winners",
+        "test_zero_cost_control_keeps_percent_unknown",
+        "test_shadow_and_control_bindings_fail_closed",
+        "test_envelope_and_schema_are_strict",
+        "test_cli_and_source_are_offline_non_authorizing",
+        'if __name__ == "__main__":',
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL context economics test missing contract token: {token}")
+    if tests.count("def test_") < 6:
+        raise SystemExit("FAIL context economics regression suite is unexpectedly incomplete")
+    print("PASS net context economics factual delta contract")
 
 
 def validate_token_efficiency_contract():
@@ -1488,6 +1536,7 @@ def main():
     validate_context_tool_output_contract()
     validate_context_canary_gate_contract()
     validate_context_shadow_gate_contract()
+    validate_context_economics_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1529,6 +1578,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_shadow_gate.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_economics.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)
