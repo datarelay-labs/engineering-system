@@ -222,6 +222,9 @@ def orientation(root: Path, task: str, max_files: int) -> dict[str, object]:
         candidates.append((-score, path.count("/"), path, reason))
     candidates.sort()
     selected = candidates[:max_files]
+    final_head = git(root, "rev-parse", "HEAD")
+    if final_head != head or worktree_paths(root):
+        fail_context("orientation repository state changed during scan")
     return {
         "head": head,
         "decision": "READY" if selected else "NO_MATCH",

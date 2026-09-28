@@ -145,6 +145,30 @@ def test_dirty_worktree_fails_closed() -> None:
         fail("dirty worktree orientation unexpectedly passed")
     if "orientation requires a clean worktree" not in run.stderr:
         fail(f"wrong dirty-worktree failure: {run.stderr}")
+def test_orientation_rejects_head_change_during_scan() -> None:
+    root = make_repo()
+    original = ctx.tracked_files
+
+    def changing_inventory(repo: Path) -> list[str]:
+        paths = original(repo)
+        (repo / "tools/concurrent.py").write_text("pass\n", encoding="utf-8")
+        git(repo, "add", "tools/concurrent.py")
+        git(repo, "commit", "-m", "concurrent change")
+        return paths
+
+    ctx.tracked_files = changing_inventory
+    try:
+        try:
+            ctx.orientation(root, "context routing", 2)
+        except SystemExit as exc:
+            if "orientation repository state changed during scan" not in str(exc):
+                fail(f"wrong concurrent-head failure: {exc}")
+        else:
+            fail("orientation accepted candidates from a different HEAD")
+    finally:
+        ctx.tracked_files = original
+
+
 def test_legacy_router_output_is_unchanged_without_task() -> None:
     root = make_repo()
     run = run_cli(root)
@@ -181,6 +205,7 @@ def main() -> int:
         test_orientation_limit_and_no_match,
         test_unicode_task_terms_are_supported,
         test_dirty_worktree_fails_closed,
+        test_orientation_rejects_head_change_during_scan,
         test_legacy_router_output_is_unchanged_without_task,
         test_invalid_orientation_inputs_fail_closed,
     ]
