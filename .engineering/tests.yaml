@@ -380,6 +380,25 @@ scenarios:
       - "admission is offline content-free factual metadata only and grants no optimizer promotion authority"
     release_gate: true
 
+  - id: ENG-CONTEXT-LEARNED-RUNTIME-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Learned compressor local runtime evidence
+    level: static
+    domains: [session-continuity, ai, schemas]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_learned_runtime.py"
+    invariants:
+      - "runtime evidence reuses the source-pinned learned candidate registry and binds the exact Engineering System HEAD"
+      - "sandbox qualification requires Docker network NONE loopback availability blocked external connectivity and a local compression backend"
+      - "model qualification requires bounded content-free probe digests and token counts"
+      - "runtime evidence is EVIDENCE_ONLY and never grants CANARY_READY provider-call promotion merge release or deploy authority"
+    release_gate: true
+
   - id: ENG-CONTEXT-FOLD-001
     cost: cheap
     estimated_seconds: 5

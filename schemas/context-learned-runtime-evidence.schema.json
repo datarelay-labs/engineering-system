@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datarelay.run/schemas/context-learned-runtime-evidence.schema.json",
+  "title": "Learned compressor local runtime evidence observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "system_head",
+    "candidate",
+    "artifact_digest",
+    "environment_id",
+    "evidence_revision",
+    "sandbox",
+    "backend"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "kind": {"type": "string", "const": "context-learned-runtime-evidence"},
+    "system_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "source_repo",
+        "source_commit",
+        "package_version",
+        "license",
+        "integration_mode"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "source_repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "package_version": {"type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,40}$"},
+        "license": {"type": "string", "pattern": "^[A-Za-z0-9.-]{1,40}$"},
+        "integration_mode": {"type": "string", "enum": ["LOCAL_SELF_HOST"]}
+      }
+    },
+    "artifact_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "environment_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "evidence_revision": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container_runtime",
+        "network_mode",
+        "loopback_bind_ok",
+        "external_connect_blocked",
+        "backend_endpoint_class"
+      ],
+      "properties": {
+        "container_runtime": {"type": "string", "enum": ["DOCKER", "OTHER", "UNKNOWN"]},
+        "network_mode": {"type": "string", "enum": ["NONE", "BRIDGE", "HOST", "UNKNOWN"]},
+        "loopback_bind_ok": {"type": ["boolean", "null"]},
+        "external_connect_blocked": {"type": ["boolean", "null"]},
+        "backend_endpoint_class": {
+          "type": "string",
+          "enum": ["LOOPBACK", "PRIVATE_NETWORK", "PUBLIC_NETWORK", "UNKNOWN"]
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["use_gpu_server"],
+      "properties": {
+        "use_gpu_server": {"type": ["boolean", "null"]},
+        "model_available": {"type": ["boolean", "null"]},
+        "compression_probe_passed": {"type": ["boolean", "null"]},
+        "probe_input_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "probe_output_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "probe_input_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "probe_output_tokens": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  }
+}
