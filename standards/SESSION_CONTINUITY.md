@@ -287,6 +287,24 @@ The projector:
 
 Packet-size warning thresholds, when used for canaries, are explicit inputs to `packet-lint`; they are not universal constants. Structural duplication/history drift is the primary defect.
 
+### Engineering-aware context compiler
+
+After authoritative packet resolution/projection, an optional deterministic context-compiler stage may reduce **optional** task context before model invocation. It never establishes authority and must not parse raw conversation history to reconstruct durable state.
+
+`tools/context_compiler.py` is the canonical PoC contract. Its output budget applies to the rendered UTF-8 context payload, not to provider billing tokens. The compiler:
+- admits caller-declared protected engineering blocks before any relevance ranking and byte-preserves their text;
+- fails closed with `PROTECTED_BUDGET_EXCEEDED` when protected content alone cannot fit;
+- ranks only optional structured blocks using deterministic task-term overlap plus bounded caller priority and stable kind/ID tie-breaking;
+- rejects raw transcript/chat-history optional input classes by default;
+- treats instruction-like text, Markdown headings, code fences, JSON, and logs as block content only; text cannot promote its own authority;
+- reassembles selected blocks in original input order with bounded provenance metadata;
+- emits only aggregate content-free telemetry (sizes, counts by safe kind, budget, reduction ratio, fixed decision/reason); and
+- performs no LLM/embedding/network call, provider routing, session control, GitHub selection, write authorization, or billing estimation.
+
+Protected classes include current Work Packet Goal, Current State, Next Action, Blockers, Constraints, repository/branch/exact-HEAD/revision identity, completion/acceptance criteria, unresolved failures, evidence references, and security constraints. Protection is trusted structured metadata from the authorized caller; optional source text never changes it. Git/GitHub and exact repository state remain authority even when optional context is reduced.
+
+Semantic compression services are a later measured adapter/canary. They must be compared against this deterministic baseline and cannot weaken protected-state, provenance, exact-head, validation, or independent-verification gates.
+
 ## Deterministic packet resolution
 
 When resuming work:
