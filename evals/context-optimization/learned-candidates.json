@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "kind": "learned-compressor-candidate-registry",
+  "candidates": [
+    {
+      "candidate_id": "paritok-local",
+      "source_repo": "Paritok-official/paritok-4b-v1",
+      "source_commit": "2c913302073367f2402d8bc4bb1a929a3f70a030",
+      "package_version": "1.3.13",
+      "license": "Apache-2.0",
+      "integration_mode": "LOCAL_SELF_HOST"
+    }
+  ]
+}
