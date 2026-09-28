@@ -25,9 +25,21 @@ INTEGRATION_MODES = frozenset({"LOCAL_SELF_HOST"})
 VERIFICATION_TOOL = ROOT / "tools/verification-contract.py"
 TRUST_WORKSTREAM_PREFIX = "learned-canary-"
 TRUST_EVIDENCE = (
-    ("execution_mode", "runtime", "learned.execution-mode"),
-    ("endpoint_class", "runtime", "learned.endpoint-class"),
-    ("external_egress", "runtime", "learned.external-egress"),
+    (
+        "compression_backend_execution_mode",
+        "runtime",
+        "learned.compression-backend-execution-mode",
+    ),
+    (
+        "compression_backend_endpoint_class",
+        "runtime",
+        "learned.compression-backend-endpoint-class",
+    ),
+    (
+        "compression_backend_external_egress",
+        "runtime",
+        "learned.compression-backend-external-egress",
+    ),
     ("protected_state_route", "runtime", "learned.protected-state-route"),
     ("deterministic_bypass", "test", "learned.deterministic-bypass"),
     ("exact_original_recovery_verified", "test", "learned.exact-recovery"),
@@ -50,9 +62,21 @@ def _load_json(path: Path, code: str) -> Any:
         raise AdmissionError(code) from exc
 
 RUNTIME_REQUIREMENTS = (
-    ("execution_mode", "LOCAL_ONLY", "EXECUTION_MODE_NOT_LOCAL"),
-    ("endpoint_class", "LOOPBACK", "ENDPOINT_NOT_LOOPBACK"),
-    ("external_egress", "DENY", "EXTERNAL_EGRESS_NOT_DENIED"),
+    (
+        "compression_backend_execution_mode",
+        "LOCAL_ONLY",
+        "COMPRESSION_BACKEND_EXECUTION_NOT_LOCAL",
+    ),
+    (
+        "compression_backend_endpoint_class",
+        "LOOPBACK",
+        "COMPRESSION_BACKEND_ENDPOINT_NOT_LOOPBACK",
+    ),
+    (
+        "compression_backend_external_egress",
+        "DENY",
+        "COMPRESSION_BACKEND_EGRESS_NOT_DENIED",
+    ),
     ("protected_state_route", "BYPASS", "PROTECTED_STATE_NOT_BYPASSED"),
 )
 BOOLEAN_REQUIREMENTS = (
@@ -286,7 +310,7 @@ def evaluate_admission(raw: Any, boundary: Any = None) -> dict[str, Any]:
     blockers.extend(trust_blockers)
     canary_ready = not blockers
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "context-learned-canary-admission-report",
         "decision": "CANARY_READY" if canary_ready else "SETUP_ALLOWED",
         "setup_allowed": True,

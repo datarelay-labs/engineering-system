@@ -15,7 +15,7 @@
     "runtime_facts"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "kind": {"type": "string", "const": "context-learned-canary-admission"},
     "candidate_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
     "source_repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
@@ -45,15 +45,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "execution_mode": {
+        "compression_backend_execution_mode": {
           "type": "string",
           "enum": ["LOCAL_ONLY", "HOSTED", "HYBRID", "UNKNOWN"]
         },
-        "endpoint_class": {
+        "compression_backend_endpoint_class": {
           "type": "string",
           "enum": ["LOOPBACK", "PRIVATE_NETWORK", "PUBLIC_NETWORK", "UNKNOWN"]
         },
-        "external_egress": {
+        "compression_backend_external_egress": {
           "type": "string",
           "enum": ["DENY", "ALLOW", "UNKNOWN"]
         },

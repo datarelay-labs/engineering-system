@@ -43,9 +43,9 @@ def expect_error(code: str, callback) -> None:
 
 def ready_facts() -> dict[str, object]:
     return {
-        "execution_mode": "LOCAL_ONLY",
-        "endpoint_class": "LOOPBACK",
-        "external_egress": "DENY",
+        "compression_backend_execution_mode": "LOCAL_ONLY",
+        "compression_backend_endpoint_class": "LOOPBACK",
+        "compression_backend_external_egress": "DENY",
         "protected_state_route": "BYPASS",
         "deterministic_bypass": True,
         "exact_original_recovery_verified": True,
@@ -71,7 +71,7 @@ def request(
     include_binding: bool = True,
 ) -> dict[str, object]:
     doc = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "context-learned-canary-admission",
         **PIN,
         "runtime_facts": ready_facts() if runtime_facts is None else runtime_facts,
@@ -154,6 +154,32 @@ def test_source_pin_and_license_fail_closed() -> None:
     expect_error("CANDIDATE_UNKNOWN", lambda: admission.evaluate_admission(doc))
 
 
+def test_legacy_ambiguous_egress_contract_fails_closed() -> None:
+    legacy = request()
+    legacy["schema_version"] = 1
+    facts = legacy["runtime_facts"]
+    facts["execution_mode"] = facts.pop("compression_backend_execution_mode")
+    facts["endpoint_class"] = facts.pop("compression_backend_endpoint_class")
+    facts["external_egress"] = facts.pop("compression_backend_external_egress")
+    expect_error("ENVELOPE_INVALID", lambda: admission.evaluate_admission(legacy))
+
+    doc = request()
+    payload = boundary_payload(doc)
+    legacy_ids = (
+        "learned.execution-mode",
+        "learned.endpoint-class",
+        "learned.external-egress",
+    )
+    for item, legacy_id in zip(payload["evidence"][:3], legacy_ids):
+        item["id"] = legacy_id
+    verification = admission._verification_module()
+    report = admission.evaluate_admission(
+        doc, verification.TrustedCoordinatorBoundary(payload)
+    )
+    if report["canary_ready"] or "TRUST_EVIDENCE_UNKNOWN" not in report["blockers"]:
+        fail(f"legacy ambiguous trust evidence was accepted: {report}")
+
+
 def test_setup_allowed_can_be_not_canary_ready() -> None:
     doc = request({})
     report = admission.evaluate_admission(doc, trusted_boundary(doc))
@@ -178,14 +204,46 @@ def test_setup_allowed_can_be_not_canary_ready() -> None:
 
 def test_runtime_mode_boundaries_block_readiness() -> None:
     cases = (
-        ("execution_mode", "HOSTED", "EXECUTION_MODE_NOT_LOCAL"),
-        ("execution_mode", "HYBRID", "EXECUTION_MODE_NOT_LOCAL"),
-        ("execution_mode", "UNKNOWN", "EXECUTION_MODE_NOT_LOCAL"),
-        ("endpoint_class", "PRIVATE_NETWORK", "ENDPOINT_NOT_LOOPBACK"),
-        ("endpoint_class", "PUBLIC_NETWORK", "ENDPOINT_NOT_LOOPBACK"),
-        ("endpoint_class", "UNKNOWN", "ENDPOINT_NOT_LOOPBACK"),
-        ("external_egress", "ALLOW", "EXTERNAL_EGRESS_NOT_DENIED"),
-        ("external_egress", "UNKNOWN", "EXTERNAL_EGRESS_NOT_DENIED"),
+        (
+            "compression_backend_execution_mode",
+            "HOSTED",
+            "COMPRESSION_BACKEND_EXECUTION_NOT_LOCAL",
+        ),
+        (
+            "compression_backend_execution_mode",
+            "HYBRID",
+            "COMPRESSION_BACKEND_EXECUTION_NOT_LOCAL",
+        ),
+        (
+            "compression_backend_execution_mode",
+            "UNKNOWN",
+            "COMPRESSION_BACKEND_EXECUTION_NOT_LOCAL",
+        ),
+        (
+            "compression_backend_endpoint_class",
+            "PRIVATE_NETWORK",
+            "COMPRESSION_BACKEND_ENDPOINT_NOT_LOOPBACK",
+        ),
+        (
+            "compression_backend_endpoint_class",
+            "PUBLIC_NETWORK",
+            "COMPRESSION_BACKEND_ENDPOINT_NOT_LOOPBACK",
+        ),
+        (
+            "compression_backend_endpoint_class",
+            "UNKNOWN",
+            "COMPRESSION_BACKEND_ENDPOINT_NOT_LOOPBACK",
+        ),
+        (
+            "compression_backend_external_egress",
+            "ALLOW",
+            "COMPRESSION_BACKEND_EGRESS_NOT_DENIED",
+        ),
+        (
+            "compression_backend_external_egress",
+            "UNKNOWN",
+            "COMPRESSION_BACKEND_EGRESS_NOT_DENIED",
+        ),
         ("protected_state_route", "COMPRESS", "PROTECTED_STATE_NOT_BYPASSED"),
         ("protected_state_route", "UNKNOWN", "PROTECTED_STATE_NOT_BYPASSED"),
     )
@@ -483,6 +541,7 @@ def main() -> int:
     tests = [
         test_all_verified_local_facts_are_canary_ready,
         test_source_pin_and_license_fail_closed,
+        test_legacy_ambiguous_egress_contract_fails_closed,
         test_setup_allowed_can_be_not_canary_ready,
         test_runtime_mode_boundaries_block_readiness,
         test_every_boolean_safety_fact_blocks_when_false_null_or_missing,
