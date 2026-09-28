@@ -64,6 +64,12 @@ CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
 )
 
+# Exact-HEAD repository orientation is invoked by the managed resume adapter.
+# Adopted repositories must carry the exact canonical helper beside that adapter.
+ENGINEERING_CONTEXT_MANAGED = (
+    "tools/engineering-context.py",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -79,6 +85,7 @@ REQUIRED_MANAGED = (
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
+    *ENGINEERING_CONTEXT_MANAGED,
 )
 
 # Known Cursor resume aliases kept in sync when present or installed as managed adapters.
@@ -901,6 +908,20 @@ def ensure_context_epoch_compatible(root: Path) -> None:
         )
 
 
+def ensure_engineering_context_compatible(root: Path) -> None:
+    """Reject a custom engineering-context helper before adoption writes any files."""
+    for rel in ENGINEERING_CONTEXT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_verification_contract_compatible(root: Path) -> None:
     """Reject an incompatible helper or schema before adoption writes any files.
 
@@ -1152,6 +1173,7 @@ def main() -> int:
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
     ensure_context_epoch_compatible(root)
+    ensure_engineering_context_compatible(root)
 
     written: list[str] = []
     skipped: list[str] = []
@@ -1187,6 +1209,7 @@ def main() -> int:
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
+        *ENGINEERING_CONTEXT_MANAGED,
     ):
         write_missing(
             root,

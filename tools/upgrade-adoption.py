@@ -13,6 +13,7 @@ import yaml
 
 from adopt import (
     CONTEXT_EPOCH_MANAGED,
+    ENGINEERING_CONTEXT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
@@ -423,6 +424,23 @@ def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str
     return installed
 
 
+def plan_engineering_context_install(root: Path) -> dict[str, str]:
+    """Install or upgrade only known managed engineering-context bytes."""
+    return plan_managed_file_install(
+        root, ENGINEERING_CONTEXT_MANAGED, label="engineering context"
+    )
+
+
+def apply_engineering_context_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_verification_contract_install(root: Path) -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
@@ -771,6 +789,7 @@ def main() -> int:
     planned_skills_contract = plan_skills_contract_install(root)
     planned_verification_contract = plan_verification_contract_install(root)
     planned_context_epoch = plan_context_epoch_install(root)
+    planned_engineering_context = plan_engineering_context_install(root)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -820,6 +839,14 @@ def main() -> int:
         print("CONTEXT_EPOCH_INSTALLED=" + ",".join(installed_context_epoch))
     else:
         print("CONTEXT_EPOCH_INSTALLED=<none>")
+
+    installed_engineering_context = apply_engineering_context_install(
+        root, planned_engineering_context
+    )
+    if installed_engineering_context:
+        print("ENGINEERING_CONTEXT_INSTALLED=" + ",".join(installed_engineering_context))
+    else:
+        print("ENGINEERING_CONTEXT_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:

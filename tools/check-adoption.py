@@ -171,6 +171,30 @@ def main() -> int:
                 "tools/context_epoch.py differs from canonical managed helper"
             )
 
+    engineering_context_referenced = any(
+        path.is_file()
+        and "tools/engineering-context.py" in path.read_text(encoding="utf-8", errors="replace")
+        for path in (
+            root / ".cursor/commands/resume.md",
+            root / ".cursor/commands/work-resume.md",
+        )
+    )
+    if engineering_context_referenced:
+        target_engineering_context = root / "tools/engineering-context.py"
+        canonical_engineering_context = Path(__file__).resolve().parent / "engineering-context.py"
+        if not target_engineering_context.is_file():
+            failures.append(
+                "Cursor resume adapter references engineering-context helper but missing tools/engineering-context.py"
+            )
+        elif not canonical_engineering_context.is_file():
+            failures.append(
+                "canonical adoption checker is missing tools/engineering-context.py"
+            )
+        elif target_engineering_context.read_bytes() != canonical_engineering_context.read_bytes():
+            failures.append(
+                "tools/engineering-context.py differs from canonical managed helper"
+            )
+
     agents_path = root / "AGENTS.md"
     if agents_path.is_file():
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
