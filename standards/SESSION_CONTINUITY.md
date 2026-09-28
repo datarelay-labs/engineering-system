@@ -317,6 +317,16 @@ One arm represents one exact system HEAD, one arm/case pair may appear only once
 
 The measurement helper is offline/read-only: it launches no worker, calls no provider/model/network service, mutates no GitHub/runtime state, and retains no raw context text, prompt, absolute path, credential, or tool output in its reports.
 
+
+### Reversible structural folding canary
+
+`tools/context_fold.py` is an optional local-only primitive after deterministic context avoidance/selection and before any semantic compression. It is disabled unless the caller explicitly names optional Context Compiler block IDs to fold. Protected blocks, including `work_packet` state, fail closed and are never stored or replaced.
+
+Folded UTF-8 bytes are retained only under the current worktree's absolute Git metadata directory in a private bounded store. The store creates a random local key, derives HMAC-SHA256 content handles from that key and exact bytes, uses private directory/file permissions, rejects symlink/out-of-bound/corrupt state, enforces entry/count/total-byte limits, and never evicts live entries merely to make room. Expansion authenticates the marker and keyed content address and returns exact original text or fails closed; explicit purge removes retained entries.
+
+The model-visible marker contains only version, store-local opaque handle, and original byte length. Fold telemetry is content-free aggregate data only and never includes raw text, reference/path, handle, digest, secret, or credential. Disabled mode writes no store state and preserves the input structure. This primitive performs no model/embedding/network call, does not change Context Compiler selection semantics, is not enabled by default in Cursor, and does not claim provider token, cache, billing, or solved-task improvement from byte reduction alone. Promotion requires the #104/#106 measured canary gates.
+
+
 ## Deterministic packet resolution
 
 When resuming work:

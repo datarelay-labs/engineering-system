@@ -55,6 +55,10 @@ paths:
     domains: [session-continuity, ai, workflows]
   "tools/test_context_optimization_benchmark.py":
     domains: [session-continuity, ai]
+  "tools/context_fold.py":
+    domains: [session-continuity, ai, workflows]
+  "tools/test_context_fold.py":
+    domains: [session-continuity, ai]
   "tools/engineering-context.py":
     domains: [session-continuity, workflows]
   "tools/test_engineering_context.py":
@@ -291,6 +295,24 @@ scenarios:
       - "offline context fixtures retain protected state and required evidence deterministically"
       - "cost per verified solved task is derived only from measured model cost"
       - "reports do not invent winners or weighted scores"
+    release_gate: true
+
+  - id: ENG-CONTEXT-FOLD-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Reversible private context folding
+    level: static
+    domains: [session-continuity, ai]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_context_fold.py"
+    invariants:
+      - "only explicitly selected optional context can fold; protected state fails closed"
+      - "folded UTF-8 content is recoverable byte-exactly from a bounded private Git-local store"
+      - "store-local handles and telemetry do not expose raw content or claim provider token/cost savings"
     release_gate: true
 
   - id: ENG-CONTEXT-ROUTER-001
