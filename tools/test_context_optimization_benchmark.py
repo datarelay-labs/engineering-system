@@ -228,6 +228,31 @@ def test_pass_evidence_requires_exact_subject_head() -> None:
         fail("PASS evidence for a different subject head was accepted")
 
 
+def test_optional_telemetry_run_id_is_backward_compatible() -> None:
+    legacy = record("compiler", "CTX-STALE-001", cost=1)
+    legacy_report = bench.score_run_set(run_set([legacy]))
+    if legacy_report["record_count"] != 1:
+        fail("legacy run record without telemetry id stopped scoring")
+
+    bound = record("compiler", "CTX-STALE-001", cost=1)
+    bound["TELEMETRY_RUN_ID"] = "a" * 32
+    bound_report = bench.score_run_set(run_set([bound]))
+    if bound_report["record_count"] != 1:
+        fail("valid optional telemetry run id stopped scoring")
+    if "TELEMETRY_RUN_ID" in json.dumps(bound_report, sort_keys=True):
+        fail("optional telemetry run id leaked into factual score report")
+
+    invalid = record("compiler", "CTX-STALE-001", cost=1)
+    invalid["TELEMETRY_RUN_ID"] = "not-a-valid-run-id"
+    try:
+        bench.score_run_set(run_set([invalid]))
+    except bench.BenchmarkError as exc:
+        if str(exc) != "TELEMETRY_RUN_ID_INVALID":
+            fail(f"wrong telemetry run id rejection: {exc}")
+    else:
+        fail("invalid optional telemetry run id was accepted")
+
+
 def test_invalid_or_ambiguous_run_records_fail_closed() -> None:
     bad_cases: list[dict[str, object]] = []
     increased = record("compiler", "BENCH-BUG-001", original=100, kept=101)
@@ -300,6 +325,7 @@ def main() -> int:
         test_exact_head_correctness_and_evidence_gate_solved,
         test_bench_fixture_requires_canonical_manifest_revision,
         test_pass_evidence_requires_exact_subject_head,
+        test_optional_telemetry_run_id_is_backward_compatible,
         test_invalid_or_ambiguous_run_records_fail_closed,
         test_cli_output_is_deterministic_and_content_free,
         test_fixture_manifest_hash_is_frozen,

@@ -67,6 +67,8 @@ RUN_FIELDS = frozenset({
     "REVIEW_REWORK",
     "HUMAN_INTERVENTIONS",
 })
+OPTIONAL_RUN_FIELDS = frozenset({"TELEMETRY_RUN_ID"})
+TELEMETRY_RUN_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 RUN_SET_FIELDS = frozenset({"schema_version", "kind", "records"})
 MANIFEST_FIELDS = frozenset({"schema_version", "kind", "cases"})
 CASE_FIELDS = frozenset({
@@ -267,14 +269,25 @@ def _bind_benchmark_fixture(case_id: str, fixture_id: str) -> None:
 def _validate_record(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise BenchmarkError("RUN_RECORD_INVALID")
-    _unknown_keys(raw, RUN_FIELDS, "RUN_RECORD_UNKNOWN_FIELD")
-    if set(raw) != RUN_FIELDS:
+    _unknown_keys(
+        raw,
+        RUN_FIELDS | OPTIONAL_RUN_FIELDS,
+        "RUN_RECORD_UNKNOWN_FIELD",
+    )
+    if not RUN_FIELDS <= set(raw):
         missing = sorted(RUN_FIELDS - set(raw))
         raise BenchmarkError("RUN_RECORD_MISSING_FIELD:" + ",".join(missing))
     arm = _require_str(raw["ARM_ID"], "ARM_ID_INVALID", ARM_RE)
     case_id = _require_str(raw["CASE_ID"], "CASE_ID_INVALID", RUN_CASE_RE)
     head = _require_str(raw["SYSTEM_HEAD"], "SYSTEM_HEAD_INVALID", SHA_RE)
     fixture_id = _require_str(raw["FIXTURE_ID"], "FIXTURE_ID_INVALID", FIXTURE_ID_RE)
+    telemetry_run_id = raw.get("TELEMETRY_RUN_ID")
+    if telemetry_run_id is not None:
+        telemetry_run_id = _require_str(
+            telemetry_run_id,
+            "TELEMETRY_RUN_ID_INVALID",
+            TELEMETRY_RUN_ID_RE,
+        )
     if case_id.startswith("BENCH-"):
         _bind_benchmark_fixture(case_id, fixture_id)
     terminal = raw["TERMINAL"]

@@ -57,6 +57,9 @@ REQUIRED_METHOD_FILES = (
     "tools/test_context_compiler.py",
     "tools/context_optimization_benchmark.py",
     "tools/test_context_optimization_benchmark.py",
+    "tools/context_canary_gate.py",
+    "tools/test_context_canary_gate.py",
+    "schemas/context-canary-comparison.schema.json",
     "tools/context_fold.py",
     "tools/test_context_fold.py",
     "tools/context_tool_output.py",
@@ -680,6 +683,45 @@ def validate_context_tool_output_contract():
     if tests.count("def test_") < 8:
         raise SystemExit("FAIL context tool-output regression suite is unexpectedly incomplete")
     print("PASS reversible structural tool-output reduction contract")
+
+
+def validate_context_canary_gate_contract():
+    tool = (ROOT / "tools/context_canary_gate.py").read_text(encoding="utf-8")
+    tests = (ROOT / "tools/test_context_canary_gate.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/context-canary-comparison.schema.json")
+    if schema.get("additionalProperties") is not False:
+        raise SystemExit("FAIL context canary envelope permits freeform top-level fields")
+    for token in (
+        "benchmark.score_run_set",
+        "telemetry.parse_document",
+        "PROFILE_SWITCHED",
+        "USAGE_INCOMPLETE",
+        "TELEMETRY_RUN_ID_DUPLICATE",
+        "TELEMETRY_RUN_ID_REQUIRED",
+        "TELEMETRY_RUN_ID_MISMATCH",
+        "telemetry.rework_count",
+        "SYSTEM_HEAD_MISMATCH",
+        "MODEL_COST_MISMATCH",
+        "VERIFIED_OUTCOME_INCOMPLETE",
+        '"decision": "ELIGIBLE"',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL context canary helper missing contract token: {token}")
+    for token in (
+        "CONTEXT_CANARY_GATE_TESTS=PASS",
+        "test_valid_live_canary_is_eligible_and_factual",
+        "test_authoritative_telemetry_identity_fails_closed",
+        "test_profile_and_switch_mismatches_fail_closed",
+        "test_binding_completeness_and_uniqueness_fail_closed",
+        "test_multi_arm_and_head_usage_mismatches_fail_closed",
+        "test_telemetry_privacy_contract_cannot_be_bypassed",
+        'if __name__ == "__main__":',
+    ):
+        if token not in tests:
+            raise SystemExit(f"FAIL context canary test missing contract token: {token}")
+    if tests.count("def test_") < 9:
+        raise SystemExit("FAIL context canary regression suite is unexpectedly incomplete")
+    print("PASS live context canary comparability contract")
 
 
 def validate_token_efficiency_contract():
@@ -1393,6 +1435,7 @@ def main():
     validate_worker_adapter_contract()
     validate_context_fold_contract()
     validate_context_tool_output_contract()
+    validate_context_canary_gate_contract()
     validate_token_efficiency_contract()
     validate_resume_template_parity()
     validate_issue_template_parity()
@@ -1428,6 +1471,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_optimization_benchmark.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_context_canary_gate.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_fold.py"], cwd=ROOT)

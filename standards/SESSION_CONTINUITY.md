@@ -317,6 +317,8 @@ One arm represents one exact system HEAD, one arm/case pair may appear only once
 
 The measurement helper is offline/read-only: it launches no worker, calls no provider/model/network service, mutates no GitHub/runtime state, and retains no raw context text, prompt, absolute path, credential, or tool output in its reports.
 
+Before a real provider/model A/B result is treated as economically comparable, `tools/context_canary_gate.py` must bind every #106 arm/case record to exactly one existing efficiency-telemetry record. #106 run records remain backward-compatible, but live-canary records carry an optional `TELEMETRY_RUN_ID` that the live gate requires and must match the validated telemetry `run_id` exactly; caller-supplied arm/case wrappers alone are never binding authority. The gate also requires one known provider/model/reasoning/toolset profile with no switches, one Engineering System HEAD across all arms, EXACT_HEAD/PASS telemetry bound to each run HEAD, complete provider-exposed input/output/cache-read/cache-write/cost fields, and exact agreement between #106 measured model cost and telemetry cost. It preserves #106 same-case-set and verified-solved requirements. Any mismatch or unknown fact blocks canary eligibility; the report is factual only and never selects, ranks, or recommends an optimizer. Shadow replay and behavioral-equivalence certification are separate later gates.
+
 
 ### Reversible structural folding canary
 
