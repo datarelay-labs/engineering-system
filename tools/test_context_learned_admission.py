@@ -293,6 +293,26 @@ def test_trust_boundary_uses_canonical_verification_module() -> None:
         fail(f"canonical verification boundary was rejected: {report}")
 
 
+def test_verification_module_rejects_preloaded_wrong_origin() -> None:
+    original = sys.modules.get("verification_contract")
+    fake = type(
+        "FakeVerificationModule",
+        (),
+        {
+            "__file__": "/tmp/fake-verification-contract.py",
+            "TrustedCoordinatorBoundary": object,
+        },
+    )()
+    sys.modules["verification_contract"] = fake
+    try:
+        expect_error("TRUST_CONTRACT_UNAVAILABLE", admission._verification_module)
+    finally:
+        if original is None:
+            sys.modules.pop("verification_contract", None)
+        else:
+            sys.modules["verification_contract"] = original
+
+
 def test_trust_boundary_is_required_and_raw_dict_is_untrusted() -> None:
     doc = request()
     report = admission.evaluate_admission(doc)
@@ -469,6 +489,7 @@ def main() -> int:
         test_schema_rejects_content_and_unbounded_fields,
         test_registry_is_source_pinned_bounded_and_strict,
         test_trust_boundary_uses_canonical_verification_module,
+        test_verification_module_rejects_preloaded_wrong_origin,
         test_trust_boundary_is_required_and_raw_dict_is_untrusted,
         test_trust_boundary_binds_artifact_environment_and_revision,
         test_trust_evidence_set_fails_closed,

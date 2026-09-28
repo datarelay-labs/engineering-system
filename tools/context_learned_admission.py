@@ -152,8 +152,19 @@ def _candidate(request: dict[str, Any]) -> dict[str, Any]:
 
 def _verification_module() -> Any:
     name = "verification_contract"
+    expected_origin = VERIFICATION_TOOL.resolve()
     cached = sys.modules.get(name)
-    if cached is not None and hasattr(cached, "TrustedCoordinatorBoundary"):
+    if cached is not None:
+        origin = getattr(cached, "__file__", None)
+        try:
+            cached_origin = Path(origin).resolve() if isinstance(origin, str) else None
+        except OSError as exc:
+            raise AdmissionError("TRUST_CONTRACT_UNAVAILABLE") from exc
+        if (
+            cached_origin != expected_origin
+            or not hasattr(cached, "TrustedCoordinatorBoundary")
+        ):
+            raise AdmissionError("TRUST_CONTRACT_UNAVAILABLE")
         return cached
     spec = importlib.util.spec_from_file_location(name, VERIFICATION_TOOL)
     if spec is None or spec.loader is None:
