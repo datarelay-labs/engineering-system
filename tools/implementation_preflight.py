@@ -437,7 +437,6 @@ def check(args: argparse.Namespace) -> int:
     )
     if root != expected_worktree:
         raise PreflightError("WORKTREE_BINDING_MISMATCH")
-    worktree_fd = open_bound_worktree(root, args.expected_worktree_identity)
     if REPO_RE.fullmatch(args.expected_repo) is None:
         raise PreflightError("EXPECTED_REPO_INVALID")
     if WORKSTREAM_RE.fullmatch(args.expected_workstream) is None:
@@ -451,6 +450,7 @@ def check(args: argparse.Namespace) -> int:
     if args.expected_intent_revision < 1:
         raise PreflightError("INTENT_REVISION_INVALID")
 
+    worktree_fd = open_bound_worktree(root, args.expected_worktree_identity)
     try:
         # All protected Git reads are anchored to the already-open authorized
         # directory inode, so rename/swap races cannot redirect the evidence.
