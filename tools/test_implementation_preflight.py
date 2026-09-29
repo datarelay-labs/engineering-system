@@ -379,6 +379,36 @@ def main() -> int:
             assert symlinked.returncode == 2, symlinked.stdout
             assert "WORKTREE_PATH_SYMLINK" in symlinked.stdout
 
+        # Protected Git reads must stay anchored to the originally opened inode
+        # even if the lexical worktree path is replaced while the check runs.
+        with tempfile.TemporaryDirectory() as fd_swap_tmp:
+            fd_swap_root = Path(fd_swap_tmp)
+            fd_original = fd_swap_root / "repo"
+            fd_original.mkdir()
+            fd_head = init_repo(fd_original)
+            fd_captured = fixture_worktree_identity(fd_original)
+            bound_fd = PREFLIGHT.open_bound_worktree(fd_original, fd_captured)
+            try:
+                (fd_original / "README.md").write_text("dirty-through-original-inode\n", encoding="utf-8")
+                fd_hidden = fd_swap_root / "repo-hidden"
+                fd_original.rename(fd_hidden)
+                git("clone", "-q", str(fd_hidden), str(fd_original), cwd=fd_swap_root)
+                git(
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://github.com/datarelay-labs/engineering-system.git",
+                    cwd=fd_original,
+                )
+                try:
+                    PREFLIGHT.require_clean_root(fd_original, bound_fd)
+                except PREFLIGHT.PreflightError as exc:
+                    assert str(exc) == "WORKTREE_DIRTY", exc
+                else:
+                    raise AssertionError("fd-bound Git reads followed replacement worktree")
+            finally:
+                os.close(bound_fd)
+
         git("update-index", "--assume-unchanged", "README.md", cwd=repo)
         hidden_assume = invoke(repo, head)
         assert hidden_assume.returncode == 2, hidden_assume.stdout
@@ -595,8 +625,11 @@ def main() -> int:
         "GIT_CONFIG_NOSYSTEM",
         "core.fsmonitor=false",
         "HIDDEN_INDEX_STATE",
-        'git(root, "ls-files", "-v", "-z")',
-        'git(root, "ls-files", "--stage", "-z")',
+        '"ls-files", "-v", "-z"',
+        '"ls-files", "--stage", "-z"',
+        "open_bound_worktree",
+        "pass_fds=(worktree_fd,)",
+        "WORKTREE_FD_BOUNDARY_UNAVAILABLE",
     ):
         assert required in source, required
 
