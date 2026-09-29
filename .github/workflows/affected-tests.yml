@@ -39,9 +39,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install selector dependency
+      - name: Install Engineering System dependencies
         if: ${{ inputs.affected_command == '' }}
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+        run: python -m pip install --disable-pip-version-check -r .engineering/requirements-engineering-system.txt
 
       - name: Resolve comparison base
         id: base

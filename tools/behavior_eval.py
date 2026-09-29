@@ -682,7 +682,14 @@ def check_permissions(root: Path) -> dict[str, str]:
         c_priv, c_pub = fixtures.generate_keypair(coord)
         a_priv, a_pub = fixtures.generate_keypair(atk)
         _, _, digest = skills.load_effective_state(root)
-        request = {"target": "prod-db", "op": "write"}
+        authority_context = {
+            "target_repo": "datarelay-labs/engineering-system",
+            "workstream": "behavior-eval",
+            "branch": "eval/skills-contract",
+            "subject_head": "a" * 40,
+            "intent_revision": 1,
+        }
+        request = {**authority_context, "target": "prod-db", "op": "write"}
         binding = base / "atk-binding.json"
         dispatch = base / "atk-dispatch.json"
         fixtures.write_binding_assertion(
@@ -745,7 +752,8 @@ def check_permissions(root: Path) -> dict[str, str]:
             tool_id="shell.external_write",
             classes=skills.DEFAULT_TOOL_REGISTRY["shell.external_write"],
             policy_digest=digest,
-            request_payload={"op": "upload"},
+            request_payload={**authority_context, "op": "upload"},
+            binding_assertion=good_binding,
             dispatch_id="ext-beh-1",
             expires_at_unix=int(time.time()) + 3600,
         )
@@ -763,7 +771,7 @@ def check_permissions(root: Path) -> dict[str, str]:
                 root,
                 binding_assertion=good_binding,
                 dispatch_assertion=good_dispatch,
-                request_json=json.dumps({"op": "other"}),
+                request_json=json.dumps({**authority_context, "op": "other"}),
             )
             # Same dispatch + same bound request must not ALLOW twice.
             ok_binding = base / "ok-binding.json"
@@ -784,7 +792,8 @@ def check_permissions(root: Path) -> dict[str, str]:
                 tool_id="production.write",
                 classes=skills.DEFAULT_TOOL_REGISTRY["production.write"],
                 policy_digest=digest,
-                request_payload={"target": "prod", "op": "write"},
+                request_payload={**authority_context, "target": "prod", "op": "write"},
+                binding_assertion=ok_binding,
                 dispatch_id="prod-beh-replay-1",
                 expires_at_unix=int(time.time()) + 3600,
             )
@@ -792,13 +801,13 @@ def check_permissions(root: Path) -> dict[str, str]:
                 root,
                 binding_assertion=ok_binding,
                 dispatch_assertion=ok_dispatch,
-                request_json=json.dumps({"target": "prod", "op": "write"}),
+                request_json=json.dumps({**authority_context, "target": "prod", "op": "write"}),
             )
             second = skills.authorize(
                 root,
                 binding_assertion=ok_binding,
                 dispatch_assertion=ok_dispatch,
-                request_json=json.dumps({"target": "prod", "op": "write"}),
+                request_json=json.dumps({**authority_context, "target": "prod", "op": "write"}),
             )
         finally:
             skills._TEST_TRUST_ANCHOR_PATH = previous_anchor

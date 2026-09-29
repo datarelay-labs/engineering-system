@@ -2436,6 +2436,40 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
         assert upgraded_release["execution_context"] == "protected-production"
 
 
+
+
+def test_managed_contract_dependency_failure_is_deterministic() -> None:
+    requirements = ROOT / ".engineering" / "requirements-engineering-system.txt"
+    text = requirements.read_text(encoding="utf-8")
+    assert "PyYAML==6.0.2" in text
+    assert "jsonschema==4.25.1" in text
+    install = (
+        "python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    )
+    for rel in (
+        "tools/knowledge-contract.py",
+        "tools/runtime-contract.py",
+        "tools/skills-contract.py",
+        "tools/verification-contract.py",
+    ):
+        completed = run(sys.executable, "-S", str(ROOT / rel), "--help", check=False)
+        assert completed.returncode != 0, rel
+        assert "ENGINEERING_SYSTEM_DEPENDENCY_MISSING=" in completed.stdout, (rel, completed.stdout)
+        assert install in completed.stdout, (rel, completed.stdout)
+        assert "Traceback" not in completed.stdout, (rel, completed.stdout)
+
+
+def test_managed_work_packet_template_requires_v2_authority_metadata() -> None:
+    template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
+        encoding="utf-8"
+    )
+    for key in ("INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER"):
+        assert re.search(rf"(?m)^{key}=", template), key
+    checker = CHECK.read_text(encoding="utf-8")
+    assert "managed Work Packet template missing required packet-v2 metadata" in checker
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -2490,6 +2524,8 @@ def main() -> int:
     test_local_adoption_checker_chat_contract_is_not_target_version_gated()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_release_execution_context_is_bounded_and_upgradeable()
+    test_managed_contract_dependency_failure_is_deterministic()
+    test_managed_work_packet_template_requires_v2_authority_metadata()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

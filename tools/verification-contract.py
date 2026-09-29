@@ -24,8 +24,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-from jsonschema import Draft202012Validator
+try:
+    import yaml
+    from jsonschema import Draft202012Validator
+except ModuleNotFoundError as exc:
+    missing = exc.name or "unknown"
+    raise SystemExit(
+        "ENGINEERING_SYSTEM_DEPENDENCY_MISSING="
+        + missing
+        + "\nINSTALL=python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    ) from None
 
 ROOT = Path(__file__).resolve().parents[1]
 MAP_REL = Path(".engineering") / "verification.yaml"

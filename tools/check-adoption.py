@@ -25,6 +25,7 @@ CONTINUITY_REQUIRED = (
 
 MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
+    ".engineering/requirements-engineering-system.txt",
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
@@ -231,10 +232,20 @@ def main() -> int:
                 failures.append(
                     "AGENTS.md missing Chat-primary implementation preflight instruction"
                 )
+            packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
+            if packet_template.is_file():
+                packet_text = packet_template.read_text(encoding="utf-8", errors="replace")
+                for key in ("INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER"):
+                    if re.search(rf"(?m)^{key}=", packet_text) is None:
+                        failures.append(
+                            f"managed Work Packet template missing required packet-v2 metadata {key}"
+                        )
             for rel in (
                 "tools/implementation_preflight.py",
                 "tools/context_epoch.py",
                 "tools/work_packet_authority.py",
+                ".github/ISSUE_TEMPLATE/ai-work-packet.md",
+                ".engineering/requirements-engineering-system.txt",
             ):
                 target = root / rel
                 canonical = Path(__file__).resolve().parents[1] / rel

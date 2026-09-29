@@ -409,6 +409,19 @@ def main() -> int:
             finally:
                 os.close(bound_fd)
 
+        # A worker-controlled local core.worktree must not redirect protected
+        # Git reads away from the fd-bound authorized worktree.
+        with tempfile.TemporaryDirectory() as core_worktree_tmp:
+            clean_sibling = Path(core_worktree_tmp) / "clean"
+            git("clone", "-q", str(repo), str(clean_sibling), cwd=root)
+            (repo / "README.md").write_text("dirty-local-worktree\n", encoding="utf-8")
+            git("config", "core.worktree", str(clean_sibling), cwd=repo)
+            redirected = invoke(repo, head)
+            assert redirected.returncode == 2, redirected.stdout
+            assert "WORKTREE_DIRTY" in redirected.stdout
+            git("config", "--unset", "core.worktree", cwd=repo)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+
         git("update-index", "--assume-unchanged", "README.md", cwd=repo)
         hidden_assume = invoke(repo, head)
         assert hidden_assume.returncode == 2, hidden_assume.stdout

@@ -234,8 +234,13 @@ def test_p1b_verifier_001_stale_ci_denied() -> None:
 
 def test_critical_requires_human_approval() -> None:
     assert evaluate(base(risk="CRITICAL"))["DENY_CLASS"] == "HUMAN_APPROVAL_MISSING"
+    bypass = evaluate(
+        base(risk="CRITICAL", human_approval={"required": False, "present": False})
+    )
+    assert bypass["DECISION"] == "DENY"
+    assert bypass["DENY_CLASS"] == "HUMAN_APPROVAL_MISSING"
     ok = evaluate(
-        base(risk="CRITICAL", human_approval={"required": True, "present": True})
+        base(risk="CRITICAL", human_approval={"required": False, "present": True})
     )
     assert ok["DECISION"] == "PASS"
 

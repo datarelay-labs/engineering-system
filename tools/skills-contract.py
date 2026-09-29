@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -31,8 +32,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-import yaml
-from jsonschema import Draft202012Validator
+try:
+    import yaml
+    from jsonschema import Draft202012Validator
+except ModuleNotFoundError as exc:
+    missing = exc.name or "unknown"
+    raise SystemExit(
+        "ENGINEERING_SYSTEM_DEPENDENCY_MISSING="
+        + missing
+        + "\nINSTALL=python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    ) from None
 
 _TOOLS_DIR = Path(__file__).resolve().parent
 if str(_TOOLS_DIR) not in sys.path:
@@ -83,6 +93,21 @@ HOOKS_EXECUTABLE = False
 SCRIPTS_GRANT_EXECUTION = False
 RESOURCES_EXECUTABLE = False
 HIGH_RISK_CLASSES = frozenset({"external_write", "production_write", "destructive"})
+FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+AUTHORITY_SCOPE_KEYS = frozenset(
+    {
+        "target_repo",
+        "worktree",
+        "workstream",
+        "branch",
+        "subject_head",
+        "intent_revision",
+        "session_id",
+    }
+)
 
 DEFAULT_TOOL_REGISTRY: dict[str, frozenset[str]] = {
     "repo.read": frozenset({"read"}),
@@ -627,6 +652,10 @@ def load_effective_state(
     return profiles, instance, str(report["policy_digest"])
 
 
+def signed_payload_sha256(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(canonical_payload_bytes(payload)).hexdigest()
+
+
 def canonical_request_sha256(request_payload: Any) -> str:
     payload = request_payload if isinstance(request_payload, dict) else {}
     body = {key: payload[key] for key in sorted(payload)}
@@ -635,6 +664,69 @@ def canonical_request_sha256(request_payload: Any) -> str:
             "utf-8"
         )
     ).hexdigest()
+
+
+def _high_risk_scope_problem(
+    *,
+    root: Path,
+    binding_payload: dict[str, Any],
+    dispatch_payload: dict[str, Any],
+    request_payload: dict[str, Any],
+) -> str | None:
+    scope = binding_payload.get("scope")
+    if not isinstance(scope, dict) or set(scope) != AUTHORITY_SCOPE_KEYS:
+        return "AUTHORITY_SCOPE_MISSING"
+
+    target_repo = scope.get("target_repo")
+    worktree = scope.get("worktree")
+    workstream = scope.get("workstream")
+    branch = scope.get("branch")
+    subject_head = scope.get("subject_head")
+    intent_revision = scope.get("intent_revision")
+    session_id = scope.get("session_id")
+
+    if not isinstance(target_repo, str) or REPOSITORY_RE.fullmatch(target_repo) is None:
+        return "AUTHORITY_SCOPE_INVALID"
+    if not isinstance(worktree, str) or not worktree:
+        return "AUTHORITY_SCOPE_INVALID"
+    if not isinstance(workstream, str) or WORKSTREAM_RE.fullmatch(workstream) is None:
+        return "AUTHORITY_SCOPE_INVALID"
+    if (
+        not isinstance(branch, str)
+        or not branch
+        or len(branch) > 240
+        or any(char in branch for char in "\r\n\x00")
+    ):
+        return "AUTHORITY_SCOPE_INVALID"
+    if not isinstance(subject_head, str) or FULL_SHA_RE.fullmatch(subject_head) is None:
+        return "AUTHORITY_SCOPE_INVALID"
+    if isinstance(intent_revision, bool) or not isinstance(intent_revision, int) or intent_revision < 1:
+        return "AUTHORITY_SCOPE_INVALID"
+    if not isinstance(session_id, str) or SESSION_ID_RE.fullmatch(session_id) is None:
+        return "AUTHORITY_SCOPE_INVALID"
+
+    try:
+        if Path(worktree).resolve() != root.resolve():
+            return "WORKTREE_SCOPE_MISMATCH"
+    except OSError:
+        return "WORKTREE_SCOPE_MISMATCH"
+
+    expected = {
+        "target_repo": request_payload.get("target_repo"),
+        "workstream": request_payload.get("workstream"),
+        "branch": request_payload.get("branch"),
+        "subject_head": request_payload.get("subject_head"),
+        "intent_revision": request_payload.get("intent_revision"),
+    }
+    for key, value in expected.items():
+        if value != scope.get(key):
+            return "AUTHORITY_SCOPE_MISMATCH"
+
+    if dispatch_payload.get("session_id") != session_id:
+        return "SESSION_SCOPE_MISMATCH"
+    if dispatch_payload.get("scope_sha256") != canonical_request_sha256(scope):
+        return "AUTHORITY_SCOPE_MISMATCH"
+    return None
 
 
 def _host_path_provenance_ok(path: Path, *, expect_file: bool) -> bool:
@@ -975,6 +1067,9 @@ def authorize(
         return Decision(False, "TRUST_ANCHOR_MISMATCH")
     if dispatch_payload.get("binding_public_key_sha256") != anchor_hash:
         return Decision(False, "TRUST_ANCHOR_MISMATCH")
+    expected_binding_hash = signed_payload_sha256(binding_payload)
+    if dispatch_payload.get("binding_sha256") != expected_binding_hash:
+        return Decision(False, "BINDING_ASSERTION_MISMATCH")
     expected_request_hash = canonical_request_sha256(request_payload)
     actual_request_hash = dispatch_payload.get("request_sha256")
     if not isinstance(actual_request_hash, str) or actual_request_hash != expected_request_hash:
@@ -985,6 +1080,14 @@ def authorize(
     class_set = frozenset(str(item) for item in classes)
     high_risk_dispatch_id: str | None = None
     if class_set & HIGH_RISK_CLASSES:
+        scope_problem = _high_risk_scope_problem(
+            root=root,
+            binding_payload=binding_payload,
+            dispatch_payload=dispatch_payload,
+            request_payload=request_payload,
+        )
+        if scope_problem is not None:
+            return Decision(False, scope_problem)
         dispatch_id = dispatch_payload.get("dispatch_id")
         expires = dispatch_payload.get("expires_at_unix")
         if not isinstance(dispatch_id, str) or not dispatch_id.strip():

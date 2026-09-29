@@ -381,9 +381,11 @@ def evaluate(request: dict[str, Any]) -> dict[str, str]:
                 VERIFIER_REQUIRED="YES",
             )
         approval_map = _require_mapping(approval, "human_approval")
-        required = _require_bool(approval_map.get("required", True), "human_approval.required")
+        # Parse caller metadata for schema hygiene, but never let it weaken the
+        # CRITICAL policy: an actual approval must always be present.
+        _require_bool(approval_map.get("required", True), "human_approval.required")
         present = _require_bool(approval_map.get("present"), "human_approval.present")
-        if required and not present:
+        if not present:
             return deny(
                 "CRITICAL human approval is required but not present",
                 "HUMAN_APPROVAL_MISSING",

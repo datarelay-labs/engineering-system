@@ -128,6 +128,16 @@ def test_present_contract_does_not_execute_commands() -> None:
         assert "health_command:" not in (root / ".engineering" / "runtime.yaml").read_text(encoding="utf-8")
 
 
+def test_empty_present_contract_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_profiles(root)
+        (root / ".engineering" / "runtime.yaml").write_text("# comment only\n", encoding="utf-8")
+        report = contract.check_contract(root)
+        assert report["result"] == "FAIL"
+        assert any(item["code"] == "SCHEMA" for item in report["findings"])
+
+
 def test_duplicate_authority_command_fails() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -308,6 +318,7 @@ def test_canonical_contract_passes() -> None:
 def main() -> int:
     test_absent_contract_passes_and_reports_authorities()
     test_present_contract_does_not_execute_commands()
+    test_empty_present_contract_fails_closed()
     test_duplicate_authority_command_fails()
     test_second_health_field_fails_schema()
     test_local_metrics_url_is_structurally_valid_and_not_executed()

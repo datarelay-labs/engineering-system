@@ -17,6 +17,7 @@ from typing import Any, Iterable
 
 # Test fixtures sign with the same fixed host binary production verification uses.
 OPENSSL = "/usr/bin/openssl"
+HIGH_RISK_CLASSES = frozenset({"external_write", "production_write", "destructive"})
 
 
 def sha256_file(path: Path) -> str:
@@ -26,6 +27,10 @@ def sha256_file(path: Path) -> str:
 def canonical_payload_bytes(payload: dict[str, Any]) -> bytes:
     body = {key: payload[key] for key in sorted(payload) if key != "signature"}
     return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def signed_payload_sha256(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(canonical_payload_bytes(payload)).hexdigest()
 
 
 def canonical_request_sha256(request_payload: Any) -> str:
@@ -122,14 +127,68 @@ def write_dispatch_assertion(
     request_payload: dict[str, Any] | None = None,
     dispatch_id: str = "",
     expires_at_unix: int | None = None,
+    binding_assertion: Path | None = None,
+    worktree: Path | None = None,
+    session_id: str = "",
 ) -> Path:
+    if binding_assertion is None:
+        candidates = sorted(path.parent.glob("*binding.json"))
+        if len(candidates) != 1:
+            raise AssertionError("fixture requires exactly one binding assertion")
+        binding_assertion = candidates[0]
+    binding_payload = json.loads(binding_assertion.read_text(encoding="utf-8"))
+    class_list = sorted(classes)
+    if worktree is None:
+        for parent in (path.parent, *path.parents):
+            candidate = parent / "repo"
+            if candidate.is_dir():
+                worktree = candidate
+                break
+    if worktree is None:
+        worktree = Path(__file__).resolve().parents[1]
+
+    request = request_payload or {}
+    high_risk = bool(set(class_list) & HIGH_RISK_CLASSES)
+    if high_risk and "scope" not in binding_payload:
+        required = ("target_repo", "workstream", "branch", "subject_head", "intent_revision")
+        missing = [key for key in required if key not in request]
+        if missing:
+            raise AssertionError("high-risk fixture request missing authority scope: " + ",".join(missing))
+        chosen_session = session_id or (
+            "fixture-" + canonical_request_sha256(request)[:24]
+        )
+        scope = {
+            "target_repo": request["target_repo"],
+            "worktree": str(worktree.resolve()),
+            "workstream": request["workstream"],
+            "branch": request["branch"],
+            "subject_head": request["subject_head"],
+            "intent_revision": request["intent_revision"],
+            "session_id": chosen_session,
+        }
+        unsigned = {key: value for key, value in binding_payload.items() if key != "signature"}
+        unsigned["scope"] = scope
+        binding_payload = sign_payload(private_key, unsigned)
+        binding_assertion.write_text(
+            json.dumps(binding_payload, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    scope = binding_payload.get("scope") if isinstance(binding_payload, dict) else None
+
     payload: dict[str, Any] = {
         "tool_id": tool_id,
-        "classes": sorted(classes),
+        "classes": class_list,
         "policy_digest": policy_digest,
         "binding_public_key_sha256": sha256_file(public_key),
-        "request_sha256": canonical_request_sha256(request_payload or {}),
+        "binding_sha256": signed_payload_sha256(binding_payload),
+        "worktree": str(worktree.resolve()),
+        "request_sha256": canonical_request_sha256(request),
     }
+    if high_risk:
+        if not isinstance(scope, dict):
+            raise AssertionError("high-risk fixture binding scope is missing")
+        payload["session_id"] = scope["session_id"]
+        payload["scope_sha256"] = canonical_request_sha256(scope)
     if dispatch_id:
         payload["dispatch_id"] = dispatch_id
     if expires_at_unix is not None:
