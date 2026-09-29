@@ -345,6 +345,8 @@ def validate_chat_primary_contract():
             raise SystemExit(f"FAIL {label} missing isolated immutable-source Python launcher")
         if "controlled minimal environment" not in text:
             raise SystemExit(f"FAIL {label} missing controlled preflight environment boundary")
+        if "--expected-worktree-identity" not in text:
+            raise SystemExit(f"FAIL {label} missing no-follow worktree identity binding")
         if (
             "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED" not in text
             and "external authenticated GitHub coordinator" not in text

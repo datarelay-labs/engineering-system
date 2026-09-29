@@ -82,6 +82,19 @@ def init_repo(root: Path) -> str:
     return git("rev-parse", "HEAD", cwd=root).stdout.strip()
 
 
+def fixture_worktree_identity(path: Path) -> str:
+    records: list[str] = []
+    current = Path(path.parts[0])
+    for part in path.parts[1:]:
+        current = current / part
+        st = os.lstat(current)
+        if os.path.islink(current):
+            raise AssertionError(f"fixture path unexpectedly symlinked: {current}")
+        records.append(f"{st.st_dev}:{st.st_ino}")
+    root_st = os.lstat(Path(path.parts[0]))
+    return ",".join([f"{root_st.st_dev}:{root_st.st_ino}", *records])
+
+
 def isolated_python_env() -> dict[str, str]:
     return {
         "PATH": "/usr/bin:/bin",
@@ -98,6 +111,7 @@ def invoke(
     *extra: str,
     env: dict[str, str] | None = None,
     tool: Path = TOOL,
+    expected_identity: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     # Match the authoritative execution shape: immutable source bytes on stdin,
     # Python isolated mode, cwd outside the worktree, and no inherited caller
@@ -113,6 +127,8 @@ def invoke(
         str(repo),
         "--expected-worktree",
         str(repo),
+        "--expected-worktree-identity",
+        expected_identity or fixture_worktree_identity(repo),
         "--issue-number",
         "143",
         "--expected-repo",
@@ -211,6 +227,25 @@ def main() -> int:
     assert env["HOME"] == "/nonexistent"
     assert env["XDG_CONFIG_HOME"] == "/nonexistent"
 
+    with tempfile.TemporaryDirectory() as identity_tmp:
+        identity_root = Path(identity_tmp) / "identity-repo"
+        identity_root.mkdir()
+        identity_result = run(
+            sys.executable,
+            "-I",
+            "-",
+            "identity",
+            "--root",
+            str(identity_root),
+            cwd=Path("/"),
+            env=isolated_python_env(),
+            check=False,
+            input_text=TOOL.read_text(encoding="utf-8"),
+        )
+        assert identity_result.returncode == 0, identity_result.stdout
+        assert f"WORKTREE_IDENTITY={fixture_worktree_identity(identity_root)}" in identity_result.stdout
+        assert "MUTATION_AUTHORITY=NO" in identity_result.stdout
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         repo = root / "repo"
@@ -255,6 +290,7 @@ def main() -> int:
         assert help_result.returncode == 0
         for required in (
             "--expected-worktree",
+            "--expected-worktree-identity",
             "--issue-number",
             "--expected-repo",
             "--expected-workstream",
@@ -295,6 +331,53 @@ def main() -> int:
         dirty = invoke(repo, head)
         assert dirty.returncode == 2 and "WORKTREE_DIRTY" in dirty.stdout
         (repo / "dirty.txt").unlink()
+
+        # Coordinator-captured identity must reject a final-directory replacement
+        # even when the replacement clone has the same origin/branch/HEAD.
+        with tempfile.TemporaryDirectory() as swap_tmp:
+            swap_root = Path(swap_tmp)
+            original = swap_root / "repo"
+            original.mkdir()
+            swap_head = init_repo(original)
+            captured = fixture_worktree_identity(original)
+            hidden = swap_root / "repo-hidden"
+            original.rename(hidden)
+            git("clone", "-q", str(hidden), str(original), cwd=swap_root)
+            git(
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/datarelay-labs/engineering-system.git",
+                cwd=original,
+            )
+            replaced = invoke(
+                original,
+                swap_head,
+                expected_identity=captured,
+            )
+            assert replaced.returncode == 2, replaced.stdout
+            assert "WORKTREE_IDENTITY_MISMATCH" in replaced.stdout
+
+        # A symlink in any lexical ancestor is forbidden even when it still
+        # resolves to the originally authorized repository inode.
+        with tempfile.TemporaryDirectory() as ancestor_tmp:
+            ancestor_root = Path(ancestor_tmp)
+            parent = ancestor_root / "parent"
+            parent.mkdir()
+            ancestor_repo = parent / "repo"
+            ancestor_repo.mkdir()
+            ancestor_head = init_repo(ancestor_repo)
+            captured = fixture_worktree_identity(ancestor_repo)
+            hidden_parent = ancestor_root / "parent-hidden"
+            parent.rename(hidden_parent)
+            parent.symlink_to(hidden_parent, target_is_directory=True)
+            symlinked = invoke(
+                ancestor_repo,
+                ancestor_head,
+                expected_identity=captured,
+            )
+            assert symlinked.returncode == 2, symlinked.stdout
+            assert "WORKTREE_PATH_SYMLINK" in symlinked.stdout
 
         git("update-index", "--assume-unchanged", "README.md", cwd=repo)
         hidden_assume = invoke(repo, head)
@@ -472,6 +555,9 @@ def main() -> int:
     source = TOOL.read_text(encoding="utf-8")
     assert "not self-authenticating" in source
     assert "EXTERNAL_IMMUTABLE_SOURCE_REQUIRED" in source
+    assert "WORKTREE_IDENTITY_MISMATCH" in source
+    assert "WORKTREE_PATH_SYMLINK" in source
+    assert "--expected-worktree-identity" in source
     for rel in (
         "AGENTS.md",
         "templates/AGENTS.md",

@@ -32,6 +32,7 @@ HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
+WORKTREE_IDENTITY_RE = re.compile(r"^[0-9]+:[0-9]+(?:,[0-9]+:[0-9]+)*$")
 DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"
 AUTHORITY_BOUNDARY = "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED"
 TRUSTED_GIT_CANDIDATES = (
@@ -61,6 +62,39 @@ def _lexical_components(path: Path) -> list[Path]:
         current = current / part
         out.append(current)
     return out
+
+
+def _lexical_absolute_path(value: str, *, reason: str) -> Path:
+    if not isinstance(value, str) or not value or "\0" in value or "\n" in value or "\r" in value:
+        raise PreflightError(reason)
+    if not value.startswith("/") or os.path.normpath(value) != value:
+        raise PreflightError(reason)
+    return Path(value)
+
+
+def worktree_identity(path: Path) -> str:
+    """Return a no-follow device/inode chain for every lexical path component."""
+    records: list[str] = []
+    for component in _lexical_components(path):
+        try:
+            st = os.lstat(component)
+        except OSError as exc:
+            raise PreflightError("WORKTREE_PATH_UNAVAILABLE") from exc
+        if stat.S_ISLNK(st.st_mode):
+            raise PreflightError("WORKTREE_PATH_SYMLINK")
+        if not stat.S_ISDIR(st.st_mode):
+            raise PreflightError("WORKTREE_PATH_NOT_DIRECTORY")
+        records.append(f"{st.st_dev}:{st.st_ino}")
+    if not records:
+        raise PreflightError("WORKTREE_PATH_UNAVAILABLE")
+    return ",".join(records)
+
+
+def verify_worktree_identity(path: Path, expected: str) -> None:
+    if WORKTREE_IDENTITY_RE.fullmatch(expected) is None:
+        raise PreflightError("EXPECTED_WORKTREE_IDENTITY_INVALID")
+    if worktree_identity(path) != expected:
+        raise PreflightError("WORKTREE_IDENTITY_MISMATCH")
 
 
 def _root_administered_path(path: Path, *, executable: bool) -> bool:
@@ -232,21 +266,23 @@ def _reject_hidden_index_flags(root: Path, seen: set[Path] | None = None) -> Non
 
 
 def require_clean_root(root: Path) -> tuple[str, str, str]:
-    resolved = root.resolve()
-    if not resolved.is_dir():
+    if not root.is_dir():
         raise PreflightError("WORKTREE_UNAVAILABLE")
-    top = Path(git(resolved, "rev-parse", "--show-toplevel")).resolve()
-    if top != resolved:
+    top = _lexical_absolute_path(
+        git(root, "rev-parse", "--show-toplevel"),
+        reason="WORKTREE_ROOT_MISMATCH",
+    )
+    if top != root:
         raise PreflightError("WORKTREE_ROOT_MISMATCH")
-    branch = git(resolved, "symbolic-ref", "--quiet", "--short", "HEAD")
+    branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
     if not branch:
         raise PreflightError("DETACHED_HEAD")
-    head = git(resolved, "rev-parse", "--verify", "HEAD^{commit}")
+    head = git(root, "rev-parse", "--verify", "HEAD^{commit}")
     if HEAD_RE.fullmatch(head) is None:
         raise PreflightError("HEAD_INVALID")
-    _reject_hidden_index_flags(resolved)
+    _reject_hidden_index_flags(root)
     if git(
-        resolved,
+        root,
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
@@ -254,7 +290,7 @@ def require_clean_root(root: Path) -> tuple[str, str, str]:
     ):
         raise PreflightError("WORKTREE_DIRTY")
     origin = git(
-        resolved,
+        root,
         "config",
         "--local",
         "--no-includes",
@@ -274,10 +310,14 @@ def _safe_branch(value: str) -> bool:
 
 
 def check(args: argparse.Namespace) -> int:
-    root = Path(args.root).resolve()
-    expected_worktree = Path(args.expected_worktree).resolve()
+    root = _lexical_absolute_path(args.root, reason="ROOT_PATH_INVALID")
+    expected_worktree = _lexical_absolute_path(
+        args.expected_worktree,
+        reason="EXPECTED_WORKTREE_INVALID",
+    )
     if root != expected_worktree:
         raise PreflightError("WORKTREE_BINDING_MISMATCH")
+    verify_worktree_identity(root, args.expected_worktree_identity)
     if REPO_RE.fullmatch(args.expected_repo) is None:
         raise PreflightError("EXPECTED_REPO_INVALID")
     if WORKSTREAM_RE.fullmatch(args.expected_workstream) is None:
@@ -292,6 +332,9 @@ def check(args: argparse.Namespace) -> int:
         raise PreflightError("INTENT_REVISION_INVALID")
 
     branch, head, origin = require_clean_root(root)
+    # Re-check the exact no-follow identity chain after all Git reads so a path
+    # replacement during the check cannot be accepted at the PASS boundary.
+    verify_worktree_identity(root, args.expected_worktree_identity)
     origin_host, origin_repo = normalize_origin(origin)
     if origin_host != args.expected_origin_host.lower():
         raise PreflightError("ORIGIN_HOST_MISMATCH")
@@ -321,9 +364,14 @@ def check(args: argparse.Namespace) -> int:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    identity = sub.add_parser("identity")
+    identity.add_argument("--root", required=True)
+
     command = sub.add_parser("check")
     command.add_argument("--root", required=True)
     command.add_argument("--expected-worktree", required=True)
+    command.add_argument("--expected-worktree-identity", required=True)
     command.add_argument("--issue-number", required=True, type=int)
     command.add_argument("--expected-repo", required=True)
     command.add_argument("--expected-origin-host", default="github.com")
@@ -342,6 +390,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        if args.command == "identity":
+            root = _lexical_absolute_path(args.root, reason="ROOT_PATH_INVALID")
+            print(f"WORKTREE_IDENTITY={worktree_identity(root)}")
+            print("MUTATION_AUTHORITY=NO")
+            return 0
         if args.command == "check":
             return check(args)
         raise PreflightError("COMMAND_INVALID")
