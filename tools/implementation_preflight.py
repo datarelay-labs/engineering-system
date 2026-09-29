@@ -255,6 +255,8 @@ def git(root: Path, *args: str, pass_fds: tuple[int, ...] = ()) -> str:
         str(binary),
         "-C",
         str(root),
+        "--work-tree",
+        str(root),
         "--no-replace-objects",
         "-c",
         "core.hooksPath=/dev/null",

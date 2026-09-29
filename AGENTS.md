@@ -13,6 +13,7 @@ Read only when the task requires it:
 - `.engineering/tests.yaml` for implementation/debugging/testing
 - `.engineering/release.yaml` for release/version/artifact work
 - one relevant Engineering System standard plus only task-relevant product/spec/ADR/runbook material
+- Managed Engineering System Python dependencies are pinned in `.engineering/requirements-engineering-system.txt`. Install that exact file before running managed contract CLIs when the environment lacks PyYAML/jsonschema. Managed helpers never auto-install packages or use unpinned dependency versions.
 - `.engineering/knowledge.yaml` when present, for domain routing. Freshness is `python3 tools/knowledge-contract.py check`. Retrieval stays local unless `python3 tools/knowledge-contract.py route` reports `RETRIEVAL=ESCALATE`.
 - `.engineering/runtime.yaml` when validating a running worktree. Resolve health, smoke, E2E, and additive capabilities with `python3 tools/runtime-contract.py check`.
 - `.engineering/skills.yaml` when present, for progressive-disclosure skills/hooks and permission profiles. Validate with `python3 tools/skills-contract.py check`. Authorization is verification-only via `python3 tools/skills-contract.py authorize` against host-administered adapter provenance and fails closed as `BOUNDARY_UNAVAILABLE` when that provenance is unavailable; see `standards/SKILLS.md`. No production HMAC/`bind` mint.

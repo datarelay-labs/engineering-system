@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install validation dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Install Engineering System dependencies
+        run: python -m pip install --disable-pip-version-check -r .engineering/requirements-engineering-system.txt
 
       - name: Fail if .engineering-system-runtime already exists
         run: test ! -e .engineering-system-runtime
@@ -35,6 +35,8 @@ jobs:
             tools/implementation_preflight.py
             tools/work_packet_authority.py
             .engineering/project.yaml
+            .engineering/requirements-engineering-system.txt
+            .github/ISSUE_TEMPLATE/ai-work-packet.md
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -246,6 +248,8 @@ jobs:
                       "tools/implementation_preflight.py",
                       "tools/context_epoch.py",
                       "tools/work_packet_authority.py",
+                      ".engineering/requirements-engineering-system.txt",
+                      ".github/ISSUE_TEMPLATE/ai-work-packet.md",
                   ):
                       target_helper = Path(rel)
                       canonical_helper = Path(".engineering-system-runtime") / rel

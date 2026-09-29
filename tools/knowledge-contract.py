@@ -13,8 +13,17 @@ import shlex
 import sys
 from pathlib import Path
 
-import yaml
-from jsonschema import Draft202012Validator
+try:
+    import yaml
+    from jsonschema import Draft202012Validator
+except ModuleNotFoundError as exc:
+    missing = exc.name or "unknown"
+    raise SystemExit(
+        "ENGINEERING_SYSTEM_DEPENDENCY_MISSING="
+        + missing
+        + "\nINSTALL=python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    ) from None
 
 BREADTH_FILES = 25
 REREAD_THRESHOLD = 3

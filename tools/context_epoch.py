@@ -22,12 +22,12 @@ SAFE_TASK_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_-]{0,63}$")
 SAFE_HOOK_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
 REQUIRED_META_V2 = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
-    "TASK_KIND", "OWNER_INTENT",
+    "TASK_KIND", "OWNER_INTENT", "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
 )
 META_ORDER = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
     "TASK_KIND", "OWNER_INTENT", "LAST_VERIFIED_HEAD", "PRIORITY",
-    "INTENT_REVISION", "CHANGE_RISK",
+    "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
 )
 CANONICAL_SECTIONS = (
     "Goal",
@@ -49,7 +49,7 @@ PROJECT_SECTIONS = (
 )
 IDENTITY_KEYS = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
-    "TASK_KIND", "INTENT_REVISION",
+    "TASK_KIND", "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
 )
 MISSING_IDENTITY_VALUE = "<missing>"
 IDENTITY_BINDING_KEYS = IDENTITY_KEYS + ("PACKET_BODY_SHA256",)
@@ -96,14 +96,16 @@ def parse_packet(text: str) -> Packet:
     headings: list[str] = []
     current: str | None = None
     before_heading = True
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for raw in text.splitlines():
         fence_match = FENCE_RE.match(raw)
         if fence_match:
-            family = fence_match.group(1)[0]
+            marker = fence_match.group(1)
+            family = marker[0]
+            length = len(marker)
             if fence is None:
-                fence = family
-            elif fence == family:
+                fence = (family, length)
+            elif fence[0] == family and length >= fence[1]:
                 fence = None
             if current is not None:
                 sections[current].append(raw)
@@ -181,6 +183,12 @@ def analyze_packet(
     revision = packet.metadata.get("INTENT_REVISION")
     if revision and (not revision.isdigit() or int(revision) < 1):
         blocking.append("INTENT_REVISION_INVALID")
+    change_risk = packet.metadata.get("CHANGE_RISK")
+    if change_risk and change_risk not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+        blocking.append("CHANGE_RISK_INVALID")
+    implementer = packet.metadata.get("IMPLEMENTER")
+    if implementer and implementer not in {"CHATGPT_CHAT", "CURSOR"}:
+        blocking.append("IMPLEMENTER_INVALID")
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
         blocking.append("STATUS_INVALID")

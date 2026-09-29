@@ -409,7 +409,7 @@ def signed_effect(base: Path, facts: dict, branch: str, state: dict) -> dict:
     normalized = normalize_facts({key: value for key, value in collected["facts"].items() if key != "watch"})
     result = evaluate(collected["facts"], {})
     if result["result"] == "NOTIFY_OWNER":
-        return owner_notice_effect(result)
+        return owner_notice_effect(result, branch)
     return external_effect(
         result,
         repository=normalized["packet"]["repository"],

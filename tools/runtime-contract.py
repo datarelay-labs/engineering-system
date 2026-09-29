@@ -13,8 +13,17 @@ import shlex
 import sys
 from pathlib import Path
 
-import yaml
-from jsonschema import Draft202012Validator
+try:
+    import yaml
+    from jsonschema import Draft202012Validator
+except ModuleNotFoundError as exc:
+    missing = exc.name or "unknown"
+    raise SystemExit(
+        "ENGINEERING_SYSTEM_DEPENDENCY_MISSING="
+        + missing
+        + "\nINSTALL=python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    ) from None
 
 DEFAULT_MAX_FINDINGS = 20
 CONTRACT_REL = Path(".engineering") / "runtime.yaml"
@@ -109,7 +118,10 @@ def check_contract(root: Path) -> dict[str, object]:
         except yaml.YAMLError as exc:
             instance = None
             findings.append(finding("SCHEMA", str(exc).splitlines()[0]))
-        if instance is not None:
+        if instance is None:
+            if not any(item["code"] == "SCHEMA" for item in findings):
+                findings.append(finding("SCHEMA", "runtime contract must be a mapping"))
+        else:
             findings.extend(schema_findings(root, instance))
         if isinstance(instance, dict) and not any(item["code"] == "SCHEMA" for item in findings):
             declared = instance.get("capabilities") or {}

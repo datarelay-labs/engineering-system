@@ -75,6 +75,14 @@ ENGINEERING_CONTEXT_MANAGED = (
     "tools/engineering-context.py",
 )
 
+WORK_PACKET_TEMPLATE_MANAGED = (
+    ".github/ISSUE_TEMPLATE/ai-work-packet.md",
+)
+
+ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED = (
+    ".engineering/requirements-engineering-system.txt",
+)
+
 REQUIRED_MANAGED = (
     "AGENTS.md",
     ".engineering/project.yaml",
@@ -85,6 +93,7 @@ REQUIRED_MANAGED = (
     ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
+    *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     *KNOWLEDGE_CONTRACT_MANAGED,
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
@@ -1235,6 +1244,7 @@ def main() -> int:
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
+        *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     ):
         write_missing(
             root,

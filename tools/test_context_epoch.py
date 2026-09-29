@@ -25,6 +25,8 @@ TASK_KIND=IMPLEMENTATION
 OWNER_INTENT=Reduce startup context.
 LAST_VERIFIED_HEAD={'a' * 40}
 INTENT_REVISION=1
+CHANGE_RISK=MEDIUM
+IMPLEMENTER=CHATGPT_CHAT
 
 ## Goal
 
@@ -110,6 +112,8 @@ def test_refetched_projection_identity_binding() -> None:
             "--expect-branch", "feat/context-epoch-packet-projection",
             "--expect-task-kind", "IMPLEMENTATION",
             "--expect-intent-revision", "1",
+            "--expect-change-risk", "MEDIUM",
+            "--expect-implementer", "CHATGPT_CHAT",
             "--expect-body-sha256", original.body_sha256,
         ]
         matched = subprocess.run(
@@ -126,37 +130,34 @@ def test_refetched_projection_identity_binding() -> None:
         if stale.returncode != 2 or "PACKET_IDENTITY_MISMATCH:PACKET_BODY_SHA256" not in stale.stderr:
             fail(f"refetched body-only drift did not block: {stale.stdout} {stale.stderr}")
 
-        missing_text = packet().replace("INTENT_REVISION=1\n", "")
-        missing = ce.parse_packet(missing_text)
-        ce.require_identity(
-            missing,
-            {"INTENT_REVISION": ce.MISSING_IDENTITY_VALUE},
-        )
-        added = ce.parse_packet(
-            missing_text.replace(
-                "## Goal",
-                "INTENT_REVISION=1\n\n## Goal",
-            )
-        )
-        try:
-            ce.require_identity(
-                added,
-                {"INTENT_REVISION": ce.MISSING_IDENTITY_VALUE},
-            )
-        except ce.ContextError as exc:
-            if "PACKET_IDENTITY_MISMATCH:INTENT_REVISION" not in str(exc):
-                fail(f"missing identity mismatch reason changed: {exc}")
-        else:
-            fail("missing identity value was not bound across refetch")
+        missing = ce.parse_packet(packet().replace("INTENT_REVISION=1\n", ""))
+        audit = ce.analyze_packet(missing)
+        if "MISSING_META:INTENT_REVISION" not in audit["blocking"]:
+            fail(f"packet v2 no longer blocks missing intent revision: {audit}")
+
+
+def test_packet_v2_requires_authority_metadata() -> None:
+    for key, line in (
+        ("INTENT_REVISION", "INTENT_REVISION=1\n"),
+        ("CHANGE_RISK", "CHANGE_RISK=MEDIUM\n"),
+        ("IMPLEMENTER", "IMPLEMENTER=CHATGPT_CHAT\n"),
+    ):
+        parsed = ce.parse_packet(packet().replace(line, ""))
+        audit = ce.analyze_packet(parsed)
+        if f"MISSING_META:{key}" not in audit["blocking"]:
+            fail(f"packet v2 accepted missing {key}: {audit}")
 
 
 def test_identity_file_binding_and_fenced_examples() -> None:
     body = packet(current="""- current fact
 
+````md
 ```md
 ## Next Action
 STATUS=BLOCKED
-```""")
+```
+## Still fenced
+````""")
     parsed = ce.parse_packet(body)
     audit = ce.analyze_packet(parsed)
     if audit["status"] != "PASS":
@@ -439,6 +440,7 @@ def main() -> None:
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
         test_refetched_projection_identity_binding,
+        test_packet_v2_requires_authority_metadata,
         test_identity_file_binding_and_fenced_examples,
         test_duplicate_metadata_and_unsafe_identity_block,
         test_duplicate_canonical_section_blocks,

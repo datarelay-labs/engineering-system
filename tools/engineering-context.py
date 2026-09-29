@@ -398,23 +398,35 @@ def matches(pattern: str, path: str) -> bool:
 
 
 def _fallback_test_path_domains(text: str) -> list[tuple[str, tuple[str, ...]]]:
-    """Parse only the managed tests.yaml path->inline-domains subset."""
+    """Parse the managed tests.yaml path->domains subset without PyYAML."""
     entries: list[tuple[str, tuple[str, ...]]] = []
     in_paths = False
     current_pattern: str | None = None
+    block_domains: list[str] | None = None
+
+    def flush_block() -> None:
+        nonlocal current_pattern, block_domains
+        if current_pattern is not None and block_domains is not None:
+            entries.append((current_pattern, tuple(block_domains)))
+            current_pattern = None
+        block_domains = None
+
     for raw in text.splitlines():
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         if raw == "paths:":
             in_paths = True
             current_pattern = None
+            block_domains = None
             continue
         if in_paths and not raw.startswith(" "):
+            flush_block()
             break
         if not in_paths:
             continue
-        pattern_match = re.fullmatch(r'  (?:"([^"]+)"|([^:]+)):', raw)
+        pattern_match = re.fullmatch(r'  (?:"([^"]+)"|([^ \t:][^:]*)):', raw)
         if pattern_match:
+            flush_block()
             current_pattern = pattern_match.group(1) or pattern_match.group(2)
             continue
         domain_match = re.fullmatch(r"    domains:\s*\[([^\]]*)\]\s*", raw)
@@ -426,6 +438,20 @@ def _fallback_test_path_domains(text: str) -> list[tuple[str, tuple[str, ...]]]:
             )
             entries.append((current_pattern, domains))
             current_pattern = None
+            block_domains = None
+            continue
+        if current_pattern and re.fullmatch(r"    domains:\s*", raw):
+            block_domains = []
+            continue
+        if current_pattern and block_domains is not None:
+            item_match = re.fullmatch(r"\s{6}-\s*(.+?)\s*", raw)
+            if item_match:
+                value = item_match.group(1).strip().strip('"').strip("'")
+                if value:
+                    block_domains.append(value)
+                continue
+            flush_block()
+    flush_block()
     return entries
 
 
@@ -482,7 +508,7 @@ def main() -> int:
     print(f"CONTEXT_BASE={base or '<none>'}")
     print(f"CHANGED_COUNT={len(files)}")
     for path in files[: max(args.max_files, 0)]:
-        print(f"CHANGED_FILE={path}")
+        print("CHANGED_FILE_JSON=" + json.dumps(path, ensure_ascii=True))
     if len(files) > max(args.max_files, 0):
         print(f"CHANGED_FILES_TRUNCATED={len(files) - max(args.max_files, 0)}")
     print("AFFECTED_DOMAINS=" + (",".join(domains) if domains else "<none>"))
