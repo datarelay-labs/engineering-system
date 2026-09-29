@@ -248,7 +248,10 @@ def validate_chat_primary_contract():
         "WORKTREE_DIRTY",
         "HIDDEN_INDEX_STATE",
         "WORKTREE_BINDING_MISMATCH",
+        "WORKTREE_IDENTITY_MISMATCH",
+        "WORKTREE_PATH_SYMLINK",
         "--expected-worktree",
+        "--expected-worktree-identity",
         "--issue-number",
         "--expected-repo",
         "--expected-workstream",
@@ -354,8 +357,13 @@ def validate_chat_primary_contract():
         raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
     if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
         raise SystemExit("FAIL legacy Cursor-primary ChatGPT contract remains")
-    if "fresh Chat context" not in quality or "independent HIGH-risk verifier" not in quality:
-        raise SystemExit("FAIL risk-based fresh-Chat/HIGH-risk verifier policy missing")
+    for token in (
+        "ChatGPT Chat is the default implementer and auditor",
+        "same Chat context may satisfy terminal audit",
+        "Independent-review provider availability or quota alone must not block",
+    ):
+        if token not in quality:
+            raise SystemExit(f"FAIL Chat-primary implementation/audit ownership policy missing token: {token}")
     if "IMPLEMENTER=CHATGPT_CHAT" not in issue:
         raise SystemExit("FAIL Work Packet template missing default Chat implementer identity")
     print("PASS Chat-primary SSH implementation and independent-verifier contract")
@@ -474,7 +482,7 @@ def validate_independent_verifier_contract():
         if "independent_verifier.py" not in text:
             raise SystemExit(f"FAIL {label} missing independent verifier command")
     for token in (
-        "Independent verifier for terminal evidence",
+        "Optional independent verifier for additional terminal evidence",
         "exact 40-char subject HEAD",
         "SAME_ACTOR",
         "EXECUTION_FORBIDDEN",

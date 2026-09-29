@@ -639,7 +639,7 @@ When the user asks to continue/resume an existing engineering workstream:
 
 After preflight PASS, Chat may implement directly through the authorized SSH/remote path, run affected validation, and perform packet-authorized Git/GitHub writes. Before later external writes or terminal actions, re-read authoritative packet/HEAD facts and reject stale intent. Fresh Chat rollover resumes from GitHub durable state plus repository facts and must not require the prior conversation transcript.
 
-The implementing Chat context may self-review but is never the sole terminal independent verifier. LOW/MEDIUM work may use a fresh Chat context for independent exact-HEAD review after deterministic gates. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require Codex or another explicitly independent HIGH-risk verifier unless an owner-approved equivalent is recorded. Codex is a review/escalation path, not a mandatory routine implementation hop.
+The implementing Chat context also owns terminal audit by default. It must re-read current Work Packet, exact HEAD, PR/CI, tests, and actionable review state instead of treating its own implementation narrative as evidence. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require deeper exact-HEAD machine evidence and any applicable human approval, but do not require a separate model/provider actor. Codex, a fresh Chat context, or the provider-neutral independent verifier remains optional defense-in-depth/escalation and must not become a quota-dependent default blocker.
 
 ## Dormant optional Cursor adapter behavior
 
@@ -708,9 +708,9 @@ Otherwise `admit` returns `DENY` with an explicit class such as `WIP_LIMIT`, `SH
 - `cleanup-worktree` additionally refuses dirty, unpushed, or ambiguous state;
 - neither action may stop or mutate unrelated Cursor sessions to reclaim capacity.
 
-## Independent verifier for terminal evidence
+## Optional independent verifier for additional terminal evidence
 
-For risk-appropriate terminal PASS, a coordinator evaluates structured evidence with a provider-neutral verifier. The implementer's self-report is never the completion oracle by itself.
+Normal terminal audit is owned by ChatGPT Chat and can complete in the implementing context when exact-HEAD deterministic evidence and current mutable gates support PASS. The implementer's self-report is never the completion oracle by itself. A coordinator may additionally evaluate structured evidence with the provider-neutral independent verifier when defense-in-depth, escalation, or an explicitly requested independent check is useful.
 
 ```bash
 python3 tools/independent_verifier.py verify --request-json <evidence.json>
@@ -719,11 +719,11 @@ python3 tools/independent_verifier.py verify --request-json <evidence.json>
 Contract:
 
 - bind verification to an exact 40-char subject HEAD; different-HEAD or missing subject identity fails closed;
-- `CHANGE_RISK=HIGH|CRITICAL` requires a verifier actor whose `identity` and `context_id` are both distinct from the implementer;
-- `CHANGE_RISK=LOW|MEDIUM` stay aligned with `standards/QUALITY.md` verification depth; a fresh Chat verifier is permitted but not mandatory unless another gate requires independent review. If a verifier actor is supplied, its identity and context must be distinct from the implementer and cannot masquerade as independent evidence;
+- independent-verifier use is optional for every risk level; if a verifier actor is supplied, its `identity` and `context_id` must both be distinct from the implementer because the result is being claimed as independent evidence;
+- `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` completion remains aligned with `standards/QUALITY.md`; absence or quota exhaustion of an optional independent-review provider is not itself a completion blocker;
 - every declared completion-oracle evidence record must be `PASS` on the same subject HEAD; `FAIL` / `BLOCK` / `NOT_RUN` / unexecuted cannot be promoted;
 - actionable review findings must be `FIXED`, `EVIDENCE_DISPOSITION`, or `NOT_ACTIONABLE`;
-- HIGH/CRITICAL require mutable CI/review/runtime evidence that carries current `subject_id` + `version_id` (not a historical generic PASS);
+- when the independent verifier is invoked for HIGH/CRITICAL, it requires mutable CI/review/runtime evidence that carries current `subject_id` + `version_id` (not a historical generic PASS);
 - request `expected_mutable` declares the required subject/version contract; each mutable evidence item must match it, and CI `version_id` must equal the subject HEAD (stale/unrelated CI DENYs as `STALE_MUTABLE`);
 - CRITICAL additionally requires present human approval when marked required;
 - the verifier evaluates JSON facts only and refuses request keys that imply command execution (`command`, `shell`, `argv`, `execute`, …).
