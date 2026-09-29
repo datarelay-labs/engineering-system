@@ -204,6 +204,8 @@ def main() -> int:
         assert clean_submodule.returncode == 0, clean_submodule.stdout
 
         submodule = repo / "deps" / "fixture"
+        git("config", "user.email", "test@example.invalid", cwd=submodule)
+        git("config", "user.name", "Preflight Test", cwd=submodule)
         (submodule / "child.txt").write_text("dirty\n", encoding="utf-8")
         dirty_submodule = invoke(repo, head)
         assert dirty_submodule.returncode == 2, dirty_submodule.stdout
