@@ -266,7 +266,7 @@ def validate_chat_primary_contract():
         "core.hooksPath=/dev/null",
         "core.fsmonitor=false",
         "credential.helper=",
-        "--ignore-submodules=all",
+        "--ignore-submodules=none",
         "--no-includes",
         "GIT_CONFIG_NOSYSTEM",
         "GIT_CONFIG_GLOBAL",

@@ -176,6 +176,51 @@ def main() -> int:
         assert dirty.returncode == 2 and "WORKTREE_DIRTY" in dirty.stdout
         (repo / "dirty.txt").unlink()
 
+        # Submodule state is part of the clean-tree authority boundary even if
+        # repository config tries to suppress it.
+        child = root / "submodule-source"
+        child.mkdir()
+        git("init", "-q", "-b", "main", str(child))
+        git("config", "user.email", "test@example.invalid", cwd=child)
+        git("config", "user.name", "Preflight Test", cwd=child)
+        (child / "child.txt").write_text("base\n", encoding="utf-8")
+        git("add", ".", cwd=child)
+        git("commit", "-qm", "child base", cwd=child)
+
+        git(
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(child),
+            "deps/fixture",
+            cwd=repo,
+        )
+        git("commit", "-qam", "add submodule", cwd=repo)
+        head = git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        git("config", "submodule.deps/fixture.ignore", "all", cwd=repo)
+
+        clean_submodule = invoke(repo, head)
+        assert clean_submodule.returncode == 0, clean_submodule.stdout
+
+        submodule = repo / "deps" / "fixture"
+        (submodule / "child.txt").write_text("dirty\n", encoding="utf-8")
+        dirty_submodule = invoke(repo, head)
+        assert dirty_submodule.returncode == 2, dirty_submodule.stdout
+        assert "WORKTREE_DIRTY" in dirty_submodule.stdout
+        git("checkout", "--", "child.txt", cwd=submodule)
+
+        (submodule / "child.txt").write_text("next\n", encoding="utf-8")
+        git("add", "child.txt", cwd=submodule)
+        git("commit", "-qm", "child next", cwd=submodule)
+        mismatched_gitlink = invoke(repo, head)
+        assert mismatched_gitlink.returncode == 2, mismatched_gitlink.stdout
+        assert "WORKTREE_DIRTY" in mismatched_gitlink.stdout
+        git("reset", "--hard", "HEAD^", cwd=submodule)
+
+        clean_again = invoke(repo, head)
+        assert clean_again.returncode == 0, clean_again.stdout
+
         git(
             "remote",
             "set-url",
@@ -241,7 +286,8 @@ def main() -> int:
         assert "core.fsmonitor=false" in source
         assert "core.hooksPath=/dev/null" in source
         assert "credential.helper=" in source
-        assert "--ignore-submodules=all" in source
+        assert "--ignore-submodules=none" in source
+        assert "--ignore-submodules=all" not in source
         assert '"--no-includes"' in source
 
     source = TOOL.read_text(encoding="utf-8")

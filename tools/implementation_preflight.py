@@ -183,7 +183,7 @@ def require_clean_root(root: Path) -> tuple[str, str, str]:
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
-        "--ignore-submodules=all",
+        "--ignore-submodules=none",
     ):
         raise PreflightError("WORKTREE_DIRTY")
     origin = git(
