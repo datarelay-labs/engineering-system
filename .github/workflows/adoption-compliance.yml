@@ -32,6 +32,8 @@ jobs:
             tools/ci_policy_audit.py
             tools/context_epoch.py
             tools/engineering-context.py
+            tools/implementation_preflight.py
+            tools/work_packet_authority.py
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -141,6 +143,25 @@ jobs:
                   elif target_helper.read_bytes() != canonical_helper.read_bytes():
                       failures.append("tools/engineering-context.py differs from canonical managed helper")
 
+              implementation_preflight_referenced = (
+                  agents.is_file()
+                  and "tools/implementation_preflight.py" in agents.read_text(encoding="utf-8")
+              )
+              if implementation_preflight_referenced:
+                  for rel in (
+                      "tools/implementation_preflight.py",
+                      "tools/context_epoch.py",
+                      "tools/work_packet_authority.py",
+                  ):
+                      target_helper = Path(rel)
+                      canonical_helper = Path(".engineering-system-runtime") / rel
+                      if not target_helper.is_file():
+                          failures.append(f"AGENTS.md references implementation preflight but missing {rel}")
+                      elif not canonical_helper.is_file():
+                          failures.append(f"canonical compliance runtime missing {rel}")
+                      elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                          failures.append(f"{rel} differs from canonical managed helper")
+
               if version_tuple >= (1, 4, 0):
                   if mode not in {"canonical", "adopted"}:
                       failures.append("Engineering System >=1.4.0 requires mode=canonical|adopted")
@@ -203,6 +224,22 @@ jobs:
                       failures.append("AGENTS.md missing design-gate routing")
                   if "standards/OPERATIONS.md" not in text:
                       failures.append("AGENTS.md missing incident/operations routing")
+              if "tools/implementation_preflight.py" in text:
+                  for rel in (
+                      "tools/implementation_preflight.py",
+                      "tools/context_epoch.py",
+                      "tools/work_packet_authority.py",
+                  ):
+                      target_helper = Path(rel)
+                      canonical_helper = Path(".engineering-system-runtime") / rel
+                      if not target_helper.is_file():
+                          failures.append(
+                              f"AGENTS.md references implementation preflight but missing {rel}"
+                          )
+                      elif not canonical_helper.is_file():
+                          failures.append(f"canonical compliance runtime missing {rel}")
+                      elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                          failures.append(f"{rel} differs from canonical managed helper")
 
           cursor = Path(".cursor/rules/engineering-system.mdc")
           if cursor.is_file():

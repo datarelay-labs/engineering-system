@@ -2,7 +2,10 @@
 """Regression tests for provider-neutral implementation preflight."""
 from __future__ import annotations
 
-import hashlib
+import contextlib
+import importlib.util
+import io
+import json
 import shutil
 import subprocess
 import sys
@@ -11,12 +14,32 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "implementation_preflight.py"
+TOOLS = ROOT / "tools"
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
 
 
-def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def load_preflight(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+PREFLIGHT = load_preflight(TOOL, "implementation_preflight_under_test")
+
+
+def run(
+    *args: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         list(args),
         cwd=str(cwd) if cwd else None,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -83,21 +106,69 @@ NONE
 """
 
 
-def invoke(repo: Path, body: Path, head: str, *extra: str) -> subprocess.CompletedProcess[str]:
+def github_fixture(
+    root: Path,
+    body: Path,
+    *,
+    permission: str = "admin",
+    state: str = "open",
+    title: str = "[AI Work] Fixture",
+    author: str = "fixture-user",
+) -> Path:
+    issue_path = root / "issue.json"
+    permission_path = root / "permission.json"
+    issue_path.write_text(
+        json.dumps(
+            {
+                "number": 143,
+                "state": state,
+                "title": title,
+                "body": body.read_text(encoding="utf-8"),
+                "user": {"login": author},
+            }
+        ),
+        encoding="utf-8",
+    )
+    permission_path.write_text(
+        json.dumps({"permission": permission}),
+        encoding="utf-8",
+    )
+    fake_bin = root / "fake-bin"
+    fake_bin.mkdir(exist_ok=True)
+    fake_bin.chmod(0o755)
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"issue={str(issue_path)!r}\n"
+        f"permission={str(permission_path)!r}\n"
+        "endpoint=sys.argv[-1]\n"
+        "path=permission if endpoint.endswith('/permission') else issue\n"
+        "print(open(path, encoding='utf-8').read())\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return gh
+
+
+def invoke(
+    repo: Path,
+    body: Path,
+    head: str,
+    *extra: str,
+    permission: str = "admin",
+    state: str = "open",
+    title: str = "[AI Work] Fixture",
+    module=PREFLIGHT,
+) -> subprocess.CompletedProcess[str]:
     args = [
-        sys.executable,
-        str(TOOL),
         "check",
         "--root",
         str(repo),
         "--expected-worktree",
         str(repo),
-        "--packet-body-file",
-        str(body),
-        "--expected-packet-body-sha256",
-        hashlib.sha256(body.read_bytes()).hexdigest(),
-        "--author-permission",
-        "admin",
+        "--issue-number",
+        "143",
         "--expected-repo",
         "datarelay-labs/engineering-system",
         "--expected-origin-host",
@@ -114,7 +185,24 @@ def invoke(repo: Path, body: Path, head: str, *extra: str) -> subprocess.Complet
         "HIGH",
     ]
     args.extend(extra)
-    return run(*args)
+    gh = github_fixture(
+        body.parent,
+        body,
+        permission=permission,
+        state=state,
+        title=title,
+    )
+    module._TEST_TRUSTED_GH = gh
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            try:
+                rc = module.main(args)
+            except SystemExit as exc:
+                rc = int(exc.code or 0)
+    finally:
+        module._TEST_TRUSTED_GH = None
+    return subprocess.CompletedProcess(args=args, returncode=rc, stdout=out.getvalue())
 
 
 def main() -> int:
@@ -134,24 +222,30 @@ def main() -> int:
         assert "AUTHOR_PERMISSION=admin" in passed.stdout
         assert "PACKET_BODY_SHA256=" in passed.stdout
 
-        invalid_digest = invoke(
-            repo,
-            body,
-            head,
+        help_result = run(sys.executable, str(TOOL), "check", "--help")
+        assert help_result.returncode == 0
+        assert "--issue-number" in help_result.stdout
+        for forbidden in (
+            "--packet-body-file",
             "--expected-packet-body-sha256",
-            "not-a-digest",
-        )
-        assert invalid_digest.returncode == 2
-        assert "TRUSTED_PACKET_DIGEST_INVALID" in invalid_digest.stdout
+            "--author-permission",
+        ):
+            assert forbidden not in help_result.stdout
+
+        weak_permission = invoke(repo, body, head, permission="read")
+        assert weak_permission.returncode == 2
+        assert "WORK_PACKET_AUTHOR_UNTRUSTED" in weak_permission.stdout
+
+        closed_issue = invoke(repo, body, head, state="closed")
+        assert closed_issue.returncode == 2
+        assert "WORK_PACKET_NOT_ACTIVE" in closed_issue.stdout
+
+        invalid_title = invoke(repo, body, head, title="Not a work packet")
+        assert invalid_title.returncode == 2
+        assert "WORK_PACKET_TITLE_INVALID" in invalid_title.stdout
 
         cases = [
             ("worktree", ["--expected-worktree", str(root / "other")], "WORKTREE_BINDING_MISMATCH"),
-            (
-                "packet-digest",
-                ["--expected-packet-body-sha256", "0" * 64],
-                "WORK_PACKET_DIGEST_MISMATCH",
-            ),
-            ("permission", ["--author-permission", "read"], "WORK_PACKET_AUTHOR_UNTRUSTED"),
             ("intent", ["--expected-intent-revision", "3"], "STALE_INTENT_REVISION"),
             ("implementer", ["--expected-implementer", "CURSOR"], "IMPLEMENTER_MISMATCH"),
             ("risk", ["--expected-change-risk", "CRITICAL"], "CHANGE_RISK_MISMATCH"),
@@ -225,12 +319,8 @@ def main() -> int:
             str(repo),
             "--expected-worktree",
             str(repo),
-            "--packet-body-file",
-            str(body),
-            "--expected-packet-body-sha256",
-            hashlib.sha256(body.read_bytes()).hexdigest(),
-            "--author-permission",
-            "admin",
+            "--issue-number",
+            "143",
             "--expected-repo",
             "datarelay-labs/engineering-system",
             "--expected-origin-host",
@@ -246,7 +336,16 @@ def main() -> int:
             "--expected-change-risk",
             "HIGH",
         ]
-        result = run(*args, cwd=repo)
+        managed_module = load_preflight(
+            managed / "implementation_preflight.py",
+            "managed_implementation_preflight_under_test",
+        )
+        result = invoke(
+            repo,
+            body,
+            head,
+            module=managed_module,
+        )
         assert result.returncode == 0, result.stdout
         assert "IMPLEMENTATION_PREFLIGHT=PASS" in result.stdout
         assert not (managed / "__pycache__").exists()

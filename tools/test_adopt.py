@@ -2061,6 +2061,12 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         ".engineering-system-runtime/tools/engineering-context.py",
         "references engineering-context helper but missing tools/engineering-context.py",
         "tools/engineering-context.py differs from canonical managed helper",
+        "tools/implementation_preflight.py",
+        "tools/work_packet_authority.py",
+        'if "tools/implementation_preflight.py" in text:',
+        "AGENTS.md references implementation preflight but missing {rel}",
+        "canonical compliance runtime missing {rel}",
+        "{rel} differs from canonical managed helper",
     )
     for token in required:
         assert token in workflow, token

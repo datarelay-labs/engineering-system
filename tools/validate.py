@@ -245,13 +245,15 @@ def validate_chat_primary_contract():
     issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
 
     required_preflight = (
-        "TRUSTED_PACKET_DIGEST_INVALID",
-        "WORK_PACKET_DIGEST_MISMATCH",
+        "WORK_PACKET_PROVENANCE_UNTRUSTED",
         "WORK_PACKET_AUTHOR_UNTRUSTED",
+        "WORK_PACKET_ISSUE_INVALID",
+        "WORK_PACKET_TITLE_INVALID",
         "WORKTREE_DIRTY",
         "WORKTREE_BINDING_MISMATCH",
         "--expected-worktree",
-        "--expected-packet-body-sha256",
+        "--issue-number",
+        "collaborators/{author}/permission",
         "ORIGIN_HOST_MISMATCH",
         "TARGET_REPO_MISMATCH",
         "BRANCH_MISMATCH",
@@ -264,6 +266,34 @@ def validate_chat_primary_contract():
     for token in required_preflight:
         if token not in preflight:
             raise SystemExit(f"FAIL implementation preflight missing token: {token}")
+    for forbidden in (
+        "--packet-body-file",
+        "--expected-packet-body-sha256",
+        "--author-permission",
+        "shutil.which",
+    ):
+        if forbidden in preflight:
+            raise SystemExit(
+                f"FAIL implementation preflight accepts caller authority or PATH lookup: {forbidden}"
+            )
+    for token in (
+        "resolve_trusted_gh",
+        "TRUSTED_GH_CANDIDATES",
+        "GH_PROMPT_DISABLED",
+        "authenticated_packet",
+    ):
+        if token not in preflight:
+            raise SystemExit(f"FAIL implementation preflight missing trusted GitHub boundary token: {token}")
+    adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for token in (
+        "tools/implementation_preflight.py",
+        "tools/context_epoch.py",
+        "tools/work_packet_authority.py",
+        'canonical_helper = Path(".engineering-system-runtime") / rel',
+        'f"{rel} differs from canonical managed helper"',
+    ):
+        if token not in adoption_workflow:
+            raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
     for label, text in (
         ("session continuity", session),
         ("AGENTS.md", agents),

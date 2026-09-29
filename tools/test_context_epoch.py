@@ -380,6 +380,19 @@ def test_adoption_compliance_carries_context_helper_baseline() -> None:
             fail(f"adoption compliance missing context helper contract: {token}")
 
 
+def test_adoption_compliance_carries_implementation_preflight_baseline() -> None:
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for token in (
+        "tools/implementation_preflight.py",
+        "tools/work_packet_authority.py",
+        'canonical_helper = Path(".engineering-system-runtime") / rel',
+        "AGENTS.md references implementation preflight but missing",
+        'f"{rel} differs from canonical managed helper"',
+    ):
+        if token not in workflow:
+            fail(f"adoption compliance missing implementation preflight contract: {token}")
+
+
 def test_resume_commands_are_thin_and_in_parity() -> None:
     root = (ROOT / ".cursor/commands/work-resume.md").read_text(encoding="utf-8")
     template = (ROOT / "templates/.cursor/commands/work-resume.md").read_text(encoding="utf-8")
@@ -432,6 +445,7 @@ def main() -> None:
         test_epoch_native_precompact,
         test_hook_sanitizer_is_content_free,
         test_adoption_compliance_carries_context_helper_baseline,
+        test_adoption_compliance_carries_implementation_preflight_baseline,
         test_resume_commands_are_thin_and_in_parity,
         test_cli_lint_and_identity,
     ]
