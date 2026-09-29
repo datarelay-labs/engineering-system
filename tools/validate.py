@@ -271,6 +271,7 @@ def validate_chat_primary_contract():
         "--expected-packet-body-sha256",
         "--author-permission",
         "shutil.which",
+        "Path.home()",
     ):
         if forbidden in preflight:
             raise SystemExit(
@@ -278,7 +279,11 @@ def validate_chat_primary_contract():
             )
     for token in (
         "resolve_trusted_gh",
+        "resolve_trusted_git",
         "TRUSTED_GH_CANDIDATES",
+        "TRUSTED_GIT_CANDIDATES",
+        "TRUSTED_ACCOUNT_HOME",
+        "pwd.getpwuid",
         "GH_PROMPT_DISABLED",
         "authenticated_packet",
     ):

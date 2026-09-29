@@ -2070,6 +2070,10 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     )
     for token in required:
         assert token in workflow, token
+    agents_definition = workflow.index('agents = Path("AGENTS.md")')
+    preflight_check = workflow.index('if "tools/implementation_preflight.py" in text:')
+    assert agents_definition < preflight_check
+    assert workflow.count('if "tools/implementation_preflight.py" in text:') == 1
 
 
 def test_release_execution_context_is_bounded_and_upgradeable() -> None:

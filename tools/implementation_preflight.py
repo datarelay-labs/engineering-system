@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import re
 import stat
 import subprocess
@@ -29,13 +30,20 @@ import work_packet_authority
 HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 IMPLEMENTER_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
+TRUSTED_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 TRUSTED_GH_CANDIDATES = (
     Path("/usr/bin/gh"),
     Path("/usr/local/bin/gh"),
-    Path.home() / ".local/bin/gh",
+    TRUSTED_ACCOUNT_HOME / ".local/bin/gh",
     Path("/opt/homebrew/bin/gh"),
 )
+TRUSTED_GIT_CANDIDATES = (
+    Path("/usr/bin/git"),
+    Path("/usr/local/bin/git"),
+    Path("/opt/homebrew/bin/git"),
+)
 _TEST_TRUSTED_GH: Path | None = None
+_TEST_TRUSTED_GIT: Path | None = None
 
 
 class PreflightError(ValueError):
@@ -48,8 +56,13 @@ def fail(reason: str) -> None:
 
 
 def git(root: Path, *args: str) -> str:
+    binary = resolve_trusted_git(root)
+    if binary is None:
+        raise PreflightError("GIT_STATE_UNAVAILABLE")
     result = subprocess.run(
-        ["git", "-C", str(root), *args],
+        [str(binary), "-C", str(root), *args],
+        cwd="/",
+        env=_bounded_local_env(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -59,7 +72,13 @@ def git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _gh_provenance_ok(path: Path, root: Path, *, test_override: bool = False) -> bool:
+def _executable_provenance_ok(
+    path: Path,
+    root: Path,
+    candidates: tuple[Path, ...],
+    *,
+    test_override: bool = False,
+) -> bool:
     try:
         path = path.resolve(strict=True)
         st = path.lstat()
@@ -72,33 +91,49 @@ def _gh_provenance_ok(path: Path, root: Path, *, test_override: bool = False) ->
             return False
         if root == path or root in path.parents:
             return False
-        if not test_override and path not in [candidate.expanduser().resolve() for candidate in TRUSTED_GH_CANDIDATES if candidate.exists()]:
-            return False
+        if not test_override:
+            fixed = [candidate.resolve() for candidate in candidates if candidate.exists()]
+            if path not in fixed:
+                return False
     except OSError:
         return False
     return True
 
 
-def resolve_trusted_gh(root: Path) -> Path | None:
-    if _TEST_TRUSTED_GH is not None:
-        candidate = Path(_TEST_TRUSTED_GH)
-        return candidate.resolve() if _gh_provenance_ok(candidate, root, test_override=True) else None
-    for candidate in TRUSTED_GH_CANDIDATES:
-        if candidate.exists() and _gh_provenance_ok(candidate, root):
+def resolve_trusted_executable(
+    root: Path, candidates: tuple[Path, ...], override: Path | None
+) -> Path | None:
+    if override is not None:
+        candidate = Path(override)
+        return candidate.resolve() if _executable_provenance_ok(
+            candidate, root, candidates, test_override=True
+        ) else None
+    for candidate in candidates:
+        if candidate.exists() and _executable_provenance_ok(candidate, root, candidates):
             return candidate.resolve()
     return None
 
 
-def _bounded_gh_env() -> dict[str, str]:
-    env = {
+def resolve_trusted_gh(root: Path) -> Path | None:
+    return resolve_trusted_executable(root, TRUSTED_GH_CANDIDATES, _TEST_TRUSTED_GH)
+
+
+def resolve_trusted_git(root: Path) -> Path | None:
+    return resolve_trusted_executable(root, TRUSTED_GIT_CANDIDATES, _TEST_TRUSTED_GIT)
+
+
+def _bounded_local_env() -> dict[str, str]:
+    return {
         "PATH": "/usr/bin:/bin",
         "LANG": "C",
         "LC_ALL": "C",
-        "GH_PROMPT_DISABLED": "1",
+        "HOME": str(TRUSTED_ACCOUNT_HOME),
     }
-    home = os.environ.get("HOME", "")
-    if home and "\x00" not in home and "\n" not in home:
-        env["HOME"] = home
+
+
+def _bounded_gh_env() -> dict[str, str]:
+    env = _bounded_local_env()
+    env["GH_PROMPT_DISABLED"] = "1"
     return env
 
 
