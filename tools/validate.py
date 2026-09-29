@@ -276,6 +276,8 @@ def validate_chat_primary_contract():
         "st.st_uid != 0",
         "os.geteuid() == 0",
         "PREFLIGHT_ARTIFACT_AUTHORITY=EXTERNAL_IMMUTABLE_SOURCE_REQUIRED",
+        "REFERENCE_ONLY_ARTIFACT",
+        'globals().get("__file__") != "<stdin>"',
     )
     for token in required_preflight:
         if token not in preflight:
@@ -336,6 +338,10 @@ def validate_chat_primary_contract():
     ):
         if "implementation_preflight.py check" not in text:
             raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
+        if "/usr/bin/python3 -I - check" not in text:
+            raise SystemExit(f"FAIL {label} missing isolated immutable-source Python launcher")
+        if "controlled minimal environment" not in text:
+            raise SystemExit(f"FAIL {label} missing controlled preflight environment boundary")
         if (
             "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED" not in text
             and "external authenticated GitHub coordinator" not in text

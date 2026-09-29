@@ -482,7 +482,8 @@ def main() -> int:
     ):
         text = (ROOT / rel).read_text(encoding="utf-8")
         assert "worker-writable" in text, rel
-        assert "/usr/bin/python3 - check" in text, rel
+        assert "/usr/bin/python3 -I - check" in text, rel
+        assert "controlled minimal environment" in text, rel
         assert "root-owned" in text, rel
 
     for forbidden in (
