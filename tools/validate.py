@@ -245,38 +245,49 @@ def validate_chat_primary_contract():
     issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
 
     required_preflight = (
-        "WORK_PACKET_AUTHOR_UNTRUSTED",
         "WORKTREE_DIRTY",
         "WORKTREE_BINDING_MISMATCH",
         "--expected-worktree",
-        "--packet-body-file",
-        "--connector-attested-author-permission",
-        "collaborators/{author}/permission",
+        "--issue-number",
+        "--expected-repo",
+        "--expected-workstream",
+        "--expected-branch",
+        "--expected-head",
+        "--expected-intent-revision",
+        "--expected-change-risk",
         "ORIGIN_HOST_MISMATCH",
         "TARGET_REPO_MISMATCH",
         "BRANCH_MISMATCH",
         "HEAD_MISMATCH",
-        "STALE_INTENT_REVISION",
-        "IMPLEMENTER_MISMATCH",
-        "CHANGE_RISK_MISMATCH",
-        "IMPLEMENTATION_PREFLIGHT=PASS",
-        "LOCAL_BINDING=PASS",
-        "MUTATION_AUTHORITY=NOT_GRANTED",
-        "AUTHORITY_BOUNDARY=EXTERNAL_GITHUB_CONNECTOR",
+        "IMPLEMENTATION_LOCAL_BINDING=PASS",
+        "MUTATION_AUTHORITY=NO",
+        "AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED",
+        "LOCAL_GIT_BOUNDARY_UNAVAILABLE",
         "core.hooksPath=/dev/null",
-        "core.fsmonitor=",
+        "core.fsmonitor=false",
+        "credential.helper=",
+        "--ignore-submodules=all",
+        "--no-includes",
         "GIT_CONFIG_NOSYSTEM",
-        "_independently_administered",
+        "GIT_CONFIG_GLOBAL",
+        "XDG_CONFIG_HOME",
+        "_root_administered_path",
+        "st.st_uid != 0",
     )
     for token in required_preflight:
         if token not in preflight:
             raise SystemExit(f"FAIL implementation preflight missing token: {token}")
     for forbidden in (
+        "--packet-body-file",
         "--expected-packet-body-sha256",
         "--author-permission",
+        "--connector-attested-author-permission",
         "--expected-implementer",
+        "IMPLEMENTATION_PREFLIGHT=PASS",
         "shutil.which",
         "Path.home()",
+        "context_epoch",
+        "work_packet_authority",
         "resolve_trusted_gh",
         "TRUSTED_GH_CANDIDATES",
         "authenticated_packet",
@@ -286,12 +297,13 @@ def validate_chat_primary_contract():
     ):
         if forbidden in preflight:
             raise SystemExit(
-                f"FAIL implementation preflight retains in-worker GitHub authority or PATH lookup: {forbidden}"
+                f"FAIL implementation preflight retains authority/network/PATH coupling: {forbidden}"
             )
     for token in (
         "resolve_trusted_git",
         "TRUSTED_GIT_CANDIDATES",
         'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        "performs no network or GitHub",
         "cannot mint mutation authority",
     ):
         if token not in preflight:
@@ -321,9 +333,13 @@ def validate_chat_primary_contract():
     ):
         if "implementation_preflight.py check" not in text:
             raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
-        if "EXTERNAL_GITHUB_CONNECTOR" not in text and "external GitHub connector" not in text:
-            raise SystemExit(f"FAIL {label} missing external connector authority boundary")
-        if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NOT_GRANTED" not in text:
+        if (
+            "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED" not in text
+            and "external authenticated GitHub coordinator" not in text
+            and "external authenticated GitHub connector" not in text
+        ):
+            raise SystemExit(f"FAIL {label} missing external coordinator authority boundary")
+        if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NO" not in text:
             raise SystemExit(f"FAIL {label} missing local-binding-only mutation denial")
     if "ChatGPT Chat is the default daytime implementer" not in custom:
         raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
