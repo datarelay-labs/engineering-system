@@ -25,6 +25,14 @@ def load_preflight():
 
 PREFLIGHT = load_preflight()
 GIT_PATH = PREFLIGHT.resolve_trusted_git()
+FIXTURE_GIT_PATH = next(
+    (
+        candidate
+        for candidate in PREFLIGHT.TRUSTED_GIT_CANDIDATES
+        if candidate.is_file() and os.access(candidate, os.X_OK)
+    ),
+    None,
+)
 
 
 def run(
@@ -47,8 +55,12 @@ def run(
 
 
 def git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    assert GIT_PATH is not None
-    return run(str(GIT_PATH), *args, cwd=cwd)
+    # Fixture setup is intentionally independent from the operational trust
+    # decision. This lets root-owned CI/container environments verify that the
+    # real preflight blocks root workers instead of making the regression suite
+    # itself impossible to run.
+    assert FIXTURE_GIT_PATH is not None
+    return run(str(FIXTURE_GIT_PATH), *args, cwd=cwd)
 
 
 def init_repo(root: Path) -> str:
@@ -105,11 +117,18 @@ def invoke(
 
 
 def main() -> int:
-    if GIT_PATH is None:
-        raise SystemExit("IMPLEMENTATION_PREFLIGHT_TESTS=FAIL trusted Git unavailable")
-    assert PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
+    if FIXTURE_GIT_PATH is None:
+        raise SystemExit("IMPLEMENTATION_PREFLIGHT_TESTS=FAIL fixture Git unavailable")
+
+    running_as_root = os.geteuid() == 0
+    if running_as_root:
+        assert GIT_PATH is None
+    else:
+        assert GIT_PATH is not None
+        assert PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
     with mock.patch.object(PREFLIGHT.os, "geteuid", return_value=0):
-        assert not PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
+        if GIT_PATH is not None:
+            assert not PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
         assert PREFLIGHT.resolve_trusted_git() is None
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -117,6 +136,14 @@ def main() -> int:
         repo = root / "repo"
         repo.mkdir()
         head = init_repo(repo)
+
+        if running_as_root:
+            blocked_root = invoke(repo, head)
+            assert blocked_root.returncode == 2, blocked_root.stdout
+            assert "LOCAL_GIT_BOUNDARY_UNAVAILABLE" in blocked_root.stdout
+            assert "MUTATION_AUTHORITY=NO" in blocked_root.stdout
+            print("IMPLEMENTATION_PREFLIGHT_TESTS=PASS ROOT_OPERATIONAL_BLOCK=VERIFIED")
+            return 0
 
         passed = invoke(repo, head)
         assert passed.returncode == 0, passed.stdout
@@ -251,6 +278,38 @@ def main() -> int:
 
         clean_again = invoke(repo, head)
         assert clean_again.returncode == 0, clean_again.stdout
+
+        # Preserve legitimate trailing spaces in Git path output. A submodule
+        # whose path ends in a space must still be recursively inspected for
+        # hidden index state instead of being silently skipped.
+        spaced_child = root / "spaced-submodule-source"
+        spaced_child.mkdir()
+        git("init", "-q", "-b", "main", str(spaced_child))
+        git("config", "user.email", "test@example.invalid", cwd=spaced_child)
+        git("config", "user.name", "Preflight Test", cwd=spaced_child)
+        (spaced_child / "spaced.txt").write_text("base\n", encoding="utf-8")
+        git("add", ".", cwd=spaced_child)
+        git("commit", "-qm", "spaced child base", cwd=spaced_child)
+        spaced_rel = "deps/fixture-space "
+        git(
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(spaced_child),
+            spaced_rel,
+            cwd=repo,
+        )
+        git("commit", "-qam", "add trailing-space submodule", cwd=repo)
+        head = git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        spaced_submodule = repo / spaced_rel
+        git("update-index", "--assume-unchanged", "spaced.txt", cwd=spaced_submodule)
+        spaced_hidden = invoke(repo, head)
+        assert spaced_hidden.returncode == 2, spaced_hidden.stdout
+        assert "HIDDEN_INDEX_STATE" in spaced_hidden.stdout
+        git("update-index", "--no-assume-unchanged", "spaced.txt", cwd=spaced_submodule)
+        spaced_clean = invoke(repo, head)
+        assert spaced_clean.returncode == 0, spaced_clean.stdout
 
         git(
             "remote",

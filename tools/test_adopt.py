@@ -2052,6 +2052,19 @@ def test_engineering_context_helper_adoption_and_upgrade() -> None:
         assert not (target / "AGENTS.md").exists()
 
 
+def test_local_adoption_checker_chat_contract_is_not_target_version_gated() -> None:
+    checker = CHECK.read_text(encoding="utf-8")
+    required = (
+        "canonical_checker_version",
+        "checker_chat_primary = version_at_least(checker_version, (1, 6, 5))",
+        "engineering_system.version does not match canonical checker version",
+        "if checker_chat_primary:",
+    )
+    for token in required:
+        assert token in checker, token
+    assert "if version_at_least(version, (1, 6, 5)):" not in checker
+
+
 def test_adoption_compliance_workflow_checks_engineering_context_helper() -> None:
     workflow = (ROOT / ".github" / "workflows" / "adoption-compliance.yml").read_text(
         encoding="utf-8"
@@ -2474,6 +2487,7 @@ def main() -> int:
     test_fresh_adoption_installs_verification_t4_dependency()
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
+    test_local_adoption_checker_chat_contract_is_not_target_version_gated()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_release_execution_context_is_bounded_and_upgradeable()
     test_bun_native_discovery()

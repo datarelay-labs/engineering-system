@@ -144,7 +144,15 @@ def git(root: Path, *args: str) -> str:
     )
     if result.returncode:
         raise PreflightError("GIT_STATE_UNAVAILABLE")
-    return result.stdout.strip()
+    # Git path-like output may legitimately end in spaces. Remove only the
+    # command line terminator; never use strip(), which can change repository
+    # path identity (for example an initialized submodule named "z ").
+    stdout = result.stdout
+    if stdout.endswith("\r\n"):
+        return stdout[:-2]
+    if stdout.endswith("\n"):
+        return stdout[:-1]
+    return stdout
 
 
 def normalize_origin(url: str) -> tuple[str, str]:

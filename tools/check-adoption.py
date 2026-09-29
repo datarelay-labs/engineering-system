@@ -32,6 +32,17 @@ FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANONICAL_URL = "https://github.com/datarelay-labs/engineering-system"
 
 
+def canonical_checker_version() -> str:
+    """Return the version shipped with this checker, not target-controlled data."""
+    path = Path(__file__).resolve().parents[1] / ".engineering" / "project.yaml"
+    try:
+        payload = load_yaml(path) or {}
+    except Exception:
+        return ""
+    engineering = payload.get("engineering_system") or {}
+    return str(engineering.get("version") or "")
+
+
 def load_yaml(path: Path):
     with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
@@ -65,6 +76,8 @@ def main() -> int:
     native_ci_workflows: list[str] = []
     merge_gate_status = ""
     project_domains: set[str] = set()
+    checker_version = canonical_checker_version()
+    checker_chat_primary = version_at_least(checker_version, (1, 6, 5))
 
     project_path = root / ".engineering/project.yaml"
     if project_path.is_file():
@@ -205,7 +218,11 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
-        if version_at_least(version, (1, 6, 5)):
+        if checker_chat_primary:
+            if mode == "adopted" and version != checker_version:
+                failures.append(
+                    "engineering_system.version does not match canonical checker version"
+                )
             if "ChatGPT Chat is the default daytime implementer" not in agents_text:
                 failures.append(
                     "AGENTS.md missing Chat-primary daytime implementer instruction"
