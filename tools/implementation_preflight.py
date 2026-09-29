@@ -30,6 +30,7 @@ import work_packet_authority
 HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 IMPLEMENTER_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
+DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"
 TRUSTED_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 TRUSTED_GH_CANDIDATES = (
     Path("/usr/bin/gh"),
@@ -278,7 +279,7 @@ def check(args: argparse.Namespace) -> int:
         raise PreflightError("STALE_INTENT_REVISION")
     if not implementer or IMPLEMENTER_RE.fullmatch(implementer) is None:
         raise PreflightError("IMPLEMENTER_INVALID")
-    if implementer != args.expected_implementer:
+    if implementer != DIRECT_CHAT_IMPLEMENTER:
         raise PreflightError("IMPLEMENTER_MISMATCH")
     if change_risk not in CHANGE_RISKS:
         raise PreflightError("CHANGE_RISK_INVALID")
@@ -313,7 +314,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     command.add_argument("--expected-workstream", required=True)
     command.add_argument("--expected-head", required=True)
     command.add_argument("--expected-intent-revision", required=True, type=int)
-    command.add_argument("--expected-implementer", required=True)
     command.add_argument(
         "--expected-change-risk",
         required=True,

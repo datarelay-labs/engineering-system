@@ -180,8 +180,6 @@ def invoke(
         head,
         "--expected-intent-revision",
         "2",
-        "--expected-implementer",
-        "CHATGPT_CHAT",
         "--expected-change-risk",
         "HIGH",
     ]
@@ -230,8 +228,48 @@ def main() -> int:
             "--packet-body-file",
             "--expected-packet-body-sha256",
             "--author-permission",
+            "--expected-implementer",
         ):
             assert forbidden not in help_result.stdout
+
+        # Caller HOME must not redefine the trusted GitHub client or auth home.
+        attacker_home = root / "attacker-home"
+        fake_home_gh = attacker_home / ".local/bin/gh"
+        fake_home_gh.parent.mkdir(parents=True)
+        fake_home_gh.parent.chmod(0o755)
+        fake_home_gh.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        fake_home_gh.chmod(0o755)
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(attacker_home)
+        try:
+            attacked = load_preflight(TOOL, "implementation_preflight_home_attack")
+            assert attacked.TRUSTED_ACCOUNT_HOME != attacker_home
+            assert fake_home_gh not in attacked.TRUSTED_GH_CANDIDATES
+            assert attacked._bounded_gh_env()["HOME"] == str(attacked.TRUSTED_ACCOUNT_HOME)
+            assert attacked.resolve_trusted_gh(repo) != fake_home_gh.resolve()
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
+        # Caller PATH must not supply the Git binary used for authority-bearing
+        # worktree/origin/HEAD/cleanliness facts.
+        attacker_bin = root / "attacker-bin"
+        attacker_bin.mkdir()
+        attacker_bin.chmod(0o755)
+        fake_git = attacker_bin / "git"
+        fake_git.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        fake_git.chmod(0o755)
+        original_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(attacker_bin) + os.pathsep + original_path
+        try:
+            assert PREFLIGHT.resolve_trusted_git(repo) != fake_git.resolve()
+            path_attack = invoke(repo, body, head)
+            assert path_attack.returncode == 0, path_attack.stdout
+            assert "IMPLEMENTATION_PREFLIGHT=PASS" in path_attack.stdout
+        finally:
+            os.environ["PATH"] = original_path
 
         weak_permission = invoke(repo, body, head, permission="read")
         assert weak_permission.returncode == 2
@@ -245,10 +283,15 @@ def main() -> int:
         assert invalid_title.returncode == 2
         assert "WORK_PACKET_TITLE_INVALID" in invalid_title.stdout
 
+        body.write_text(packet(head, IMPLEMENTER="CURSOR"), encoding="utf-8")
+        wrong_implementer = invoke(repo, body, head)
+        assert wrong_implementer.returncode == 2
+        assert "IMPLEMENTER_MISMATCH" in wrong_implementer.stdout
+        body.write_text(packet(head), encoding="utf-8")
+
         cases = [
             ("worktree", ["--expected-worktree", str(root / "other")], "WORKTREE_BINDING_MISMATCH"),
             ("intent", ["--expected-intent-revision", "3"], "STALE_INTENT_REVISION"),
-            ("implementer", ["--expected-implementer", "CURSOR"], "IMPLEMENTER_MISMATCH"),
             ("risk", ["--expected-change-risk", "CRITICAL"], "CHANGE_RISK_MISMATCH"),
             ("repo", ["--expected-repo", "evil/repo"], "TARGET_REPO_MISMATCH"),
         ]
@@ -332,8 +375,6 @@ def main() -> int:
             head,
             "--expected-intent-revision",
             "2",
-            "--expected-implementer",
-            "CHATGPT_CHAT",
             "--expected-change-risk",
             "HIGH",
         ]

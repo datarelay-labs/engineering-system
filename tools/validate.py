@@ -270,6 +270,7 @@ def validate_chat_primary_contract():
         "--packet-body-file",
         "--expected-packet-body-sha256",
         "--author-permission",
+        "--expected-implementer",
         "shutil.which",
         "Path.home()",
     ):
@@ -286,6 +287,7 @@ def validate_chat_primary_contract():
         "pwd.getpwuid",
         "GH_PROMPT_DISABLED",
         "authenticated_packet",
+        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
     ):
         if token not in preflight:
             raise SystemExit(f"FAIL implementation preflight missing trusted GitHub boundary token: {token}")
