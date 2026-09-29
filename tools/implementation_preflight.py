@@ -165,6 +165,54 @@ def normalize_origin(url: str) -> tuple[str, str]:
     return host, path
 
 
+def _index_has_hidden_flags(root: Path) -> bool:
+    records = git(root, "ls-files", "-v", "-z").split("\0")
+    for record in records:
+        if not record:
+            continue
+        tag = record[0]
+        if tag == "S" or tag.islower():
+            return True
+    return False
+
+
+def _initialized_gitlink_roots(root: Path) -> list[Path]:
+    raw = git(root, "ls-files", "--stage", "-z")
+    submodules: list[Path] = []
+    for record in raw.split("\0"):
+        if not record:
+            continue
+        metadata, separator, relative = record.partition("\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise PreflightError("GIT_STATE_UNAVAILABLE")
+        if fields[0] != "160000":
+            continue
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise PreflightError("SUBMODULE_STATE_UNAVAILABLE") from exc
+        if not candidate.is_dir():
+            continue
+        top = Path(git(candidate, "rev-parse", "--show-toplevel")).resolve()
+        if top == candidate:
+            submodules.append(candidate)
+    return submodules
+
+
+def _reject_hidden_index_flags(root: Path, seen: set[Path] | None = None) -> None:
+    visited = seen if seen is not None else set()
+    resolved = root.resolve()
+    if resolved in visited:
+        raise PreflightError("SUBMODULE_STATE_UNAVAILABLE")
+    visited.add(resolved)
+    if _index_has_hidden_flags(resolved):
+        raise PreflightError("HIDDEN_INDEX_STATE")
+    for submodule in _initialized_gitlink_roots(resolved):
+        _reject_hidden_index_flags(submodule, visited)
+
+
 def require_clean_root(root: Path) -> tuple[str, str, str]:
     resolved = root.resolve()
     if not resolved.is_dir():
@@ -178,6 +226,7 @@ def require_clean_root(root: Path) -> tuple[str, str, str]:
     head = git(resolved, "rev-parse", "--verify", "HEAD^{commit}")
     if HEAD_RE.fullmatch(head) is None:
         raise PreflightError("HEAD_INVALID")
+    _reject_hidden_index_flags(resolved)
     if git(
         resolved,
         "status",

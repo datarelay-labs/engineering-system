@@ -176,6 +176,18 @@ def main() -> int:
         assert dirty.returncode == 2 and "WORKTREE_DIRTY" in dirty.stdout
         (repo / "dirty.txt").unlink()
 
+        git("update-index", "--assume-unchanged", "README.md", cwd=repo)
+        hidden_assume = invoke(repo, head)
+        assert hidden_assume.returncode == 2, hidden_assume.stdout
+        assert "HIDDEN_INDEX_STATE" in hidden_assume.stdout
+        git("update-index", "--no-assume-unchanged", "README.md", cwd=repo)
+
+        git("update-index", "--skip-worktree", "README.md", cwd=repo)
+        hidden_skip = invoke(repo, head)
+        assert hidden_skip.returncode == 2, hidden_skip.stdout
+        assert "HIDDEN_INDEX_STATE" in hidden_skip.stdout
+        git("update-index", "--no-skip-worktree", "README.md", cwd=repo)
+
         # Submodule state is part of the clean-tree authority boundary even if
         # repository config tries to suppress it.
         child = root / "submodule-source"
@@ -206,6 +218,19 @@ def main() -> int:
         submodule = repo / "deps" / "fixture"
         git("config", "user.email", "test@example.invalid", cwd=submodule)
         git("config", "user.name", "Preflight Test", cwd=submodule)
+
+        git("update-index", "--assume-unchanged", "child.txt", cwd=submodule)
+        nested_hidden_assume = invoke(repo, head)
+        assert nested_hidden_assume.returncode == 2, nested_hidden_assume.stdout
+        assert "HIDDEN_INDEX_STATE" in nested_hidden_assume.stdout
+        git("update-index", "--no-assume-unchanged", "child.txt", cwd=submodule)
+
+        git("update-index", "--skip-worktree", "child.txt", cwd=submodule)
+        nested_hidden_skip = invoke(repo, head)
+        assert nested_hidden_skip.returncode == 2, nested_hidden_skip.stdout
+        assert "HIDDEN_INDEX_STATE" in nested_hidden_skip.stdout
+        git("update-index", "--no-skip-worktree", "child.txt", cwd=submodule)
+
         (submodule / "child.txt").write_text("dirty\n", encoding="utf-8")
         dirty_submodule = invoke(repo, head)
         assert dirty_submodule.returncode == 2, dirty_submodule.stdout
@@ -314,6 +339,9 @@ def main() -> int:
         "MUTATION_AUTHORITY=NO",
         "GIT_CONFIG_NOSYSTEM",
         "core.fsmonitor=false",
+        "HIDDEN_INDEX_STATE",
+        'git(root, "ls-files", "-v", "-z")',
+        'git(root, "ls-files", "--stage", "-z")',
     ):
         assert required in source, required
 

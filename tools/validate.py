@@ -246,6 +246,7 @@ def validate_chat_primary_contract():
 
     required_preflight = (
         "WORKTREE_DIRTY",
+        "HIDDEN_INDEX_STATE",
         "WORKTREE_BINDING_MISMATCH",
         "--expected-worktree",
         "--issue-number",

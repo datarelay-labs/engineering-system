@@ -2067,7 +2067,12 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "AGENTS.md missing Chat-primary implementation preflight instruction",
         "canonical compliance runtime missing {rel}",
         "{rel} differs from canonical managed helper",
-        "version_tuple >= (1, 6, 5)",
+        ".engineering-system-runtime/.engineering/project.yaml",
+        "CALLED_WORKFLOW_SHA: ${{ job.workflow_sha }}",
+        "reusable adoption compliance requires engineering_system.mode=adopted",
+        "engineering_system.baseline does not match called workflow SHA",
+        "engineering_system.version does not match called baseline version",
+        "canonical_version_tuple >= (1, 6, 5)",
     )
     for token in required:
         assert token in workflow, token
@@ -2075,6 +2080,7 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     preflight_check = workflow.index("Chat-primary adoption missing required helper")
     assert agents_definition < preflight_check
     assert 'if "tools/implementation_preflight.py" in text:' not in workflow
+    assert "if version_tuple >= (1, 6, 5):" not in workflow
 
 
 def test_release_execution_context_is_bounded_and_upgradeable() -> None:
