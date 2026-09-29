@@ -56,7 +56,9 @@ def _lexical_components(path: Path) -> list[Path]:
 
 
 def _root_administered_path(path: Path, *, executable: bool) -> bool:
-    """Require root-owned, non-writable lexical and resolved path components."""
+    """Require root-owned, worker-inaccessible lexical and resolved path components."""
+    if os.geteuid() == 0:
+        return False
     try:
         lexical = path.absolute()
         for component in _lexical_components(lexical):

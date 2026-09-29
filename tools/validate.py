@@ -274,6 +274,7 @@ def validate_chat_primary_contract():
         "XDG_CONFIG_HOME",
         "_root_administered_path",
         "st.st_uid != 0",
+        "os.geteuid() == 0",
     )
     for token in required_preflight:
         if token not in preflight:

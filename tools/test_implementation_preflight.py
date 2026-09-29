@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "implementation_preflight.py"
@@ -107,6 +108,9 @@ def main() -> int:
     if GIT_PATH is None:
         raise SystemExit("IMPLEMENTATION_PREFLIGHT_TESTS=FAIL trusted Git unavailable")
     assert PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
+    with mock.patch.object(PREFLIGHT.os, "geteuid", return_value=0):
+        assert not PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
+        assert PREFLIGHT.resolve_trusted_git() is None
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -336,6 +340,7 @@ def main() -> int:
         'AUTHORITY_BOUNDARY = "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED"',
         'Path("/usr/bin/git")',
         "st.st_uid != 0",
+        "os.geteuid() == 0",
         "MUTATION_AUTHORITY=NO",
         "GIT_CONFIG_NOSYSTEM",
         "core.fsmonitor=false",
