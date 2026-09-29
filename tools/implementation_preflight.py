@@ -3,8 +3,11 @@
 
 This repository copy is parity/reference/test material and is not self-authenticating.
 Authoritative pre-mutation use requires source fetched from an immutable canonical
-baseline and executed directly by the external coordinator with a trusted interpreter,
+baseline and executed directly by the external coordinator via isolated stdin using a
+trusted interpreter (for Linux: controlled environment/cwd plus /usr/bin/python3 -I -),
 or an equivalent host-administered immutable copy outside the worker-writable tree.
+Direct CLI execution of this worker-writable repository file is reference-only and
+must fail closed.
 
 GitHub Work Packet and author-permission authority belongs to the external,
 authenticated coordinator/connector. This logic performs no network or GitHub
@@ -348,4 +351,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # The repository/worktree copy is worker-writable and therefore can never be
+    # mutation authority. Authoritative execution uses immutable source bytes
+    # supplied on stdin (Python sets __file__ to "<stdin>") through an isolated
+    # trusted interpreter controlled by the external coordinator.
+    if globals().get("__file__") != "<stdin>":
+        fail("REFERENCE_ONLY_ARTIFACT")
     raise SystemExit(main())

@@ -40,6 +40,7 @@ def run(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     check: bool = True,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         list(args),
@@ -48,6 +49,7 @@ def run(
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        input=input_text,
     )
     if check and result.returncode:
         raise AssertionError(result.stdout)
@@ -80,6 +82,16 @@ def init_repo(root: Path) -> str:
     return git("rev-parse", "HEAD", cwd=root).stdout.strip()
 
 
+def isolated_python_env() -> dict[str, str]:
+    return {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "HOME": "/nonexistent",
+        "XDG_CONFIG_HOME": "/nonexistent",
+    }
+
+
 def invoke(
     repo: Path,
     head: str,
@@ -87,9 +99,15 @@ def invoke(
     env: dict[str, str] | None = None,
     tool: Path = TOOL,
 ) -> subprocess.CompletedProcess[str]:
+    # Match the authoritative execution shape: immutable source bytes on stdin,
+    # Python isolated mode, cwd outside the worktree, and no inherited caller
+    # environment. env is accepted only so adversarial callers can prove their
+    # supplied values are ignored by this launcher.
+    _ = env
     args = [
         sys.executable,
-        str(tool),
+        "-I",
+        "-",
         "check",
         "--root",
         str(repo),
@@ -113,7 +131,13 @@ def invoke(
         "HIGH",
     ]
     args.extend(extra)
-    return run(*args, cwd=repo, env=env, check=False)
+    return run(
+        *args,
+        cwd=Path("/"),
+        env=isolated_python_env(),
+        check=False,
+        input_text=tool.read_text(encoding="utf-8"),
+    )
 
 
 def main() -> int:
@@ -130,6 +154,62 @@ def main() -> int:
         if GIT_PATH is not None:
             assert not PREFLIGHT._root_administered_path(GIT_PATH, executable=True)
         assert PREFLIGHT.resolve_trusted_git() is None
+
+    # Python import isolation is part of the authority boundary. Worker-owned
+    # cwd modules, PYTHONPATH, and user-site customization must not run before
+    # the immutable stdin helper.
+    with tempfile.TemporaryDirectory() as poison_tmp:
+        poison = Path(poison_tmp)
+        (poison / "argparse.py").write_text(
+            'print("FORGED_ARGPARSE_IMPORT")\nraise SystemExit(0)\n',
+            encoding="utf-8",
+        )
+        userbase = poison / "userbase"
+        site = userbase / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+        site.mkdir(parents=True)
+        (site / "usercustomize.py").write_text(
+            'print("FORGED_USERCUSTOMIZE")\n',
+            encoding="utf-8",
+        )
+        poisoned_env = {
+            **isolated_python_env(),
+            "PYTHONPATH": str(poison),
+            "PYTHONUSERBASE": str(userbase),
+        }
+        isolated_help = run(
+            sys.executable,
+            "-I",
+            "-",
+            "check",
+            "--help",
+            cwd=poison,
+            env=poisoned_env,
+            check=False,
+            input_text=TOOL.read_text(encoding="utf-8"),
+        )
+        assert isolated_help.returncode == 0, isolated_help.stdout
+        assert "--expected-worktree" in isolated_help.stdout
+        assert "FORGED_ARGPARSE_IMPORT" not in isolated_help.stdout
+        assert "FORGED_USERCUSTOMIZE" not in isolated_help.stdout
+
+    # The worker-writable repository copy is reference/test material only.
+    direct = run(
+        sys.executable,
+        str(TOOL),
+        "check",
+        "--help",
+        cwd=ROOT,
+        check=False,
+    )
+    assert direct.returncode == 2, direct.stdout
+    assert "REFERENCE_ONLY_ARTIFACT" in direct.stdout
+    assert "IMPLEMENTATION_LOCAL_BINDING=PASS" not in direct.stdout
+    assert "MUTATION_AUTHORITY=NO" in direct.stdout
+
+    env = isolated_python_env()
+    assert not any(name.startswith("PYTHON") for name in env)
+    assert env["HOME"] == "/nonexistent"
+    assert env["XDG_CONFIG_HOME"] == "/nonexistent"
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -162,7 +242,16 @@ def main() -> int:
         ):
             assert token in passed.stdout, token
 
-        help_result = run(sys.executable, str(TOOL), "check", "--help")
+        help_result = run(
+            sys.executable,
+            "-I",
+            "-",
+            "check",
+            "--help",
+            cwd=Path("/"),
+            env=isolated_python_env(),
+            input_text=TOOL.read_text(encoding="utf-8"),
+        )
         assert help_result.returncode == 0
         for required in (
             "--expected-worktree",
