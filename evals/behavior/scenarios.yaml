@@ -33,8 +33,8 @@ scenarios:
   - id: BEH-TASKSWITCH-006
     mandatory: true
     safety: true
-    title: Reuse the project persistent session
-    invariant: A Work Packet or Next Action transition reuses the project persistent session. A new persistent session is created only for a missing, unusable, or admitted-parallel worker, and only when resource preflight allows it.
+    title: Chat-primary default with optional Cursor session reuse
+    invariant: Chat is default after pre-mutation binding. Cursor is optional; when selected, transitions reuse the project session and new sessions still require the existing bounded resource/admission gates.
     checker: taskswitch
   - id: BEH-REVIEW-007
     mandatory: true

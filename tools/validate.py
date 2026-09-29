@@ -77,6 +77,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_adopt.py",
     "tools/test_org_rollout.py",
     "tools/test_work_packet_authority.py",
+    "tools/implementation_preflight.py",
+    "tools/test_implementation_preflight.py",
     "tools/cursor-resource-preflight.py",
     "tools/test_cursor_resource_preflight.py",
     "tools/work_admission.py",
@@ -232,6 +234,143 @@ def validate_work_packet_author_authority():
     print("PASS trusted Work Packet author authority contract")
 
 
+def validate_chat_primary_contract():
+    preflight = (ROOT / "tools/implementation_preflight.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    quality = (ROOT / "standards/QUALITY.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    project = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
+    issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
+
+    required_preflight = (
+        "WORKTREE_DIRTY",
+        "HIDDEN_INDEX_STATE",
+        "WORKTREE_BINDING_MISMATCH",
+        "WORKTREE_IDENTITY_MISMATCH",
+        "WORKTREE_PATH_SYMLINK",
+        "--expected-worktree",
+        "--expected-worktree-identity",
+        "--issue-number",
+        "--expected-repo",
+        "--expected-workstream",
+        "--expected-branch",
+        "--expected-head",
+        "--expected-intent-revision",
+        "--expected-change-risk",
+        "ORIGIN_HOST_MISMATCH",
+        "TARGET_REPO_MISMATCH",
+        "BRANCH_MISMATCH",
+        "HEAD_MISMATCH",
+        "IMPLEMENTATION_LOCAL_BINDING=PASS",
+        "MUTATION_AUTHORITY=NO",
+        "AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED",
+        "LOCAL_GIT_BOUNDARY_UNAVAILABLE",
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=false",
+        "credential.helper=",
+        "--ignore-submodules=none",
+        "--no-includes",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
+        "XDG_CONFIG_HOME",
+        "_root_administered_path",
+        "st.st_uid != 0",
+        "os.geteuid() == 0",
+        "PREFLIGHT_ARTIFACT_AUTHORITY=EXTERNAL_IMMUTABLE_SOURCE_REQUIRED",
+        "REFERENCE_ONLY_ARTIFACT",
+        'globals().get("__file__") != "<stdin>"',
+    )
+    for token in required_preflight:
+        if token not in preflight:
+            raise SystemExit(f"FAIL implementation preflight missing token: {token}")
+    for forbidden in (
+        "--packet-body-file",
+        "--expected-packet-body-sha256",
+        "--author-permission",
+        "--connector-attested-author-permission",
+        "--expected-implementer",
+        "IMPLEMENTATION_PREFLIGHT=PASS",
+        "shutil.which",
+        "Path.home()",
+        "context_epoch",
+        "work_packet_authority",
+        "resolve_trusted_gh",
+        "TRUSTED_GH_CANDIDATES",
+        "authenticated_packet",
+        "github_json",
+        "pwd.getpwuid",
+        "GH_PROMPT_DISABLED",
+    ):
+        if forbidden in preflight:
+            raise SystemExit(
+                f"FAIL implementation preflight retains authority/network/PATH coupling: {forbidden}"
+            )
+    for token in (
+        "resolve_trusted_git",
+        "TRUSTED_GIT_CANDIDATES",
+        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        "performs no network or GitHub",
+        "cannot mint mutation authority",
+    ):
+        if token not in preflight:
+            raise SystemExit(f"FAIL implementation preflight missing local-binding token: {token}")
+    adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for token in (
+        "tools/implementation_preflight.py",
+        "tools/context_epoch.py",
+        "tools/work_packet_authority.py",
+        'canonical_helper = Path(".engineering-system-runtime") / rel',
+        'f"{rel} differs from canonical managed helper"',
+        "implementation_preflight.py check",
+        "ChatGPT Chat is the default implementer",
+    ):
+        if token not in adoption_workflow:
+            raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
+    if 'if "tools/implementation_preflight.py" in text:' in adoption_workflow:
+        raise SystemExit(
+            "FAIL adoption compliance still gates Chat-primary helper parity on AGENTS text"
+        )
+    for label, text in (
+        ("session continuity", session),
+        ("AGENTS.md", agents),
+        ("AGENTS template", agents_template),
+        ("ChatGPT custom instruction", custom),
+        ("ChatGPT project instruction", project),
+    ):
+        if "implementation_preflight.py check" not in text:
+            raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
+        if "/usr/bin/python3 -I - check" not in text:
+            raise SystemExit(f"FAIL {label} missing isolated immutable-source Python launcher")
+        if "controlled minimal environment" not in text:
+            raise SystemExit(f"FAIL {label} missing controlled preflight environment boundary")
+        if "--expected-worktree-identity" not in text:
+            raise SystemExit(f"FAIL {label} missing no-follow worktree identity binding")
+        if (
+            "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED" not in text
+            and "external authenticated GitHub coordinator" not in text
+            and "external authenticated GitHub connector" not in text
+        ):
+            raise SystemExit(f"FAIL {label} missing external coordinator authority boundary")
+        if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NO" not in text:
+            raise SystemExit(f"FAIL {label} missing local-binding-only mutation denial")
+    if "ChatGPT Chat is the default implementer" not in custom:
+        raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
+    if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
+        raise SystemExit("FAIL legacy Cursor-primary ChatGPT contract remains")
+    for token in (
+        "ChatGPT Chat is the default implementer and auditor",
+        "same Chat context may satisfy terminal audit",
+        "Independent-review provider availability or quota alone must not block",
+    ):
+        if token not in quality:
+            raise SystemExit(f"FAIL Chat-primary implementation/audit ownership policy missing token: {token}")
+    if "IMPLEMENTER=CHATGPT_CHAT" not in issue:
+        raise SystemExit("FAIL Work Packet template missing default Chat implementer identity")
+    print("PASS Chat-primary SSH implementation and independent-verifier contract")
+
+
 def validate_resource_guard_contract():
     tool = (ROOT / "tools/cursor-resource-preflight.py").read_text(encoding="utf-8")
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
@@ -245,16 +384,17 @@ def validate_resource_guard_contract():
             raise SystemExit(f"FAIL resource preflight encodes session mutation: {token}")
     for label, text in (
         ("session continuity", session),
-        ("ChatGPT custom instruction", instruction),
         ("resume template", resume),
     ):
         if "cursor-resource-preflight.py" not in text:
-            raise SystemExit(f"FAIL {label} missing resource preflight command")
+            raise SystemExit(f"FAIL {label} missing optional-adapter resource preflight command")
         if "BLOCK" not in text:
             raise SystemExit(f"FAIL {label} missing BLOCK result")
-    if instruction.index("tools/cursor-resource-preflight.py") > instruction.index("agent persist /work-resume"):
-        raise SystemExit("FAIL ChatGPT handoff runs agent persist before resource preflight")
-    print("PASS Cursor persistent-session resource guard contract")
+    if "Cursor is retired from the default workflow" not in instruction:
+        raise SystemExit("FAIL ChatGPT custom instruction does not retire Cursor default")
+    if "DISABLED BY DEFAULT" not in resume:
+        raise SystemExit("FAIL Cursor resume compatibility adapter is not disabled by default")
+    print("PASS dormant Cursor compatibility resource guard contract")
 
 
 def validate_work_admission_contract():
@@ -344,7 +484,7 @@ def validate_independent_verifier_contract():
         if "independent_verifier.py" not in text:
             raise SystemExit(f"FAIL {label} missing independent verifier command")
     for token in (
-        "Independent verifier for terminal evidence",
+        "Optional independent verifier for additional terminal evidence",
         "exact 40-char subject HEAD",
         "SAME_ACTOR",
         "EXECUTION_FORBIDDEN",
@@ -904,6 +1044,7 @@ def validate_session_continuity_templates():
         "TASK_KIND=",
         "OWNER_INTENT=",
         "LAST_VERIFIED_HEAD=",
+        "IMPLEMENTER=CHATGPT_CHAT",
         "## Next Action",
         "## Canonical References",
         "## Latest Evidence",
@@ -1525,6 +1666,7 @@ def main():
     validate_baseline_declarations()
     validate_bun_discovery()
     validate_work_packet_author_authority()
+    validate_chat_primary_contract()
     validate_resource_guard_contract()
     validate_work_admission_contract()
     validate_independent_verifier_contract()
@@ -1559,6 +1701,9 @@ def main():
     validate("templates/TESTS.yaml", "schemas/tests.schema.json")
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
+    completed = subprocess.run(["python3", "tools/test_implementation_preflight.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_cursor_resource_preflight.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

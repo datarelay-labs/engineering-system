@@ -1,3 +1,5 @@
+Cursor compatibility rules are DISABLED BY DEFAULT. Do not use Cursor for implementation unless the owner explicitly reactivates Cursor for the current Work Packet and sets `IMPLEMENTER=CURSOR`. Otherwise stop; ChatGPT Chat owns design, implementation, testing, and audit coordination.
+
 Use datarelay-labs/engineering-system as the default engineering standard for software/product work.
 
 Always read the target repository's AGENTS.md and .engineering/project.yaml first. Use minimum sufficient context and reasoning; do not request maximum reasoning by default or preload all standards/history. Load tests/release metadata and only the relevant standard/spec/ADR/runbook when the task requires them.

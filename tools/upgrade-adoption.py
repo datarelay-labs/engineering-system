@@ -14,6 +14,7 @@ import yaml
 from adopt import (
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
+    IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
@@ -398,6 +399,22 @@ def plan_skills_contract_install(root: Path) -> dict[str, str]:
 
 
 def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_implementation_preflight_install(root: Path) -> dict[str, str]:
+    return plan_managed_file_install(
+        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight"
+    )
+
+
+def apply_implementation_preflight_install(root: Path, planned: dict[str, str]) -> list[str]:
     installed: list[str] = []
     for rel, text in planned.items():
         path = root / rel
@@ -817,6 +834,7 @@ def main() -> int:
     planned_runtime_contract = plan_runtime_contract_install(root)
     planned_skills_contract = plan_skills_contract_install(root)
     planned_verification_contract = plan_verification_contract_install(root)
+    planned_implementation_preflight = plan_implementation_preflight_install(root)
     planned_context_epoch = plan_context_epoch_install(root)
     planned_engineering_context = plan_engineering_context_install(root)
 
@@ -862,6 +880,14 @@ def main() -> int:
         print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
     else:
         print("VERIFICATION_CONTRACT_INSTALLED=<none>")
+
+    installed_preflight = apply_implementation_preflight_install(
+        root, planned_implementation_preflight
+    )
+    if installed_preflight:
+        print("IMPLEMENTATION_PREFLIGHT_INSTALLED=" + ",".join(installed_preflight))
+    else:
+        print("IMPLEMENTATION_PREFLIGHT_INSTALLED=<none>")
 
     installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
     if installed_context_epoch:

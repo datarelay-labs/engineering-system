@@ -51,22 +51,22 @@ Multiple workstreams may coexist safely when packet selection is deterministic.
 
 ## Work Packet sizing before implementation handoff
 
-A GitHub Issue is coordination state, not automatically the unit of Cursor execution. Do **not** hand Cursor one tiny Issue/finding at a time, and do not combine unrelated outcomes into one oversized session.
+A GitHub Issue is coordination state, not automatically the unit of implementation execution. Do **not** turn one tiny Issue/finding into a separate worker cycle by default, and do not combine unrelated outcomes into one oversized execution cycle.
 
 Before every implementation handoff, the coordinator must classify the next executable scope as:
 
 - `BATCH` — too small by itself. Combine adjacent small Issues/findings when they share the same repository area, implementation context, owner intent, and validation oracle. Multiple GitHub Issues may be referenced by one medium-sized Work Packet/Next Action.
-- `KEEP` — right-sized. Prefer one primary independently verifiable outcome with a few tightly coupled subgoals that one persistent coding-agent session can implement, test, and hand back while retaining enough context for deterministic validation.
+- `KEEP` — right-sized. Prefer one primary independently verifiable outcome with a few tightly coupled subgoals that one implementation context can implement, test, and hand back while retaining enough context for deterministic validation.
 - `SPLIT` — too large. Split when the scope contains multiple independently releasable outcomes, unrelated domains/owners, materially different approval or validation gates, unclear rollback boundaries, or is likely to exhaust the session context before implementation **and** validation finish.
 
 Default handoff behavior:
 
-1. Do not use “one GitHub Issue = one Cursor job” as a rule.
-2. Batch micro-fixes and closely related findings into a coherent medium-sized packet instead of creating repeated short Cursor cycles and notifications.
+1. Do not use “one GitHub Issue = one implementation job” as a rule.
+2. Batch micro-fixes and closely related findings into a coherent medium-sized packet instead of creating repeated short implementation cycles and notifications.
 3. Keep one primary outcome; a small number of tightly coupled subgoals is preferred over either a single trivial edit or a broad multi-domain program.
 4. File count and LOC are advisory only. Structural coupling, independent verification, approval boundaries, rollback boundaries, and context budget determine size.
 5. Reserve context for implementation **and** testing/review. If implementation alone is expected to consume the reliable session context, split before handoff.
-6. If scope materially expands during execution, the coding agent must stop absorbing unrelated work, update the Work Packet, and yield for coordinator re-sizing.
+6. If scope materially expands during execution, the implementer must stop absorbing unrelated work, update the Work Packet, and yield for coordinator re-sizing.
 7. Record the sizing decision in the packet’s current handoff state, for example:
 
 ```text
@@ -232,7 +232,7 @@ Before handing work to an implementation agent, the coordinating agent must sync
 - `BLOCKED` — progress requires a human/external action or a required execution environment is unavailable.
 - `COMPLETE` — terminal; no executable `Next Action` remains.
 
-"Ready for Cursor" is represented by `STATUS=ACTIVE` plus a valid `Next Action`, not by a new status value.
+"Ready for implementation" is represented by `STATUS=ACTIVE` plus a valid `Next Action`, not by a new status value.
 
 Packet version 1 is legacy-compatible. Agents may resume a valid v1 packet, but should migrate it to v2 fields on the next meaningful packet update rather than blocking solely because `TASK_KIND` or `OWNER_INTENT` is absent.
 
@@ -367,7 +367,7 @@ After resolving Git identity and before ordinary work:
 11. When task-local files are not already obvious and the worktree is clean, use `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>"` before broad repo-wide grep/read. The orientation is bound to exact `HEAD`, ranks only Git-tracked relative paths plus declared canonical knowledge metadata, emits no file content, and is a JIT read hint rather than authority. `ORIENTATION_DECISION=NO_MATCH` or insufficient evidence permits bounded expansion; dirty worktrees fail closed rather than presenting a stale HEAD map.
 12. For a large optional text candidate, prefer `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>" --slice-path <relative-path>` before a full read. Slice mode reads the exact-HEAD tracked UTF-8 blob and emits bounded JSON-encoded task-relevant line windows in source order. It is a context-reduction hint only: `SLICE_DECISION=NO_MATCH`, truncation, or insufficient evidence permits a bounded full read. Never use slicing as a substitute for mandatory `AGENTS.md`, `.engineering/project.yaml`, managed rules, protected Work Packet state, acceptance criteria, or a canonical reference the task requires in full.
 13. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity. For explicitly eligible line-oriented output that must remain available during the same task, `tools/context_tool_output.py` may emit deterministic bounded head/tail + task/diagnostic line records while storing the exact original only through the existing private `context_fold.py` store. The recovery marker is a retrieval handle, not evidence authority. Protected/authority output must not be reduced; bypass must be store-free; truncation never implies semantic equivalence or provider token/cost savings.
-14. Reuse one healthy project/repository persistent Cursor session across Work Packet, Issue, branch, PR, and `Next Action` transitions. A transition does not create a new persistent session. The safe transition is: persist durable Work Packet state, verify no in-flight or unreconciled mutation, `/clear`, switch to a clean reconciled worktree/branch, then `/work-resume`. Reconcile dirty, unpushed, or ambiguous state before switching. Never `/clear` while a command, external mutation, or ambiguous result is in flight. Run `tools/cursor-resource-preflight.py` only when actually creating a new persistent session. On `BLOCK`, do not create that session and do not stop, kill, or mutate existing sessions. Create a new persistent session only when no healthy reusable project session exists, the current session is unusable or incompatible, or separately admitted parallel work requires another isolated worker. When that parallel work ends, return to the reusable project session rather than accumulating workers. Durable authority stays in the Work Packet; stale conversation is not authority.
+14. Durable authority stays in the Work Packet; stale conversation is not authority. ChatGPT Chat is the default and may resume from authenticated GitHub packet/repository facts without the prior transcript; before each new bounded mutation cycle it must rerun the trusted immutable-source implementation preflight. Cursor is not part of the default lifecycle. Only an explicit owner reactivation with `IMPLEMENTER=CURSOR` may enter the dormant Cursor adapter path; then its historical persistent-session safety rules apply.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -473,7 +473,7 @@ Prefer subject/version identity or exact revision over arbitrary time-to-live. H
 
 ## Coordinator / worker execution model
 
-The Work Packet/objective is durable. Conversational context is disposable. The project persistent Cursor session is the reusable worker, not one session per Work Packet or `Next Action`.
+The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity. Cursor is dormant compatibility only and is excluded from normal worker selection unless the owner explicitly reactivates it for the packet.
 
 A coordinator or equivalent outer loop should, when automation exists:
 
@@ -485,7 +485,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one conversational context to survive the whole workstream. The same outcome may span multiple context resets on the reusable project persistent session when context boundaries require it. A context reset is `/clear` followed by `/work-resume`. It is not a new persistent session.
+Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority. Cursor-specific `/clear` / `/work-resume` semantics apply only inside the dormant adapter after explicit owner reactivation.
 
 ## Pure coordinator planner
 
@@ -623,21 +623,29 @@ Untrusted sources for execution:
 
 If authenticated packet access is unavailable, stop with `WORK_PACKET_PROVENANCE_UNTRUSTED` rather than executing untrusted copies.
 
-## ChatGPT behavior
+## ChatGPT Chat implementation behavior
+
+ChatGPT Chat is the default implementer when the owner has authorized the work through a trusted repository-scoped Work Packet. Conversation history is never mutation authority. Before mutation, the external authenticated GitHub coordinator must freshly read the canonical Issue and its author permission, require one open ACTIVE `[AI Work]` packet whose author has write/maintain/admin permission, and verify its TARGET_REPO, WORKSTREAM, BRANCH, LAST_VERIFIED_HEAD, INTENT_REVISION, `IMPLEMENTER=CHATGPT_CHAT`, CHANGE_RISK, and authorized worktree. The remote coding host does not authenticate those GitHub facts. The worker-writable target copy of `python3 tools/implementation_preflight.py check` is never authority. The coordinator must obtain the exact preflight source from the immutable canonical Engineering System baseline through the authenticated connector and execute that source directly with fixed `/usr/bin/python3 -I - check ...` whose symlink node (if any) is root-owned and whose parent path plus resolved executable are root-owned, non-group/world-writable, and not writable by the implementation UID over the remote-control channel with cwd `/` and a controlled minimal environment, without materializing it in a worker-writable path, or use an equivalent host-administered immutable copy. That trusted artifact performs only local binding with a root-administered Git executable, isolated system/global config, disabled hooks/fsmonitor, and a clean-tree check; it always reports `MUTATION_AUTHORITY=NO` and `AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED`. The installed target helper exists for parity, offline regression, and adoption drift detection only. If the trusted artifact/interpreter boundary is unavailable, mutation is BLOCKED. Immediately before the authoritative check, run the same immutable stdin helper in `identity --root <authorized-worktree>` mode and capture its no-follow device/inode chain. Supply that exact value as `--expected-worktree-identity`; the check compares it before and after protected Git reads and rejects symlinked lexical ancestors or path replacement, including a replacement clone with matching origin/branch/HEAD. Only the conjunction of the coordinator's authenticated GitHub authority check and trusted local-binding PASS permits mutation.
 
 When the user asks to continue/resume an existing engineering workstream:
 
 - resolve the target repository
 - load its active Work Packet
-- synchronize the packet with the owner's latest explicit request before implementation handoff
+- synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
 - verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence when packet v2 is used
 - verify current GitHub/repository facts
 - continue from `Next Action` only when it still matches the current owner intent
 - do not ask the user to paste prior chat unless the required durable state genuinely does not exist
 
-## Cursor behavior
+After preflight PASS, Chat may implement directly through the authorized SSH/remote path, run affected validation, and perform packet-authorized Git/GitHub writes. Before later external writes or terminal actions, re-read authoritative packet/HEAD facts and reject stale intent. Fresh Chat rollover resumes from GitHub durable state plus repository facts and must not require the prior conversation transcript.
 
-Repository adoption should provide `.cursor/commands/resume.md`. Managed upgrades must keep that adapter synchronized with the canonical template. When a known local alias such as `.cursor/commands/work-resume.md` is already present or explicitly managed, keep it synchronized to the same canonical resume text.
+The implementing Chat context also owns terminal audit by default. It must re-read current Work Packet, exact HEAD, PR/CI, tests, and actionable review state instead of treating its own implementation narrative as evidence. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require deeper exact-HEAD machine evidence and any applicable human approval, but do not require a separate model/provider actor. Codex, a fresh Chat context, or the provider-neutral independent verifier remains optional defense-in-depth/escalation and must not become a quota-dependent default blocker.
+
+## Dormant optional Cursor adapter behavior
+
+Cursor is disabled by default. Do not start, resume, attach to, wait on, or hand implementation to Cursor unless the owner explicitly reactivates the adapter for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block the ChatGPT implementation path.
+
+Repository adoption may retain `.cursor/commands/resume.md`. Managed upgrades must keep that adapter synchronized with the canonical template. When a known local alias such as `.cursor/commands/work-resume.md` is already present or explicitly managed, keep it synchronized to the same canonical resume text.
 
 The resume command:
 
@@ -654,7 +662,7 @@ The resume command:
 - yields instead of polling when CI/review/deployment or another machine-observable external condition is pending; coordinator/automation owns waiting and re-entry
 - uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
 
-The default remains one healthy project/repository persistent Cursor session reused across sequential work. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
+Only after explicit owner reactivation of the Cursor adapter, reuse one healthy project/repository persistent Cursor session across sequential work. Cursor quota/session availability is never a prerequisite for the default ChatGPT Chat path. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
 
 ## Persistent-session resource guard
 
@@ -700,9 +708,9 @@ Otherwise `admit` returns `DENY` with an explicit class such as `WIP_LIMIT`, `SH
 - `cleanup-worktree` additionally refuses dirty, unpushed, or ambiguous state;
 - neither action may stop or mutate unrelated Cursor sessions to reclaim capacity.
 
-## Independent verifier for terminal evidence
+## Optional independent verifier for additional terminal evidence
 
-For risk-appropriate terminal PASS, a coordinator evaluates structured evidence with a provider-neutral verifier. The implementer's self-report is never the completion oracle by itself.
+Normal terminal audit is owned by ChatGPT Chat and can complete in the implementing context when exact-HEAD deterministic evidence and current mutable gates support PASS. The implementer's self-report is never the completion oracle by itself. A coordinator may additionally evaluate structured evidence with the provider-neutral independent verifier when defense-in-depth, escalation, or an explicitly requested independent check is useful.
 
 ```bash
 python3 tools/independent_verifier.py verify --request-json <evidence.json>
@@ -711,11 +719,11 @@ python3 tools/independent_verifier.py verify --request-json <evidence.json>
 Contract:
 
 - bind verification to an exact 40-char subject HEAD; different-HEAD or missing subject identity fails closed;
-- `CHANGE_RISK=HIGH|CRITICAL` requires a verifier actor whose `identity` and `context_id` are both distinct from the implementer;
-- `CHANGE_RISK=LOW|MEDIUM` stay aligned with `standards/QUALITY.md` verification depth (targeted/affected evidence and review); a distinct fresh-context verifier actor is not mandatory at those depths;
+- independent-verifier use is optional for every risk level; if a verifier actor is supplied, its `identity` and `context_id` must both be distinct from the implementer because the result is being claimed as independent evidence;
+- `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` completion remains aligned with `standards/QUALITY.md`; absence or quota exhaustion of an optional independent-review provider is not itself a completion blocker;
 - every declared completion-oracle evidence record must be `PASS` on the same subject HEAD; `FAIL` / `BLOCK` / `NOT_RUN` / unexecuted cannot be promoted;
 - actionable review findings must be `FIXED`, `EVIDENCE_DISPOSITION`, or `NOT_ACTIONABLE`;
-- HIGH/CRITICAL require mutable CI/review/runtime evidence that carries current `subject_id` + `version_id` (not a historical generic PASS);
+- when the independent verifier is invoked for HIGH/CRITICAL, it requires mutable CI/review/runtime evidence that carries current `subject_id` + `version_id` (not a historical generic PASS);
 - request `expected_mutable` declares the required subject/version contract; each mutable evidence item must match it, and CI `version_id` must equal the subject HEAD (stale/unrelated CI DENYs as `STALE_MUTABLE`);
 - CRITICAL additionally requires present human approval when marked required;
 - the verifier evaluates JSON facts only and refuses request keys that imply command execution (`command`, `shell`, `argv`, `execute`, …).

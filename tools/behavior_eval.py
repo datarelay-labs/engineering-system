@@ -470,11 +470,37 @@ def check_wait(root: Path) -> dict[str, str]:
 def check_taskswitch(root: Path) -> dict[str, str]:
     resume = _read(root, ".cursor/commands/resume.md")
     session = _read(root, "standards/SESSION_CONTINUITY.md")
+    agents = _read(root, "AGENTS.md")
+
+    _require_tokens(
+        agents,
+        (
+            "ChatGPT Chat is the default implementer",
+            "implementation_preflight.py check",
+            "Cursor adapter is disabled by default",
+        ),
+    )
+    _require_tokens(
+        session,
+        (
+            "ChatGPT Chat implementation behavior",
+            "default implementer",
+            "implementation_preflight.py check",
+            "GitHub durable state",
+            "Dormant optional Cursor adapter behavior",
+            "Cursor is disabled by default",
+            "Cursor quota/session availability is never a prerequisite",
+        ),
+    )
+
+    # Cursor remains a supported optional adapter. If selected, preserve its
+    # bounded persistent-session reuse and resource-safety contract.
     for label, text in (("resume", resume), ("session continuity", session)):
         if "fresh coding-agent session" in text or "preferring a fresh session" in text:
             return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
         if label == "resume" and "Prefer a fresh" in text:
             return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
+
     _require_tokens(
         resume,
         (
@@ -493,10 +519,10 @@ def check_taskswitch(root: Path) -> dict[str, str]:
             "/clear",
             "/work-resume",
             "reusable project",
-            "do not create",
             "dirty, unpushed, or ambiguous",
         ),
     )
+
     preflight = _load_tool("cursor-resource-preflight.py", "cursor_resource_preflight")
     mem_total = 2 * 1024**3
     thresholds = preflight.apply_override(mem_total, None, "builtin")

@@ -638,7 +638,15 @@ def test_adoption_compliance_calls_runtime_auditor() -> None:
         fail(f"runtime checkout path mismatch: {runtime_with.get('path')!r}")
     if runtime_with.get("persist-credentials") is not False:
         fail("runtime checkout must set persist-credentials false")
-    if runtime_with.get("sparse-checkout") != "tools/ci_policy_audit.py":
+    expected_sparse = (
+        "tools/ci_policy_audit.py\n"
+        "tools/context_epoch.py\n"
+        "tools/engineering-context.py\n"
+        "tools/implementation_preflight.py\n"
+        "tools/work_packet_authority.py\n"
+        ".engineering/project.yaml\n"
+    )
+    if runtime_with.get("sparse-checkout") != expected_sparse:
         fail(f"sparse checkout mismatch: {runtime_with.get('sparse-checkout')!r}")
     if runtime_with.get("sparse-checkout-cone-mode") is not False:
         fail("sparse checkout cone mode must be false")
