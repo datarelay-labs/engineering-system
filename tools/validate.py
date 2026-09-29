@@ -243,30 +243,41 @@ def validate_chat_primary_contract():
     custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
     project = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
     issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
+    adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(
+        encoding="utf-8"
+    )
 
     required_preflight = (
-        "WORK_PACKET_PROVENANCE_UNTRUSTED",
-        "WORK_PACKET_AUTHOR_UNTRUSTED",
-        "WORK_PACKET_ISSUE_INVALID",
-        "WORK_PACKET_TITLE_INVALID",
-        "WORKTREE_DIRTY",
-        "WORKTREE_BINDING_MISMATCH",
+        "IMPLEMENTATION_LOCAL_BINDING=PASS",
+        "MUTATION_AUTHORITY=NO",
+        "AUTHORITY_BOUNDARY=EXTERNAL_COORDINATOR_REQUIRED",
+        "LOCAL_GIT_BOUNDARY_UNAVAILABLE",
         "--expected-worktree",
         "--issue-number",
-        "collaborators/{author}/permission",
-        "ORIGIN_HOST_MISMATCH",
-        "TARGET_REPO_MISMATCH",
-        "BRANCH_MISMATCH",
-        "HEAD_MISMATCH",
-        "STALE_INTENT_REVISION",
-        "IMPLEMENTER_MISMATCH",
-        "CHANGE_RISK_MISMATCH",
-        "IMPLEMENTATION_PREFLIGHT=PASS",
+        "--expected-repo",
+        "--expected-workstream",
+        "--expected-branch",
+        "--expected-head",
+        "--expected-intent-revision",
+        "--expected-change-risk",
+        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        "TRUSTED_GIT_CANDIDATES",
+        "_root_administered_component",
+        "st_uid != 0",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
     )
     for token in required_preflight:
         if token not in preflight:
-            raise SystemExit(f"FAIL implementation preflight missing token: {token}")
+            raise SystemExit(f"FAIL implementation local binding missing token: {token}")
+
     for forbidden in (
+        "TRUSTED_GH",
+        "github_json",
+        "authenticated_packet",
+        "collaborators/{author}/permission",
+        "AUTHOR_PERMISSION=",
+        "PACKET_BODY_SHA256=",
         "--packet-body-file",
         "--expected-packet-body-sha256",
         "--author-permission",
@@ -276,31 +287,9 @@ def validate_chat_primary_contract():
     ):
         if forbidden in preflight:
             raise SystemExit(
-                f"FAIL implementation preflight accepts caller authority or PATH lookup: {forbidden}"
+                f"FAIL implementation local binding contains GitHub/caller authority surface: {forbidden}"
             )
-    for token in (
-        "resolve_trusted_gh",
-        "resolve_trusted_git",
-        "TRUSTED_GH_CANDIDATES",
-        "TRUSTED_GIT_CANDIDATES",
-        "TRUSTED_ACCOUNT_HOME",
-        "pwd.getpwuid",
-        "GH_PROMPT_DISABLED",
-        "authenticated_packet",
-        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
-    ):
-        if token not in preflight:
-            raise SystemExit(f"FAIL implementation preflight missing trusted GitHub boundary token: {token}")
-    adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
-    for token in (
-        "tools/implementation_preflight.py",
-        "tools/context_epoch.py",
-        "tools/work_packet_authority.py",
-        'canonical_helper = Path(".engineering-system-runtime") / rel',
-        'f"{rel} differs from canonical managed helper"',
-    ):
-        if token not in adoption_workflow:
-            raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
+
     for label, text in (
         ("session continuity", session),
         ("AGENTS.md", agents),
@@ -309,7 +298,23 @@ def validate_chat_primary_contract():
         ("ChatGPT project instruction", project),
     ):
         if "implementation_preflight.py check" not in text:
-            raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
+            raise SystemExit(f"FAIL {label} missing Chat-primary local binding command")
+        if "MUTATION_AUTHORITY=NO" not in text:
+            raise SystemExit(f"FAIL {label} treats local binding as mutation authority")
+        if "authenticated external GitHub connector/coordinator" not in text:
+            raise SystemExit(f"FAIL {label} missing external GitHub authority boundary")
+
+    for token in (
+        'version_tuple >= (1, 6, 5) and mode == "adopted"',
+        "requires Chat-primary implementation preflight instruction",
+        ".engineering-system-runtime/tools/implementation_preflight.py",
+        "tools/implementation_preflight.py differs from canonical managed helper",
+    ):
+        if token not in adoption_workflow:
+            raise SystemExit(f"FAIL adoption compliance missing unconditional preflight contract: {token}")
+    if 'if "tools/implementation_preflight.py" in text:' in adoption_workflow:
+        raise SystemExit("FAIL adoption compliance still lets AGENTS text disable preflight parity")
+
     if "ChatGPT Chat is the default daytime implementer" not in custom:
         raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
     if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
@@ -318,7 +323,7 @@ def validate_chat_primary_contract():
         raise SystemExit("FAIL risk-based fresh-Chat/HIGH-risk verifier policy missing")
     if "IMPLEMENTER=CHATGPT_CHAT" not in issue:
         raise SystemExit("FAIL Work Packet template missing default Chat implementer identity")
-    print("PASS Chat-primary SSH implementation and independent-verifier contract")
+    print("PASS Chat-primary external-authority + local-binding + independent-verifier contract")
 
 
 def validate_resource_guard_contract():

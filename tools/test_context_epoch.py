@@ -384,10 +384,10 @@ def test_adoption_compliance_carries_implementation_preflight_baseline() -> None
     workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
     for token in (
         "tools/implementation_preflight.py",
-        "tools/work_packet_authority.py",
-        'canonical_helper = Path(".engineering-system-runtime") / rel',
-        "AGENTS.md references implementation preflight but missing",
-        'f"{rel} differs from canonical managed helper"',
+        'version_tuple >= (1, 6, 5) and mode == "adopted"',
+        "requires Chat-primary implementation preflight instruction",
+        ".engineering-system-runtime/tools/implementation_preflight.py",
+        "tools/implementation_preflight.py differs from canonical managed helper",
     ):
         if token not in workflow:
             fail(f"adoption compliance missing implementation preflight contract: {token}")

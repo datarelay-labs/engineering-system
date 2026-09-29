@@ -196,8 +196,36 @@ def main() -> int:
             )
 
     agents_path = root / "AGENTS.md"
+    agents_text = (
+        agents_path.read_text(encoding="utf-8", errors="replace")
+        if agents_path.is_file()
+        else ""
+    )
+    if mode == "adopted" and version_at_least(version, (1, 6, 5)):
+        if not agents_path.is_file():
+            failures.append(
+                "Engineering System >=1.6.5 adopted repository requires AGENTS.md"
+            )
+        elif "tools/implementation_preflight.py check" not in agents_text:
+            failures.append(
+                "Engineering System >=1.6.5 adopted repository requires Chat-primary implementation preflight instruction"
+            )
+        target = root / "tools/implementation_preflight.py"
+        canonical = Path(__file__).resolve().parents[1] / "tools/implementation_preflight.py"
+        if not target.is_file():
+            failures.append(
+                "Engineering System >=1.6.5 adopted repository missing tools/implementation_preflight.py"
+            )
+        elif not canonical.is_file():
+            failures.append(
+                "canonical adoption checker is missing tools/implementation_preflight.py"
+            )
+        elif target.read_bytes() != canonical.read_bytes():
+            failures.append(
+                "tools/implementation_preflight.py differs from canonical managed helper"
+            )
+
     if agents_path.is_file():
-        agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
         if CANONICAL_URL not in agents_text:
             failures.append("AGENTS.md does not reference canonical Engineering System")
         if version_at_least(version, (1, 5, 0)):
@@ -205,20 +233,6 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
-        if "tools/implementation_preflight.py" in agents_text:
-            for rel in (
-                "tools/implementation_preflight.py",
-                "tools/context_epoch.py",
-                "tools/work_packet_authority.py",
-            ):
-                target = root / rel
-                canonical = Path(__file__).resolve().parents[1] / rel
-                if not target.is_file():
-                    failures.append(f"AGENTS.md references implementation preflight but missing {rel}")
-                elif not canonical.is_file():
-                    failures.append(f"canonical adoption checker is missing {rel}")
-                elif target.read_bytes() != canonical.read_bytes():
-                    failures.append(f"{rel} differs from canonical managed helper")
         if "tools/knowledge-contract.py" in agents_text:
             for rel in (
                 "tools/knowledge-contract.py",

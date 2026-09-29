@@ -643,7 +643,6 @@ def test_adoption_compliance_calls_runtime_auditor() -> None:
         "tools/context_epoch.py\n"
         "tools/engineering-context.py\n"
         "tools/implementation_preflight.py\n"
-        "tools/work_packet_authority.py\n"
     )
     if runtime_with.get("sparse-checkout") != expected_sparse:
         fail(f"sparse checkout mismatch: {runtime_with.get('sparse-checkout')!r}")

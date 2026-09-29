@@ -1,49 +1,38 @@
 #!/usr/bin/env python3
-"""Fail-closed provider-neutral pre-mutation binding for an implementation worker.
+"""Provider-neutral local binding evidence for direct implementation.
 
-This CLI performs the Work Packet and author-permission reads itself through
-the host's authenticated GitHub CLI. Caller-supplied packet bodies, digests,
-permissions, or token environment variables do not mint repository authority.
-The authenticated GitHub facts are then bound to exact local Git state.
+This helper is deliberately NOT a Work Packet or GitHub authority boundary.
+An authenticated coordinator/connector outside the coding-agent host must first
+verify the canonical Work Packet, its author permission, and the packet fields.
+This process then binds those coordinator-supplied expected facts to local Git
+state using only a fixed host-administered Git executable.
+
+A PASS here is local evidence only. It never mints mutation authority by itself.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import pwd
 import re
 import stat
 import subprocess
 import sys
-
-# This helper is itself a pre-mutation gate. Importing its managed sibling
-# modules must not create __pycache__ and dirty the target worktree.
-sys.dont_write_bytecode = True
-
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import context_epoch
-import work_packet_authority
+sys.dont_write_bytecode = True
 
 HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
-IMPLEMENTER_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
 DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"
-TRUSTED_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
-TRUSTED_GH_CANDIDATES = (
-    Path("/usr/bin/gh"),
-    Path("/usr/local/bin/gh"),
-    TRUSTED_ACCOUNT_HOME / ".local/bin/gh",
-    Path("/opt/homebrew/bin/gh"),
-)
 TRUSTED_GIT_CANDIDATES = (
     Path("/usr/bin/git"),
     Path("/usr/local/bin/git"),
     Path("/opt/homebrew/bin/git"),
 )
-_TEST_TRUSTED_GH: Path | None = None
 _TEST_TRUSTED_GIT: Path | None = None
 
 
@@ -52,18 +41,63 @@ class PreflightError(ValueError):
 
 
 def fail(reason: str) -> None:
-    print(f"IMPLEMENTATION_PREFLIGHT=BLOCK REASON={reason}")
+    print(f"IMPLEMENTATION_LOCAL_BINDING=BLOCK REASON={reason}")
+    print("MUTATION_AUTHORITY=NO")
     raise SystemExit(2)
 
 
+def _root_administered_component(path: Path, *, expect_file: bool) -> bool:
+    """Require a root-owned, non-group/world-writable path and every parent."""
+    try:
+        resolved = path.resolve(strict=True)
+        st = resolved.lstat()
+        if expect_file:
+            if not stat.S_ISREG(st.st_mode) or not os.access(resolved, os.X_OK):
+                return False
+        elif not stat.S_ISDIR(st.st_mode):
+            return False
+        current = resolved
+        while True:
+            item = current.lstat()
+            if item.st_uid != 0 or item.st_mode & 0o022:
+                return False
+            if current == Path("/"):
+                break
+            current = current.parent
+    except OSError:
+        return False
+    return True
+
+
+def resolve_trusted_git() -> Path | None:
+    if _TEST_TRUSTED_GIT is not None:
+        candidate = Path(_TEST_TRUSTED_GIT).resolve()
+        return candidate if candidate.is_file() and os.access(candidate, os.X_OK) else None
+    for candidate in TRUSTED_GIT_CANDIDATES:
+        if _root_administered_component(candidate, expect_file=True):
+            return candidate.resolve()
+    return None
+
+
+def _bounded_git_env() -> dict[str, str]:
+    return {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "HOME": "/nonexistent",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+    }
+
+
 def git(root: Path, *args: str) -> str:
-    binary = resolve_trusted_git(root)
+    binary = resolve_trusted_git()
     if binary is None:
-        raise PreflightError("GIT_STATE_UNAVAILABLE")
+        raise PreflightError("LOCAL_GIT_BOUNDARY_UNAVAILABLE")
     result = subprocess.run(
         [str(binary), "-C", str(root), *args],
         cwd="/",
-        env=_bounded_local_env(),
+        env=_bounded_git_env(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -71,128 +105,6 @@ def git(root: Path, *args: str) -> str:
     if result.returncode:
         raise PreflightError("GIT_STATE_UNAVAILABLE")
     return result.stdout.strip()
-
-
-def _executable_provenance_ok(
-    path: Path,
-    root: Path,
-    candidates: tuple[Path, ...],
-    *,
-    test_override: bool = False,
-) -> bool:
-    try:
-        path = path.resolve(strict=True)
-        st = path.lstat()
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-            return False
-        if not os.access(path, os.X_OK) or st.st_mode & 0o022:
-            return False
-        parent = path.parent.lstat()
-        if stat.S_ISLNK(parent.st_mode) or parent.st_mode & 0o022:
-            return False
-        if root == path or root in path.parents:
-            return False
-        if not test_override:
-            fixed = [candidate.resolve() for candidate in candidates if candidate.exists()]
-            if path not in fixed:
-                return False
-    except OSError:
-        return False
-    return True
-
-
-def resolve_trusted_executable(
-    root: Path, candidates: tuple[Path, ...], override: Path | None
-) -> Path | None:
-    if override is not None:
-        candidate = Path(override)
-        return candidate.resolve() if _executable_provenance_ok(
-            candidate, root, candidates, test_override=True
-        ) else None
-    for candidate in candidates:
-        if candidate.exists() and _executable_provenance_ok(candidate, root, candidates):
-            return candidate.resolve()
-    return None
-
-
-def resolve_trusted_gh(root: Path) -> Path | None:
-    return resolve_trusted_executable(root, TRUSTED_GH_CANDIDATES, _TEST_TRUSTED_GH)
-
-
-def resolve_trusted_git(root: Path) -> Path | None:
-    return resolve_trusted_executable(root, TRUSTED_GIT_CANDIDATES, _TEST_TRUSTED_GIT)
-
-
-def _bounded_local_env() -> dict[str, str]:
-    return {
-        "PATH": "/usr/bin:/bin",
-        "LANG": "C",
-        "LC_ALL": "C",
-        "HOME": str(TRUSTED_ACCOUNT_HOME),
-    }
-
-
-def _bounded_gh_env() -> dict[str, str]:
-    env = _bounded_local_env()
-    env["GH_PROMPT_DISABLED"] = "1"
-    return env
-
-
-def github_json(root: Path, hostname: str, endpoint: str) -> dict:
-    gh_path = resolve_trusted_gh(root)
-    if gh_path is None:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-
-    result = subprocess.run(
-        [str(gh_path), "api", "--hostname", hostname, endpoint],
-        cwd="/",
-        env=_bounded_gh_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    if result.returncode:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED") from exc
-    if not isinstance(payload, dict):
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-    return payload
-
-
-def authenticated_packet(
-    root: Path, hostname: str, repo: str, issue_number: int
-) -> tuple[str, str, str]:
-    if issue_number < 1:
-        raise PreflightError("WORK_PACKET_ISSUE_INVALID")
-    issue = github_json(root, hostname, f"repos/{repo}/issues/{issue_number}")
-    if issue.get("pull_request") is not None:
-        raise PreflightError("WORK_PACKET_ISSUE_INVALID")
-    if str(issue.get("state") or "").lower() != "open":
-        raise PreflightError("WORK_PACKET_NOT_ACTIVE")
-    if not str(issue.get("title") or "").startswith("[AI Work]"):
-        raise PreflightError("WORK_PACKET_TITLE_INVALID")
-
-    body = issue.get("body")
-    user = issue.get("user")
-    author = user.get("login") if isinstance(user, dict) else None
-    if not isinstance(body, str) or not body.strip():
-        raise PreflightError("WORK_PACKET_UNREADABLE")
-    if not isinstance(author, str) or re.fullmatch(r"[A-Za-z0-9-]{1,39}", author) is None:
-        raise PreflightError("WORK_PACKET_AUTHOR_UNTRUSTED")
-
-    permission_payload = github_json(
-        root, hostname, f"repos/{repo}/collaborators/{author}/permission"
-    )
-    try:
-        permission = work_packet_authority.authorize_work_packet_author_permission(
-            permission_payload.get("permission")
-        )
-    except SystemExit as exc:
-        raise PreflightError("WORK_PACKET_AUTHOR_UNTRUSTED") from exc
-    return body, author, permission
 
 
 def normalize_origin(url: str) -> tuple[str, str]:
@@ -210,7 +122,7 @@ def normalize_origin(url: str) -> tuple[str, str]:
         raise PreflightError("ORIGIN_INVALID")
     if path.endswith(".git"):
         path = path[:-4]
-    if not host or not context_epoch.SAFE_REPO_RE.fullmatch(path):
+    if not host or REPO_RE.fullmatch(path) is None:
         raise PreflightError("ORIGIN_INVALID")
     return host, path
 
@@ -239,6 +151,19 @@ def check(args: argparse.Namespace) -> int:
     expected_worktree = Path(args.expected_worktree).resolve()
     if root != expected_worktree:
         raise PreflightError("WORKTREE_BINDING_MISMATCH")
+    if not REPO_RE.fullmatch(args.expected_repo):
+        raise PreflightError("EXPECTED_REPO_INVALID")
+    if WORKSTREAM_RE.fullmatch(args.expected_workstream) is None:
+        raise PreflightError("WORKSTREAM_INVALID")
+    if BRANCH_RE.fullmatch(args.expected_branch) is None:
+        raise PreflightError("EXPECTED_BRANCH_INVALID")
+    if HEAD_RE.fullmatch(args.expected_head) is None:
+        raise PreflightError("EXPECTED_HEAD_INVALID")
+    if args.issue_number < 1:
+        raise PreflightError("WORK_PACKET_ISSUE_INVALID")
+    if args.expected_intent_revision < 1:
+        raise PreflightError("INTENT_REVISION_INVALID")
+
     branch, head, origin = require_clean_root(root)
     origin_host, origin_repo = normalize_origin(origin)
 
@@ -246,59 +171,23 @@ def check(args: argparse.Namespace) -> int:
         raise PreflightError("ORIGIN_HOST_MISMATCH")
     if origin_repo != args.expected_repo:
         raise PreflightError("TARGET_REPO_MISMATCH")
-
-    body, author, permission = authenticated_packet(
-        root, origin_host, origin_repo, args.issue_number
-    )
-    packet = context_epoch.parse_packet(body)
-    audit = context_epoch.analyze_packet(packet)
-    if audit["blocking"]:
-        raise PreflightError("WORK_PACKET_INVALID:" + ",".join(audit["blocking"]))
-    if packet.metadata.get("STATUS") != "ACTIVE":
-        raise PreflightError("WORK_PACKET_NOT_ACTIVE")
-
-    target_repo = packet.metadata.get("TARGET_REPO", "")
-    workstream = packet.metadata.get("WORKSTREAM", "")
-    packet_branch = packet.metadata.get("BRANCH", "")
-    packet_head = packet.metadata.get("LAST_VERIFIED_HEAD", "")
-    packet_revision = packet.metadata.get("INTENT_REVISION", "")
-    implementer = packet.metadata.get("IMPLEMENTER", "")
-    change_risk = packet.metadata.get("CHANGE_RISK", "")
-
-    if target_repo != origin_repo or target_repo != args.expected_repo:
-        raise PreflightError("TARGET_REPO_MISMATCH")
-    if workstream != args.expected_workstream:
-        raise PreflightError("WORKSTREAM_MISMATCH")
-    if packet_branch != branch:
+    if branch != args.expected_branch:
         raise PreflightError("BRANCH_MISMATCH")
-    if packet_head != head or head != args.expected_head:
+    if head != args.expected_head:
         raise PreflightError("HEAD_MISMATCH")
-    if HEAD_RE.fullmatch(packet_head) is None:
-        raise PreflightError("PACKET_HEAD_INVALID")
-    if packet_revision != str(args.expected_intent_revision):
-        raise PreflightError("STALE_INTENT_REVISION")
-    if not implementer or IMPLEMENTER_RE.fullmatch(implementer) is None:
-        raise PreflightError("IMPLEMENTER_INVALID")
-    if implementer != DIRECT_CHAT_IMPLEMENTER:
-        raise PreflightError("IMPLEMENTER_MISMATCH")
-    if change_risk not in CHANGE_RISKS:
-        raise PreflightError("CHANGE_RISK_INVALID")
-    if change_risk != args.expected_change_risk:
-        raise PreflightError("CHANGE_RISK_MISMATCH")
 
-    print("IMPLEMENTATION_PREFLIGHT=PASS")
-    print(f"TARGET_REPO={target_repo}")
+    print("IMPLEMENTATION_LOCAL_BINDING=PASS")
+    print("MUTATION_AUTHORITY=NO")
+    print("AUTHORITY_BOUNDARY=EXTERNAL_COORDINATOR_REQUIRED")
+    print(f"TARGET_REPO={origin_repo}")
     print(f"WORKTREE={root}")
-    print(f"WORKSTREAM={workstream}")
+    print(f"WORKSTREAM={args.expected_workstream}")
     print(f"BRANCH={branch}")
     print(f"HEAD={head}")
-    print(f"INTENT_REVISION={packet_revision}")
-    print(f"CHANGE_RISK={change_risk}")
-    print(f"IMPLEMENTER={implementer}")
+    print(f"INTENT_REVISION={args.expected_intent_revision}")
+    print(f"CHANGE_RISK={args.expected_change_risk}")
+    print(f"IMPLEMENTER={DIRECT_CHAT_IMPLEMENTER}")
     print(f"PACKET_ISSUE={args.issue_number}")
-    print(f"PACKET_AUTHOR={author}")
-    print(f"AUTHOR_PERMISSION={permission}")
-    print(f"PACKET_BODY_SHA256={packet.body_sha256}")
     return 0
 
 
@@ -312,6 +201,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     command.add_argument("--expected-repo", required=True)
     command.add_argument("--expected-origin-host", default="github.com")
     command.add_argument("--expected-workstream", required=True)
+    command.add_argument("--expected-branch", required=True)
     command.add_argument("--expected-head", required=True)
     command.add_argument("--expected-intent-revision", required=True, type=int)
     command.add_argument(
@@ -328,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "check":
             return check(args)
         raise PreflightError("COMMAND_INVALID")
-    except (PreflightError, context_epoch.ContextError) as exc:
+    except PreflightError as exc:
         fail(str(exc))
     return 2
 

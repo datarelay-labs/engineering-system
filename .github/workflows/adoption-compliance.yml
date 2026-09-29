@@ -33,7 +33,6 @@ jobs:
             tools/context_epoch.py
             tools/engineering-context.py
             tools/implementation_preflight.py
-            tools/work_packet_authority.py
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -71,6 +70,7 @@ jobs:
               return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
 
           version = ""
+          version_tuple = (0, 0, 0)
           mode = ""
           baseline = ""
           ci_mode = ""
@@ -194,33 +194,42 @@ jobs:
                           failures.append("persistent-state adoption requires restore_test_command")
 
           agents = Path("AGENTS.md")
+          agents_text = agents.read_text(encoding="utf-8") if agents.is_file() else ""
+          if version_tuple >= (1, 6, 5) and mode == "adopted":
+              if not agents.is_file():
+                  failures.append(
+                      "Engineering System >=1.6.5 adopted repository requires AGENTS.md"
+                  )
+              elif "tools/implementation_preflight.py check" not in agents_text:
+                  failures.append(
+                      "Engineering System >=1.6.5 adopted repository requires Chat-primary implementation preflight instruction"
+                  )
+              target_helper = Path("tools/implementation_preflight.py")
+              canonical_helper = Path(
+                  ".engineering-system-runtime/tools/implementation_preflight.py"
+              )
+              if not target_helper.is_file():
+                  failures.append(
+                      "Engineering System >=1.6.5 adopted repository missing tools/implementation_preflight.py"
+                  )
+              elif not canonical_helper.is_file():
+                  failures.append(
+                      "canonical compliance runtime missing tools/implementation_preflight.py"
+                  )
+              elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                  failures.append(
+                      "tools/implementation_preflight.py differs from canonical managed helper"
+                  )
+
           if agents.is_file():
-              text = agents.read_text(encoding="utf-8")
+              text = agents_text
               if "https://github.com/datarelay-labs/engineering-system" not in text:
                   failures.append("AGENTS.md does not reference canonical Engineering System")
-              match = semver_re.fullmatch(version)
-              version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
               if version_tuple >= (1, 5, 0):
                   if "standards/DESIGN.md" not in text:
                       failures.append("AGENTS.md missing design-gate routing")
                   if "standards/OPERATIONS.md" not in text:
                       failures.append("AGENTS.md missing incident/operations routing")
-              if "tools/implementation_preflight.py" in text:
-                  for rel in (
-                      "tools/implementation_preflight.py",
-                      "tools/context_epoch.py",
-                      "tools/work_packet_authority.py",
-                  ):
-                      target_helper = Path(rel)
-                      canonical_helper = Path(".engineering-system-runtime") / rel
-                      if not target_helper.is_file():
-                          failures.append(
-                              f"AGENTS.md references implementation preflight but missing {rel}"
-                          )
-                      elif not canonical_helper.is_file():
-                          failures.append(f"canonical compliance runtime missing {rel}")
-                      elif target_helper.read_bytes() != canonical_helper.read_bytes():
-                          failures.append(f"{rel} differs from canonical managed helper")
 
           cursor = Path(".cursor/rules/engineering-system.mdc")
           if cursor.is_file():

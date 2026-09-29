@@ -2062,18 +2062,78 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "references engineering-context helper but missing tools/engineering-context.py",
         "tools/engineering-context.py differs from canonical managed helper",
         "tools/implementation_preflight.py",
-        "tools/work_packet_authority.py",
-        'if "tools/implementation_preflight.py" in text:',
-        "AGENTS.md references implementation preflight but missing {rel}",
-        "canonical compliance runtime missing {rel}",
-        "{rel} differs from canonical managed helper",
+        'version_tuple >= (1, 6, 5) and mode == "adopted"',
+        "requires Chat-primary implementation preflight instruction",
+        ".engineering-system-runtime/tools/implementation_preflight.py",
+        "tools/implementation_preflight.py differs from canonical managed helper",
     )
     for token in required:
         assert token in workflow, token
-    agents_definition = workflow.index('agents = Path("AGENTS.md")')
-    preflight_check = workflow.index('if "tools/implementation_preflight.py" in text:')
-    assert agents_definition < preflight_check
-    assert workflow.count('if "tools/implementation_preflight.py" in text:') == 1
+    assert 'if "tools/implementation_preflight.py" in text:' not in workflow
+
+
+def test_adopted_preflight_contract_cannot_be_disabled_by_agents_text() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-preflight-parity"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/preflight-parity\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        agents = target / "AGENTS.md"
+        original_agents = agents.read_text(encoding="utf-8")
+        assert "tools/implementation_preflight.py check" in original_agents
+
+        agents.write_text(
+            original_agents.replace(
+                "tools/implementation_preflight.py check",
+                "tools/removed-preflight.py check",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        missing_instruction = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert missing_instruction.returncode != 0
+        assert (
+            "requires Chat-primary implementation preflight instruction"
+            in missing_instruction.stdout
+        )
+
+        agents.write_text(original_agents, encoding="utf-8")
+        helper = target / "tools/implementation_preflight.py"
+        helper.write_text("#!/usr/bin/env python3\nprint('tampered')\n", encoding="utf-8")
+        tampered = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert tampered.returncode != 0
+        assert (
+            "tools/implementation_preflight.py differs from canonical managed helper"
+            in tampered.stdout
+        )
 
 
 def test_release_execution_context_is_bounded_and_upgradeable() -> None:
@@ -2468,6 +2528,7 @@ def main() -> int:
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
+    test_adopted_preflight_contract_cannot_be_disabled_by_agents_text()
     test_release_execution_context_is_bounded_and_upgradeable()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")

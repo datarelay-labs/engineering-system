@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""Regression tests for provider-neutral implementation preflight."""
+"""Regression tests for Chat-primary local implementation binding evidence."""
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import io
-import json
 import os
 import shutil
 import subprocess
@@ -15,29 +11,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "implementation_preflight.py"
-TOOLS = ROOT / "tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+GIT = "/usr/bin/git"
 
 
-def load_preflight(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-PREFLIGHT = load_preflight(TOOL, "implementation_preflight_under_test")
-
-
-def run(
-    *args: str,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
         list(args),
         cwd=str(cwd) if cwd else None,
         env=env,
@@ -45,353 +23,155 @@ def run(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    if check and result.returncode:
+        raise AssertionError(result.stdout)
+    return result
 
 
 def init_repo(root: Path) -> str:
-    run("git", "init", "-q", "-b", "feat/chat-primary", str(root))
-    run("git", "config", "user.email", "test@example.invalid", cwd=root)
-    run("git", "config", "user.name", "Preflight Test", cwd=root)
+    run(GIT, "init", "-q", "-b", "feat/chat-primary", str(root))
+    run(GIT, "config", "user.email", "test@example.invalid", cwd=root)
+    run(GIT, "config", "user.name", "Preflight Test", cwd=root)
     (root / "README.md").write_text("fixture\n", encoding="utf-8")
-    run("git", "add", ".", cwd=root)
-    run("git", "commit", "-qm", "fixture", cwd=root)
-    run(
-        "git",
-        "remote",
-        "add",
-        "origin",
-        "git@github.com:datarelay-labs/engineering-system.git",
-        cwd=root,
-    )
-    return run("git", "rev-parse", "HEAD", cwd=root).stdout.strip()
+    run(GIT, "add", ".", cwd=root)
+    run(GIT, "commit", "-qm", "fixture", cwd=root)
+    run(GIT, "remote", "add", "origin", "https://github.com/datarelay-labs/engineering-system.git", cwd=root)
+    return run(GIT, "rev-parse", "HEAD", cwd=root).stdout.strip()
 
 
-def packet(head: str, **overrides: str) -> str:
-    values = {
-        "TARGET_REPO": "datarelay-labs/engineering-system",
-        "WORKSTREAM": "chat-primary-ssh-development-workflow",
-        "STATUS": "ACTIVE",
-        "BRANCH": "feat/chat-primary",
-        "LAST_VERIFIED_HEAD": head,
-        "INTENT_REVISION": "2",
-        "CHANGE_RISK": "HIGH",
-        "IMPLEMENTER": "CHATGPT_CHAT",
-    }
-    values.update(overrides)
-    return f"""PACKET_VERSION=2
-TARGET_REPO={values['TARGET_REPO']}
-WORKSTREAM={values['WORKSTREAM']}
-STATUS={values['STATUS']}
-BRANCH={values['BRANCH']}
-TASK_KIND=IMPLEMENTATION_AND_TEST
-OWNER_INTENT=Implement the authorized bounded change.
-LAST_VERIFIED_HEAD={values['LAST_VERIFIED_HEAD']}
-INTENT_REVISION={values['INTENT_REVISION']}
-CHANGE_RISK={values['CHANGE_RISK']}
-IMPLEMENTER={values['IMPLEMENTER']}
-
-## Goal
-
-Implement the authorized change.
-
-## Current State
-
-Clean exact-head worktree.
-
-## Next Action
-
-Implement and validate.
-
-## Blockers
-
-NONE
-"""
-
-
-def github_fixture(
-    root: Path,
-    body: Path,
-    *,
-    permission: str = "admin",
-    state: str = "open",
-    title: str = "[AI Work] Fixture",
-    author: str = "fixture-user",
-) -> Path:
-    issue_path = root / "issue.json"
-    permission_path = root / "permission.json"
-    issue_path.write_text(
-        json.dumps(
-            {
-                "number": 143,
-                "state": state,
-                "title": title,
-                "body": body.read_text(encoding="utf-8"),
-                "user": {"login": author},
-            }
-        ),
-        encoding="utf-8",
-    )
-    permission_path.write_text(
-        json.dumps({"permission": permission}),
-        encoding="utf-8",
-    )
-    fake_bin = root / "fake-bin"
-    fake_bin.mkdir(exist_ok=True)
-    fake_bin.chmod(0o755)
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        f"issue={str(issue_path)!r}\n"
-        f"permission={str(permission_path)!r}\n"
-        "endpoint=sys.argv[-1]\n"
-        "path=permission if endpoint.endswith('/permission') else issue\n"
-        "print(open(path, encoding='utf-8').read())\n",
-        encoding="utf-8",
-    )
-    gh.chmod(0o755)
-    return gh
-
-
-def invoke(
-    repo: Path,
-    body: Path,
-    head: str,
-    *extra: str,
-    permission: str = "admin",
-    state: str = "open",
-    title: str = "[AI Work] Fixture",
-    module=PREFLIGHT,
-) -> subprocess.CompletedProcess[str]:
+def invoke(tool: Path, repo: Path, head: str, *extra: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     args = [
-        "check",
-        "--root",
-        str(repo),
-        "--expected-worktree",
-        str(repo),
-        "--issue-number",
-        "143",
-        "--expected-repo",
-        "datarelay-labs/engineering-system",
-        "--expected-origin-host",
-        "github.com",
-        "--expected-workstream",
-        "chat-primary-ssh-development-workflow",
-        "--expected-head",
-        head,
-        "--expected-intent-revision",
-        "2",
-        "--expected-change-risk",
-        "HIGH",
+        sys.executable, str(tool), "check",
+        "--root", str(repo),
+        "--expected-worktree", str(repo),
+        "--issue-number", "146",
+        "--expected-repo", "datarelay-labs/engineering-system",
+        "--expected-origin-host", "github.com",
+        "--expected-workstream", "chat-primary-trust-boundary-hardening",
+        "--expected-branch", "feat/chat-primary",
+        "--expected-head", head,
+        "--expected-intent-revision", "1",
+        "--expected-change-risk", "HIGH",
     ]
     args.extend(extra)
-    gh = github_fixture(
-        body.parent,
-        body,
-        permission=permission,
-        state=state,
-        title=title,
-    )
-    module._TEST_TRUSTED_GH = gh
-    out = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(out):
-            try:
-                rc = module.main(args)
-            except SystemExit as exc:
-                rc = int(exc.code or 0)
-    finally:
-        module._TEST_TRUSTED_GH = None
-    return subprocess.CompletedProcess(args=args, returncode=rc, stdout=out.getvalue())
+    return run(*args, cwd=repo, env=env, check=False)
 
 
 def main() -> int:
+    if not Path(GIT).is_file():
+        raise SystemExit("IMPLEMENTATION_PREFLIGHT_TESTS=FAIL missing /usr/bin/git")
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         repo = root / "repo"
         repo.mkdir()
         head = init_repo(repo)
-        body = root / "packet.md"
-        body.write_text(packet(head), encoding="utf-8")
 
-        passed = invoke(repo, body, head)
+        passed = invoke(TOOL, repo, head)
         assert passed.returncode == 0, passed.stdout
-        assert "IMPLEMENTATION_PREFLIGHT=PASS" in passed.stdout
-        assert f"HEAD={head}" in passed.stdout
-        assert "IMPLEMENTER=CHATGPT_CHAT" in passed.stdout
-        assert "AUTHOR_PERMISSION=admin" in passed.stdout
-        assert "PACKET_BODY_SHA256=" in passed.stdout
+        for token in (
+            "IMPLEMENTATION_LOCAL_BINDING=PASS",
+            "MUTATION_AUTHORITY=NO",
+            "AUTHORITY_BOUNDARY=EXTERNAL_COORDINATOR_REQUIRED",
+            "TARGET_REPO=datarelay-labs/engineering-system",
+            "WORKSTREAM=chat-primary-trust-boundary-hardening",
+            "BRANCH=feat/chat-primary",
+            f"HEAD={head}",
+            "INTENT_REVISION=1",
+            "CHANGE_RISK=HIGH",
+            "IMPLEMENTER=CHATGPT_CHAT",
+            "PACKET_ISSUE=146",
+        ):
+            assert token in passed.stdout, token
+        assert "AUTHOR_PERMISSION=" not in passed.stdout
+        assert "PACKET_BODY_SHA256=" not in passed.stdout
 
         help_result = run(sys.executable, str(TOOL), "check", "--help")
-        assert help_result.returncode == 0
-        assert "--issue-number" in help_result.stdout
+        for required in (
+            "--expected-worktree", "--issue-number", "--expected-repo",
+            "--expected-workstream", "--expected-branch", "--expected-head",
+            "--expected-intent-revision", "--expected-change-risk",
+        ):
+            assert required in help_result.stdout
         for forbidden in (
-            "--packet-body-file",
-            "--expected-packet-body-sha256",
-            "--author-permission",
-            "--expected-implementer",
+            "--packet-body-file", "--expected-packet-body-sha256",
+            "--author-permission", "--expected-implementer",
+            "--github-token", "--gh-path",
         ):
             assert forbidden not in help_result.stdout
 
-        # Caller HOME must not redefine the trusted GitHub client or auth home.
-        attacker_home = root / "attacker-home"
-        fake_home_gh = attacker_home / ".local/bin/gh"
-        fake_home_gh.parent.mkdir(parents=True)
-        fake_home_gh.parent.chmod(0o755)
-        fake_home_gh.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-        fake_home_gh.chmod(0o755)
-        original_home = os.environ.get("HOME")
-        os.environ["HOME"] = str(attacker_home)
-        try:
-            attacked = load_preflight(TOOL, "implementation_preflight_home_attack")
-            assert attacked.TRUSTED_ACCOUNT_HOME != attacker_home
-            assert fake_home_gh not in attacked.TRUSTED_GH_CANDIDATES
-            assert attacked._bounded_gh_env()["HOME"] == str(attacked.TRUSTED_ACCOUNT_HOME)
-            assert attacked.resolve_trusted_gh(repo) != fake_home_gh.resolve()
-        finally:
-            if original_home is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = original_home
-
-        # Caller PATH must not supply the Git binary used for authority-bearing
-        # worktree/origin/HEAD/cleanliness facts.
-        attacker_bin = root / "attacker-bin"
-        attacker_bin.mkdir()
-        attacker_bin.chmod(0o755)
-        fake_git = attacker_bin / "git"
-        fake_git.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-        fake_git.chmod(0o755)
-        original_path = os.environ.get("PATH", "")
-        os.environ["PATH"] = str(attacker_bin) + os.pathsep + original_path
-        try:
-            assert PREFLIGHT.resolve_trusted_git(repo) != fake_git.resolve()
-            path_attack = invoke(repo, body, head)
-            assert path_attack.returncode == 0, path_attack.stdout
-            assert "IMPLEMENTATION_PREFLIGHT=PASS" in path_attack.stdout
-        finally:
-            os.environ["PATH"] = original_path
-
-        weak_permission = invoke(repo, body, head, permission="read")
-        assert weak_permission.returncode == 2
-        assert "WORK_PACKET_AUTHOR_UNTRUSTED" in weak_permission.stdout
-
-        closed_issue = invoke(repo, body, head, state="closed")
-        assert closed_issue.returncode == 2
-        assert "WORK_PACKET_NOT_ACTIVE" in closed_issue.stdout
-
-        invalid_title = invoke(repo, body, head, title="Not a work packet")
-        assert invalid_title.returncode == 2
-        assert "WORK_PACKET_TITLE_INVALID" in invalid_title.stdout
-
-        body.write_text(packet(head, IMPLEMENTER="CURSOR"), encoding="utf-8")
-        wrong_implementer = invoke(repo, body, head)
-        assert wrong_implementer.returncode == 2
-        assert "IMPLEMENTER_MISMATCH" in wrong_implementer.stdout
-        body.write_text(packet(head), encoding="utf-8")
-
         cases = [
             ("worktree", ["--expected-worktree", str(root / "other")], "WORKTREE_BINDING_MISMATCH"),
-            ("intent", ["--expected-intent-revision", "3"], "STALE_INTENT_REVISION"),
-            ("risk", ["--expected-change-risk", "CRITICAL"], "CHANGE_RISK_MISMATCH"),
             ("repo", ["--expected-repo", "evil/repo"], "TARGET_REPO_MISMATCH"),
+            ("branch", ["--expected-branch", "feat/other"], "BRANCH_MISMATCH"),
+            ("head", ["--expected-head", "f" * 40], "HEAD_MISMATCH"),
         ]
-        for _name, extra, reason in cases:
-            result = invoke(repo, body, head, *extra)
-            assert result.returncode == 2, (_name, result.stdout)
-            assert reason in result.stdout, (_name, result.stdout)
+        for name, extra, reason in cases:
+            result = invoke(TOOL, repo, head, *extra)
+            assert result.returncode == 2, (name, result.stdout)
+            assert reason in result.stdout, (name, result.stdout)
+            assert "MUTATION_AUTHORITY=NO" in result.stdout
 
-        body.write_text(packet(head, BRANCH="feat/other"), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "BRANCH_MISMATCH" in result.stdout
-
-        body.write_text(packet("f" * 40), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "HEAD_MISMATCH" in result.stdout
-
-        body.write_text(packet(head, STATUS="PAUSED"), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "WORK_PACKET_NOT_ACTIVE" in result.stdout
-
-        body.write_text(packet(head, CHANGE_RISK="UNKNOWN"), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "CHANGE_RISK_INVALID" in result.stdout
-
-        body.write_text(packet(head, IMPLEMENTER=""), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "IMPLEMENTER_INVALID" in result.stdout
-
-        body.write_text(packet(head).replace("## Current State\n\nClean exact-head worktree.\n\n", ""), encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "MISSING_SECTION:Current State" in result.stdout
-
-        body.write_text(packet(head), encoding="utf-8")
         (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "WORKTREE_DIRTY" in result.stdout
+        dirty = invoke(TOOL, repo, head)
+        assert dirty.returncode == 2 and "WORKTREE_DIRTY" in dirty.stdout
         (repo / "dirty.txt").unlink()
 
-        run("git", "remote", "set-url", "origin", "https://evil.invalid/datarelay-labs/engineering-system.git", cwd=repo)
-        result = invoke(repo, body, head)
-        assert result.returncode == 2 and "ORIGIN_HOST_MISMATCH" in result.stdout
+        run(GIT, "remote", "set-url", "origin", "https://evil.invalid/datarelay-labs/engineering-system.git", cwd=repo)
+        wrong_origin = invoke(TOOL, repo, head)
+        assert wrong_origin.returncode == 2
+        assert "ORIGIN_HOST_MISMATCH" in wrong_origin.stdout
+        run(GIT, "remote", "set-url", "origin", "https://github.com/datarelay-labs/engineering-system.git", cwd=repo)
 
-    # Adopted repositories execute their managed copy from inside the target
-    # worktree. The pre-mutation gate must not dirty that worktree merely by
-    # importing its managed sibling helpers.
+        attacker_bin = root / "attacker-bin"
+        attacker_bin.mkdir()
+        fake_git = attacker_bin / "git"
+        fake_git.write_text("#!/bin/sh\nprintf '%s\\n' 'forged-by-path'\nexit 0\n", encoding="utf-8")
+        fake_git.chmod(0o755)
+        poisoned = dict(os.environ)
+        poisoned["PATH"] = str(attacker_bin) + os.pathsep + poisoned.get("PATH", "")
+        poisoned["HOME"] = str(root / "attacker-home")
+        poisoned["GIT_CONFIG_GLOBAL"] = str(root / "attacker.gitconfig")
+        (root / "attacker.gitconfig").write_text("[url \"https://evil.invalid/\"]\n    insteadOf = https://github.com/\n", encoding="utf-8")
+        path_attack = invoke(TOOL, repo, head, env=poisoned)
+        assert path_attack.returncode == 0, path_attack.stdout
+        assert f"HEAD={head}" in path_attack.stdout
+        assert "forged-by-path" not in path_attack.stdout
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         repo = root / "adopted"
         repo.mkdir()
-        head = init_repo(repo)
+        init_repo(repo)
         managed = repo / "tools"
         managed.mkdir()
-        for name in (
-            "implementation_preflight.py",
-            "context_epoch.py",
-            "work_packet_authority.py",
-        ):
-            shutil.copy2(ROOT / "tools" / name, managed / name)
-        run("git", "add", "tools", cwd=repo)
-        run("git", "commit", "-qm", "managed preflight helpers", cwd=repo)
-        head = run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
-        body = root / "packet.md"
-        body.write_text(packet(head), encoding="utf-8")
-        args = [
-            sys.executable,
-            str(managed / "implementation_preflight.py"),
-            "check",
-            "--root",
-            str(repo),
-            "--expected-worktree",
-            str(repo),
-            "--issue-number",
-            "143",
-            "--expected-repo",
-            "datarelay-labs/engineering-system",
-            "--expected-origin-host",
-            "github.com",
-            "--expected-workstream",
-            "chat-primary-ssh-development-workflow",
-            "--expected-head",
-            head,
-            "--expected-intent-revision",
-            "2",
-            "--expected-change-risk",
-            "HIGH",
-        ]
-        managed_module = load_preflight(
-            managed / "implementation_preflight.py",
-            "managed_implementation_preflight_under_test",
-        )
-        result = invoke(
-            repo,
-            body,
-            head,
-            module=managed_module,
-        )
+        shutil.copy2(TOOL, managed / "implementation_preflight.py")
+        run(GIT, "add", "tools", cwd=repo)
+        run(GIT, "commit", "-qm", "managed implementation preflight", cwd=repo)
+        head = run(GIT, "rev-parse", "HEAD", cwd=repo).stdout.strip()
+        result = invoke(managed / "implementation_preflight.py", repo, head)
         assert result.returncode == 0, result.stdout
-        assert "IMPLEMENTATION_PREFLIGHT=PASS" in result.stdout
-        assert not (managed / "__pycache__").exists()
-        assert run("git", "status", "--porcelain", cwd=repo).stdout == ""
+        assert "IMPLEMENTATION_LOCAL_BINDING=PASS" in result.stdout
+        assert "MUTATION_AUTHORITY=NO" in result.stdout
+        assert run(GIT, "status", "--porcelain", cwd=repo).stdout == ""
+
+    source = TOOL.read_text(encoding="utf-8")
+    for forbidden in (
+        "gh api", "TRUSTED_GH", "authenticated_packet",
+        "collaborators/{author}/permission", "AUTHOR_PERMISSION=",
+        "PACKET_BODY_SHA256=", "Path.home()", "shutil.which",
+    ):
+        assert forbidden not in source, forbidden
+    for required in (
+        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        'Path("/usr/bin/git")',
+        "st_uid != 0",
+        "MUTATION_AUTHORITY=NO",
+        "AUTHORITY_BOUNDARY=EXTERNAL_COORDINATOR_REQUIRED",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
+    ):
+        assert required in source, required
 
     print("IMPLEMENTATION_PREFLIGHT_TESTS=PASS")
     return 0

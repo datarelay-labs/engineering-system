@@ -282,7 +282,7 @@ scenarios:
     platforms: [linux]
     command: "python3 tools/test_implementation_preflight.py"
     invariants:
-      - "Chat direct mutation requires authenticated packet permission exact repo branch HEAD clean-tree intent implementer and risk binding"
+      - "Chat direct mutation requires authenticated external coordinator packet/permission authority plus exact local repo worktree branch HEAD clean binding; local preflight alone grants no mutation authority"
     release_gate: true
 
   - id: ENG-CONTEXT-EPOCH-001
