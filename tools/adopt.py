@@ -58,6 +58,11 @@ VERIFICATION_CONTRACT_MANAGED = (
     "schemas/trust-evidence-boundary.schema.json",
 )
 
+# Provider-neutral implementation preflight for direct Chat/remote mutation.
+IMPLEMENTATION_PREFLIGHT_MANAGED = (
+    "tools/implementation_preflight.py",
+)
+
 # Context-epoch projection is invoked by the managed Cursor resume adapter, so
 # adopted repositories must carry the exact canonical helper beside that adapter.
 CONTEXT_EPOCH_MANAGED = (
@@ -84,6 +89,7 @@ REQUIRED_MANAGED = (
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
+    *IMPLEMENTATION_PREFLIGHT_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
 )
@@ -896,6 +902,20 @@ def ensure_knowledge_contract_compatible(root: Path) -> None:
         )
 
 
+def ensure_implementation_preflight_compatible(root: Path) -> None:
+    # Reject a custom implementation-preflight helper before adoption writes.
+    for rel in IMPLEMENTATION_PREFLIGHT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_context_epoch_compatible(root: Path) -> None:
     """Reject a custom context-epoch helper before adoption writes any files."""
     for rel in CONTEXT_EPOCH_MANAGED:
@@ -1175,6 +1195,7 @@ def main() -> int:
     ensure_runtime_contract_compatible(root)
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
+    ensure_implementation_preflight_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
 
@@ -1211,6 +1232,7 @@ def main() -> int:
         *RUNTIME_CONTRACT_MANAGED,
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
+        *IMPLEMENTATION_PREFLIGHT_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
     ):

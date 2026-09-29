@@ -77,6 +77,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_adopt.py",
     "tools/test_org_rollout.py",
     "tools/test_work_packet_authority.py",
+    "tools/implementation_preflight.py",
+    "tools/test_implementation_preflight.py",
     "tools/cursor-resource-preflight.py",
     "tools/test_cursor_resource_preflight.py",
     "tools/work_admission.py",
@@ -230,6 +232,56 @@ def validate_work_packet_author_authority():
         if token not in authority:
             raise SystemExit(f"FAIL work packet authority helper missing token: {token}")
     print("PASS trusted Work Packet author authority contract")
+
+
+def validate_chat_primary_contract():
+    preflight = (ROOT / "tools/implementation_preflight.py").read_text(encoding="utf-8")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    quality = (ROOT / "standards/QUALITY.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    project = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
+    issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
+
+    required_preflight = (
+        "TRUSTED_PACKET_DIGEST_INVALID",
+        "WORK_PACKET_DIGEST_MISMATCH",
+        "WORK_PACKET_AUTHOR_UNTRUSTED",
+        "WORKTREE_DIRTY",
+        "WORKTREE_BINDING_MISMATCH",
+        "--expected-worktree",
+        "--expected-packet-body-sha256",
+        "ORIGIN_HOST_MISMATCH",
+        "TARGET_REPO_MISMATCH",
+        "BRANCH_MISMATCH",
+        "HEAD_MISMATCH",
+        "STALE_INTENT_REVISION",
+        "IMPLEMENTER_MISMATCH",
+        "CHANGE_RISK_MISMATCH",
+        "IMPLEMENTATION_PREFLIGHT=PASS",
+    )
+    for token in required_preflight:
+        if token not in preflight:
+            raise SystemExit(f"FAIL implementation preflight missing token: {token}")
+    for label, text in (
+        ("session continuity", session),
+        ("AGENTS.md", agents),
+        ("AGENTS template", agents_template),
+        ("ChatGPT custom instruction", custom),
+        ("ChatGPT project instruction", project),
+    ):
+        if "implementation_preflight.py check" not in text:
+            raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
+    if "ChatGPT Chat is the default daytime implementer" not in custom:
+        raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
+    if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
+        raise SystemExit("FAIL legacy Cursor-primary ChatGPT contract remains")
+    if "fresh Chat context" not in quality or "independent HIGH-risk verifier" not in quality:
+        raise SystemExit("FAIL risk-based fresh-Chat/HIGH-risk verifier policy missing")
+    if "IMPLEMENTER=CHATGPT_CHAT" not in issue:
+        raise SystemExit("FAIL Work Packet template missing default Chat implementer identity")
+    print("PASS Chat-primary SSH implementation and independent-verifier contract")
 
 
 def validate_resource_guard_contract():
@@ -904,6 +956,7 @@ def validate_session_continuity_templates():
         "TASK_KIND=",
         "OWNER_INTENT=",
         "LAST_VERIFIED_HEAD=",
+        "IMPLEMENTER=CHATGPT_CHAT",
         "## Next Action",
         "## Canonical References",
         "## Latest Evidence",
@@ -1525,6 +1578,7 @@ def main():
     validate_baseline_declarations()
     validate_bun_discovery()
     validate_work_packet_author_authority()
+    validate_chat_primary_contract()
     validate_resource_guard_contract()
     validate_work_admission_contract()
     validate_independent_verifier_contract()
@@ -1559,6 +1613,9 @@ def main():
     validate("templates/TESTS.yaml", "schemas/tests.schema.json")
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
+    completed = subprocess.run(["python3", "tools/test_implementation_preflight.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_cursor_resource_preflight.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

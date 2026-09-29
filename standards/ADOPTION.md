@@ -138,7 +138,7 @@ AGENTS.md
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
-Managed Cursor resume adapters invoke both `tools/context_epoch.py` and `tools/engineering-context.py`. Bootstrap and managed upgrade install exact canonical copies of both helpers when missing, and fail closed before mutation when a pre-existing copy differs. This keeps resume/context-orientation commands executable in adopted repositories without vendoring the full Engineering System.
+Managed Cursor resume adapters invoke `tools/context_epoch.py` and `tools/engineering-context.py`, while the Chat-primary path invokes `tools/implementation_preflight.py`. Bootstrap and managed upgrade install exact canonical copies of these helpers when missing and fail closed before mutation when a pre-existing copy differs. The implementation preflight reuses the managed `tools/context_epoch.py` and `tools/work_packet_authority.py` dependencies, so adopted repositories can enforce the same GitHub/HEAD/clean-tree mutation gate without vendoring the full Engineering System.
 
 Adopted `AGENTS.md` may route optional knowledge freshness through `python3 tools/knowledge-contract.py`. Bootstrap and managed upgrade install that helper and `schemas/knowledge-index.schema.json` when the paths are missing, so the instructed command exists in the adopted repository. A pre-existing different copy fails closed before bootstrap writes any files, and managed upgrade fails closed the same way. `.engineering/knowledge.yaml` stays optional and is never created or rewritten. Repositories whose `AGENTS.md` does not reference the helper remain valid without those files.
 

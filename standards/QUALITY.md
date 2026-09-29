@@ -78,6 +78,8 @@ Default behavior:
 
 These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.
 
+For Chat-primary daytime work, a fresh Chat context is an acceptable independent verifier for LOW/MEDIUM changes when required deterministic tests and exact-HEAD CI are satisfied. LOW/MEDIUM do not require a verifier actor unless another gate requires one, but any actor presented as independent must have identity and context distinct from the implementer. HIGH/CRITICAL and security, production, release-authority, permission, credential-boundary, or destructive changes require Codex or another explicitly independent HIGH-risk verifier unless an owner-approved equivalent is recorded. The implementation context itself never satisfies that independent-verifier requirement.
+
 ## Trust by evidence
 
 Optional `.engineering/verification.yaml` maps a feature to applicable domains and to launch, drive, observe, and cleanup references. Those references are existing test scenario IDs, runtime authority or capability IDs, and skill or profile IDs only. The map contains no command, shell, URL, endpoint, or argv fields. `python3 tools/verification-contract.py check` validates a present map and passes when the file is absent. Adoption never creates the file.

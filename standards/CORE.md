@@ -14,7 +14,8 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 
 - **Owner:** product requirements, scope, final decisions, release approval, human UX judgment.
 - **Independent AI reviewer:** architecture, requirements, test strategy, independent review, incident analysis.
-- **Coding agent:** repository inspection, implementation, tests, affected regression, evidence.
+- **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. ChatGPT Chat is the default daytime implementer when a trusted Work Packet and pre-mutation gate authorize it.
+- **Execution adapters:** Cursor, Codex, and other approved workers may be selected intentionally; adapter choice never creates authority or weakens repository/packet gates.
 - **Automation:** deterministic validation, CI, security/performance checks, artifact verification.
 - **GitHub:** durable source of truth for code, history, gates, and releases.
 - **Wiki/Athena:** derived human-readable and AI-searchable knowledge; canonical Git content wins on conflict.

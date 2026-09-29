@@ -17,6 +17,7 @@ LAST_VERIFIED_HEAD=UNKNOWN
 PRIORITY=NORMAL
 INTENT_REVISION=1
 CHANGE_RISK=MEDIUM
+IMPLEMENTER=CHATGPT_CHAT
 
 ## Goal
 
@@ -43,8 +44,8 @@ INCLUDED_ISSUES=NONE
 SIZING_REASON=One medium-sized coherent outcome with a single deterministic completion oracle.
 ```
 
-Before Cursor/coding-agent handoff, set `WORK_PACKET_SIZING` to `BATCH`, `KEEP`, or `SPLIT`.
-Do not assume one GitHub Issue equals one Cursor job. Batch adjacent small Issues/findings that share implementation context and validation; split unrelated outcomes or scope that cannot reliably complete implementation plus validation in one bounded session.
+Before direct implementation or optional adapter handoff, set `WORK_PACKET_SIZING` to `BATCH`, `KEEP`, or `SPLIT`.
+Do not assume one GitHub Issue equals one implementation job. Batch adjacent small Issues/findings that share implementation context and validation; split unrelated outcomes or scope that cannot reliably complete implementation plus validation in one bounded session.
 
 ## Completion Contract
 

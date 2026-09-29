@@ -205,6 +205,20 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
+        if "tools/implementation_preflight.py" in agents_text:
+            for rel in (
+                "tools/implementation_preflight.py",
+                "tools/context_epoch.py",
+                "tools/work_packet_authority.py",
+            ):
+                target = root / rel
+                canonical = Path(__file__).resolve().parents[1] / rel
+                if not target.is_file():
+                    failures.append(f"AGENTS.md references implementation preflight but missing {rel}")
+                elif not canonical.is_file():
+                    failures.append(f"canonical adoption checker is missing {rel}")
+                elif target.read_bytes() != canonical.read_bytes():
+                    failures.append(f"{rel} differs from canonical managed helper")
         if "tools/knowledge-contract.py" in agents_text:
             for rel in (
                 "tools/knowledge-contract.py",
@@ -245,7 +259,6 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references verification contract but missing {rel}"
                     )
-
     if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
         failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
 

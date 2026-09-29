@@ -95,6 +95,7 @@ def test_clean_python_bootstrap() -> None:
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
+            "tools/implementation_preflight.py",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -473,6 +474,7 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
             rule_history, encoding="utf-8"
         )
         (target / "tools/context_epoch.py").unlink()
+        (target / "tools/implementation_preflight.py").unlink()
         commit_all(target, "simulate canonical pre-context-epoch 1.6.5 baseline")
 
         upgraded = run(
@@ -492,6 +494,7 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
             in upgraded.stdout
         )
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert "IMPLEMENTATION_PREFLIGHT_INSTALLED=tools/implementation_preflight.py" in upgraded.stdout
 
         project = load_yaml(target / ".engineering/project.yaml")
         assert project["engineering_system"]["version"] == "1.6.5"
