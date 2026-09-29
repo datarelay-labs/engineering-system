@@ -132,6 +132,9 @@ REQUIRED_METHOD_FILES = (
     "tools/security-profile.py",
     "tools/test_security_profile.py",
     "schemas/security-profile.schema.json",
+    "tools/security-hardening.py",
+    "tools/test_security_hardening.py",
+    "schemas/security-hardening-plan.schema.json",
 )
 
 ACTION_USE_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)", re.MULTILINE)
@@ -1414,6 +1417,41 @@ def validate_benchmark_fixtures():
         raise SystemExit(completed.returncode)
 
 
+def validate_security_hardening():
+    Draft202012Validator.check_schema(load_json(ROOT / "schemas/security-hardening-plan.schema.json"))
+    tool = (ROOT / "tools/security-hardening.py").read_text(encoding="utf-8")
+    for token in (
+        "security-hardening-plan",
+        "DRY_RUN",
+        "eligible_apply",
+        "plan_digest",
+        "allowed_controls",
+        "APPLYABLE_CONTROLS",
+        "STALE_PLAN",
+        '"network": "NONE"',
+        "tools/security-profile.py",
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL security hardening tool missing token: {token}")
+    if 'return ("plan", "apply")' not in tool:
+        raise SystemExit("FAIL security hardening tool exposes unexpected commands")
+    security = (ROOT / "standards/SECURITY.md").read_text(encoding="utf-8")
+    for token in (
+        "tools/security-hardening.py",
+        "desired-state",
+        "dry-run",
+        "allowed control",
+        "NOT_APPLICABLE",
+        "DEFERRED",
+    ):
+        if token not in security:
+            raise SystemExit(f"FAIL SECURITY.md missing security hardening token: {token}")
+    for rel in ("AGENTS.md", "templates/AGENTS.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if "tools/security-hardening.py plan|apply" not in text:
+            raise SystemExit(f"FAIL {rel} missing security hardening router")
+
+
 def validate_security_profile():
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/security-profile.schema.json"))
     tool = (ROOT / "tools/security-profile.py").read_text(encoding="utf-8")
@@ -1550,6 +1588,7 @@ def main():
     validate_skills_contract()
     validate_verification_contract()
     validate_security_profile()
+    validate_security_hardening()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")

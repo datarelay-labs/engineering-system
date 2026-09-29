@@ -185,6 +185,12 @@ paths:
     domains: [standards, workflows]
   "schemas/security-profile.schema.json":
     domains: [schemas, standards]
+  "tools/security-hardening.py":
+    domains: [standards, workflows]
+  "tools/test_security_hardening.py":
+    domains: [standards, workflows]
+  "schemas/security-hardening-plan.schema.json":
+    domains: [schemas, standards]
   "tools/incident-evidence.py":
     domains: [operations-contract, workflows]
   "tools/test_incident_evidence.py":
@@ -216,7 +222,7 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
     release_gate: true
 
   - id: ENG-STATIC-002
@@ -752,6 +758,22 @@ scenarios:
     command: "python3 tools/test_security_profile.py"
     invariants:
       - "security profile audit classifies four profiles or NEEDS_INPUT and has no GitHub mutation path"
+    release_gate: true
+
+  - id: ENG-SECURITY-HARDENING-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Security hardening desired-state and safe-apply gate
+    level: static
+    domains: [standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_security_hardening.py"
+    invariants:
+      - "desired-state diff is deterministic, dry-run by default, and apply stays fail-closed without evidence plus an explicit allowed control set"
     release_gate: true
 
   - id: ENG-ADOPTION-003

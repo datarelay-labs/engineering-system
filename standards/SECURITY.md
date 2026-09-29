@@ -89,6 +89,8 @@ Do not retain raw secrets, private keys, unrestricted tool payloads, or full con
 
 `python3 tools/security-profile.py classify --root <repo>` and `python3 tools/security-profile.py audit --root <repo> [--github-fixture <json>]` are a read-only, network-free auditor. They do not enable, disable, or otherwise mutate GitHub settings, workflows, or organization policy.
 
+`python3 tools/security-hardening.py plan|apply --root <repo> [--github-fixture <json>] [--allowed-control <id> ...] [--execute]` consumes that audit as observed-state authority and emits a deterministic desired-state diff. Default mode is dry-run (`mutation` is `NONE` or `PLANNED`, `network` is `NONE`). Apply eligibility requires current repository/profile/control evidence plus an explicit allowed control set; unsupported controls such as ruleset/Actions policy/visibility/workflow-pin/provenance changes, and ambiguous `UNAVAILABLE`/`UNKNOWN`/`NEEDS_INPUT` facts, block rather than guess. Docs-site repositories keep CodeQL `NOT_APPLICABLE` and empty/preproduct controls stay `DEFERRED`. Already-compliant state is idempotent `NOOP`. `--execute` is required for mutation, remains bounded to the allowed applyable GitHub-native settings, refuses partial batches that cannot be validated up front, and must not persist credential values.
+
 Profile precedence:
 
 1. conflicting required facts => `NEEDS_INPUT`

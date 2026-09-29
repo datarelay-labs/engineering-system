@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Repository security hardening desired-state plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "repository",
+    "profile",
+    "binding",
+    "mode",
+    "allowed_controls",
+    "controls",
+    "planned_mutations",
+    "blockers",
+    "eligible_apply",
+    "plan_digest",
+    "mutation",
+    "network"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "security-hardening-plan"
+    },
+    "repository": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "profile": {
+      "type": "string",
+      "enum": [
+        "production-code",
+        "development-code",
+        "docs-site",
+        "empty-preproduct",
+        "NEEDS_INPUT"
+      ]
+    },
+    "binding": {
+      "type": "string",
+      "enum": ["ok", "mismatch", "unavailable"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["DRY_RUN", "EXECUTE"]
+    },
+    "allowed_controls": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "uniqueItems": true
+    },
+    "controls": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "requirement",
+          "observed_state",
+          "desired",
+          "action",
+          "applyable",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "requirement": {
+            "type": "string",
+            "enum": [
+              "REQUIRED",
+              "RECOMMENDED",
+              "DEFERRED",
+              "NOT_APPLICABLE",
+              "UNKNOWN"
+            ]
+          },
+          "observed_state": {
+            "type": "string",
+            "enum": [
+              "REQUIRED_PASS",
+              "REQUIRED_FAIL",
+              "RECOMMENDED_PASS",
+              "RECOMMENDED_GAP",
+              "EQUIVALENT_EXTERNAL",
+              "DEFERRED",
+              "UNAVAILABLE",
+              "NOT_APPLICABLE",
+              "UNKNOWN"
+            ]
+          },
+          "desired": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "configured",
+              "unchanged",
+              "deferred",
+              "not_applicable",
+              "blocked"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": ["ENABLE", "NOOP", "BLOCK"]
+          },
+          "applyable": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        }
+      }
+    },
+    "planned_mutations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "desired", "detail"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "desired": {
+            "type": "string",
+            "enum": ["enabled", "configured"]
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400
+      }
+    },
+    "eligible_apply": {
+      "type": "boolean"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "mutation": {
+      "type": "string",
+      "enum": ["NONE", "PLANNED", "APPLIED"]
+    },
+    "network": {
+      "type": "string",
+      "enum": ["NONE", "GITHUB_SETTINGS"]
+    },
+    "apply_result": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "detail"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "status": {
+            "type": "string",
+            "enum": ["APPLIED", "SKIPPED", "FAILED", "DRY_RUN"]
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"mode": {"const": "DRY_RUN"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "mutation": {"enum": ["NONE", "PLANNED"]},
+          "network": {"const": "NONE"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"mode": {"const": "EXECUTE"}, "eligible_apply": {"const": false}},
+        "required": ["mode", "eligible_apply"]
+      },
+      "then": {
+        "properties": {
+          "mutation": {"const": "NONE"},
+          "network": {"const": "NONE"}
+        }
+      }
+    }
+  ]
+}
