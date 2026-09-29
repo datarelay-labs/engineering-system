@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
-import json
 import os
 import shutil
 import subprocess
@@ -107,59 +106,12 @@ NONE
 """
 
 
-def github_fixture(
-    root: Path,
-    body: Path,
-    *,
-    permission: str = "admin",
-    state: str = "open",
-    title: str = "[AI Work] Fixture",
-    author: str = "fixture-user",
-) -> Path:
-    issue_path = root / "issue.json"
-    permission_path = root / "permission.json"
-    issue_path.write_text(
-        json.dumps(
-            {
-                "number": 143,
-                "state": state,
-                "title": title,
-                "body": body.read_text(encoding="utf-8"),
-                "user": {"login": author},
-            }
-        ),
-        encoding="utf-8",
-    )
-    permission_path.write_text(
-        json.dumps({"permission": permission}),
-        encoding="utf-8",
-    )
-    fake_bin = root / "fake-bin"
-    fake_bin.mkdir(exist_ok=True)
-    fake_bin.chmod(0o755)
-    gh = fake_bin / "gh"
-    gh.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        f"issue={str(issue_path)!r}\n"
-        f"permission={str(permission_path)!r}\n"
-        "endpoint=sys.argv[-1]\n"
-        "path=permission if endpoint.endswith('/permission') else issue\n"
-        "print(open(path, encoding='utf-8').read())\n",
-        encoding="utf-8",
-    )
-    gh.chmod(0o755)
-    return gh
-
-
 def invoke(
     repo: Path,
     body: Path,
     head: str,
     *extra: str,
     permission: str = "admin",
-    state: str = "open",
-    title: str = "[AI Work] Fixture",
     module=PREFLIGHT,
 ) -> subprocess.CompletedProcess[str]:
     args = [
@@ -168,6 +120,10 @@ def invoke(
         str(repo),
         "--expected-worktree",
         str(repo),
+        "--packet-body-file",
+        str(body),
+        "--connector-attested-author-permission",
+        permission,
         "--issue-number",
         "143",
         "--expected-repo",
@@ -184,14 +140,6 @@ def invoke(
         "HIGH",
     ]
     args.extend(extra)
-    gh = github_fixture(
-        body.parent,
-        body,
-        permission=permission,
-        state=state,
-        title=title,
-    )
-    module._TEST_TRUSTED_GH = gh
     out = io.StringIO()
     try:
         with contextlib.redirect_stdout(out):
@@ -200,7 +148,7 @@ def invoke(
             except SystemExit as exc:
                 rc = int(exc.code or 0)
     finally:
-        module._TEST_TRUSTED_GH = None
+        pass
     return subprocess.CompletedProcess(args=args, returncode=rc, stdout=out.getvalue())
 
 
@@ -216,72 +164,88 @@ def main() -> int:
         passed = invoke(repo, body, head)
         assert passed.returncode == 0, passed.stdout
         assert "IMPLEMENTATION_PREFLIGHT=PASS" in passed.stdout
+        assert "LOCAL_BINDING=PASS" in passed.stdout
+        assert "MUTATION_AUTHORITY=NOT_GRANTED" in passed.stdout
+        assert "AUTHORITY_BOUNDARY=EXTERNAL_GITHUB_CONNECTOR" in passed.stdout
         assert f"HEAD={head}" in passed.stdout
         assert "IMPLEMENTER=CHATGPT_CHAT" in passed.stdout
-        assert "AUTHOR_PERMISSION=admin" in passed.stdout
+        assert "CONNECTOR_ATTESTED_AUTHOR_PERMISSION=admin" in passed.stdout
         assert "PACKET_BODY_SHA256=" in passed.stdout
+
+        source = TOOL.read_text(encoding="utf-8")
+        assert "github_json" not in source
+        assert "resolve_trusted_gh" not in source
+        assert "authenticated_packet" not in source
+        assert "TRUSTED_GH_CANDIDATES" not in source
+        assert "gh api" not in source
 
         help_result = run(sys.executable, str(TOOL), "check", "--help")
         assert help_result.returncode == 0
-        assert "--issue-number" in help_result.stdout
+        assert "--packet-body-file" in help_result.stdout
+        assert "--connector-attested-author-permission" in help_result.stdout
         for forbidden in (
-            "--packet-body-file",
             "--expected-packet-body-sha256",
             "--author-permission",
             "--expected-implementer",
+            "--issue-number required",
         ):
             assert forbidden not in help_result.stdout
 
-        # Caller HOME must not redefine the trusted GitHub client or auth home.
-        attacker_home = root / "attacker-home"
-        fake_home_gh = attacker_home / ".local/bin/gh"
-        fake_home_gh.parent.mkdir(parents=True)
-        fake_home_gh.parent.chmod(0o755)
-        fake_home_gh.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-        fake_home_gh.chmod(0o755)
-        original_home = os.environ.get("HOME")
-        os.environ["HOME"] = str(attacker_home)
-        try:
-            attacked = load_preflight(TOOL, "implementation_preflight_home_attack")
-            assert attacked.TRUSTED_ACCOUNT_HOME != attacker_home
-            assert fake_home_gh not in attacked.TRUSTED_GH_CANDIDATES
-            assert attacked._bounded_gh_env()["HOME"] == str(attacked.TRUSTED_ACCOUNT_HOME)
-            assert attacked.resolve_trusted_gh(repo) != fake_home_gh.resolve()
-        finally:
-            if original_home is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = original_home
+        # Same-user writable path must not be treated as independently administered.
+        writable = root / "owner-writable"
+        writable.mkdir()
+        writable.chmod(0o755)
+        fake_git = writable / "git"
+        fake_git.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        fake_git.chmod(0o755)
+        assert PREFLIGHT._independently_administered(fake_git) is False
+        assert (
+            PREFLIGHT._executable_provenance_ok(
+                fake_git, repo, (fake_git,), test_override=False
+            )
+            is False
+        )
 
         # Caller PATH must not supply the Git binary used for authority-bearing
         # worktree/origin/HEAD/cleanliness facts.
         attacker_bin = root / "attacker-bin"
         attacker_bin.mkdir()
         attacker_bin.chmod(0o755)
-        fake_git = attacker_bin / "git"
-        fake_git.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-        fake_git.chmod(0o755)
+        path_fake_git = attacker_bin / "git"
+        path_fake_git.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        path_fake_git.chmod(0o755)
         original_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(attacker_bin) + os.pathsep + original_path
         try:
-            assert PREFLIGHT.resolve_trusted_git(repo) != fake_git.resolve()
+            assert PREFLIGHT.resolve_trusted_git(repo) != path_fake_git.resolve()
             path_attack = invoke(repo, body, head)
             assert path_attack.returncode == 0, path_attack.stdout
             assert "IMPLEMENTATION_PREFLIGHT=PASS" in path_attack.stdout
         finally:
             os.environ["PATH"] = original_path
 
+        # Repository-configured fsmonitor must not execute during clean-tree reads.
+        sentinel = root / "fsmonitor-ran"
+        hook = root / "fsmonitor-hook"
+        hook.write_text(
+            "#!/bin/sh\necho ran > " + str(sentinel) + "\nexit 0\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        run("git", "config", "core.fsmonitor", str(hook), cwd=repo)
+        fsmonitor = invoke(repo, body, head)
+        assert fsmonitor.returncode == 0, fsmonitor.stdout
+        assert not sentinel.exists()
+        env = PREFLIGHT._bounded_git_env()
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert "HOME" not in env
+        assert "core.fsmonitor=" in TOOL.read_text(encoding="utf-8")
+        assert "core.hooksPath=/dev/null" in TOOL.read_text(encoding="utf-8")
+
         weak_permission = invoke(repo, body, head, permission="read")
         assert weak_permission.returncode == 2
         assert "WORK_PACKET_AUTHOR_UNTRUSTED" in weak_permission.stdout
-
-        closed_issue = invoke(repo, body, head, state="closed")
-        assert closed_issue.returncode == 2
-        assert "WORK_PACKET_NOT_ACTIVE" in closed_issue.stdout
-
-        invalid_title = invoke(repo, body, head, title="Not a work packet")
-        assert invalid_title.returncode == 2
-        assert "WORK_PACKET_TITLE_INVALID" in invalid_title.stdout
 
         body.write_text(packet(head, IMPLEMENTER="CURSOR"), encoding="utf-8")
         wrong_implementer = invoke(repo, body, head)
@@ -320,7 +284,12 @@ def main() -> int:
         result = invoke(repo, body, head)
         assert result.returncode == 2 and "IMPLEMENTER_INVALID" in result.stdout
 
-        body.write_text(packet(head).replace("## Current State\n\nClean exact-head worktree.\n\n", ""), encoding="utf-8")
+        body.write_text(
+            packet(head).replace(
+                "## Current State\n\nClean exact-head worktree.\n\n", ""
+            ),
+            encoding="utf-8",
+        )
         result = invoke(repo, body, head)
         assert result.returncode == 2 and "MISSING_SECTION:Current State" in result.stdout
 
@@ -330,7 +299,14 @@ def main() -> int:
         assert result.returncode == 2 and "WORKTREE_DIRTY" in result.stdout
         (repo / "dirty.txt").unlink()
 
-        run("git", "remote", "set-url", "origin", "https://evil.invalid/datarelay-labs/engineering-system.git", cwd=repo)
+        run(
+            "git",
+            "remote",
+            "set-url",
+            "origin",
+            "https://evil.invalid/datarelay-labs/engineering-system.git",
+            cwd=repo,
+        )
         result = invoke(repo, body, head)
         assert result.returncode == 2 and "ORIGIN_HOST_MISMATCH" in result.stdout
 
@@ -355,29 +331,6 @@ def main() -> int:
         head = run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
         body = root / "packet.md"
         body.write_text(packet(head), encoding="utf-8")
-        args = [
-            sys.executable,
-            str(managed / "implementation_preflight.py"),
-            "check",
-            "--root",
-            str(repo),
-            "--expected-worktree",
-            str(repo),
-            "--issue-number",
-            "143",
-            "--expected-repo",
-            "datarelay-labs/engineering-system",
-            "--expected-origin-host",
-            "github.com",
-            "--expected-workstream",
-            "chat-primary-ssh-development-workflow",
-            "--expected-head",
-            head,
-            "--expected-intent-revision",
-            "2",
-            "--expected-change-risk",
-            "HIGH",
-        ]
         managed_module = load_preflight(
             managed / "implementation_preflight.py",
             "managed_implementation_preflight_under_test",
@@ -390,6 +343,7 @@ def main() -> int:
         )
         assert result.returncode == 0, result.stdout
         assert "IMPLEMENTATION_PREFLIGHT=PASS" in result.stdout
+        assert "MUTATION_AUTHORITY=NOT_GRANTED" in result.stdout
         assert not (managed / "__pycache__").exists()
         assert run("git", "status", "--porcelain", cwd=repo).stdout == ""
 

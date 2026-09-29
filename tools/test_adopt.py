@@ -2063,17 +2063,18 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "tools/engineering-context.py differs from canonical managed helper",
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
-        'if "tools/implementation_preflight.py" in text:',
-        "AGENTS.md references implementation preflight but missing {rel}",
+        "Chat-primary adoption missing required helper",
+        "AGENTS.md missing Chat-primary implementation preflight instruction",
         "canonical compliance runtime missing {rel}",
         "{rel} differs from canonical managed helper",
+        "version_tuple >= (1, 6, 5)",
     )
     for token in required:
         assert token in workflow, token
     agents_definition = workflow.index('agents = Path("AGENTS.md")')
-    preflight_check = workflow.index('if "tools/implementation_preflight.py" in text:')
+    preflight_check = workflow.index("Chat-primary adoption missing required helper")
     assert agents_definition < preflight_check
-    assert workflow.count('if "tools/implementation_preflight.py" in text:') == 1
+    assert 'if "tools/implementation_preflight.py" in text:' not in workflow
 
 
 def test_release_execution_context_is_bounded_and_upgradeable() -> None:

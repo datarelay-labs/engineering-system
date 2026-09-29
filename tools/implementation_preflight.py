@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Fail-closed provider-neutral pre-mutation binding for an implementation worker.
+"""Fail-closed local binding evidence for a Chat/remote implementation worker.
 
-This CLI performs the Work Packet and author-permission reads itself through
-the host's authenticated GitHub CLI. Caller-supplied packet bodies, digests,
-permissions, or token environment variables do not mint repository authority.
-The authenticated GitHub facts are then bound to exact local Git state.
+Authenticated Work Packet body and author-permission authority belong to an
+external GitHub connector/coordinator outside the remote coding-worker
+privilege boundary. This CLI binds connector-supplied packet bytes and
+permission attestation to exact local Git state using a fixed
+host-administered Git executable and config-isolated invocation. It does not
+perform GitHub reads and cannot mint mutation authority.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import pwd
 import re
 import stat
 import subprocess
@@ -31,19 +31,11 @@ HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 IMPLEMENTER_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
 DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"
-TRUSTED_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
-TRUSTED_GH_CANDIDATES = (
-    Path("/usr/bin/gh"),
-    Path("/usr/local/bin/gh"),
-    TRUSTED_ACCOUNT_HOME / ".local/bin/gh",
-    Path("/opt/homebrew/bin/gh"),
-)
 TRUSTED_GIT_CANDIDATES = (
     Path("/usr/bin/git"),
     Path("/usr/local/bin/git"),
     Path("/opt/homebrew/bin/git"),
 )
-_TEST_TRUSTED_GH: Path | None = None
 _TEST_TRUSTED_GIT: Path | None = None
 
 
@@ -56,21 +48,35 @@ def fail(reason: str) -> None:
     raise SystemExit(2)
 
 
-def git(root: Path, *args: str) -> str:
-    binary = resolve_trusted_git(root)
-    if binary is None:
-        raise PreflightError("GIT_STATE_UNAVAILABLE")
-    result = subprocess.run(
-        [str(binary), "-C", str(root), *args],
-        cwd="/",
-        env=_bounded_local_env(),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    if result.returncode:
-        raise PreflightError("GIT_STATE_UNAVAILABLE")
-    return result.stdout.strip()
+def _path_components(path: Path) -> list[Path]:
+    resolved = path.resolve(strict=True)
+    components = [resolved]
+    current = resolved.parent
+    while True:
+        components.append(current)
+        if current == current.parent:
+            break
+        current = current.parent
+    return components
+
+
+def _independently_administered(path: Path) -> bool:
+    """Require host-administered ownership the implementing account cannot rewrite."""
+    uid = os.getuid()
+    try:
+        for component in _path_components(path):
+            st = component.lstat()
+            if stat.S_ISLNK(st.st_mode):
+                return False
+            if st.st_mode & 0o022:
+                return False
+            if uid != 0 and st.st_uid == uid:
+                return False
+            if uid != 0 and os.access(component, os.W_OK):
+                return False
+    except OSError:
+        return False
+    return True
 
 
 def _executable_provenance_ok(
@@ -87,112 +93,76 @@ def _executable_provenance_ok(
             return False
         if not os.access(path, os.X_OK) or st.st_mode & 0o022:
             return False
-        parent = path.parent.lstat()
-        if stat.S_ISLNK(parent.st_mode) or parent.st_mode & 0o022:
-            return False
         if root == path or root in path.parents:
             return False
         if not test_override:
             fixed = [candidate.resolve() for candidate in candidates if candidate.exists()]
             if path not in fixed:
                 return False
+            if not _independently_administered(path):
+                return False
+        else:
+            parent = path.parent.lstat()
+            if stat.S_ISLNK(parent.st_mode) or parent.st_mode & 0o022:
+                return False
     except OSError:
         return False
     return True
 
 
-def resolve_trusted_executable(
-    root: Path, candidates: tuple[Path, ...], override: Path | None
-) -> Path | None:
-    if override is not None:
-        candidate = Path(override)
+def resolve_trusted_git(root: Path) -> Path | None:
+    if _TEST_TRUSTED_GIT is not None:
+        candidate = Path(_TEST_TRUSTED_GIT)
         return candidate.resolve() if _executable_provenance_ok(
-            candidate, root, candidates, test_override=True
+            candidate, root, TRUSTED_GIT_CANDIDATES, test_override=True
         ) else None
-    for candidate in candidates:
-        if candidate.exists() and _executable_provenance_ok(candidate, root, candidates):
+    for candidate in TRUSTED_GIT_CANDIDATES:
+        if candidate.exists() and _executable_provenance_ok(
+            candidate, root, TRUSTED_GIT_CANDIDATES
+        ):
             return candidate.resolve()
     return None
 
 
-def resolve_trusted_gh(root: Path) -> Path | None:
-    return resolve_trusted_executable(root, TRUSTED_GH_CANDIDATES, _TEST_TRUSTED_GH)
-
-
-def resolve_trusted_git(root: Path) -> Path | None:
-    return resolve_trusted_executable(root, TRUSTED_GIT_CANDIDATES, _TEST_TRUSTED_GIT)
-
-
-def _bounded_local_env() -> dict[str, str]:
+def _bounded_git_env() -> dict[str, str]:
+    # Isolate from caller/repo Git config, hooks, and external helpers such as
+    # fsmonitor. HOME is intentionally absent so no account config is loaded.
     return {
         "PATH": "/usr/bin:/bin",
         "LANG": "C",
         "LC_ALL": "C",
-        "HOME": str(TRUSTED_ACCOUNT_HOME),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_NO_REPLACE_OBJECTS": "1",
     }
 
 
-def _bounded_gh_env() -> dict[str, str]:
-    env = _bounded_local_env()
-    env["GH_PROMPT_DISABLED"] = "1"
-    return env
-
-
-def github_json(root: Path, hostname: str, endpoint: str) -> dict:
-    gh_path = resolve_trusted_gh(root)
-    if gh_path is None:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-
+def git(root: Path, *args: str) -> str:
+    binary = resolve_trusted_git(root)
+    if binary is None:
+        raise PreflightError("GIT_STATE_UNAVAILABLE")
     result = subprocess.run(
-        [str(gh_path), "api", "--hostname", hostname, endpoint],
+        [
+            str(binary),
+            "-C",
+            str(root),
+            "--no-replace-objects",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=",
+            *args,
+        ],
         cwd="/",
-        env=_bounded_gh_env(),
+        env=_bounded_git_env(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     if result.returncode:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED") from exc
-    if not isinstance(payload, dict):
-        raise PreflightError("WORK_PACKET_PROVENANCE_UNTRUSTED")
-    return payload
-
-
-def authenticated_packet(
-    root: Path, hostname: str, repo: str, issue_number: int
-) -> tuple[str, str, str]:
-    if issue_number < 1:
-        raise PreflightError("WORK_PACKET_ISSUE_INVALID")
-    issue = github_json(root, hostname, f"repos/{repo}/issues/{issue_number}")
-    if issue.get("pull_request") is not None:
-        raise PreflightError("WORK_PACKET_ISSUE_INVALID")
-    if str(issue.get("state") or "").lower() != "open":
-        raise PreflightError("WORK_PACKET_NOT_ACTIVE")
-    if not str(issue.get("title") or "").startswith("[AI Work]"):
-        raise PreflightError("WORK_PACKET_TITLE_INVALID")
-
-    body = issue.get("body")
-    user = issue.get("user")
-    author = user.get("login") if isinstance(user, dict) else None
-    if not isinstance(body, str) or not body.strip():
-        raise PreflightError("WORK_PACKET_UNREADABLE")
-    if not isinstance(author, str) or re.fullmatch(r"[A-Za-z0-9-]{1,39}", author) is None:
-        raise PreflightError("WORK_PACKET_AUTHOR_UNTRUSTED")
-
-    permission_payload = github_json(
-        root, hostname, f"repos/{repo}/collaborators/{author}/permission"
-    )
-    try:
-        permission = work_packet_authority.authorize_work_packet_author_permission(
-            permission_payload.get("permission")
-        )
-    except SystemExit as exc:
-        raise PreflightError("WORK_PACKET_AUTHOR_UNTRUSTED") from exc
-    return body, author, permission
+        raise PreflightError("GIT_STATE_UNAVAILABLE")
+    return result.stdout.strip()
 
 
 def normalize_origin(url: str) -> tuple[str, str]:
@@ -234,6 +204,16 @@ def require_clean_root(root: Path) -> tuple[str, str, str]:
     return branch, head, origin
 
 
+def load_connector_packet(path: Path) -> str:
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PreflightError("WORK_PACKET_UNREADABLE") from exc
+    if not body.strip():
+        raise PreflightError("WORK_PACKET_UNREADABLE")
+    return body
+
+
 def check(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     expected_worktree = Path(args.expected_worktree).resolve()
@@ -247,9 +227,14 @@ def check(args: argparse.Namespace) -> int:
     if origin_repo != args.expected_repo:
         raise PreflightError("TARGET_REPO_MISMATCH")
 
-    body, author, permission = authenticated_packet(
-        root, origin_host, origin_repo, args.issue_number
-    )
+    try:
+        permission = work_packet_authority.authorize_work_packet_author_permission(
+            args.connector_attested_author_permission
+        )
+    except SystemExit as exc:
+        raise PreflightError("WORK_PACKET_AUTHOR_UNTRUSTED") from exc
+
+    body = load_connector_packet(Path(args.packet_body_file))
     packet = context_epoch.parse_packet(body)
     audit = context_epoch.analyze_packet(packet)
     if audit["blocking"]:
@@ -287,6 +272,9 @@ def check(args: argparse.Namespace) -> int:
         raise PreflightError("CHANGE_RISK_MISMATCH")
 
     print("IMPLEMENTATION_PREFLIGHT=PASS")
+    print("LOCAL_BINDING=PASS")
+    print("MUTATION_AUTHORITY=NOT_GRANTED")
+    print("AUTHORITY_BOUNDARY=EXTERNAL_GITHUB_CONNECTOR")
     print(f"TARGET_REPO={target_repo}")
     print(f"WORKTREE={root}")
     print(f"WORKSTREAM={workstream}")
@@ -295,9 +283,9 @@ def check(args: argparse.Namespace) -> int:
     print(f"INTENT_REVISION={packet_revision}")
     print(f"CHANGE_RISK={change_risk}")
     print(f"IMPLEMENTER={implementer}")
-    print(f"PACKET_ISSUE={args.issue_number}")
-    print(f"PACKET_AUTHOR={author}")
-    print(f"AUTHOR_PERMISSION={permission}")
+    if args.issue_number is not None:
+        print(f"PACKET_ISSUE={args.issue_number}")
+    print(f"CONNECTOR_ATTESTED_AUTHOR_PERMISSION={permission}")
     print(f"PACKET_BODY_SHA256={packet.body_sha256}")
     return 0
 
@@ -308,7 +296,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     command = sub.add_parser("check")
     command.add_argument("--root", required=True)
     command.add_argument("--expected-worktree", required=True)
-    command.add_argument("--issue-number", required=True, type=int)
+    command.add_argument(
+        "--packet-body-file",
+        required=True,
+        help="Connector-authenticated Work Packet body bytes for local binding only",
+    )
+    command.add_argument(
+        "--connector-attested-author-permission",
+        required=True,
+        help=(
+            "Author permission attested by the external GitHub connector after an "
+            "authenticated collaborators/{author}/permission read; format-checked only"
+        ),
+    )
+    command.add_argument("--issue-number", required=False, type=int, default=None)
     command.add_argument("--expected-repo", required=True)
     command.add_argument("--expected-origin-host", default="github.com")
     command.add_argument("--expected-workstream", required=True)

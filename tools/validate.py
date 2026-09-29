@@ -245,14 +245,12 @@ def validate_chat_primary_contract():
     issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
 
     required_preflight = (
-        "WORK_PACKET_PROVENANCE_UNTRUSTED",
         "WORK_PACKET_AUTHOR_UNTRUSTED",
-        "WORK_PACKET_ISSUE_INVALID",
-        "WORK_PACKET_TITLE_INVALID",
         "WORKTREE_DIRTY",
         "WORKTREE_BINDING_MISMATCH",
         "--expected-worktree",
-        "--issue-number",
+        "--packet-body-file",
+        "--connector-attested-author-permission",
         "collaborators/{author}/permission",
         "ORIGIN_HOST_MISMATCH",
         "TARGET_REPO_MISMATCH",
@@ -262,35 +260,42 @@ def validate_chat_primary_contract():
         "IMPLEMENTER_MISMATCH",
         "CHANGE_RISK_MISMATCH",
         "IMPLEMENTATION_PREFLIGHT=PASS",
+        "LOCAL_BINDING=PASS",
+        "MUTATION_AUTHORITY=NOT_GRANTED",
+        "AUTHORITY_BOUNDARY=EXTERNAL_GITHUB_CONNECTOR",
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=",
+        "GIT_CONFIG_NOSYSTEM",
+        "_independently_administered",
     )
     for token in required_preflight:
         if token not in preflight:
             raise SystemExit(f"FAIL implementation preflight missing token: {token}")
     for forbidden in (
-        "--packet-body-file",
         "--expected-packet-body-sha256",
         "--author-permission",
         "--expected-implementer",
         "shutil.which",
         "Path.home()",
+        "resolve_trusted_gh",
+        "TRUSTED_GH_CANDIDATES",
+        "authenticated_packet",
+        "github_json",
+        "pwd.getpwuid",
+        "GH_PROMPT_DISABLED",
     ):
         if forbidden in preflight:
             raise SystemExit(
-                f"FAIL implementation preflight accepts caller authority or PATH lookup: {forbidden}"
+                f"FAIL implementation preflight retains in-worker GitHub authority or PATH lookup: {forbidden}"
             )
     for token in (
-        "resolve_trusted_gh",
         "resolve_trusted_git",
-        "TRUSTED_GH_CANDIDATES",
         "TRUSTED_GIT_CANDIDATES",
-        "TRUSTED_ACCOUNT_HOME",
-        "pwd.getpwuid",
-        "GH_PROMPT_DISABLED",
-        "authenticated_packet",
         'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        "cannot mint mutation authority",
     ):
         if token not in preflight:
-            raise SystemExit(f"FAIL implementation preflight missing trusted GitHub boundary token: {token}")
+            raise SystemExit(f"FAIL implementation preflight missing local-binding token: {token}")
     adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
     for token in (
         "tools/implementation_preflight.py",
@@ -298,9 +303,15 @@ def validate_chat_primary_contract():
         "tools/work_packet_authority.py",
         'canonical_helper = Path(".engineering-system-runtime") / rel',
         'f"{rel} differs from canonical managed helper"',
+        "implementation_preflight.py check",
+        "ChatGPT Chat is the default daytime implementer",
     ):
         if token not in adoption_workflow:
             raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
+    if 'if "tools/implementation_preflight.py" in text:' in adoption_workflow:
+        raise SystemExit(
+            "FAIL adoption compliance still gates Chat-primary helper parity on AGENTS text"
+        )
     for label, text in (
         ("session continuity", session),
         ("AGENTS.md", agents),
@@ -310,6 +321,10 @@ def validate_chat_primary_contract():
     ):
         if "implementation_preflight.py check" not in text:
             raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
+        if "EXTERNAL_GITHUB_CONNECTOR" not in text and "external GitHub connector" not in text:
+            raise SystemExit(f"FAIL {label} missing external connector authority boundary")
+        if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NOT_GRANTED" not in text:
+            raise SystemExit(f"FAIL {label} missing local-binding-only mutation denial")
     if "ChatGPT Chat is the default daytime implementer" not in custom:
         raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
     if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:

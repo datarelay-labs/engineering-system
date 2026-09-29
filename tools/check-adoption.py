@@ -205,7 +205,15 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
-        if "tools/implementation_preflight.py" in agents_text:
+        if version_at_least(version, (1, 6, 5)):
+            if "ChatGPT Chat is the default daytime implementer" not in agents_text:
+                failures.append(
+                    "AGENTS.md missing Chat-primary daytime implementer instruction"
+                )
+            if "implementation_preflight.py check" not in agents_text:
+                failures.append(
+                    "AGENTS.md missing Chat-primary implementation preflight instruction"
+                )
             for rel in (
                 "tools/implementation_preflight.py",
                 "tools/context_epoch.py",
@@ -214,7 +222,7 @@ def main() -> int:
                 target = root / rel
                 canonical = Path(__file__).resolve().parents[1] / rel
                 if not target.is_file():
-                    failures.append(f"AGENTS.md references implementation preflight but missing {rel}")
+                    failures.append(f"Chat-primary adoption missing required helper {rel}")
                 elif not canonical.is_file():
                     failures.append(f"canonical adoption checker is missing {rel}")
                 elif target.read_bytes() != canonical.read_bytes():

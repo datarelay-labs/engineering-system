@@ -386,11 +386,15 @@ def test_adoption_compliance_carries_implementation_preflight_baseline() -> None
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
         'canonical_helper = Path(".engineering-system-runtime") / rel',
-        "AGENTS.md references implementation preflight but missing",
+        "Chat-primary adoption missing required helper",
+        "AGENTS.md missing Chat-primary implementation preflight instruction",
         'f"{rel} differs from canonical managed helper"',
+        "version_tuple >= (1, 6, 5)",
     ):
         if token not in workflow:
             fail(f"adoption compliance missing implementation preflight contract: {token}")
+    if 'if "tools/implementation_preflight.py" in text:' in workflow:
+        fail("adoption compliance still gates Chat-primary helper parity on AGENTS text")
 
 
 def test_resume_commands_are_thin_and_in_parity() -> None:
