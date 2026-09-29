@@ -72,30 +72,120 @@ def _lexical_absolute_path(value: str, *, reason: str) -> Path:
     return Path(value)
 
 
+def _directory_open_flags() -> int:
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise PreflightError("WORKTREE_FD_BOUNDARY_UNAVAILABLE")
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def _identity_tuple(value: str) -> tuple[int, int]:
+    device, inode = value.split(":", 1)
+    return int(device), int(inode)
+
+
+def _expected_identity_records(expected: str) -> list[tuple[int, int]]:
+    if WORKTREE_IDENTITY_RE.fullmatch(expected) is None:
+        raise PreflightError("EXPECTED_WORKTREE_IDENTITY_INVALID")
+    return [_identity_tuple(item) for item in expected.split(",")]
+
+
+def _open_child_dir(parent_fd: int, name: str) -> int:
+    if not name or name in {".", ".."} or "/" in name or "\0" in name:
+        raise PreflightError("WORKTREE_PATH_INVALID")
+    try:
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise PreflightError("WORKTREE_PATH_UNAVAILABLE") from exc
+    if stat.S_ISLNK(before.st_mode):
+        raise PreflightError("WORKTREE_PATH_SYMLINK")
+    if not stat.S_ISDIR(before.st_mode):
+        raise PreflightError("WORKTREE_PATH_NOT_DIRECTORY")
+    try:
+        child_fd = os.open(name, _directory_open_flags(), dir_fd=parent_fd)
+    except OSError as exc:
+        raise PreflightError("WORKTREE_PATH_UNAVAILABLE") from exc
+    after = os.fstat(child_fd)
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        os.close(child_fd)
+        raise PreflightError("WORKTREE_IDENTITY_MISMATCH")
+    return child_fd
+
+
+def _walk_worktree(path: Path) -> tuple[int, list[tuple[int, int]]]:
+    """Open a no-follow directory chain and return the bound leaf fd + identities."""
+    components = path.parts
+    if not path.is_absolute() or not components or components[0] != "/":
+        raise PreflightError("WORKTREE_PATH_INVALID")
+    try:
+        fd = os.open("/", _directory_open_flags())
+    except OSError as exc:
+        raise PreflightError("WORKTREE_FD_BOUNDARY_UNAVAILABLE") from exc
+    records: list[tuple[int, int]] = []
+    try:
+        st = os.fstat(fd)
+        records.append((st.st_dev, st.st_ino))
+        for name in components[1:]:
+            child_fd = _open_child_dir(fd, name)
+            os.close(fd)
+            fd = child_fd
+            st = os.fstat(fd)
+            records.append((st.st_dev, st.st_ino))
+        return fd, records
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _format_identity(records: list[tuple[int, int]]) -> str:
+    return ",".join(f"{device}:{inode}" for device, inode in records)
+
+
 def worktree_identity(path: Path) -> str:
-    """Return a no-follow device/inode chain for every lexical path component."""
-    records: list[str] = []
-    for component in _lexical_components(path):
-        try:
-            st = os.lstat(component)
-        except OSError as exc:
-            raise PreflightError("WORKTREE_PATH_UNAVAILABLE") from exc
-        if stat.S_ISLNK(st.st_mode):
-            raise PreflightError("WORKTREE_PATH_SYMLINK")
-        if not stat.S_ISDIR(st.st_mode):
-            raise PreflightError("WORKTREE_PATH_NOT_DIRECTORY")
-        records.append(f"{st.st_dev}:{st.st_ino}")
-    if not records:
-        raise PreflightError("WORKTREE_PATH_UNAVAILABLE")
-    return ",".join(records)
+    """Capture a race-resistant no-follow device/inode chain for the lexical path."""
+    fd, records = _walk_worktree(path)
+    os.close(fd)
+    return _format_identity(records)
+
+
+def open_bound_worktree(path: Path, expected: str) -> int:
+    """Open the exact coordinator-captured worktree identity and keep its inode bound."""
+    expected_records = _expected_identity_records(expected)
+    fd, actual_records = _walk_worktree(path)
+    if actual_records != expected_records:
+        os.close(fd)
+        raise PreflightError("WORKTREE_IDENTITY_MISMATCH")
+    return fd
 
 
 def verify_worktree_identity(path: Path, expected: str) -> None:
-    if WORKTREE_IDENTITY_RE.fullmatch(expected) is None:
-        raise PreflightError("EXPECTED_WORKTREE_IDENTITY_INVALID")
-    if worktree_identity(path) != expected:
+    expected_records = _expected_identity_records(expected)
+    fd, actual_records = _walk_worktree(path)
+    os.close(fd)
+    if actual_records != expected_records:
         raise PreflightError("WORKTREE_IDENTITY_MISMATCH")
 
+
+def _fd_path(fd: int) -> Path:
+    for base in (Path("/proc/self/fd"), Path("/dev/fd")):
+        if base.is_dir():
+            return base / str(fd)
+    raise PreflightError("WORKTREE_FD_BOUNDARY_UNAVAILABLE")
+
+
+def _open_relative_dir_fd(parent_fd: int, relative: str) -> int:
+    path = Path(relative)
+    if path.is_absolute() or not path.parts:
+        raise PreflightError("SUBMODULE_STATE_UNAVAILABLE")
+    fd = os.dup(parent_fd)
+    try:
+        for name in path.parts:
+            child_fd = _open_child_dir(fd, name)
+            os.close(fd)
+            fd = child_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
 def _root_administered_path(path: Path, *, executable: bool) -> bool:
     """Require root-owned, worker-inaccessible lexical and resolved path components."""
@@ -157,7 +247,7 @@ def _bounded_git_env() -> dict[str, str]:
     }
 
 
-def git(root: Path, *args: str) -> str:
+def git(root: Path, *args: str, pass_fds: tuple[int, ...] = ()) -> str:
     binary = resolve_trusted_git()
     if binary is None:
         raise PreflightError("LOCAL_GIT_BOUNDARY_UNAVAILABLE")
@@ -183,6 +273,7 @@ def git(root: Path, *args: str) -> str:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        pass_fds=pass_fds,
     )
     if result.returncode:
         raise PreflightError("GIT_STATE_UNAVAILABLE")
@@ -217,8 +308,8 @@ def normalize_origin(url: str) -> tuple[str, str]:
     return host, path
 
 
-def _index_has_hidden_flags(root: Path) -> bool:
-    records = git(root, "ls-files", "-v", "-z").split("\0")
+def _index_has_hidden_flags(root: Path, *, pass_fds: tuple[int, ...] = ()) -> bool:
+    records = git(root, "ls-files", "-v", "-z", pass_fds=pass_fds).split("\0")
     for record in records:
         if not record:
             continue
@@ -228,9 +319,13 @@ def _index_has_hidden_flags(root: Path) -> bool:
     return False
 
 
-def _initialized_gitlink_roots(root: Path) -> list[Path]:
-    raw = git(root, "ls-files", "--stage", "-z")
-    submodules: list[Path] = []
+def _initialized_gitlink_paths(
+    root: Path,
+    *,
+    pass_fds: tuple[int, ...] = (),
+) -> list[str]:
+    raw = git(root, "ls-files", "--stage", "-z", pass_fds=pass_fds)
+    submodules: list[str] = []
     for record in raw.split("\0"):
         if not record:
             continue
@@ -240,62 +335,87 @@ def _initialized_gitlink_roots(root: Path) -> list[Path]:
             raise PreflightError("GIT_STATE_UNAVAILABLE")
         if fields[0] != "160000":
             continue
-        candidate = (root / relative).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError as exc:
-            raise PreflightError("SUBMODULE_STATE_UNAVAILABLE") from exc
-        if not candidate.is_dir():
-            continue
-        top = Path(git(candidate, "rev-parse", "--show-toplevel")).resolve()
-        if top == candidate:
-            submodules.append(candidate)
+        rel = Path(relative)
+        if rel.is_absolute() or not rel.parts or any(part in {"", ".", ".."} for part in rel.parts):
+            raise PreflightError("SUBMODULE_STATE_UNAVAILABLE")
+        submodules.append(relative)
     return submodules
 
 
-def _reject_hidden_index_flags(root: Path, seen: set[Path] | None = None) -> None:
+def _reject_hidden_index_flags_fd(root_fd: int, seen: set[tuple[int, int]] | None = None) -> None:
     visited = seen if seen is not None else set()
-    resolved = root.resolve()
-    if resolved in visited:
+    st = os.fstat(root_fd)
+    identity = (st.st_dev, st.st_ino)
+    if identity in visited:
         raise PreflightError("SUBMODULE_STATE_UNAVAILABLE")
-    visited.add(resolved)
-    if _index_has_hidden_flags(resolved):
+    visited.add(identity)
+    root_ref = _fd_path(root_fd)
+    if _index_has_hidden_flags(root_ref, pass_fds=(root_fd,)):
         raise PreflightError("HIDDEN_INDEX_STATE")
-    for submodule in _initialized_gitlink_roots(resolved):
-        _reject_hidden_index_flags(submodule, visited)
+    for relative in _initialized_gitlink_paths(root_ref, pass_fds=(root_fd,)):
+        child_fd = _open_relative_dir_fd(root_fd, relative)
+        try:
+            child_ref = _fd_path(child_fd)
+            prefix = git(
+                child_ref,
+                "rev-parse",
+                "--show-prefix",
+                pass_fds=(child_fd,),
+            )
+            if prefix:
+                raise PreflightError("SUBMODULE_STATE_UNAVAILABLE")
+            _reject_hidden_index_flags_fd(child_fd, visited)
+        finally:
+            os.close(child_fd)
 
 
-def require_clean_root(root: Path) -> tuple[str, str, str]:
-    if not root.is_dir():
-        raise PreflightError("WORKTREE_UNAVAILABLE")
-    top = _lexical_absolute_path(
-        git(root, "rev-parse", "--show-toplevel"),
-        reason="WORKTREE_ROOT_MISMATCH",
+def require_clean_root(root: Path, worktree_fd: int) -> tuple[str, str, str]:
+    root_ref = _fd_path(worktree_fd)
+    prefix = git(
+        root_ref,
+        "rev-parse",
+        "--show-prefix",
+        pass_fds=(worktree_fd,),
     )
-    if top != root:
+    if prefix:
         raise PreflightError("WORKTREE_ROOT_MISMATCH")
-    branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    branch = git(
+        root_ref,
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        "HEAD",
+        pass_fds=(worktree_fd,),
+    )
     if not branch:
         raise PreflightError("DETACHED_HEAD")
-    head = git(root, "rev-parse", "--verify", "HEAD^{commit}")
+    head = git(
+        root_ref,
+        "rev-parse",
+        "--verify",
+        "HEAD^{commit}",
+        pass_fds=(worktree_fd,),
+    )
     if HEAD_RE.fullmatch(head) is None:
         raise PreflightError("HEAD_INVALID")
-    _reject_hidden_index_flags(root)
+    _reject_hidden_index_flags_fd(worktree_fd)
     if git(
-        root,
+        root_ref,
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
         "--ignore-submodules=none",
+        pass_fds=(worktree_fd,),
     ):
         raise PreflightError("WORKTREE_DIRTY")
     origin = git(
-        root,
+        root_ref,
         "config",
         "--local",
         "--no-includes",
         "--get",
         "remote.origin.url",
+        pass_fds=(worktree_fd,),
     )
     return branch, head, origin
 
@@ -317,7 +437,7 @@ def check(args: argparse.Namespace) -> int:
     )
     if root != expected_worktree:
         raise PreflightError("WORKTREE_BINDING_MISMATCH")
-    verify_worktree_identity(root, args.expected_worktree_identity)
+    worktree_fd = open_bound_worktree(root, args.expected_worktree_identity)
     if REPO_RE.fullmatch(args.expected_repo) is None:
         raise PreflightError("EXPECTED_REPO_INVALID")
     if WORKSTREAM_RE.fullmatch(args.expected_workstream) is None:
@@ -331,9 +451,14 @@ def check(args: argparse.Namespace) -> int:
     if args.expected_intent_revision < 1:
         raise PreflightError("INTENT_REVISION_INVALID")
 
-    branch, head, origin = require_clean_root(root)
-    # Re-check the exact no-follow identity chain after all Git reads so a path
-    # replacement during the check cannot be accepted at the PASS boundary.
+    try:
+        # All protected Git reads are anchored to the already-open authorized
+        # directory inode, so rename/swap races cannot redirect the evidence.
+        branch, head, origin = require_clean_root(root, worktree_fd)
+    finally:
+        os.close(worktree_fd)
+    # Require the authorized lexical path to point at the same captured inode
+    # chain at the PASS boundary as well.
     verify_worktree_identity(root, args.expected_worktree_identity)
     origin_host, origin_repo = normalize_origin(origin)
     if origin_host != args.expected_origin_host.lower():
