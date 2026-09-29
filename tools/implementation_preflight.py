@@ -12,6 +12,11 @@ import argparse
 import re
 import subprocess
 import sys
+
+# This helper is itself a pre-mutation gate. Importing its managed sibling
+# modules must not create __pycache__ and dirty the target worktree.
+sys.dont_write_bytecode = True
+
 from pathlib import Path
 from urllib.parse import urlsplit
 

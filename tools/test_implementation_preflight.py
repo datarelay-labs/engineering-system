@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -194,6 +195,62 @@ def main() -> int:
         run("git", "remote", "set-url", "origin", "https://evil.invalid/datarelay-labs/engineering-system.git", cwd=repo)
         result = invoke(repo, body, head)
         assert result.returncode == 2 and "ORIGIN_HOST_MISMATCH" in result.stdout
+
+    # Adopted repositories execute their managed copy from inside the target
+    # worktree. The pre-mutation gate must not dirty that worktree merely by
+    # importing its managed sibling helpers.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "adopted"
+        repo.mkdir()
+        head = init_repo(repo)
+        managed = repo / "tools"
+        managed.mkdir()
+        for name in (
+            "implementation_preflight.py",
+            "context_epoch.py",
+            "work_packet_authority.py",
+        ):
+            shutil.copy2(ROOT / "tools" / name, managed / name)
+        run("git", "add", "tools", cwd=repo)
+        run("git", "commit", "-qm", "managed preflight helpers", cwd=repo)
+        head = run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
+        body = root / "packet.md"
+        body.write_text(packet(head), encoding="utf-8")
+        args = [
+            sys.executable,
+            str(managed / "implementation_preflight.py"),
+            "check",
+            "--root",
+            str(repo),
+            "--expected-worktree",
+            str(repo),
+            "--packet-body-file",
+            str(body),
+            "--expected-packet-body-sha256",
+            hashlib.sha256(body.read_bytes()).hexdigest(),
+            "--author-permission",
+            "admin",
+            "--expected-repo",
+            "datarelay-labs/engineering-system",
+            "--expected-origin-host",
+            "github.com",
+            "--expected-workstream",
+            "chat-primary-ssh-development-workflow",
+            "--expected-head",
+            head,
+            "--expected-intent-revision",
+            "2",
+            "--expected-implementer",
+            "CHATGPT_CHAT",
+            "--expected-change-risk",
+            "HIGH",
+        ]
+        result = run(*args, cwd=repo)
+        assert result.returncode == 0, result.stdout
+        assert "IMPLEMENTATION_PREFLIGHT=PASS" in result.stdout
+        assert not (managed / "__pycache__").exists()
+        assert run("git", "status", "--porcelain", cwd=repo).stdout == ""
 
     print("IMPLEMENTATION_PREFLIGHT_TESTS=PASS")
     return 0
