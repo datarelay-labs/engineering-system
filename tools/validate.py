@@ -275,6 +275,7 @@ def validate_chat_primary_contract():
         "_root_administered_path",
         "st.st_uid != 0",
         "os.geteuid() == 0",
+        "PREFLIGHT_ARTIFACT_AUTHORITY=EXTERNAL_IMMUTABLE_SOURCE_REQUIRED",
     )
     for token in required_preflight:
         if token not in preflight:
@@ -318,7 +319,7 @@ def validate_chat_primary_contract():
         'canonical_helper = Path(".engineering-system-runtime") / rel',
         'f"{rel} differs from canonical managed helper"',
         "implementation_preflight.py check",
-        "ChatGPT Chat is the default daytime implementer",
+        "ChatGPT Chat is the default implementer",
     ):
         if token not in adoption_workflow:
             raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
@@ -343,7 +344,7 @@ def validate_chat_primary_contract():
             raise SystemExit(f"FAIL {label} missing external coordinator authority boundary")
         if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NO" not in text:
             raise SystemExit(f"FAIL {label} missing local-binding-only mutation denial")
-    if "ChatGPT Chat is the default daytime implementer" not in custom:
+    if "ChatGPT Chat is the default implementer" not in custom:
         raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
     if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
         raise SystemExit("FAIL legacy Cursor-primary ChatGPT contract remains")
@@ -367,16 +368,17 @@ def validate_resource_guard_contract():
             raise SystemExit(f"FAIL resource preflight encodes session mutation: {token}")
     for label, text in (
         ("session continuity", session),
-        ("ChatGPT custom instruction", instruction),
         ("resume template", resume),
     ):
         if "cursor-resource-preflight.py" not in text:
-            raise SystemExit(f"FAIL {label} missing resource preflight command")
+            raise SystemExit(f"FAIL {label} missing optional-adapter resource preflight command")
         if "BLOCK" not in text:
             raise SystemExit(f"FAIL {label} missing BLOCK result")
-    if instruction.index("tools/cursor-resource-preflight.py") > instruction.index("agent persist /work-resume"):
-        raise SystemExit("FAIL ChatGPT handoff runs agent persist before resource preflight")
-    print("PASS Cursor persistent-session resource guard contract")
+    if "Cursor is retired from the default workflow" not in instruction:
+        raise SystemExit("FAIL ChatGPT custom instruction does not retire Cursor default")
+    if "DISABLED BY DEFAULT" not in resume:
+        raise SystemExit("FAIL Cursor resume compatibility adapter is not disabled by default")
+    print("PASS dormant Cursor compatibility resource guard contract")
 
 
 def validate_work_admission_contract():

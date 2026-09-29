@@ -367,7 +367,7 @@ After resolving Git identity and before ordinary work:
 11. When task-local files are not already obvious and the worktree is clean, use `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>"` before broad repo-wide grep/read. The orientation is bound to exact `HEAD`, ranks only Git-tracked relative paths plus declared canonical knowledge metadata, emits no file content, and is a JIT read hint rather than authority. `ORIENTATION_DECISION=NO_MATCH` or insufficient evidence permits bounded expansion; dirty worktrees fail closed rather than presenting a stale HEAD map.
 12. For a large optional text candidate, prefer `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>" --slice-path <relative-path>` before a full read. Slice mode reads the exact-HEAD tracked UTF-8 blob and emits bounded JSON-encoded task-relevant line windows in source order. It is a context-reduction hint only: `SLICE_DECISION=NO_MATCH`, truncation, or insufficient evidence permits a bounded full read. Never use slicing as a substitute for mandatory `AGENTS.md`, `.engineering/project.yaml`, managed rules, protected Work Packet state, acceptance criteria, or a canonical reference the task requires in full.
 13. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity. For explicitly eligible line-oriented output that must remain available during the same task, `tools/context_tool_output.py` may emit deterministic bounded head/tail + task/diagnostic line records while storing the exact original only through the existing private `context_fold.py` store. The recovery marker is a retrieval handle, not evidence authority. Protected/authority output must not be reduced; bypass must be store-free; truncation never implies semantic equivalence or provider token/cost savings.
-14. Durable authority stays in the Work Packet; stale conversation is not authority. For direct Chat implementation, a new Chat context may resume from authenticated GitHub packet/repository facts without the prior transcript and must rerun the implementation preflight before a new bounded mutation cycle. When the Cursor adapter is selected, reuse one healthy project/repository persistent Cursor session across Work Packet, Issue, branch, PR, and `Next Action` transitions. A transition does not create a new persistent session. Persist durable state, verify no in-flight or unreconciled mutation, `/clear`, switch to a clean reconciled worktree/branch, then `/work-resume`. Reconcile dirty, unpushed, or ambiguous state before switching. Run `tools/cursor-resource-preflight.py` only when actually creating a new Cursor persistent session.
+14. Durable authority stays in the Work Packet; stale conversation is not authority. ChatGPT Chat is the default and may resume from authenticated GitHub packet/repository facts without the prior transcript; before each new bounded mutation cycle it must rerun the trusted immutable-source implementation preflight. Cursor is not part of the default lifecycle. Only an explicit owner reactivation with `IMPLEMENTER=CURSOR` may enter the dormant Cursor adapter path; then its historical persistent-session safety rules apply.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -473,7 +473,7 @@ Prefer subject/version identity or exact revision over arbitrary time-to-live. H
 
 ## Coordinator / worker execution model
 
-The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity. When the Cursor adapter is selected, its project persistent session is a reusable adapter worker rather than one session per Work Packet or `Next Action`.
+The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity. Cursor is dormant compatibility only and is excluded from normal worker selection unless the owner explicitly reactivates it for the packet.
 
 A coordinator or equivalent outer loop should, when automation exists:
 
@@ -485,7 +485,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one conversational context to survive the whole workstream. The same outcome may span multiple context resets on the reusable project persistent session when context boundaries require it. A context reset is `/clear` followed by `/work-resume`. It is not a new persistent session.
+Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority. Cursor-specific `/clear` / `/work-resume` semantics apply only inside the dormant adapter after explicit owner reactivation.
 
 ## Pure coordinator planner
 
@@ -625,7 +625,7 @@ If authenticated packet access is unavailable, stop with `WORK_PACKET_PROVENANCE
 
 ## ChatGPT Chat implementation behavior
 
-ChatGPT Chat is the default daytime implementer when the owner has authorized the work through a trusted repository-scoped Work Packet. Conversation history is never mutation authority. Before mutation, the external authenticated GitHub coordinator must freshly read the canonical Issue and its author permission, require one open ACTIVE `[AI Work]` packet whose author has write/maintain/admin permission, and verify its TARGET_REPO, WORKSTREAM, BRANCH, LAST_VERIFIED_HEAD, INTENT_REVISION, `IMPLEMENTER=CHATGPT_CHAT`, CHANGE_RISK, and authorized worktree. The remote coding host does not authenticate those GitHub facts. Instead, run `python3 tools/implementation_preflight.py check` with the coordinator-derived expected repo/worktree/branch/HEAD/workstream/revision/risk values and require `IMPLEMENTATION_LOCAL_BINDING=PASS`. The helper performs only local binding with a root-administered Git executable, isolated system/global config, disabled hooks/fsmonitor, and a clean-tree check; it always reports `MUTATION_AUTHORITY=NO` and `AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED`. Only the conjunction of the coordinator's authenticated GitHub authority check and the local binding PASS permits mutation.
+ChatGPT Chat is the default implementer when the owner has authorized the work through a trusted repository-scoped Work Packet. Conversation history is never mutation authority. Before mutation, the external authenticated GitHub coordinator must freshly read the canonical Issue and its author permission, require one open ACTIVE `[AI Work]` packet whose author has write/maintain/admin permission, and verify its TARGET_REPO, WORKSTREAM, BRANCH, LAST_VERIFIED_HEAD, INTENT_REVISION, `IMPLEMENTER=CHATGPT_CHAT`, CHANGE_RISK, and authorized worktree. The remote coding host does not authenticate those GitHub facts. The worker-writable target copy of `python3 tools/implementation_preflight.py check` is never authority. The coordinator must obtain the exact preflight source from the immutable canonical Engineering System baseline through the authenticated connector and execute that source directly with fixed `/usr/bin/python3 - check ...` whose lexical/resolved path is root-owned, non-group/world-writable, and not writable by the implementation UID over the remote-control channel without materializing it in a worker-writable path, or use an equivalent host-administered immutable copy. That trusted artifact performs only local binding with a root-administered Git executable, isolated system/global config, disabled hooks/fsmonitor, and a clean-tree check; it always reports `MUTATION_AUTHORITY=NO` and `AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED`. The installed target helper exists for parity, offline regression, and adoption drift detection only. If the trusted artifact/interpreter boundary is unavailable, mutation is BLOCKED. Only the conjunction of the coordinator's authenticated GitHub authority check and trusted local-binding PASS permits mutation.
 
 When the user asks to continue/resume an existing engineering workstream:
 
@@ -641,9 +641,11 @@ After preflight PASS, Chat may implement directly through the authorized SSH/rem
 
 The implementing Chat context may self-review but is never the sole terminal independent verifier. LOW/MEDIUM work may use a fresh Chat context for independent exact-HEAD review after deterministic gates. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require Codex or another explicitly independent HIGH-risk verifier unless an owner-approved equivalent is recorded. Codex is a review/escalation path, not a mandatory routine implementation hop.
 
-## Optional Cursor adapter behavior
+## Dormant optional Cursor adapter behavior
 
-Repository adoption should provide `.cursor/commands/resume.md`. Managed upgrades must keep that adapter synchronized with the canonical template. When a known local alias such as `.cursor/commands/work-resume.md` is already present or explicitly managed, keep it synchronized to the same canonical resume text.
+Cursor is disabled by default. Do not start, resume, attach to, wait on, or hand implementation to Cursor unless the owner explicitly reactivates the adapter for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block the ChatGPT implementation path.
+
+Repository adoption may retain `.cursor/commands/resume.md`. Managed upgrades must keep that adapter synchronized with the canonical template. When a known local alias such as `.cursor/commands/work-resume.md` is already present or explicitly managed, keep it synchronized to the same canonical resume text.
 
 The resume command:
 
@@ -660,7 +662,7 @@ The resume command:
 - yields instead of polling when CI/review/deployment or another machine-observable external condition is pending; coordinator/automation owns waiting and re-entry
 - uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
 
-When the Cursor adapter is selected, reuse one healthy project/repository persistent Cursor session across sequential work. Cursor quota/session availability is not a prerequisite for the default ChatGPT Chat path. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
+Only after explicit owner reactivation of the Cursor adapter, reuse one healthy project/repository persistent Cursor session across sequential work. Cursor quota/session availability is never a prerequisite for the default ChatGPT Chat path. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
 
 ## Persistent-session resource guard
 

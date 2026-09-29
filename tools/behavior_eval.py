@@ -475,21 +475,21 @@ def check_taskswitch(root: Path) -> dict[str, str]:
     _require_tokens(
         agents,
         (
-            "ChatGPT Chat is the default daytime implementer",
+            "ChatGPT Chat is the default implementer",
             "implementation_preflight.py check",
-            "When the Cursor adapter is selected",
+            "Cursor adapter is disabled by default",
         ),
     )
     _require_tokens(
         session,
         (
             "ChatGPT Chat implementation behavior",
-            "default daytime implementer",
+            "default implementer",
             "implementation_preflight.py check",
             "GitHub durable state",
-            "Optional Cursor adapter behavior",
-            "When the Cursor adapter is selected",
-            "Cursor quota/session availability is not a prerequisite",
+            "Dormant optional Cursor adapter behavior",
+            "Cursor is disabled by default",
+            "Cursor quota/session availability is never a prerequisite",
         ),
     )
 

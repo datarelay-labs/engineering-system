@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Fail-closed local Git binding evidence for Chat-primary implementation.
+"""Fail-closed local Git binding logic for Chat-primary implementation.
+
+This repository copy is parity/reference/test material and is not self-authenticating.
+Authoritative pre-mutation use requires source fetched from an immutable canonical
+baseline and executed directly by the external coordinator with a trusted interpreter,
+or an equivalent host-administered immutable copy outside the worker-writable tree.
 
 GitHub Work Packet and author-permission authority belongs to the external,
-authenticated coordinator/connector. This helper performs no network or GitHub
+authenticated coordinator/connector. This logic performs no network or GitHub
 read and cannot mint mutation authority. It only proves that coordinator-supplied
 expected repository facts match one clean local worktree through a
 host-administered, config-isolated Git executable.
@@ -295,6 +300,7 @@ def check(args: argparse.Namespace) -> int:
         raise PreflightError("HEAD_MISMATCH")
 
     print("IMPLEMENTATION_LOCAL_BINDING=PASS")
+    print("PREFLIGHT_ARTIFACT_AUTHORITY=EXTERNAL_IMMUTABLE_SOURCE_REQUIRED")
     print("MUTATION_AUTHORITY=NO")
     print("AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED")
     print(f"TARGET_REPO={origin_repo}")

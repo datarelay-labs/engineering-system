@@ -381,6 +381,21 @@ def main() -> int:
         assert '"--no-includes"' in source
 
     source = TOOL.read_text(encoding="utf-8")
+    assert "not self-authenticating" in source
+    assert "EXTERNAL_IMMUTABLE_SOURCE_REQUIRED" in source
+    for rel in (
+        "AGENTS.md",
+        "templates/AGENTS.md",
+        "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
+        "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
+        "standards/SESSION_CONTINUITY.md",
+        "standards/ADOPTION.md",
+    ):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert "worker-writable" in text, rel
+        assert "/usr/bin/python3 - check" in text, rel
+        assert "root-owned" in text, rel
+
     for forbidden in (
         "gh api",
         "TRUSTED_GH",

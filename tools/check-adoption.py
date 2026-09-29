@@ -223,7 +223,7 @@ def main() -> int:
                 failures.append(
                     "engineering_system.version does not match canonical checker version"
                 )
-            if "ChatGPT Chat is the default daytime implementer" not in agents_text:
+            if "ChatGPT Chat is the default implementer" not in agents_text:
                 failures.append(
                     "AGENTS.md missing Chat-primary daytime implementer instruction"
                 )

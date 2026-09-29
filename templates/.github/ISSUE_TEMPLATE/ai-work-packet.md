@@ -1,6 +1,6 @@
 ---
 name: AI Work Packet
-about: Repository-scoped current state for ChatGPT/Cursor session continuity
+about: Repository-scoped current state for ChatGPT implementation continuity
 title: "[AI Work] "
 labels: []
 assignees: []
