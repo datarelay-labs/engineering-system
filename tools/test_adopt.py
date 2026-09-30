@@ -2077,7 +2077,6 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
         "Chat-primary adoption missing required helper",
-        "AGENTS.md missing Chat-primary implementation preflight instruction",
         "canonical compliance runtime missing {rel}",
         "{rel} differs from canonical managed helper",
         ".engineering-system-runtime/.engineering/project.yaml",

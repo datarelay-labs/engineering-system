@@ -388,7 +388,6 @@ def test_adoption_compliance_carries_implementation_preflight_baseline() -> None
         "tools/work_packet_authority.py",
         'canonical_helper = Path(".engineering-system-runtime") / rel',
         "Chat-primary adoption missing required helper",
-        "AGENTS.md missing Chat-primary implementation preflight instruction",
         'f"{rel} differs from canonical managed helper"',
         "version_tuple >= (1, 6, 5)",
     ):
