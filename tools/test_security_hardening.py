@@ -113,6 +113,48 @@ def production_root(base: Path) -> Path:
     return root
 
 
+class StaticObservedStateProvider:
+    def __init__(self, fixture: dict[str, object]) -> None:
+        self.fixture = fixture
+        self.calls: list[dict[str, object]] = []
+
+    def read(
+        self,
+        root: Path,
+        repository: str,
+        seed_fixture: dict[str, object] | None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "root": str(root),
+                "repository": repository,
+                "seed_fixture": seed_fixture,
+            }
+        )
+        return dict(self.fixture)
+
+
+class CapturingGhApiMutator(HARDENING.GhApiMutator):
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
+        self.calls.append({"repository": repository, "mutations": list(mutations)})
+        return [
+            {
+                "id": item["id"],
+                "status": "APPLIED",
+                "detail": "captured authoritative mutation",
+            }
+            for item in mutations
+        ]
+
+
+class CustomMutator:
+    def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
+        raise AssertionError("custom mutator must not execute without fresh observed-state provider")
+
+
 def test_production_gaps_plan_and_eligibility() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -300,6 +342,135 @@ def test_stale_plan_digest_rejected() -> None:
             fail("stale plan digest was accepted")
 
 
+def test_live_provider_replaces_caller_native_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        calls: list[tuple[str, str, dict[str, object] | None, bool]] = []
+        original = HARDENING._run_gh_api
+
+        def fake_run_gh_api(
+            method: str,
+            endpoint: str,
+            *,
+            body: dict[str, object] | None = None,
+            allow_not_found: bool = False,
+        ) -> dict[str, object] | None:
+            calls.append((method, endpoint, body, allow_not_found))
+            if endpoint == "repos/example/app":
+                return {
+                    "visibility": "private",
+                    "security_and_analysis": {
+                        "secret_scanning": {"status": "disabled"},
+                        "secret_scanning_push_protection": {"status": "enabled"},
+                    },
+                }
+            if endpoint == "repos/example/app/automated-security-fixes":
+                return None
+            if endpoint == "repos/example/app/code-scanning/default-setup":
+                return {"state": "not-configured"}
+            fail(f"unexpected gh endpoint {method} {endpoint}")
+            return None
+
+        HARDENING._run_gh_api = fake_run_gh_api
+        try:
+            live = HARDENING.GhApiObservedStateProvider().read(
+                root,
+                "example/app",
+                enabled_fixture(scope="repo"),
+            )
+        finally:
+            HARDENING._run_gh_api = original
+
+        if live["secret_scanning"] != "disabled":
+            fail(f"stale secret scanning state survived live read: {live}")
+        if live["push_protection"] != "enabled":
+            fail(f"live push protection state was lost: {live}")
+        if live["dependabot_security_updates"] != "disabled":
+            fail(f"Dependabot 404 did not map to disabled: {live}")
+        if live["codeql_default_setup"] != "not-configured":
+            fail(f"live CodeQL state was not used: {live}")
+        if live.get("scope") != "repo":
+            fail("bounded non-native scope context was not preserved")
+        expected = {
+            ("GET", "repos/example/app"),
+            ("GET", "repos/example/app/automated-security-fixes"),
+            ("GET", "repos/example/app/code-scanning/default-setup"),
+        }
+        observed = {(method, endpoint) for method, endpoint, _body, _allow in calls}
+        if observed != expected:
+            fail(f"live read endpoints were {observed}")
+
+
+def test_execute_rechecks_stale_fixture_before_mutation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        stale = enabled_fixture(secret_scanning="disabled")
+        provider = StaticObservedStateProvider(disabled_fixture())
+        mutator = CapturingGhApiMutator()
+        result = HARDENING.apply_plan(
+            root,
+            stale,
+            allowed_controls=["secret_scanning"],
+            execute=True,
+            mutator=mutator,
+            observed_state_provider=provider,
+        )
+        VALIDATOR.validate(result)
+        if not provider.calls:
+            fail("authoritative execute did not refresh observed state")
+        if result["eligible_apply"]:
+            fail("fresh required gaps were ignored in favor of stale fixture state")
+        if mutator.calls:
+            fail("mutation ran despite fresh unallowed required gaps")
+        if not any("push_protection" in item for item in result["blockers"]):
+            fail(f"fresh push-protection gap did not block: {result['blockers']}")
+
+
+def test_custom_execute_requires_observed_state_provider() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        try:
+            HARDENING.apply_plan(
+                root,
+                disabled_fixture(),
+                allowed_controls=[
+                    "secret_scanning",
+                    "push_protection",
+                    "dependabot_security_updates",
+                    "codeql_or_sast",
+                ],
+                execute=True,
+                mutator=CustomMutator(),
+            )
+        except HARDENING.HardeningError as exc:
+            if "observed-state provider" not in str(exc):
+                fail(f"unexpected custom-mutator freshness error: {exc}")
+        else:
+            fail("custom authoritative execute bypassed fresh observed-state requirement")
+
+
+def test_github_native_mutation_endpoints() -> None:
+    dependabot = HARDENING._github_mutation_request(
+        "example/app", "dependabot_security_updates", "enabled"
+    )
+    if dependabot != (
+        "PUT",
+        "repos/example/app/automated-security-fixes",
+        None,
+    ):
+        fail(f"Dependabot mutation route was {dependabot}")
+
+    codeql = HARDENING._github_mutation_request(
+        "example/app", "codeql_or_sast", "configured"
+    )
+    if codeql != (
+        "PATCH",
+        "repos/example/app/code-scanning/default-setup",
+        {"state": "configured"},
+    ):
+        fail(f"CodeQL mutation route was {codeql}")
+
+
 def test_execute_record_backend_is_idempotent_and_bounded() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -320,12 +491,14 @@ def test_execute_record_backend_is_idempotent_and_bounded() -> None:
         VALIDATOR.validate(result)
         if not result["eligible_apply"]:
             fail(f"execute blocked unexpectedly: {result['blockers']}")
-        if result["mode"] != "EXECUTE" or result["mutation"] != "APPLIED":
-            fail(f"execute result was mode={result['mode']} mutation={result['mutation']}")
+        if result["mode"] != "EXECUTE" or result["mutation"] != "PLANNED":
+            fail(f"record rehearsal was mode={result['mode']} mutation={result['mutation']}")
         if result["network"] != "NONE":
             fail("record backend must remain network-free")
         if len(mutator.calls) != 4:
             fail(f"mutator calls were {mutator.calls}")
+        if {item["status"] for item in result["apply_result"]} != {"DRY_RUN"}:
+            fail(f"record backend claimed apply: {result['apply_result']}")
         # Second execute against already-enabled fixture is NOOP.
         mutator2 = HARDENING.RecordingMutator()
         again = HARDENING.apply_plan(
@@ -412,6 +585,44 @@ def test_cli_dry_run_default_and_commands() -> None:
         applied = json.loads(apply.stdout)
         if applied["mode"] != "DRY_RUN" or applied["mutation"] not in {"NONE", "PLANNED"}:
             fail("apply default must remain dry-run")
+
+        rehearsal_args = [
+            sys.executable,
+            str(TOOL),
+            "apply",
+            "--root",
+            str(root),
+            "--github-fixture",
+            str(fixture),
+            "--execute",
+            "--mutation-backend",
+            "record",
+        ]
+        for control_id in (
+            "secret_scanning",
+            "push_protection",
+            "dependabot_security_updates",
+            "codeql_or_sast",
+        ):
+            rehearsal_args.extend(["--allowed-control", control_id])
+        rehearsal = subprocess.run(
+            rehearsal_args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if rehearsal.returncode != 0:
+            fail(f"record rehearsal failed: {rehearsal.stderr}")
+        rehearsed = json.loads(rehearsal.stdout)
+        VALIDATOR.validate(rehearsed)
+        if rehearsed["mode"] != "EXECUTE" or rehearsed["mutation"] != "PLANNED":
+            fail(f"record CLI claimed authoritative mutation: {rehearsed}")
+        if rehearsed["network"] != "NONE":
+            fail("record CLI rehearsal must stay network-free")
+        if {item["status"] for item in rehearsed["apply_result"]} != {"DRY_RUN"}:
+            fail(f"record CLI claimed applied status: {rehearsed['apply_result']}")
+
         blocked = subprocess.run(
             [
                 sys.executable,
@@ -454,6 +665,10 @@ def main() -> None:
     test_ambiguous_github_facts_block()
     test_foreign_fixture_blocks_apply()
     test_stale_plan_digest_rejected()
+    test_live_provider_replaces_caller_native_state()
+    test_execute_rechecks_stale_fixture_before_mutation()
+    test_custom_execute_requires_observed_state_provider()
+    test_github_native_mutation_endpoints()
     test_execute_record_backend_is_idempotent_and_bounded()
     test_execute_blocked_without_eligibility()
     test_cli_dry_run_default_and_commands()

@@ -362,8 +362,142 @@ def build_plan(
     return payload
 
 
+class ObservedStateProvider(Protocol):
+    def read(
+        self,
+        root: Path,
+        repository: str,
+        seed_fixture: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        ...
+
+
+def _gh_error_detail(completed: subprocess.CompletedProcess[str]) -> str:
+    detail = (completed.stderr or completed.stdout or "gh api failed").strip()
+    detail = detail.splitlines()[0][:400] if detail else "gh api failed"
+    return detail.replace("Bearer ", "").replace("token ", "")
+
+
+def _run_gh_api(
+    method: str,
+    endpoint: str,
+    *,
+    body: dict[str, Any] | None = None,
+    allow_not_found: bool = False,
+) -> dict[str, Any] | None:
+    command = ["gh", "api", "-X", method, endpoint]
+    payload = None
+    if body is not None:
+        command.extend(["--input", "-"])
+        payload = json.dumps(body)
+    completed = subprocess.run(
+        command,
+        input=payload,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = _gh_error_detail(completed)
+        if allow_not_found and ("HTTP 404" in detail or "Not Found" in detail):
+            return None
+        raise HardeningError(f"gh api {method} {endpoint} failed: {detail}")
+    text = (completed.stdout or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HardeningError(f"gh api {method} {endpoint} returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HardeningError(f"gh api {method} {endpoint} returned non-object JSON")
+    return parsed
+
+
+def _repository_security_status(document: dict[str, Any], key: str) -> str:
+    security = document.get("security_and_analysis")
+    if not isinstance(security, dict):
+        raise HardeningError("authoritative security_and_analysis state is unavailable")
+    value = security.get(key)
+    if not isinstance(value, dict) or value.get("status") not in {"enabled", "disabled"}:
+        raise HardeningError(f"authoritative GitHub setting is unavailable: {key}")
+    return str(value["status"])
+
+
+class GhApiObservedStateProvider:
+    """Fresh GitHub-native observation used only at the real execute boundary."""
+
+    def read(
+        self,
+        root: Path,
+        repository: str,
+        seed_fixture: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if PROFILE.REPO_RE.fullmatch(repository) is None:
+            raise HardeningError("repository identity is malformed")
+        if seed_fixture is not None:
+            binding = PROFILE.github_fixture_binding(root, seed_fixture)
+            if binding != "ok":
+                raise HardeningError(
+                    f"seed fixture binding is {binding}; live execute requires ok"
+                )
+
+        repository_document = _run_gh_api("GET", f"repos/{repository}")
+        if repository_document is None:
+            raise HardeningError("authoritative repository state is unavailable")
+        visibility = repository_document.get("visibility")
+        if visibility not in PROFILE.KNOWN_VISIBILITY:
+            raise HardeningError("authoritative repository visibility is unavailable")
+
+        dependabot_document = _run_gh_api(
+            "GET",
+            f"repos/{repository}/automated-security-fixes",
+            allow_not_found=True,
+        )
+        if dependabot_document is None:
+            dependabot_state = "disabled"
+        else:
+            enabled = dependabot_document.get("enabled")
+            paused = dependabot_document.get("paused")
+            if not isinstance(enabled, bool) or not isinstance(paused, bool):
+                raise HardeningError("authoritative Dependabot security-update state is malformed")
+            dependabot_state = "enabled" if enabled and not paused else "disabled"
+
+        codeql_document = _run_gh_api(
+            "GET",
+            f"repos/{repository}/code-scanning/default-setup",
+        )
+        if codeql_document is None or codeql_document.get("state") not in {
+            "configured",
+            "not-configured",
+        }:
+            raise HardeningError("authoritative CodeQL default-setup state is unavailable")
+
+        live: dict[str, Any] = {
+            "repository": repository,
+            "visibility": visibility,
+            "secret_scanning": _repository_security_status(
+                repository_document, "secret_scanning"
+            ),
+            "push_protection": _repository_security_status(
+                repository_document, "secret_scanning_push_protection"
+            ),
+            "dependabot_security_updates": dependabot_state,
+            "codeql_default_setup": codeql_document["state"],
+        }
+
+        # Preserve only non-GitHub-native context. Native control state and
+        # equivalent-SAST claims are always refreshed or fail closed here.
+        if seed_fixture is not None:
+            for key in ("privileged_tools", "bootstrap", "scope"):
+                if key in seed_fixture:
+                    live[key] = seed_fixture[key]
+        return live
+
+
 class RecordingMutator:
-    """Test/local mutator that records intended GitHub setting changes without network."""
+    """Network-free rehearsal that records intent but never claims external apply."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -375,11 +509,43 @@ class RecordingMutator:
             results.append(
                 {
                     "id": item["id"],
-                    "status": "APPLIED",
-                    "detail": f"recorded desired={item['desired']} for {repository}",
+                    "status": "DRY_RUN",
+                    "detail": f"rehearsal only; desired={item['desired']} for {repository}",
                 }
             )
         return results
+
+
+def _github_mutation_request(
+    repository: str,
+    control_id: str,
+    desired: str,
+) -> tuple[str, str, dict[str, Any] | None]:
+    if control_id == "secret_scanning" and desired == "enabled":
+        return (
+            "PATCH",
+            f"repos/{repository}",
+            {"security_and_analysis": {"secret_scanning": {"status": "enabled"}}},
+        )
+    if control_id == "push_protection" and desired == "enabled":
+        return (
+            "PATCH",
+            f"repos/{repository}",
+            {
+                "security_and_analysis": {
+                    "secret_scanning_push_protection": {"status": "enabled"}
+                }
+            },
+        )
+    if control_id == "dependabot_security_updates" and desired == "enabled":
+        return ("PUT", f"repos/{repository}/automated-security-fixes", None)
+    if control_id == "codeql_or_sast" and desired == "configured":
+        return (
+            "PATCH",
+            f"repos/{repository}/code-scanning/default-setup",
+            {"state": "configured"},
+        )
+    raise HardeningError(f"unsupported desired value for {control_id}: {desired}")
 
 
 class GhApiMutator:
@@ -388,39 +554,29 @@ class GhApiMutator:
     def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
         if PROFILE.REPO_RE.fullmatch(repository) is None:
             raise HardeningError("repository identity is malformed")
-        # Validate the full batch before any network mutation to avoid partial apply.
-        bodies: list[tuple[dict[str, str], dict[str, Any]]] = []
+
+        # Validate the full batch before any network mutation.
+        requests: list[
+            tuple[dict[str, str], str, str, dict[str, Any] | None]
+        ] = []
         for item in mutations:
             control_id = item["id"]
             if control_id not in APPLYABLE_CONTROLS:
                 raise HardeningError(f"refusing unsupported mutation: {control_id}")
-            bodies.append((item, _github_settings_patch(control_id, item["desired"])))
-        results: list[dict[str, str]] = []
-        for item, body in bodies:
-            control_id = item["id"]
-            completed = subprocess.run(
-                [
-                    "gh",
-                    "api",
-                    "-X",
-                    "PATCH",
-                    f"repos/{repository}",
-                    "--input",
-                    "-",
-                ],
-                input=json.dumps(body),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
+            method, endpoint, body = _github_mutation_request(
+                repository, control_id, item["desired"]
             )
-            if completed.returncode != 0:
-                detail = (completed.stderr or completed.stdout or "gh api failed").strip()
-                detail = detail.splitlines()[0][:400] if detail else "gh api failed"
-                # Never retain token-looking fragments.
-                detail = detail.replace("Bearer ", "").replace("token ", "")
+            requests.append((item, method, endpoint, body))
+
+        results: list[dict[str, str]] = []
+        for item, method, endpoint, body in requests:
+            control_id = item["id"]
+            try:
+                _run_gh_api(method, endpoint, body=body)
+            except HardeningError as exc:
+                detail = str(exc)[:400]
                 results.append({"id": control_id, "status": "FAILED", "detail": detail})
-                raise HardeningError(f"mutation failed for {control_id}: {detail}")
+                raise HardeningError(f"mutation failed for {control_id}: {detail}") from exc
             results.append(
                 {
                     "id": control_id,
@@ -431,29 +587,6 @@ class GhApiMutator:
         return results
 
 
-def _github_settings_patch(control_id: str, desired: str) -> dict[str, Any]:
-    if control_id == "secret_scanning" and desired == "enabled":
-        return {"security_and_analysis": {"secret_scanning": {"status": "enabled"}}}
-    if control_id == "push_protection" and desired == "enabled":
-        return {
-            "security_and_analysis": {
-                "secret_scanning_push_protection": {"status": "enabled"}
-            }
-        }
-    if control_id == "dependabot_security_updates" and desired == "enabled":
-        return {
-            "security_and_analysis": {
-                "dependabot_security_updates": {"status": "enabled"}
-            }
-        }
-    if control_id == "codeql_or_sast" and desired == "configured":
-        # Default setup enablement is a separate endpoint; refuse silent substitute.
-        raise HardeningError(
-            "codeql_or_sast execute requires explicit code-scanning default-setup path"
-        )
-    raise HardeningError(f"unsupported desired value for {control_id}: {desired}")
-
-
 def apply_plan(
     root: Path,
     fixture: dict[str, Any] | None,
@@ -462,13 +595,49 @@ def apply_plan(
     execute: bool,
     expect_plan_digest: str | None = None,
     mutator: Mutator | None = None,
+    observed_state_provider: ObservedStateProvider | None = None,
 ) -> dict[str, Any]:
     mode = "EXECUTE" if execute else "DRY_RUN"
-    plan = build_plan(root, fixture, allowed_controls=allowed_controls, mode=mode)
+    active = mutator
+    effective_fixture = fixture
+    github_read = False
+
+    if execute:
+        if active is None:
+            active = GhApiMutator()
+        if not isinstance(active, RecordingMutator):
+            repository = PROFILE.local_repository_identity(root)
+            if repository is None:
+                raise HardeningError("repository identity is unavailable")
+            provider = observed_state_provider
+            if provider is None:
+                if not isinstance(active, GhApiMutator):
+                    raise HardeningError(
+                        "authoritative execute requires an observed-state provider"
+                    )
+                provider = GhApiObservedStateProvider()
+            effective_fixture = provider.read(root, repository, fixture)
+            github_read = isinstance(provider, GhApiObservedStateProvider)
+
+    plan = build_plan(
+        root,
+        effective_fixture,
+        allowed_controls=allowed_controls,
+        mode=mode,
+    )
+    if github_read:
+        plan["network"] = "GITHUB_READ"
+
     if expect_plan_digest:
-        # Recompute dry-run digest material and compare caller expectation.
+        # Compare against the exact facts used for this execution. A stale
+        # caller fixture cannot preserve a previously computed digest because
+        # real GitHub execution first replaces GitHub-native state with a
+        # fresh authoritative read.
         baseline = build_plan(
-            root, fixture, allowed_controls=allowed_controls, mode="DRY_RUN"
+            root,
+            effective_fixture,
+            allowed_controls=allowed_controls,
+            mode="DRY_RUN",
         )
         if expect_plan_digest != baseline["plan_digest"]:
             raise HardeningError(
@@ -482,7 +651,7 @@ def apply_plan(
 
     if not plan["eligible_apply"]:
         plan["mutation"] = "NONE"
-        plan["network"] = "NONE"
+        plan["network"] = "GITHUB_READ" if github_read else "NONE"
         plan["apply_result"] = []
         Draft202012Validator(load_schema()).validate(plan)
         return plan
@@ -490,25 +659,22 @@ def apply_plan(
     if plan["repository"] is None:
         raise HardeningError("repository identity is unavailable")
 
-    active = mutator
-    network = "NONE"
-    if active is None:
-        active = GhApiMutator()
-        network = "GITHUB_SETTINGS"
-    elif isinstance(active, GhApiMutator):
-        network = "GITHUB_SETTINGS"
-
     if not plan["planned_mutations"]:
         plan["mutation"] = "NONE"
-        plan["network"] = "NONE"
+        plan["network"] = "GITHUB_READ" if github_read else "NONE"
         plan["apply_result"] = []
         Draft202012Validator(load_schema()).validate(plan)
         return plan
 
+    assert active is not None
     results = active.apply(plan["repository"], plan["planned_mutations"])
     plan["apply_result"] = results
-    plan["mutation"] = "APPLIED"
-    plan["network"] = network
+    if isinstance(active, RecordingMutator):
+        plan["mutation"] = "PLANNED"
+        plan["network"] = "NONE"
+    else:
+        plan["mutation"] = "APPLIED"
+        plan["network"] = "GITHUB_SETTINGS" if isinstance(active, GhApiMutator) else "NONE"
     # Digest stays bound to desired-state material, not apply_result.
     Draft202012Validator(load_schema()).validate(plan)
     return plan

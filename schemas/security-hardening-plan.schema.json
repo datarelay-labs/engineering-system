@@ -175,7 +175,7 @@
     },
     "network": {
       "type": "string",
-      "enum": ["NONE", "GITHUB_SETTINGS"]
+      "enum": ["NONE", "GITHUB_READ", "GITHUB_SETTINGS"]
     },
     "apply_result": {
       "type": "array",
@@ -223,7 +223,7 @@
       "then": {
         "properties": {
           "mutation": {"const": "NONE"},
-          "network": {"const": "NONE"}
+          "network": {"enum": ["NONE", "GITHUB_READ"]}
         }
       }
     }
