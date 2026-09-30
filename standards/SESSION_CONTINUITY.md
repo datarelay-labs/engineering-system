@@ -643,85 +643,24 @@ After preflight PASS, Chat may implement directly through the authorized SSH/rem
 
 The implementing Chat context also owns terminal audit by default. It must re-read current Work Packet, exact HEAD, PR/CI, tests, and actionable review state instead of treating its own implementation narrative as evidence. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require deeper exact-HEAD machine evidence and any applicable human approval, but do not require a separate model/provider actor. Codex, a fresh Chat context, or the provider-neutral independent verifier remains optional defense-in-depth/escalation and must not become a quota-dependent default blocker.
 
-## Dormant optional Cursor adapter behavior
+## Execution loop, CI, and parallel work
 
-Cursor is disabled by default. Do not start, resume, attach to, wait on, or hand implementation to Cursor unless the owner explicitly reactivates the adapter for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block the ChatGPT implementation path.
+Keep the normal engineering loop short:
 
-Repository adoption may retain `.cursor/commands/resume.md`. Managed upgrades must keep that adapter synchronized with the canonical template. When a known local alias such as `.cursor/commands/work-resume.md` is already present or explicitly managed, keep it synchronized to the same canonical resume text.
-
-The resume command:
-
-- requires a working local shell/process and Git context for repository implementation; if these cannot start, reports `ENVIRONMENT_BLOCKER` instead of probing unrelated knowledge systems
-- derives repository/branch/HEAD from Git
-- loads the repository-scoped active Work Packet only through an available GitHub integration or authenticated `gh` for the resolved origin repository
-- rejects pasted, conversational, or otherwise untrusted packet copies with `WORK_PACKET_PROVENANCE_UNTRUSTED`
-- rejects Work Packet Issues whose author lacks effective `write`/`maintain`/`admin` permission with `WORK_PACKET_AUTHOR_UNTRUSTED`; `author_association` MUST NOT authorize execution
-- fails closed on incomplete adopted-project context unless `TASK_KIND=ADOPTION`
-- fails closed on missing/ambiguous packets, invalid status values, or material owner-intent/Next-Action mismatch
-- reads only task-relevant canonical references with minimum sufficient reasoning/context
-- executes the current bounded local/deterministic phase beginning at `Next Action`
-- updates the same packet with concise verified state/evidence after meaningful milestones
-- yields instead of polling when CI/review/deployment or another machine-observable external condition is pending; coordinator/automation owns waiting and re-entry
-- uses BLOCKED only for human/external actions that cannot be resolved by machine-observable re-entry
-
-Only after explicit owner reactivation of the Cursor adapter, reuse one healthy project/repository persistent Cursor session across sequential work. Cursor quota/session availability is never a prerequisite for the default ChatGPT Chat path. A long-lived session is not a substitute for durable packet state or external orchestration: reload authority with `/work-resume` after every context reset or workstream switch.
-
-## Persistent-session resource guard
-
-Before creating a new `agent persist` session, run the canonical preflight. Routine reuse of the existing project session does not run this preflight:
-
-```bash
-python3 tools/cursor-resource-preflight.py
+```text
+understand -> implement a coherent small/medium batch -> affected local tests -> iterate until locally clean -> PR/fast CI when useful -> address blocking findings -> merge
 ```
 
-`ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD`, when set, names that preflight executable. It is never threshold configuration and is never parsed as YAML. Host policy may override thresholds without editing a repository, using `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG` or `~/.config/engineering-system/cursor-resource-guard.yaml` (then `/etc/engineering-system/cursor-resource-guard.yaml`). A missing or malformed explicit override fails closed. Exit 0 is `PASS` or `WARN` and may proceed. Exit 2 blocks on memory, swap, or session pressure. Exit 3 blocks because memory facts, `agent persist list`, or the override could not be trusted. Neither blocking result may stop or mutate existing Cursor sessions. Unsupported platforms report `BLOCK` instead of guessing. The always-applied Cursor rule stays small; this tool and this standard hold the procedure.
+Guidance:
+- A progress update is not a handoff. Continue while a safe authorized next action exists.
+- Prefer the cheapest relevant local tests during implementation. Fast CI is feedback, not release qualification; do not run expensive/full/release suites after every edit.
+- Batch related corrective findings before the next expensive qualification run.
+- When waiting on CI/review or another machine-observable condition, work on the highest-priority independent roadmap item rather than polling.
+- Parallel work is allowed when dependencies are satisfied and worktrees, owned paths, shared mutable runtimes, and irreversible external effects do not conflict. Use a separate worktree/state owner for concurrent mutation.
+- Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-Chat work.
+- Stop only for a genuine owner decision/credential, an irreconcilable blocker, an explicit status-only request, or a completed bounded outcome.
 
-## External-wait work conservation
-
-A machine-observable wait is not a reason for ChatGPT to idle. When an active workstream is waiting on CI, tests, review, deployment, scheduled checks, or another external condition:
-
-1. persist/reconcile the exact waiting condition and delegate re-entry to coordinator/automation rather than polling;
-2. scan the same repository roadmap plus trusted ACTIVE/eligible Work Packets, then portfolio roadmap only when repository-local eligible work is exhausted;
-3. select the highest owner-priority dependency-eligible item whose worktree, owned paths, runtime, external mutation boundary, and declared dependencies do not overlap the waiting work;
-4. run normal work_admission.py admit and all authority/preflight gates before starting it in a separate worktree/state owner;
-5. continue useful independent work while the original external wait remains, and return when automation/coordinator observes the terminal condition;
-6. idle only when no safe eligible roadmap work exists.
-
-This is work conservation, not unrestricted concurrency. Never bypass WIP/resource limits, dependency order, exact-HEAD binding, repository authority, or overlapping-path/runtime protections. Do not manufacture low-value work merely to avoid waiting.
-
-## Parallel-work admission and WIP ownership
-
-Default execution remains sequential. A second worker may start only when a coordinator proves independence from packet/claim/worktree/resource facts.
-
-Use the canonical oracle:
-
-```bash
-python3 tools/work_admission.py admit --request-json <facts.json>
-python3 tools/work_admission.py size --request-json <sizing.json>
-python3 tools/work_admission.py release --request-json <release.json>
-```
-
-Admission identity is `repository + workstream + intent_revision`, scoped to a dedicated worktree when concurrent. Machine-readable claims must record owned paths and any shared runtime id with an explicit isolation flag.
-
-`admit` returns `ALLOW` only when all of the following hold:
-
-- host resource preflight facts are `PASS` or `WARN` (never invent capacity by stopping unrelated sessions);
-- active claim count is below the configured WIP limit (default `1`, so parallelism is off unless raised);
-- no shared worktree with an active claim;
-- no overlapping claim identity or conflicting intent revision on the same workstream;
-- no overlapping owned paths;
-- no shared mutable runtime unless every concurrent claimant marks that runtime isolated;
-- no ambiguous proposed or active claim.
-
-Otherwise `admit` returns `DENY` with an explicit class such as `WIP_LIMIT`, `SHARED_WORKTREE`, `OVERLAPPING_CLAIM`, `STALE_INTENT_REVISION`, `OVERLAPPING_PATHS`, `SHARED_RUNTIME`, `HOST_BUDGET`, or `AMBIGUOUS_CLAIM`. Exit `3` is reserved for malformed/untrusted facts.
-
-`size` emits deterministic `BATCH` / `KEEP` / `SPLIT` from structured sizing signals (primary outcome count, adjacent shared oracle, unrelated domains/gates/rollback, effort band, and context budget). File/LOC/Issue counts are inputs only when encoded as those signals; they are not the sizing authority.
-
-`release` reconciles ownership safely:
-
-- `release-claim` allows COMPLETE / ABANDON / SUPERSEDED / RELEASED claims;
-- `cleanup-worktree` additionally refuses dirty, unpushed, or ambiguous state;
-- neither action may stop or mutate unrelated Cursor sessions to reclaim capacity.
+Release qualification follows `standards/RELEASE.md` and the target repository release profile. Product-specific choreography belongs in that repository, not in this continuity standard.
 
 ## Optional independent verifier for additional terminal evidence
 
