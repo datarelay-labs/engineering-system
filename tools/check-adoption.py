@@ -255,14 +255,6 @@ def main() -> int:
                 failures.append(
                     "engineering_system.version does not match canonical checker version"
                 )
-            if "ChatGPT Chat is the default implementer" not in agents_text:
-                failures.append(
-                    "AGENTS.md missing Chat-primary daytime implementer instruction"
-                )
-            if "implementation_preflight.py check" not in agents_text:
-                failures.append(
-                    "AGENTS.md missing Chat-primary implementation preflight instruction"
-                )
             packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
             if packet_template.is_file():
                 packet_text = packet_template.read_text(encoding="utf-8", errors="replace")

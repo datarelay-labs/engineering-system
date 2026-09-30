@@ -367,7 +367,7 @@ After resolving Git identity and before ordinary work:
 11. When task-local files are not already obvious and the worktree is clean, use `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>"` before broad repo-wide grep/read. The orientation is bound to exact `HEAD`, ranks only Git-tracked relative paths plus declared canonical knowledge metadata, emits no file content, and is a JIT read hint rather than authority. `ORIENTATION_DECISION=NO_MATCH` or insufficient evidence permits bounded expansion; dirty worktrees fail closed rather than presenting a stale HEAD map.
 12. For a large optional text candidate, prefer `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>" --slice-path <relative-path>` before a full read. Slice mode reads the exact-HEAD tracked UTF-8 blob and emits bounded JSON-encoded task-relevant line windows in source order. It is a context-reduction hint only: `SLICE_DECISION=NO_MATCH`, truncation, or insufficient evidence permits a bounded full read. Never use slicing as a substitute for mandatory `AGENTS.md`, `.engineering/project.yaml`, managed rules, protected Work Packet state, acceptance criteria, or a canonical reference the task requires in full.
 13. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity. For explicitly eligible line-oriented output that must remain available during the same task, `tools/context_tool_output.py` may emit deterministic bounded head/tail + task/diagnostic line records while storing the exact original only through the existing private `context_fold.py` store. The recovery marker is a retrieval handle, not evidence authority. Protected/authority output must not be reduced; bypass must be store-free; truncation never implies semantic equivalence or provider token/cost savings.
-14. Durable authority stays in the Work Packet; stale conversation is not authority. ChatGPT Chat is the default and may resume from authenticated GitHub packet/repository facts without the prior transcript; before each new bounded mutation cycle it must rerun the trusted immutable-source implementation preflight. Cursor is not part of the default lifecycle. Only an explicit owner reactivation with `IMPLEMENTER=CURSOR` may enter the dormant Cursor adapter path; then its historical persistent-session safety rules apply.
+14. Durable authority stays in the Work Packet; stale conversation is not authority. ChatGPT Chat may resume from durable GitHub packet/repository facts without the prior transcript. Verify the actual repository/branch/HEAD before mutation and use stronger approval boundaries only where the action risk requires them.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -485,7 +485,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority. Cursor-specific `/clear` / `/work-resume` semantics apply only inside the dormant adapter after explicit owner reactivation.
+Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority. Cursor is retired and has no session-continuity path.
 
 ## Pure coordinator planner
 
@@ -737,7 +737,6 @@ For repositories using session continuity:
 
 - add the AI Work Packet Issue template
 - preserve the canonical `[AI Work]` title prefix
-- add Cursor `/resume` command when Cursor is used
-- ensure ChatGPT/Cursor adapters know to resolve repository first
+- ensure ChatGPT resolves the repository and current durable state first
 - never store secrets in Work Packets
 - never use a Work Packet update as release evidence
