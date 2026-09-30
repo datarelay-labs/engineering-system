@@ -224,6 +224,7 @@ def main() -> int:
                         )
             for rel in (
                 "tools/implementation_preflight.py",
+                "tools/terminal_completion_notify.py",
                 "tools/context_epoch.py",
                 "tools/engineering-context.py",
                 "tools/work_packet_authority.py",

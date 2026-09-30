@@ -99,6 +99,7 @@ def test_clean_python_bootstrap() -> None:
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
             "tools/implementation_preflight.py",
+            "tools/terminal_completion_notify.py",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -1658,7 +1659,12 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "context_epoch.py"
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        notifier = target / "tools" / "terminal_completion_notify.py"
+        assert notifier.read_bytes() == (
+            ROOT / "tools" / "terminal_completion_notify.py"
+        ).read_bytes()
         helper.unlink()
+        notifier.unlink()
         compliance = run(
             sys.executable,
             str(CHECK),
@@ -1668,6 +1674,10 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert compliance.returncode != 0
         assert "Chat-primary adoption missing required helper tools/context_epoch.py" in compliance.stdout
+        assert (
+            "Chat-primary adoption missing required helper tools/terminal_completion_notify.py"
+            in compliance.stdout
+        )
 
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)
@@ -1687,7 +1697,14 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert (
+            "TERMINAL_COMPLETION_NOTIFY_INSTALLED=tools/terminal_completion_notify.py"
+            in upgraded.stdout
+        )
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert notifier.read_bytes() == (
+            ROOT / "tools" / "terminal_completion_notify.py"
+        ).read_bytes()
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
         helper.write_text("#!/usr/bin/env python3\nprint('divergent')\n", encoding="utf-8")
