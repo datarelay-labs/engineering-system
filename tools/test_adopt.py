@@ -555,6 +555,53 @@ def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> 
 
 
 
+def test_managed_file_old_baseline_is_trusted_without_manifest() -> None:
+    upgrade_path = ROOT / "tools" / "upgrade-adoption.py"
+    spec = importlib.util.spec_from_file_location("upgrade_adoption_old_baseline", upgrade_path)
+    assert spec and spec.loader
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        canonical = base / "canonical"
+        target = base / "target"
+        rel = "tools/example-managed.py"
+        canonical.mkdir()
+        init_repo(canonical)
+        (canonical / rel).parent.mkdir(parents=True, exist_ok=True)
+        prior = b"prior baseline managed bytes\n"
+        current = b"current managed bytes\n"
+        custom = b"project custom bytes\n"
+        (canonical / rel).write_bytes(prior)
+        commit_all(canonical, "prior baseline")
+        prior_sha = run("git", "rev-parse", "HEAD", cwd=canonical).stdout.strip()
+        (canonical / rel).write_bytes(current)
+        commit_all(canonical, "current baseline")
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+
+        original = upgrade.CANONICAL
+        upgrade.CANONICAL = canonical
+        try:
+            (target / rel).write_bytes(prior)
+            planned = upgrade.plan_managed_file_install(
+                target, (rel,), label="fixture", old_baseline=prior_sha
+            )
+            assert planned == {rel: current.decode("utf-8")}
+
+            (target / rel).write_bytes(custom)
+            try:
+                upgrade.plan_managed_file_install(
+                    target, (rel,), label="fixture", old_baseline=prior_sha
+                )
+            except SystemExit as exc:
+                assert "local/custom changes" in str(exc)
+            else:
+                raise AssertionError("custom bytes were accepted from old baseline trust")
+        finally:
+            upgrade.CANONICAL = original
+
+
 def test_grant_style_baseline_declarations_upgraded() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-grant-decls"
@@ -2363,6 +2410,7 @@ def main() -> int:
     test_same_baseline_repairs_managed_execution_policy()
     test_managed_file_hash_manifests_match_immutable_revisions()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
+    test_managed_file_old_baseline_is_trusted_without_manifest()
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()
     test_stale_outside_form_declaration_fails_without_partial_upgrade()
