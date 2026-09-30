@@ -655,7 +655,7 @@ Guidance:
 - A progress update is not a handoff. Continue while a safe authorized next action exists.
 - Prefer the cheapest relevant local tests during implementation. Fast CI is feedback, not release qualification; do not run expensive/full/release suites after every edit.
 - Batch related corrective findings before the next expensive qualification run.
-- When waiting on CI/review or another machine-observable condition, work on the highest-priority independent roadmap item rather than polling.
+- When a workstream is waiting on CI/review/deploy or another machine-observable condition, persist the named wait and yield that workstream back to repository-level scheduling. Select the highest-priority dependency-eligible independent ACTIVE Work Packet/worktree when safe rather than polling or stopping. The single matching ACTIVE packet rule is scoped to the current branch/workstream and must not be interpreted as repository-wide serialization behind a waiting packet.
 - Parallel work is allowed when dependencies are satisfied and worktrees, owned paths, shared mutable runtimes, and irreversible external effects do not conflict. Use a separate worktree/state owner for concurrent mutation.
 - Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-Chat work.
 - Stop only for a genuine owner decision/credential, an irreconcilable blocker, an explicit status-only request, or a completed bounded outcome.
