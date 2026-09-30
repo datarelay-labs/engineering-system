@@ -661,7 +661,13 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
             if separator != b"\t":
                 raise ValueError("tree entry")
             mode, kind, oid = meta.split()
-            if kind != b"blob" or mode in {b"120000", b"160000"}:
+            # Symlinks and gitlinks/submodules are intentionally omitted from
+            # the private subject tree. Never follow or fetch them. A command
+            # that depends on an omitted entry will fail closed because the
+            # path is absent from the exact-HEAD materialization.
+            if mode in {b"120000", b"160000"}:
+                continue
+            if kind != b"blob":
                 raise ValueError("unsupported tree entry")
             relative = path.decode("utf-8", "surrogateescape")
             if relative.startswith("/") or "\x00" in relative:
