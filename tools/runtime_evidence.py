@@ -723,15 +723,20 @@ def _decode_trace_string(raw: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _trace_unsafe_access_reason(trace_path: Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
-    try:
-        if not trace_path.is_file():
+def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
+    if isinstance(trace_source, Path):
+        try:
+            if not trace_source.is_file():
+                return "TRACE_UNAVAILABLE"
+            if trace_source.stat().st_size > TRACE_LIMIT_BYTES:
+                return "TRACE_LIMIT"
+            trace = trace_source.read_text(encoding="utf-8", errors="replace")
+        except OSError:
             return "TRACE_UNAVAILABLE"
-        if trace_path.stat().st_size > TRACE_LIMIT_BYTES:
+    else:
+        trace = trace_source
+        if len(trace.encode("utf-8", errors="replace")) > TRACE_LIMIT_BYTES:
             return "TRACE_LIMIT"
-        trace = trace_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return "TRACE_UNAVAILABLE"
 
     base = os.path.normpath(str(work.resolve()))
     unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
@@ -757,17 +762,18 @@ def _trace_unsafe_access_reason(trace_path: Path, work: Path, unsafe_paths: tupl
                 continue
             if os.path.isabs(decoded):
                 normalized = os.path.normpath(decoded)
-                if normalized == base:
-                    relative = "."
-                elif normalized.startswith(base + os.sep):
-                    relative = os.path.relpath(normalized, base)
-                else:
-                    continue
             else:
-                normalized = os.path.normpath(decoded)
-                if normalized == ".." or normalized.startswith(".." + os.sep):
-                    continue
-                relative = normalized
+                # strace reports AT_FDCWD-relative names exactly as supplied.
+                # Resolve them against the fixed subject cwd before deciding
+                # whether they escape. This catches aliases such as
+                # ../tree/optional-config that normalize back into the root.
+                normalized = os.path.normpath(os.path.join(base, decoded))
+            if normalized == base:
+                relative = "."
+            elif normalized.startswith(base + os.sep):
+                relative = os.path.relpath(normalized, base)
+            else:
+                continue
             relative_posix = Path(relative).as_posix()
             for blocked in unsafe:
                 if relative_posix == blocked or relative_posix.startswith(blocked + "/"):
@@ -793,14 +799,17 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         _release_subject_tree(temporary)
         return "EXECUTION_FAILED", "CODE_UNBOUND", b""
 
-    trace_path: Path | None = None
+    trace_enabled = bool(unsafe_paths)
     exec_argv = trusted
-    if unsafe_paths:
+    if trace_enabled:
         tracer = _trusted_trace_argv()
-        if tracer is None:
+        wrapper = _trusted_argv(["sh"])
+        if tracer is None or wrapper is None:
             _release_subject_tree(temporary)
             return "EXECUTION_FAILED", "TRACE_SETUP_UNAVAILABLE", b""
-        trace_path = Path(temporary.name) / "file-access.trace"
+        # Keep strace on its own stderr pipe. The fixed trusted wrapper redirects
+        # the tracee's stderr to stdout before exec, so the traced command never
+        # receives the trace channel and cannot replace/forge terminal evidence.
         exec_argv = [
             *tracer,
             "-f",
@@ -809,103 +818,128 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             "4096",
             "-e",
             "trace=%file",
-            "-o",
-            str(trace_path),
             "--",
+            *wrapper,
+            "-c",
+            'exec "$@" 2>&1',
+            "engineering-runtime-evidence",
             *trusted,
         ]
 
     proc: subprocess.Popen[bytes] | None = None
+    trace_stream: object | None = None
     try:
         proc = subprocess.Popen(
             exec_argv,
             cwd=work,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE if trace_enabled else subprocess.STDOUT,
             shell=False,
             start_new_session=True,
             env=_execution_environment(),
         )
         stdout = proc.stdout
-        if stdout is None:
+        trace_stream = proc.stderr if trace_enabled else None
+        if stdout is None or (trace_enabled and trace_stream is None):
             _stop_group(proc, stdout)
             return "EXECUTION_FAILED", "OUTPUT_PIPE", b""
-        fd = stdout.fileno()
-        os.set_blocking(fd, False)
-        chunks: list[bytes] = []
-        total = 0
-        deadline = time.monotonic() + TIMEOUT_SECONDS
+        output_fd = stdout.fileno()
+        os.set_blocking(output_fd, False)
+        trace_fd = None
+        if trace_enabled:
+            trace_fd = trace_stream.fileno()  # type: ignore[union-attr]
+            os.set_blocking(trace_fd, False)
 
-        def absorb(block: bytes) -> bool:
-            nonlocal total
+        chunks: list[bytes] = []
+        trace_chunks: list[bytes] = []
+        total = 0
+        trace_total = 0
+        deadline = time.monotonic() + TIMEOUT_SECONDS
+        open_fds: dict[int, str] = {output_fd: "output"}
+        if trace_fd is not None:
+            open_fds[trace_fd] = "trace"
+        status = ""
+
+        def absorb(kind: str, block: bytes) -> bool:
+            nonlocal total, trace_total
+            if kind == "trace":
+                if trace_total + len(block) > TRACE_LIMIT_BYTES:
+                    return False
+                trace_chunks.append(block)
+                trace_total += len(block)
+                return True
             if total + len(block) > OUTPUT_LIMIT_BYTES:
                 return False
             chunks.append(block)
             total += len(block)
             return True
 
-        pipe_open = True
-        status = ""
         while not status:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 status = "timeout"
                 break
-            if trace_path is not None:
-                try:
-                    if trace_path.is_file() and trace_path.stat().st_size > TRACE_LIMIT_BYTES:
-                        status = "trace_limit"
-                        break
-                except OSError:
-                    status = "trace_unavailable"
-                    break
             exited = proc.poll() is not None
-            if pipe_open:
-                readable, _, _ = select.select([fd], [], [], 0 if exited else min(0.2, remaining))
-                if readable:
+            if open_fds:
+                readable, _, _ = select.select(
+                    list(open_fds), [], [], 0 if exited else min(0.2, remaining)
+                )
+                for fd in readable:
                     try:
-                        block = os.read(fd, 1024)
+                        block = os.read(fd, 4096)
                     except BlockingIOError:
                         continue
-                    if block:
-                        if not absorb(block):
-                            status = "limit"
-                            break
+                    if not block:
+                        open_fds.pop(fd, None)
                         continue
-                    pipe_open = False
+                    kind = open_fds.get(fd, "output")
+                    if not absorb(kind, block):
+                        status = "trace_limit" if kind == "trace" else "limit"
+                        break
+                if status:
+                    break
+                if readable:
+                    continue
             if exited or proc.poll() is not None:
                 status = "exited"
                 break
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-        if status == "exited" and pipe_open:
-            while True:
-                try:
-                    block = os.read(fd, 1024)
-                except BlockingIOError:
+
+        if status == "exited" and open_fds:
+            for fd in list(open_fds):
+                kind = open_fds[fd]
+                while True:
+                    try:
+                        block = os.read(fd, 4096)
+                    except BlockingIOError:
+                        break
+                    if not block:
+                        break
+                    if not absorb(kind, block):
+                        status = "trace_limit" if kind == "trace" else "limit"
+                        break
+                if status != "exited":
                     break
-                if not block:
-                    break
-                if not absorb(block):
-                    status = "limit"
-                    break
-        if status in {"limit", "timeout", "trace_limit", "trace_unavailable"}:
+
+        if status in {"limit", "timeout", "trace_limit"}:
             if status == "limit":
                 return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
             if status == "trace_limit":
                 return "EXECUTION_FAILED", "TRACE_LIMIT", b""
-            if status == "trace_unavailable":
-                return "EXECUTION_FAILED", "TRACE_UNAVAILABLE", b""
             return "TIMEOUT", "TIMEOUT", b""
         try:
             code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             return "TIMEOUT", "TIMEOUT", b""
         stdout.close()
+        if trace_stream is not None:
+            trace_stream.close()  # type: ignore[union-attr]
         output = b"".join(chunks)
         if code != 0:
             return "EXECUTION_FAILED", f"EXIT_{code}", output
-        if trace_path is not None:
-            trace_reason = _trace_unsafe_access_reason(trace_path, work, unsafe_paths)
+        if trace_enabled:
+            trace = b"".join(trace_chunks).decode("utf-8", errors="replace")
+            trace_reason = _trace_unsafe_access_reason(trace, work, unsafe_paths)
             if trace_reason is not None:
                 return "EXECUTION_FAILED", trace_reason, b""
         return "CAPTURED", "OK", output
@@ -914,8 +948,14 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     finally:
         if proc is not None:
             _stop_group(proc, proc.stdout)
+        if trace_stream is not None:
+            close = getattr(trace_stream, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except OSError:
+                    pass
         _release_subject_tree(temporary)
-
 
 def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Path:
     git_dir = _git(root, "rev-parse", "--absolute-git-dir")

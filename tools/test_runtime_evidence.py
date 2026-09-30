@@ -657,6 +657,70 @@ def test_indirect_symlink_fallback_is_rejected() -> None:
             clear_trust()
 
 
+def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-config')\n"
+        "_ = path.exists()\n"
+        "trace = Path('../file-access.trace')\n"
+        "try:\n"
+        "    trace.unlink()\n"
+        "except FileNotFoundError:\n"
+        "    pass\n"
+        "trace.write_text('')\n"
+        "print('FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "trace replacement regression")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+            assert "raw_output" not in private_record(repo)
+        finally:
+            clear_trust()
+
+
+def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('../tree/optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "parent relative unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
 def test_indirect_gitlink_fallback_is_rejected() -> None:
     command = "python3 health.py"
     script = (
@@ -719,6 +783,8 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
         trace.write_text('123 newfstatat(3, "dependency", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(AT_FDCWD, "../tree/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "UNSAFE_TREE_DEPENDENCY"
 
 
 def test_referenced_gitlink_does_not_execute() -> None:
