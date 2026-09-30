@@ -483,6 +483,47 @@ def test_live_provider_replaces_caller_native_state() -> None:
             fail(f"live read endpoints were {observed}")
 
 
+def test_live_provider_treats_dependabot_204_as_enabled() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        original = HARDENING._run_gh_api
+
+        def fake_run_gh_api(
+            method: str,
+            endpoint: str,
+            *,
+            body: dict[str, object] | None = None,
+            allow_not_found: bool = False,
+        ) -> dict[str, object] | None:
+            if endpoint == "repos/example/app":
+                return {
+                    "visibility": "private",
+                    "security_and_analysis": {
+                        "secret_scanning": {"status": "enabled"},
+                        "secret_scanning_push_protection": {"status": "enabled"},
+                    },
+                }
+            if endpoint == "repos/example/app/automated-security-fixes":
+                return {}
+            if endpoint == "repos/example/app/code-scanning/default-setup":
+                return {"state": "configured"}
+            fail(f"unexpected gh endpoint {method} {endpoint}")
+            return None
+
+        HARDENING._run_gh_api = fake_run_gh_api
+        try:
+            live = HARDENING.GhApiObservedStateProvider().read(
+                root,
+                "example/app",
+                enabled_fixture(),
+            )
+        finally:
+            HARDENING._run_gh_api = original
+
+        if live["dependabot_security_updates"] != "enabled":
+            fail(f"Dependabot 204 was not treated as enabled: {live}")
+
+
 def test_execute_rechecks_stale_fixture_before_mutation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -827,6 +868,7 @@ def main() -> None:
     test_foreign_fixture_blocks_apply()
     test_stale_plan_digest_rejected()
     test_live_provider_replaces_caller_native_state()
+    test_live_provider_treats_dependabot_204_as_enabled()
     test_execute_rechecks_stale_fixture_before_mutation()
     test_custom_execute_requires_observed_state_provider()
     test_custom_authoritative_mutator_requires_network_boundary()

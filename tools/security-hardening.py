@@ -459,6 +459,10 @@ class GhApiObservedStateProvider:
         )
         if dependabot_document is None:
             dependabot_state = "disabled"
+        elif dependabot_document == {}:
+            # GitHub's "check automated security fixes" endpoint returns
+            # 204 No Content when the feature is enabled.
+            dependabot_state = "enabled"
         else:
             enabled = dependabot_document.get("enabled")
             paused = dependabot_document.get("paused")
