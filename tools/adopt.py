@@ -529,6 +529,25 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def require_repository_relative_contract(root: Path, value: str, label: str) -> Path:
+    raw = value.strip()
+    relative = Path(raw)
+    if not raw or relative.is_absolute() or ".." in relative.parts:
+        raise SystemExit(
+            f"FAIL user-facing {label} contract path must be repository-relative and stay inside repository: {raw}"
+        )
+    try:
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        raise SystemExit(
+            f"FAIL user-facing {label} contract path must be repository-relative and stay inside repository: {raw}"
+        )
+    if not candidate.is_file():
+        raise SystemExit(f"FAIL user-facing {label} contract missing: {raw}")
+    return candidate
+
+
 def parse_domain_tests(values: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for value in values:
@@ -1100,9 +1119,7 @@ def main() -> int:
         if not args.surface_reconciliation_contract.strip() or not args.full_user_e2e_contract.strip():
             raise SystemExit("FAIL --user-facing requires both --surface-reconciliation-contract and --full-user-e2e-contract")
         for label, rel in (("surface reconciliation", args.surface_reconciliation_contract), ("Full User E2E", args.full_user_e2e_contract)):
-            path = root / rel
-            if not path.is_file():
-                raise SystemExit(f"FAIL user-facing {label} contract missing: {rel}")
+            require_repository_relative_contract(root, rel, label)
     elif args.primary_user_surface != "none":
         raise SystemExit("FAIL --primary-user-surface requires --user-facing")
 

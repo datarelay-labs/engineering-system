@@ -2528,6 +2528,17 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         assert user_tests["full_user_e2e"]["contract"] == "docs/FULL_USER_E2E.md"
         assert run(sys.executable, str(CHECK), "--root", str(target)).returncode == 0
 
+        for invalid_required in ("true", "false", 1):
+            release["human_equivalent_user_tests_required"] = invalid_required
+            (target / ".engineering/release.yaml").write_text(
+                yaml.safe_dump(release, sort_keys=False),
+                encoding="utf-8",
+            )
+            blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+            assert blocked.returncode != 0
+            assert "user-facing project requires human_equivalent_user_tests_required=true" in blocked.stdout
+        release["human_equivalent_user_tests_required"] = True
+
         release["human_equivalent_user_tests"]["actual_browser_process_required"] = False
         (target / ".engineering/release.yaml").write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
         blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
@@ -2556,6 +2567,68 @@ def test_user_facing_adoption_fails_without_contracts() -> None:
         assert "requires both --surface-reconciliation-contract and --full-user-e2e-contract" in blocked.stdout
 
 
+def test_user_facing_contract_paths_are_repository_bounded() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_root = Path(tmp)
+        target = tmp_root / "demo-bounded-contracts"
+        target.mkdir()
+        init_repo(target)
+        (target / "tests").mkdir()
+        (target / "tests/test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+        (target / "docs").mkdir()
+        surface = target / "docs/SURFACE_RECONCILIATION.md"
+        full_e2e = target / "docs/FULL_USER_E2E.md"
+        surface.write_text("# Surface Reconciliation\n", encoding="utf-8")
+        full_e2e.write_text("# Full User E2E\n", encoding="utf-8")
+        outside = tmp_root / "OUTSIDE.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        (target / "docs/ESCAPE.md").symlink_to(outside)
+        commit_all(target)
+
+        invalid_paths = (
+            str(surface.resolve()),
+            "docs/../docs/SURFACE_RECONCILIATION.md",
+            "docs/ESCAPE.md",
+        )
+        for invalid_surface in invalid_paths:
+            blocked = run(
+                sys.executable, str(ADOPT),
+                "--root", str(target),
+                "--apply",
+                "--baseline-sha", BASELINE,
+                "--test-command", "python -m pytest -q",
+                "--user-facing",
+                "--primary-user-surface", "browser",
+                "--surface-reconciliation-contract", invalid_surface,
+                "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+                check=False,
+            )
+            assert blocked.returncode != 0
+            assert "contract path must be repository-relative and stay inside repository" in blocked.stdout
+
+        applied = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+
+        release_path = target / ".engineering/release.yaml"
+        for invalid_surface in invalid_paths:
+            release = load_yaml(release_path)
+            release["human_equivalent_user_tests"]["surface_reconciliation"]["contract"] = invalid_surface
+            release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+            blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+            assert blocked.returncode != 0
+            assert "contract must be repository-relative and stay inside repository" in blocked.stdout
+
+
 def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> None:
     workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
     for needle in (
@@ -2564,6 +2637,10 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
         "browser user-facing project requires actual_browser_process_required=true",
         'for gate_name in ("surface_reconciliation", "full_user_e2e")',
         'failures.append(f"human-equivalent {gate_name} gate must be mandatory")',
+        'release.get("human_equivalent_user_tests_required") is not True',
+        "contract_path.is_absolute()",
+        '".." in contract_path.parts',
+        "resolved.relative_to(repo_root)",
     ):
         assert needle in workflow, needle
 
@@ -2606,6 +2683,7 @@ def main() -> int:
     test_managed_work_packet_template_requires_v2_authority_metadata()
     test_user_facing_browser_release_requires_human_equivalent_contracts()
     test_user_facing_adoption_fails_without_contracts()
+    test_user_facing_contract_paths_are_repository_bounded()
     test_adoption_compliance_workflow_enforces_user_facing_release_gates()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
