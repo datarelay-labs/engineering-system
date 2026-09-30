@@ -61,6 +61,12 @@ IMPLEMENTATION_PREFLIGHT_MANAGED = (
     "tools/implementation_preflight.py",
 )
 
+# Terminal completion notification is managed because adopted AGENTS.md
+# makes this helper a hard terminal gate.
+TERMINAL_COMPLETION_NOTIFY_MANAGED = (
+    "tools/terminal_completion_notify.py",
+)
+
 # Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
@@ -92,6 +98,7 @@ REQUIRED_MANAGED = (
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
     *IMPLEMENTATION_PREFLIGHT_MANAGED,
+    *TERMINAL_COMPLETION_NOTIFY_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
 )
@@ -1067,6 +1074,20 @@ def ensure_implementation_preflight_compatible(root: Path) -> None:
         )
 
 
+def ensure_terminal_completion_notify_compatible(root: Path) -> None:
+    """Reject a custom terminal completion notifier before adoption writes any files."""
+    for rel in TERMINAL_COMPLETION_NOTIFY_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_context_epoch_compatible(root: Path) -> None:
     """Reject a custom context-epoch helper before adoption writes any files."""
     for rel in CONTEXT_EPOCH_MANAGED:
@@ -1361,6 +1382,7 @@ def main() -> int:
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
     ensure_implementation_preflight_compatible(root)
+    ensure_terminal_completion_notify_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
     planned_execution_policy = plan_execution_policy_sync(root)
@@ -1378,6 +1400,7 @@ def main() -> int:
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
+        *TERMINAL_COMPLETION_NOTIFY_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
         *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,

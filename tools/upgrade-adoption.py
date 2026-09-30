@@ -21,6 +21,7 @@ from adopt import (
     KNOWLEDGE_CONTRACT_MANAGED,
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
+    TERMINAL_COMPLETION_NOTIFY_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
     WORK_PACKET_TEMPLATE_MANAGED,
     apply_execution_policy_sync,
@@ -391,6 +392,28 @@ def plan_implementation_preflight_install(root: Path, old_baseline: str = "") ->
 
 
 def apply_implementation_preflight_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_terminal_completion_notify_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade only the managed terminal completion notifier."""
+    return plan_managed_file_install(
+        root,
+        TERMINAL_COMPLETION_NOTIFY_MANAGED,
+        label="terminal completion notifier",
+        old_baseline=old_baseline,
+    )
+
+
+def apply_terminal_completion_notify_install(
+    root: Path, planned: dict[str, str]
+) -> list[str]:
     installed: list[str] = []
     for rel, text in planned.items():
         path = root / rel
@@ -837,6 +860,9 @@ def main() -> int:
     planned_skills_contract = plan_skills_contract_install(root, old_baseline)
     planned_verification_contract = plan_verification_contract_install(root, old_baseline)
     planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
+    planned_terminal_completion_notify = plan_terminal_completion_notify_install(
+        root, old_baseline
+    )
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
 
@@ -897,6 +923,17 @@ def main() -> int:
         print("IMPLEMENTATION_PREFLIGHT_INSTALLED=" + ",".join(installed_preflight))
     else:
         print("IMPLEMENTATION_PREFLIGHT_INSTALLED=<none>")
+
+    installed_terminal_completion_notify = apply_terminal_completion_notify_install(
+        root, planned_terminal_completion_notify
+    )
+    if installed_terminal_completion_notify:
+        print(
+            "TERMINAL_COMPLETION_NOTIFY_INSTALLED="
+            + ",".join(installed_terminal_completion_notify)
+        )
+    else:
+        print("TERMINAL_COMPLETION_NOTIFY_INSTALLED=<none>")
 
     installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
     if installed_context_epoch:
