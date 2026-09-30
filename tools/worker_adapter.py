@@ -320,8 +320,12 @@ def _authorize_concrete_effect(
     except SystemExit:
         return "signed binding permission is missing or weaker than write"
     try:
+        scope = binding_payload.get("scope")
+        signed_worktree = scope.get("worktree") if isinstance(scope, dict) else None
+        if not isinstance(signed_worktree, str) or not Path(signed_worktree).is_absolute():
+            return "signed binding worktree is missing or invalid"
         decision = authorize(
-            REPO_ROOT,
+            Path(signed_worktree),
             binding_assertion=binding,
             dispatch_assertion=dispatch,
             request_json=json.dumps(effect),

@@ -56,6 +56,10 @@ def test_clean_python_bootstrap() -> None:
         (target / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
         (target / "tests").mkdir()
         (target / "tests" / "test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+        (target / ".cursor").mkdir()
+        (target / ".cursor" / "legacy.txt").write_text("legacy\n", encoding="utf-8")
+        (target / ".cursorignore").write_text("legacy ignore\n", encoding="utf-8")
+        (target / ".cursorrules").write_text("legacy rules\n", encoding="utf-8")
         commit_all(target)
 
         audit = run(sys.executable, str(ADOPT), "--root", str(target), "--audit")
@@ -80,6 +84,9 @@ def test_clean_python_bootstrap() -> None:
             "python -m pytest -q",
         )
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        assert "RETIRED_AGENT_ARTIFACTS_REMOVED=.cursor,.cursorignore,.cursorrules" in applied.stdout
+        for rel in (".cursor", ".cursorignore", ".cursorrules"):
+            assert not (target / rel).exists(), rel
         assert "OPERATIONS_MODE=nonproduction" in applied.stdout
         assert "MERGE_GATE_ENFORCEMENT=unknown" in applied.stdout
 
@@ -88,14 +95,11 @@ def test_clean_python_bootstrap() -> None:
             ".engineering/project.yaml",
             ".engineering/tests.yaml",
             ".engineering/release.yaml",
-            ".cursor/rules/engineering-system.mdc",
-            ".cursorignore",
-            ".cursor/commands/resume.md",
-            ".cursor/commands/work-resume.md",
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
             "tools/implementation_preflight.py",
+            "tools/terminal_completion_notify.py",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -110,11 +114,6 @@ def test_clean_python_bootstrap() -> None:
         assert engineering["merge_gate_status"] == "unknown"
         assert project["operations"]["production_oriented"] is False
         assert project["operations"]["incident_response_required"] is False
-
-        resume_text = (target / ".cursor/commands/resume.md").read_text(encoding="utf-8")
-        assert resume_text == (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8")
-        assert "WORK_PACKET_PROVENANCE_UNTRUSTED" in resume_text
-        assert "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE" in resume_text
 
         tests_text = (target / ".engineering/tests.yaml").read_text(encoding="utf-8")
         assert "cost: medium" in tests_text
@@ -361,16 +360,11 @@ def test_managed_upgrade_to_1_6() -> None:
         commit_all(target)
 
         run(
-            sys.executable,
-            str(ADOPT),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            BASELINE,
-            "--test-command",
-            "go test ./...",
+            sys.executable, str(ADOPT), "--root", str(target), "--apply",
+            "--baseline-sha", BASELINE, "--test-command", "go test ./...",
         )
+        for rel in (".cursor", ".cursorignore", ".cursorrules"):
+            assert not (target / rel).exists(), rel
 
         project_path = target / ".engineering/project.yaml"
         project = load_yaml(project_path)
@@ -384,31 +378,48 @@ def test_managed_upgrade_to_1_6() -> None:
             "\n  enforcement-reconcile:\n"
             f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{BASELINE}\n"
         )
-        workflow_text = workflow_text.replace(enforcement_block, "")
-        workflow_path.write_text(workflow_text, encoding="utf-8")
+        workflow_path.write_text(workflow_text.replace(enforcement_block, ""), encoding="utf-8")
 
-        history = ROOT / "tools" / "managed_adapter_history" / "resume" / "1.6.1.md"
-        managed_prior = history.read_text(encoding="utf-8")
-        (target / ".cursor/commands/resume.md").write_text(managed_prior, encoding="utf-8")
-        (target / ".cursor/commands/work-resume.md").write_text(managed_prior, encoding="utf-8")
-        prior_rule = (ROOT / "tools" / "managed_adapter_history" / "rule" / "1.6.3.mdc").read_text(encoding="utf-8")
-        (target / ".cursor/rules/engineering-system.mdc").write_text(prior_rule, encoding="utf-8")
-        (target / ".cursorignore").unlink()
-        commit_all(target, "downgrade fixture to 1.5")
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        policy_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Execute useful work continuously.**")
+        )
+        agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text = (
+            f"Adoption baseline: Engineering System version 1.5.0 at immutable commit `{BASELINE}`.\n\n"
+            + agents_text
+            + "\nChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.\n"
+            + "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.\n"
+            + "\n## Product-specific invariant\n\n- preserve-project-rule\n"
+        )
+        agents_path.write_text(agents_text, encoding="utf-8")
+
+        (target / ".cursor/rules").mkdir(parents=True)
+        (target / ".cursor/rules/project-custom.mdc").write_text("custom legacy adapter\n", encoding="utf-8")
+        (target / ".cursorignore").write_text("custom legacy ignore\n", encoding="utf-8")
+        (target / ".cursorrules").write_text("custom legacy rules\n", encoding="utf-8")
+        commit_all(target, "legacy adapter and stale policy fixture")
 
         upgraded = run(
-            sys.executable,
-            str(UPGRADE),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            NEW_BASELINE,
+            sys.executable, str(UPGRADE), "--root", str(target), "--apply",
+            "--baseline-sha", NEW_BASELINE,
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
-        assert "CURSOR_RULE_SYNCED=YES" in upgraded.stdout
-        assert "CURSORIGNORE_INSTALLED=YES" in upgraded.stdout
-        assert "CURSOR_RESUME_ADAPTERS_SYNCED=.cursor/commands/resume.md,.cursor/commands/work-resume.md" in upgraded.stdout
+        assert "EXECUTION_POLICY_SYNCED=YES" in upgraded.stdout
+        assert "RETIRED_AGENT_ARTIFACTS_REMOVED=.cursor,.cursorignore,.cursorrules" in upgraded.stdout
+        for rel in (".cursor", ".cursorignore", ".cursorrules"):
+            assert not (target / rel).exists(), rel
+        upgraded_agents = agents_path.read_text(encoding="utf-8")
+        assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
+        assert "does not serialize unrelated repository work behind a waiting packet" in upgraded_agents
+        assert "begin the first concrete repository action in the same turn" in upgraded_agents
+        assert "- preserve-project-rule" in upgraded_agents
+        assert "Cursor" not in upgraded_agents
+        assert "IMPLEMENTER=CURSOR" not in upgraded_agents
+        assert f"Engineering System version 1.6.5 at immutable commit `{NEW_BASELINE}`" in upgraded_agents
+        assert BASELINE not in upgraded_agents
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.6.5"
@@ -418,22 +429,14 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
 
-        canonical_resume = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-        assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == canonical_resume
-        assert (target / ".cursor/commands/work-resume.md").read_text(encoding="utf-8") == canonical_resume
-        canonical_rule = (ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8")
-        assert (target / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8") == canonical_rule
-        assert (target / ".cursorignore").read_text(encoding="utf-8") == (ROOT / "templates" / ".cursorignore").read_text(encoding="utf-8")
 
-
-def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
-    """A legitimate pre-context-epoch 1.6.5 adoption must remain upgradeable."""
+def test_same_baseline_repairs_managed_execution_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "demo-165-baseline-upgrade"
+        target = Path(tmp) / "demo-policy-repair"
         target.mkdir()
         init_repo(target)
         (target / "go.mod").write_text(
-            "module example.invalid/same-version\n\ngo 1.23\n",
+            "module example.invalid/policy-repair\n\ngo 1.23\n",
             encoding="utf-8",
         )
         commit_all(target)
@@ -450,196 +453,69 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
             "go test ./...",
         )
 
-        resume_history = (
-            ROOT
-            / "tools"
-            / "managed_adapter_history"
-            / "resume"
-            / "1.6.5-pre-context-epoch.md"
-        ).read_text(encoding="utf-8")
-        rule_history = (
-            ROOT
-            / "tools"
-            / "managed_adapter_history"
-            / "rule"
-            / "1.6.5-pre-context-epoch.mdc"
-        ).read_text(encoding="utf-8")
-        (target / ".cursor/commands/resume.md").write_text(
-            resume_history, encoding="utf-8"
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        policy_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Execute useful work continuously.**")
         )
-        (target / ".cursor/commands/work-resume.md").write_text(
-            resume_history, encoding="utf-8"
-        )
-        (target / ".cursor/rules/engineering-system.mdc").write_text(
-            rule_history, encoding="utf-8"
-        )
-        (target / "tools/context_epoch.py").unlink()
-        (target / "tools/implementation_preflight.py").unlink()
-        commit_all(target, "simulate canonical pre-context-epoch 1.6.5 baseline")
+        agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text += "\n## Product-specific invariant\n\n- preserve-same-baseline-rule\n"
+        agents_path.write_text(agents_text, encoding="utf-8")
+        commit_all(target, "simulate managed policy drift")
 
-        upgraded = run(
+        failed = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "AGENTS.md missing managed continuous-execution policy" in failed.stdout
+
+        repaired = run(
             sys.executable,
             str(UPGRADE),
             "--root",
             str(target),
             "--apply",
             "--baseline-sha",
-            NEW_BASELINE,
+            BASELINE,
         )
-        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
-        assert "CURSOR_RULE_SYNCED=YES" in upgraded.stdout
-        assert (
-            "CURSOR_RESUME_ADAPTERS_SYNCED="
-            ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
-            in upgraded.stdout
-        )
-        assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
-        assert "IMPLEMENTATION_PREFLIGHT_INSTALLED=tools/implementation_preflight.py" in upgraded.stdout
-
-        project = load_yaml(target / ".engineering/project.yaml")
-        assert project["engineering_system"]["version"] == "1.6.5"
-        assert project["engineering_system"]["baseline"] == NEW_BASELINE
-        canonical_resume = (
-            ROOT / "templates" / ".cursor" / "commands" / "resume.md"
-        ).read_text(encoding="utf-8")
-        canonical_rule = (
-            ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc"
-        ).read_text(encoding="utf-8")
-        assert (target / ".cursor/commands/resume.md").read_text(
-            encoding="utf-8"
-        ) == canonical_resume
-        assert (target / ".cursor/commands/work-resume.md").read_text(
-            encoding="utf-8"
-        ) == canonical_resume
-        assert (target / ".cursor/rules/engineering-system.mdc").read_text(
-            encoding="utf-8"
-        ) == canonical_rule
-        assert (target / "tools/context_epoch.py").read_bytes() == (
-            ROOT / "tools/context_epoch.py"
-        ).read_bytes()
+        assert "EXECUTION_POLICY_REPAIR=REQUIRED" in repaired.stdout
+        assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        repaired_agents = agents_path.read_text(encoding="utf-8")
+        assert repaired_agents.count("- **Execute useful work continuously.**") == 1
+        assert "- preserve-same-baseline-rule" in repaired_agents
 
 
-def test_same_version_1_6_5_context_epoch_resume_upgrade() -> None:
-    """Recreate the real cdc54b3 managed cohort and upgrade it end to end."""
+def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "demo-165-context-resume-upgrade"
+        target = Path(tmp) / "unknown-cursor-rule"
         target.mkdir()
         init_repo(target)
-        (target / "go.mod").write_text(
-            "module example.invalid/same-version-context\n\ngo 1.23\n",
+        (target / "go.mod").write_text("module example.invalid/cursor-rule\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable, str(ADOPT), "--root", str(target), "--apply",
+            "--baseline-sha", BASELINE, "--test-command", "go test ./...",
+        )
+        agents = target / "AGENTS.md"
+        agents.write_text(
+            agents.read_text(encoding="utf-8") + "\nCustom Cursor execution rule that is not canonical.\n",
             encoding="utf-8",
         )
-        commit_all(target)
-
-        run(
-            sys.executable,
-            str(ADOPT),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            CONTEXT_EPOCH_BASELINE,
-            "--test-command",
-            "go test ./...",
+        commit_all(target, "custom cursor rule")
+        before = agents.read_bytes()
+        blocked = run(
+            sys.executable, str(UPGRADE), "--root", str(target), "--apply",
+            "--baseline-sha", NEW_BASELINE, check=False,
         )
-
-        # Recreate every adoption-managed file tracked by the immutable cdc54b3
-        # manifest from the actual canonical Git object, not from a synthetic
-        # approximation.  This is the cohort that Atlas PR #82 exposed.
-        manifest = (
-            ROOT
-            / "tools"
-            / "managed_adapter_history"
-            / "file_hashes"
-            / "1.6.5-cdc54b3.sha256"
-        )
-        historical_paths: list[str] = []
-        for raw in manifest.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            digest, rel = line.split(None, 1)
-            historical = run(
-                "git",
-                "show",
-                f"{CONTEXT_EPOCH_BASELINE}:{rel}",
-                cwd=ROOT,
-            ).stdout
-            assert hashlib.sha256(historical.encode("utf-8")).hexdigest() == digest
-            path = target / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(historical, encoding="utf-8")
-            historical_paths.append(rel)
-
-        prior_resume = run(
-            "git",
-            "show",
-            f"{CONTEXT_EPOCH_BASELINE}:templates/.cursor/commands/resume.md",
-            cwd=ROOT,
-        ).stdout
-        resume_history = (
-            ROOT
-            / "tools"
-            / "managed_adapter_history"
-            / "resume"
-            / "1.6.5-context-epoch-pre-thin-router.md"
-        ).read_text(encoding="utf-8")
-        assert prior_resume == resume_history
-        (target / ".cursor/commands/resume.md").write_text(
-            prior_resume, encoding="utf-8"
-        )
-        (target / ".cursor/commands/work-resume.md").write_text(
-            prior_resume, encoding="utf-8"
-        )
-
-        # work_packet_authority.py became an adoption-managed skills runtime
-        # dependency after cdc54b3.  It must therefore be absent in this exact
-        # historical cohort and installed by the upgrade.
-        authority = target / "tools/work_packet_authority.py"
-        if authority.exists():
-            authority.unlink()
-
-        commit_all(target, "simulate exact canonical cdc54b3 managed cohort")
-
-        upgraded = run(
-            sys.executable,
-            str(UPGRADE),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            NEW_BASELINE,
-        )
-        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
-        assert (
-            "CURSOR_RESUME_ADAPTERS_SYNCED="
-            ".cursor/commands/resume.md,.cursor/commands/work-resume.md"
-            in upgraded.stdout
-        )
-        assert "tools/context_epoch.py" in upgraded.stdout
-        assert "tools/independent_verifier.py" in upgraded.stdout
-        assert "tools/skills-contract.py" in upgraded.stdout
-        assert "tools/work_packet_authority.py" in upgraded.stdout
-
-        project = load_yaml(target / ".engineering/project.yaml")
-        assert project["engineering_system"]["version"] == "1.6.5"
-        assert project["engineering_system"]["baseline"] == NEW_BASELINE
-
-        canonical_resume = (
-            ROOT / "templates" / ".cursor" / "commands" / "resume.md"
-        ).read_text(encoding="utf-8")
-        assert (target / ".cursor/commands/resume.md").read_text(
-            encoding="utf-8"
-        ) == canonical_resume
-        assert (target / ".cursor/commands/work-resume.md").read_text(
-            encoding="utf-8"
-        ) == canonical_resume
-
-        # Every historical managed file now converges to the current canonical
-        # bytes, and the newly managed runtime dependency is installed too.
-        for rel in historical_paths:
-            assert (target / rel).read_bytes() == (ROOT / rel).read_bytes(), rel
-        assert authority.read_bytes() == (ROOT / "tools/work_packet_authority.py").read_bytes()
+        assert blocked.returncode != 0
+        assert "unrecognized retired agent/Cursor rules" in blocked.stdout
+        assert agents.read_bytes() == before
 
 
 def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
@@ -711,132 +587,59 @@ def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> 
             upgrade.CANONICAL = original
 
 
-def test_custom_cursorignore_preserved_on_upgrade() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "demo-custom-ignore"
-        target.mkdir()
-        init_repo(target)
-        (target / "go.mod").write_text("module example.invalid/custom-ignore\n\ngo 1.23\n", encoding="utf-8")
-        commit_all(target)
-        run(sys.executable, str(ADOPT), "--root", str(target), "--apply", "--baseline-sha", BASELINE, "--test-command", "go test ./...")
-        project_path = target / ".engineering/project.yaml"
-        project = load_yaml(project_path)
-        project["engineering_system"]["version"] = "1.6.3"
-        project["engineering_system"]["baseline"] = BASELINE
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        prior_rule = (ROOT / "tools" / "managed_adapter_history" / "rule" / "1.6.3.mdc").read_text(encoding="utf-8")
-        (target / ".cursor/rules/engineering-system.mdc").write_text(prior_rule, encoding="utf-8")
-        (target / ".cursorignore").write_text("# custom\nprivate-generated/\n", encoding="utf-8")
-        commit_all(target, "custom ignore fixture")
-        upgraded = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply", "--baseline-sha", NEW_BASELINE)
-        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
-        assert "CURSORIGNORE_INSTALLED=NO" in upgraded.stdout
-        assert (target / ".cursorignore").read_text(encoding="utf-8") == "# custom\nprivate-generated/\n"
 
 
-def test_supported_managed_cursor_rule_history_is_upgradeable() -> None:
-    expected = {
-        "1.5.0.mdc": "051b2798360b1519d86f5575f98dd1f38d077b7bc866eef80a9e9619f0701626",
-        "1.5.1.mdc": "7d13a513dceae8cc96a285044079a3a25cff5422d919a71d9a03cbec771ab506",
-        "1.6.0.mdc": "48b933abedf8baeea2ebcce433eb0e1b8de2c82e8727ab23316830b89e6d1503",
-        "1.6.0-cursor-rule-routing.mdc": "af8e76084880d2effefb50336a8e02777892d04932852ac5784b47d318196553",
-        "1.6.0-work-packet-intent.mdc": "81edcc3137ca63ee5074b0edd0315d3b2ae863fe5b8643d68faacfa5e07eac2a",
-        "1.6.3.mdc": "01a357b466549a3bf2e7495fca78ef9a2aaead3b895f3583186e7fa8874732e5",
-        "1.6.5-pre-context-epoch.mdc": "49438f2735d2a97b7776a7de6c21deebf5ed6679628bba783ee65468c1e94752",
-    }
-    history = ROOT / "tools" / "managed_adapter_history" / "rule"
-    assert {path.name for path in history.glob("*.mdc")} == set(expected)
-    spec = importlib.util.spec_from_file_location("upgrade_adoption", UPGRADE)
+
+
+
+
+
+
+def test_managed_file_old_baseline_is_trusted_without_manifest() -> None:
+    upgrade_path = ROOT / "tools" / "upgrade-adoption.py"
+    spec = importlib.util.spec_from_file_location("upgrade_adoption_old_baseline", upgrade_path)
     assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    canonical = (ROOT / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8")
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp)
-        rule = target / ".cursor/rules/engineering-system.mdc"
-        rule.parent.mkdir(parents=True)
-        for name, digest in expected.items():
-            text = (history / name).read_text(encoding="utf-8")
-            assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest
-            assert text != canonical
-            rule.write_text(text, encoding="utf-8")
-            assert module.plan_cursor_rule_update(target) == canonical
+        base = Path(tmp)
+        canonical = base / "canonical"
+        target = base / "target"
+        rel = "tools/example-managed.py"
+        canonical.mkdir()
+        init_repo(canonical)
+        (canonical / rel).parent.mkdir(parents=True, exist_ok=True)
+        prior = b"prior baseline managed bytes\n"
+        current = b"current managed bytes\n"
+        custom = b"project custom bytes\n"
+        (canonical / rel).write_bytes(prior)
+        commit_all(canonical, "prior baseline")
+        prior_sha = run("git", "rev-parse", "HEAD", cwd=canonical).stdout.strip()
+        (canonical / rel).write_bytes(current)
+        commit_all(canonical, "current baseline")
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
 
+        original = upgrade.CANONICAL
+        upgrade.CANONICAL = canonical
+        try:
+            (target / rel).write_bytes(prior)
+            planned = upgrade.plan_managed_file_install(
+                target, (rel,), label="fixture", old_baseline=prior_sha
+            )
+            assert planned == {rel: current.decode("utf-8")}
 
-def test_custom_cursor_rule_fails_closed_before_upgrade_mutation() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "demo-custom-rule"
-        target.mkdir()
-        init_repo(target)
-        (target / "go.mod").write_text("module example.invalid/custom-rule\n\ngo 1.23\n", encoding="utf-8")
-        commit_all(target)
-        run(sys.executable, str(ADOPT), "--root", str(target), "--apply", "--baseline-sha", BASELINE, "--test-command", "go test ./...")
-        project_path = target / ".engineering/project.yaml"
-        project = load_yaml(project_path)
-        project["engineering_system"]["version"] = "1.6.3"
-        project["engineering_system"]["baseline"] = BASELINE
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        (target / ".cursor/rules/engineering-system.mdc").write_text("# custom cursor rule\n", encoding="utf-8")
-        commit_all(target, "custom rule fixture")
-        before = _managed_upgrade_file_snapshot(target)
-        failed = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply", "--baseline-sha", NEW_BASELINE, check=False)
-        assert failed.returncode != 0
-        assert "local/custom changes" in failed.stdout
-        assert _managed_upgrade_file_snapshot(target) == before
-
-
-def test_custom_resume_adapter_fails_closed() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "demo-custom-resume"
-        target.mkdir()
-        init_repo(target)
-        (target / "go.mod").write_text("module example.invalid/custom\n\ngo 1.23\n", encoding="utf-8")
-        commit_all(target)
-
-        run(
-            sys.executable,
-            str(ADOPT),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            BASELINE,
-            "--test-command",
-            "go test ./...",
-        )
-
-        project_path = target / ".engineering/project.yaml"
-        project = load_yaml(project_path)
-        project["engineering_system"]["version"] = "1.5.0"
-        project["engineering_system"]["baseline"] = BASELINE
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-
-        workflow_path = target / ".github/workflows/engineering-system.yml"
-        workflow_text = workflow_path.read_text(encoding="utf-8")
-        enforcement_block = (
-            "\n  enforcement-reconcile:\n"
-            f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{BASELINE}\n"
-        )
-        workflow_path.write_text(workflow_text.replace(enforcement_block, ""), encoding="utf-8")
-        (target / ".cursor/commands/resume.md").write_text("# project-custom resume\n", encoding="utf-8")
-        commit_all(target, "custom resume fixture")
-
-        before = _managed_upgrade_file_snapshot(target)
-
-        failed = run(
-            sys.executable,
-            str(UPGRADE),
-            "--root",
-            str(target),
-            "--apply",
-            "--baseline-sha",
-            NEW_BASELINE,
-            check=False,
-        )
-        assert failed.returncode != 0
-        assert "local/custom changes" in failed.stdout
-        assert (target / ".cursor/commands/resume.md").read_text(encoding="utf-8") == "# project-custom resume\n"
-        assert _managed_upgrade_file_snapshot(target) == before
+            (target / rel).write_bytes(custom)
+            try:
+                upgrade.plan_managed_file_install(
+                    target, (rel,), label="fixture", old_baseline=prior_sha
+                )
+            except SystemExit as exc:
+                assert "local/custom changes" in str(exc)
+            else:
+                raise AssertionError("custom bytes were accepted from old baseline trust")
+        finally:
+            upgrade.CANONICAL = original
 
 
 def test_grant_style_baseline_declarations_upgraded() -> None:
@@ -972,8 +775,6 @@ def _managed_upgrade_file_snapshot(root: Path) -> dict[str, bytes]:
         ".github/workflows/engineering-release.yml",
         "AGENTS.md",
         "README.md",
-        ".cursor/commands/resume.md",
-        ".cursor/commands/work-resume.md",
         "tools/context_epoch.py",
         "tools/engineering-context.py",
     )
@@ -1858,10 +1659,12 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "context_epoch.py"
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
-        resume = (target / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-        assert "adoption-managed canonical helper" in resume
-
+        notifier = target / "tools" / "terminal_completion_notify.py"
+        assert notifier.read_bytes() == (
+            ROOT / "tools" / "terminal_completion_notify.py"
+        ).read_bytes()
         helper.unlink()
+        notifier.unlink()
         compliance = run(
             sys.executable,
             str(CHECK),
@@ -1870,7 +1673,11 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
             check=False,
         )
         assert compliance.returncode != 0
-        assert "references context-epoch helper but missing tools/context_epoch.py" in compliance.stdout
+        assert "Chat-primary adoption missing required helper tools/context_epoch.py" in compliance.stdout
+        assert (
+            "Chat-primary adoption missing required helper tools/terminal_completion_notify.py"
+            in compliance.stdout
+        )
 
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)
@@ -1890,7 +1697,14 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert (
+            "TERMINAL_COMPLETION_NOTIFY_INSTALLED=tools/terminal_completion_notify.py"
+            in upgraded.stdout
+        )
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert notifier.read_bytes() == (
+            ROOT / "tools" / "terminal_completion_notify.py"
+        ).read_bytes()
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
         helper.write_text("#!/usr/bin/env python3\nprint('divergent')\n", encoding="utf-8")
@@ -1958,9 +1772,6 @@ def test_engineering_context_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "engineering-context.py"
         assert helper.read_bytes() == (ROOT / "tools" / "engineering-context.py").read_bytes()
-        resume = (target / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-        assert "tools/engineering-context.py" in resume
-
         helper.unlink()
         compliance = run(
             sys.executable,
@@ -1970,7 +1781,7 @@ def test_engineering_context_helper_adoption_and_upgrade() -> None:
             check=False,
         )
         assert compliance.returncode != 0
-        assert "references engineering-context helper but missing tools/engineering-context.py" in compliance.stdout
+        assert "Chat-primary adoption missing required helper tools/engineering-context.py" in compliance.stdout
 
         project_path = target / ".engineering" / "project.yaml"
         project = load_yaml(project_path)
@@ -2071,13 +1882,12 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     )
     required = (
         "tools/engineering-context.py",
-        ".engineering-system-runtime/tools/engineering-context.py",
-        "references engineering-context helper but missing tools/engineering-context.py",
-        "tools/engineering-context.py differs from canonical managed helper",
+        'canonical_helper = Path(".engineering-system-runtime") / rel',
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
+        "AGENTS.md missing managed continuous-execution policy",
+        "- **Execute useful work continuously.**",
         "Chat-primary adoption missing required helper",
-        "AGENTS.md missing Chat-primary implementation preflight instruction",
         "canonical compliance runtime missing {rel}",
         "{rel} differs from canonical managed helper",
         ".engineering-system-runtime/.engineering/project.yaml",
@@ -2093,6 +1903,8 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     preflight_check = workflow.index("Chat-primary adoption missing required helper")
     assert agents_definition < preflight_check
     assert 'if "tools/implementation_preflight.py" in text:' not in workflow
+    assert 'missing current ChatGPT implementation-path instruction' not in workflow
+    assert 'missing current repository-binding preflight instruction' not in workflow
     assert "if version_tuple >= (1, 6, 5):" not in workflow
 
 
@@ -2490,6 +2302,161 @@ def test_bun_native_discovery() -> None:
         assert "bun test" in audit.stdout
 
 
+def test_user_facing_browser_release_requires_human_equivalent_contracts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-browser-product"
+        target.mkdir()
+        init_repo(target)
+        (target / "tests").mkdir()
+        (target / "tests/test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+        (target / "docs").mkdir()
+        (target / "docs/SURFACE_RECONCILIATION.md").write_text("# Surface Reconciliation\n", encoding="utf-8")
+        (target / "docs/FULL_USER_E2E.md").write_text("# Full User E2E\n", encoding="utf-8")
+        commit_all(target)
+
+        applied = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["project"]["user_facing"] is True
+        assert project["project"]["primary_user_surface"] == "browser"
+        release = load_yaml(target / ".engineering/release.yaml")
+        assert release["human_equivalent_user_tests_required"] is True
+        user_tests = release["human_equivalent_user_tests"]
+        assert user_tests["actual_user_surface_required"] is True
+        assert user_tests["actual_browser_process_required"] is True
+        assert user_tests["same_candidate_required"] is True
+        assert user_tests["ci_contract_validation_only"] is True
+        assert user_tests["surface_reconciliation"]["contract"] == "docs/SURFACE_RECONCILIATION.md"
+        assert user_tests["full_user_e2e"]["contract"] == "docs/FULL_USER_E2E.md"
+        assert run(sys.executable, str(CHECK), "--root", str(target)).returncode == 0
+
+        for invalid_required in ("true", "false", 1):
+            release["human_equivalent_user_tests_required"] = invalid_required
+            (target / ".engineering/release.yaml").write_text(
+                yaml.safe_dump(release, sort_keys=False),
+                encoding="utf-8",
+            )
+            blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+            assert blocked.returncode != 0
+            assert "user-facing project requires human_equivalent_user_tests_required=true" in blocked.stdout
+        release["human_equivalent_user_tests_required"] = True
+
+        release["human_equivalent_user_tests"]["actual_browser_process_required"] = False
+        (target / ".engineering/release.yaml").write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+        assert blocked.returncode != 0
+        assert "browser user-facing project requires actual_browser_process_required=true" in blocked.stdout
+
+
+def test_user_facing_adoption_fails_without_contracts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-missing-user-contracts"
+        target.mkdir()
+        init_repo(target)
+        (target / "README.md").write_text("# Demo\n", encoding="utf-8")
+        commit_all(target)
+        blocked = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--allow-no-tests",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert "requires both --surface-reconciliation-contract and --full-user-e2e-contract" in blocked.stdout
+
+
+def test_user_facing_contract_paths_are_repository_bounded() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_root = Path(tmp)
+        target = tmp_root / "demo-bounded-contracts"
+        target.mkdir()
+        init_repo(target)
+        (target / "tests").mkdir()
+        (target / "tests/test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+        (target / "docs").mkdir()
+        surface = target / "docs/SURFACE_RECONCILIATION.md"
+        full_e2e = target / "docs/FULL_USER_E2E.md"
+        surface.write_text("# Surface Reconciliation\n", encoding="utf-8")
+        full_e2e.write_text("# Full User E2E\n", encoding="utf-8")
+        outside = tmp_root / "OUTSIDE.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        (target / "docs/ESCAPE.md").symlink_to(outside)
+        commit_all(target)
+
+        invalid_paths = (
+            str(surface.resolve()),
+            "docs/../docs/SURFACE_RECONCILIATION.md",
+            "docs/ESCAPE.md",
+        )
+        for invalid_surface in invalid_paths:
+            blocked = run(
+                sys.executable, str(ADOPT),
+                "--root", str(target),
+                "--apply",
+                "--baseline-sha", BASELINE,
+                "--test-command", "python -m pytest -q",
+                "--user-facing",
+                "--primary-user-surface", "browser",
+                "--surface-reconciliation-contract", invalid_surface,
+                "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+                check=False,
+            )
+            assert blocked.returncode != 0
+            assert "contract path must be repository-relative and stay inside repository" in blocked.stdout
+
+        applied = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+
+        release_path = target / ".engineering/release.yaml"
+        for invalid_surface in invalid_paths:
+            release = load_yaml(release_path)
+            release["human_equivalent_user_tests"]["surface_reconciliation"]["contract"] = invalid_surface
+            release_path.write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+            blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+            assert blocked.returncode != 0
+            assert "contract must be repository-relative and stay inside repository" in blocked.stdout
+
+
+def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> None:
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for needle in (
+        "user-facing project requires human_equivalent_user_tests_required=true",
+        "human-equivalent user tests require actual_user_surface_required=true",
+        "browser user-facing project requires actual_browser_process_required=true",
+        'for gate_name in ("surface_reconciliation", "full_user_e2e")',
+        'failures.append(f"human-equivalent {gate_name} gate must be mandatory")',
+        'release.get("human_equivalent_user_tests_required") is not True',
+        "contract_path.is_absolute()",
+        '".." in contract_path.parts',
+        "resolved.relative_to(repo_root)",
+    ):
+        assert needle in workflow, needle
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_clean_python_bootstrap()
@@ -2498,14 +2465,11 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
-    test_same_version_1_6_5_pre_context_epoch_upgrade()
-    test_same_version_1_6_5_context_epoch_resume_upgrade()
+    test_same_baseline_repairs_managed_execution_policy()
+    test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
-    test_custom_cursorignore_preserved_on_upgrade()
-    test_supported_managed_cursor_rule_history_is_upgradeable()
-    test_custom_cursor_rule_fails_closed_before_upgrade_mutation()
-    test_custom_resume_adapter_fails_closed()
+    test_managed_file_old_baseline_is_trusted_without_manifest()
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()
     test_stale_outside_form_declaration_fails_without_partial_upgrade()
@@ -2526,6 +2490,10 @@ def main() -> int:
     test_release_execution_context_is_bounded_and_upgradeable()
     test_managed_contract_dependency_failure_is_deterministic()
     test_managed_work_packet_template_requires_v2_authority_metadata()
+    test_user_facing_browser_release_requires_human_equivalent_contracts()
+    test_user_facing_adoption_fails_without_contracts()
+    test_user_facing_contract_paths_are_repository_bounded()
+    test_adoption_compliance_workflow_enforces_user_facing_release_gates()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

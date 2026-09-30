@@ -87,6 +87,44 @@ Important scenarios should have stable IDs plus level, domains, triggers, platfo
 
 Test help/navigation, wizard inputs, invalid input recovery, copy/paste, wrong context, cancellation/EOF/Ctrl+C, generated remediation commands, and cross-output consistency. Run affected UX tests during development and broader UX qualification near release.
 
+### Human-equivalent user-surface release tests — mandatory for user-facing products
+
+Deterministic unit/component/API/matrix tests are necessary but do not reproduce the user's complete environment, discoverability, action sequence, state transitions, cross-surface continuity, realistic mistakes, failure diagnosis/recovery, and final user-visible outcome. They therefore cannot be the only release evidence for a user-facing product.
+
+A user-facing release MUST use the human-equivalent gates as the semantic defect-discovery stages **before final exact-head CI and release-integrity qualification**:
+
+```text
+Surface Reconciliation / Feature-Scenario PASS1
+ -> batched remediation
+ -> PASS2 clean
+ -> Full User E2E PASS1
+ -> batched remediation
+ -> PASS2 clean
+ -> release-specific upgrade/platform qualification
+ -> final exact-head automated CI
+ -> release integrity / final audit
+ -> owner/manual acceptance when required
+ -> release authorization
+```
+
+PASS1 continues every safe independent scenario/journey after findings to maximize defect discovery. PASS1 findings are remediated as one bounded batch. PASS2 restarts the complete gate on the new candidate and requires zero mandatory findings. Do not interleave each finding fix with remote CI.
+
+**Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
+
+**Full User E2E** is depth-first. It executes complete realistic user missions through the real primary product surface, proves actual outcomes, injects realistic mistakes/failures, performs user-visible diagnosis and recovery, exercises live edits/destructive lifecycle, and verifies cleanup/orphan truth.
+
+Both gates:
+- run on the same exact candidate HEAD;
+- are independently required and never substitute for each other;
+- require zero mandatory FAIL/PARTIAL/BLOCKED for release PASS;
+- may reuse machine evidence for verification but not to replace the user action;
+- must continue safe independent scenarios after a failure so one defect does not hide others;
+- must retain run/evidence identity in the active release Work Packet.
+
+For browser products, the user action MUST be performed by an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
+
+For CLI/desktop/mobile products, use the actual supported public primary interface with the same human-equivalent principle.
+
 ## Performance/resilience
 
 ```text
@@ -100,8 +138,11 @@ Run these when the change touches performance/resilience boundaries or at the re
 - development: affected L0-L5 only
 - PR: affected scenarios + cheap `pr` guardrails
 - optional nightly: broader deterministic/integration
-- release preflight: cheap `preflight` blockers
-- release candidate: full deterministic + selected L6/L7
-- stable release: required L8 operational E2E on the exact candidate
+- release closure discovery: breadth-first Feature/Scenario PASS1 -> batched remediation -> PASS2
+- release user validation: Full User E2E PASS1 -> batched remediation -> PASS2
+- release-specific qualification: upgrade/migration/platform/performance as applicable
+- final release candidate: one exact-head automated deterministic/platform CI qualification
+- integrity: artifact/hash/SBOM/provenance/manifest/attestation after final CI
+- stable release: final exact-candidate audit, authorization, publication, then public smoke
 
 A failure at an earlier mandatory level blocks starting downstream expensive qualification until the failure is resolved or explicitly classified as non-blocking.

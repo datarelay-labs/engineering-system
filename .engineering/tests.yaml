@@ -23,8 +23,6 @@ paths:
     domains: [release-contract]
   ".github/ISSUE_TEMPLATE/**":
     domains: [session-continuity]
-  ".cursor/commands/**":
-    domains: [session-continuity]
   "tools/**":
     domains: [workflows]
   "tools/adopt.py":
@@ -91,10 +89,6 @@ paths:
     domains: [session-continuity]
   "evals/context-optimization/**":
     domains: [session-continuity, ai]
-  "tools/cursor-resource-preflight.py":
-    domains: [session-continuity, workflows]
-  "tools/test_cursor_resource_preflight.py":
-    domains: [session-continuity]
   "tools/work_admission.py":
     domains: [session-continuity, workflows]
   "tools/test_work_admission.py":
@@ -461,20 +455,41 @@ scenarios:
       - "legacy diff/domain routing is unchanged without task orientation"
     release_gate: true
 
-  - id: ENG-RESOURCE-001
+  - id: ENG-TELEGRAM-COMPLETE-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Mandatory ChatGPT terminal Telegram completion gate
+    level: static
+    domains: [session-continuity, enforcement]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_terminal_completion_notify.py"
+    invariants:
+      - "ChatGPT terminal implementation test audit release and migration outcomes require verified Telegram COMPLETE before owner-facing COMPLETE/PASS"
+      - "micro-steps and individual test invocations do not notify"
+      - "missing trusted helper or unverified delivery fails closed"
+    release_gate: true
+
+  - id: ENG-TRUSTED-EXTERNAL-WRITE-001
     cost: cheap
     estimated_seconds: 5
     timeout_seconds: 60
     agent_default: true
     scope: static
-    name: Cursor persistent-session resource preflight
+    name: Trusted ChatGPT external-write coordinator and signer
     level: static
-    domains: [session-continuity]
+    domains: [session-continuity, enforcement]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 tools/test_cursor_resource_preflight.py"
+    command: "python3 tools/test_trusted_external_write_signer.py && python3 tools/test_trusted_external_write_coordinator.py && python3 tools/test_worker_adapter.py"
     invariants:
-      - "new persistent Cursor sessions fail closed under host resource pressure"
+      - "external-write assertions require authenticated Work Packet author permission and exact authoritative branch HEAD"
+      - "production signing keys and trust anchors stay root-owned and outside the coding-worker privilege boundary"
+      - "the signer cannot execute shell commands or arbitrary endpoints and signs only one exact typed worker-adapter effect"
+      - "missing trusted host executables or stale packet facts fail closed"
     release_gate: true
 
   - id: ENG-ADMISSION-001

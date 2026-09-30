@@ -24,6 +24,9 @@ operational_e2e_required: false
 operational_e2e_command: ""
 full_e2e_passes: 0
 
+# Mandatory for user-facing products. See standards/TESTING.md and standards/RELEASE.md.
+human_equivalent_user_tests_required: false
+
 # Executed only in the post-release phase.
 public_smoke_required: false
 public_smoke_command: ""

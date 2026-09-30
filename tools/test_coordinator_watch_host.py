@@ -243,19 +243,6 @@ def init_observed_worktree(path: Path, *, dirty: bool, unpushed: bool, branch: s
         (path / "DIRTY").write_text("dirty\n", encoding="utf-8")
 
 
-def write_agent(path: Path, worktree: Path, *, present: bool) -> None:
-    if present:
-        body = (
-            "1 persistent sessions:\n"
-            "Task: Work Resume\n"
-            "  Status: Attached (1 client)\n"
-            "  Session: cursor-watch-test\n"
-            f"  Workspace: {worktree}\n"
-        )
-    else:
-        body = "No Cursor-managed persistent sessions.\n"
-    path.write_text(f"#!/usr/bin/env python3\nimport sys\nsys.stdout.write({body!r})\n", encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
 def write_claim(directory: Path, worktree: Path) -> None:
@@ -285,7 +272,6 @@ def observed_machine(
     *,
     dirty: bool,
     unpushed: bool,
-    session: bool,
     claim: bool,
     meminfo: list[str],
     local_branch: str = BRANCH,
@@ -294,19 +280,15 @@ def observed_machine(
     worktree = base / "worktree"
     worktree.mkdir()
     init_observed_worktree(worktree, dirty=dirty, unpushed=unpushed, branch=local_branch)
-    agent = base / "agent"
-    write_agent(agent, worktree, present=session)
     claim_dir = base / "claims"
     if claim:
         write_claim(claim_dir, claim_worktree or worktree)
     previous = (
         collect._TEST_WORKTREE,
-        collect._TEST_TRUSTED_AGENT,
         collect._TEST_CLAIM_DIR,
         collect._TEST_MEMINFO_BODIES,
     )
     collect._TEST_WORKTREE = worktree
-    collect._TEST_TRUSTED_AGENT = agent
     collect._TEST_CLAIM_DIR = claim_dir if claim else None
     collect._TEST_MEMINFO_BODIES = list(meminfo)
     try:
@@ -314,8 +296,7 @@ def observed_machine(
     finally:
         (
             collect._TEST_WORKTREE,
-            collect._TEST_TRUSTED_AGENT,
-            collect._TEST_CLAIM_DIR,
+                collect._TEST_CLAIM_DIR,
             collect._TEST_MEMINFO_BODIES,
         ) = previous
 
@@ -442,7 +423,7 @@ def test_exact_head_ci_wakes_once_and_replay_dedups() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, facts, BRANCH)
             effect = signed_effect(base, facts, BRANCH, state)
@@ -462,125 +443,16 @@ def test_exact_head_ci_wakes_once_and_replay_dedups() -> None:
         assert comment_count(base) == 1
 
 
-def test_progress_resumes_once() -> None:
-    facts = load_fixture("06-worker-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        with observed_machine(
-            base, dirty=True, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False)
-            effect = signed_effect(base, facts, BRANCH, state)
-            with SignedDispatch(base, effect, "watch-host-resume-1") as verification:
-                request = request_for(facts)
-                request["verification"] = verification
-                with fake_gh(base, state), host_env(base):
-                    result = run_once(request)
-        assert result["result"] == "DELIVERED"
-        assert result["resumes"] == 1
-        assert result["mutates_github"] is True
-        assert comment_count(base) == 1
 
 
-def _assert_unbound_session_does_not_resume(base: Path, facts: dict, state: dict) -> None:
-    with fake_gh(base, state):
-        collected = collect_authoritative(
-            repository=REPO,
-            workstream=WORKSTREAM,
-            issue_id=TARGET,
-            watch_class=facts["watch"]["watch_class"],
-        )
-        with host_env(base):
-            result = run_once(request_for(facts))
-    worker = collected["facts"]["worker"]
-    assert worker.get("present") is not True
-    assert worker.get("progress_evidence") is not True
-    assert collected["facts"]["git"].get("dirty") is not True
-    assert collected["facts"]["git"].get("unpushed") is not True
-    assert result["watch_result"] != "RESUME_ADMITTED_WORKER"
-    assert result["result"] != "DELIVERED"
-    assert result["resumes"] == 0
-    assert result["actions_delivered"] == 0
-    assert comment_count(base) == 0
 
 
-def test_wrong_branch_session_does_not_resume() -> None:
-    facts = load_fixture("06-worker-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        with observed_machine(
-            base,
-            dirty=True,
-            unpushed=True,
-            session=True,
-            claim=True,
-            meminfo=[HEALTHY_MEMINFO],
-            local_branch="main",
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False)
-            _assert_unbound_session_does_not_resume(base, facts, state)
 
 
-def test_wrong_head_session_does_not_resume() -> None:
-    facts = load_fixture("06-worker-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        with observed_machine(
-            base, dirty=True, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False, sha=OTHER)
-            _assert_unbound_session_does_not_resume(base, facts, state)
 
 
-def test_different_claim_worktree_does_not_resume() -> None:
-    facts = load_fixture("06-worker-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        other = base / "other-worktree"
-        other.mkdir()
-        with observed_machine(
-            base,
-            dirty=True,
-            unpushed=False,
-            session=True,
-            claim=True,
-            meminfo=[HEALTHY_MEMINFO],
-            claim_worktree=other,
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False)
-            with fake_gh(base, state):
-                collected = collect_authoritative(
-                    repository=REPO,
-                    workstream=WORKSTREAM,
-                    issue_id=TARGET,
-                    watch_class=facts["watch"]["watch_class"],
-                )
-                with host_env(base):
-                    result = run_once(request_for(facts))
-        worker = collected["facts"]["worker"]
-        assert collected["facts"]["git"].get("dirty") is True
-        assert worker.get("present") is not True
-        assert worker.get("progress_evidence") is not True
-        assert result["watch_result"] != "RESUME_ADMITTED_WORKER"
-        assert result["result"] != "DELIVERED"
-        assert result["resumes"] == 0
-        assert result["actions_delivered"] == 0
-        assert comment_count(base) == 0
 
 
-def test_liveness_without_progress_does_not_resume() -> None:
-    facts = load_fixture("05-worker-no-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False, bodies=[render_body(facts, BRANCH)])
-            with fake_gh(base, state), host_env(base):
-                result = run_once(request_for(facts))
-        assert result["result"] == "NO_ACTION"
-        assert result["resumes"] == 0
-        assert comment_count(base) == 0
 
 
 def test_revision_change_before_action_delivers_nothing() -> None:
@@ -589,63 +461,65 @@ def test_revision_change_before_action_delivers_nothing() -> None:
     changed["packet"]["intent_revision"] = 4
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        state = gh_state(base, facts, BRANCH, bodies=[render_body(facts, BRANCH), render_body(changed, BRANCH)])
-        with fake_gh(base, state), host_env(base):
-            result = run_once(request_for(facts))
+        with observed_machine(base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]):
+            state = gh_state(
+                base, facts, BRANCH,
+                bodies=[render_body(facts, BRANCH), render_body(changed, BRANCH)],
+            )
+            effect = signed_effect(base, facts, BRANCH, state)
+            with SignedDispatch(base, effect, "watch-host-revision") as verification:
+                request = request_for(facts)
+                request["verification"] = verification
+                with fake_gh(base, state), host_env(base):
+                    result = run_once(request)
         assert result["result"] == "STALE_RECONCILE"
         assert result["actions_delivered"] == 0
         assert comment_count(base) == 0
+
+
 
 
 def test_subject_change_before_action_delivers_nothing() -> None:
     facts = load_fixture("02-ci-pass-exact.json")
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        state = gh_state(base, facts, BRANCH, sha_queue=[SHA, OTHER])
-        with fake_gh(base, state), host_env(base):
-            result = run_once(request_for(facts))
+        with observed_machine(base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]) as worktree:
+            local_sha = subprocess.run(
+                ["/usr/bin/git", "-C", str(worktree), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            state = gh_state(base, facts, BRANCH, sha=local_sha, sha_queue=[local_sha, OTHER])
+            effect = signed_effect(base, facts, BRANCH, state)
+            with SignedDispatch(base, effect, "watch-host-subject") as verification:
+                request = request_for(facts)
+                request["verification"] = verification
+                with fake_gh(base, state), host_env(base):
+                    result = run_once(request)
         assert result["result"] == "STALE_RECONCILE"
         assert result["wakes"] == 0
         assert comment_count(base) == 0
 
 
-def test_resource_block_before_resume_leaves_sessions_untouched() -> None:
-    facts = load_fixture("06-worker-progress.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        body = render_body(facts, BRANCH)
-        with observed_machine(
-            base,
-            dirty=True,
-            unpushed=False,
-            session=True,
-            claim=True,
-            meminfo=[HEALTHY_MEMINFO, STARVED_MEMINFO],
-        ):
-            state = gh_state(base, facts, BRANCH, pr=False, bodies=[body, body])
-            with fake_gh(base, state), host_env(base):
-                result = run_once(request_for(facts))
-        assert_inert(result)
-        assert result["result"] == "RESOURCE_BLOCKED"
-        assert result["resumes"] == 0
-        assert comment_count(base) == 0
+
+
 
 
 def test_requested_branch_mismatch_consumes_nothing() -> None:
     facts = load_fixture("02-ci-pass-exact.json")
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        state = gh_state(base, facts, BRANCH, bodies=[render_body(facts, BRANCH)])
-        effect = signed_effect(base, facts, BRANCH, gh_state(base, facts, BRANCH))
-        with SignedDispatch(base, effect, "watch-host-branch") as verification:
-            request = request_for(facts, branch="feat/other")
-            request["verification"] = verification
-            with fake_gh(base, state), host_env(base):
-                result = run_once(request)
-            assert result["result"] == "STALE_RECONCILE"
-            assert result["actions_delivered"] == 0
-            assert comment_count(base) == 0
-            assert "watch-host-branch" not in skills_contract._TEST_REPLAY_STORE
+        with observed_machine(base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]):
+            state = gh_state(base, facts, BRANCH, bodies=[render_body(facts, BRANCH)])
+            effect = signed_effect(base, facts, BRANCH, state)
+            with SignedDispatch(base, effect, "watch-host-branch") as verification:
+                request = request_for(facts, branch="feat/other")
+                request["verification"] = verification
+                with fake_gh(base, state), host_env(base):
+                    result = run_once(request)
+                assert result["result"] == "STALE_RECONCILE"
+                assert result["actions_delivered"] == 0
+                assert comment_count(base) == 0
+                assert "watch-host-branch" not in skills_contract._TEST_REPLAY_STORE
 
 
 def test_forged_authoritative_file_cannot_authorize() -> None:
@@ -780,7 +654,7 @@ def test_pre_send_crash_is_retryable_once() -> None:
         base = Path(tmp)
         body = render_body(facts, BRANCH)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, facts, BRANCH, bodies=[body, body, body, body])
             effect = signed_effect(base, facts, BRANCH, state)
@@ -819,7 +693,7 @@ def test_post_send_crash_is_not_retried() -> None:
         base = Path(tmp)
         body = render_body(facts, BRANCH)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, facts, BRANCH, bodies=[body, body, body, body])
             effect = signed_effect(base, facts, BRANCH, state)
@@ -856,56 +730,59 @@ def test_owner_notice_is_verified_info() -> None:
     facts = load_fixture("10-blocked.json")
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        state = gh_state(base, facts, BRANCH)
-        effect = signed_effect(base, facts, BRANCH, state)
-        assert effect["level"] == "INFO"
-        token_dir = base / "telegram"
-        token_dir.mkdir()
-        (token_dir / "telegram-bot-token").write_text("host-token", encoding="utf-8")
-        (token_dir / "telegram-chat-id").write_text("host-chat", encoding="utf-8")
-        seen: dict[str, object] = {}
+        with observed_machine(base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]):
+            state = gh_state(base, facts, BRANCH)
+            effect = signed_effect(base, facts, BRANCH, state)
+            assert effect["level"] == "INFO"
+            token_dir = base / "telegram"
+            token_dir.mkdir()
+            (token_dir / "telegram-bot-token").write_text("host-token", encoding="utf-8")
+            (token_dir / "telegram-chat-id").write_text("host-chat", encoding="utf-8")
+            seen: dict[str, object] = {}
 
-        class Response:
-            def read(self) -> bytes:
-                return b'{"ok":true,"result":{"message_id":77}}'
+            class Response:
+                def read(self) -> bytes:
+                    return b'{"ok":true,"result":{"message_id":77}}'
 
-            def __enter__(self) -> "Response":
-                return self
+                def __enter__(self) -> "Response":
+                    return self
 
-            def __exit__(self, *_args: object) -> bool:
-                return False
+                def __exit__(self, *_args: object) -> bool:
+                    return False
 
-        def urlopen(request, timeout=0):  # noqa: ANN001
-            seen["url"] = request.full_url
-            seen["data"] = request.data
-            seen["timeout"] = timeout
-            return Response()
+            def urlopen(request, timeout=0):  # noqa: ANN001
+                seen["url"] = request.full_url
+                seen["data"] = request.data
+                seen["timeout"] = timeout
+                return Response()
 
-        previous = coordinator_watch_effects._TEST_TELEGRAM_DIR
-        coordinator_watch_effects._TEST_TELEGRAM_DIR = token_dir
-        original = coordinator_watch_effects.urllib.request.urlopen
-        coordinator_watch_effects.urllib.request.urlopen = urlopen
-        try:
-            with SignedDispatch(base, effect, "watch-host-notice-1") as verification:
-                request = request_for(facts)
-                request["verification"] = verification
-                with fake_gh(base, state), host_env(base):
-                    first = run_once(request)
-                    second = run_once(request)
-        finally:
-            coordinator_watch_effects._TEST_TELEGRAM_DIR = previous
-            coordinator_watch_effects.urllib.request.urlopen = original
-        assert first["result"] == "DELIVERED"
-        assert first["notifications"] == 1
-        assert first["notification_level"] == "INFO"
-        assert first["notification_delivery"] == "VERIFIED"
-        assert first["mutates_github"] is False
-        assert str(seen["url"]).startswith("https://api.telegram.org/bot")
-        assert b"LEVEL=INFO" in bytes(seen["data"])
-        assert b"COMPLETE" not in bytes(seen["data"])
-        assert second["result"] in {"DEDUP", "NO_ACTION"}
-        assert second["notifications"] == 0
-        assert send_effect("NOTIFY_OWNER", {**effect, "level": "COMPLETE"})["outcome"] == "NOT_SENT"
+            previous = coordinator_watch_effects._TEST_TELEGRAM_DIR
+            coordinator_watch_effects._TEST_TELEGRAM_DIR = token_dir
+            original = coordinator_watch_effects.urllib.request.urlopen
+            coordinator_watch_effects.urllib.request.urlopen = urlopen
+            try:
+                with SignedDispatch(base, effect, "watch-host-notice-1") as verification:
+                    request = request_for(facts)
+                    request["verification"] = verification
+                    with fake_gh(base, state), host_env(base):
+                        first = run_once(request)
+                        second = run_once(request)
+            finally:
+                coordinator_watch_effects._TEST_TELEGRAM_DIR = previous
+                coordinator_watch_effects.urllib.request.urlopen = original
+            assert first["result"] == "DELIVERED"
+            assert first["notifications"] == 1
+            assert first["notification_level"] == "INFO"
+            assert first["notification_delivery"] == "VERIFIED"
+            assert first["mutates_github"] is False
+            assert str(seen["url"]).startswith("https://api.telegram.org/bot")
+            assert b"LEVEL=INFO" in bytes(seen["data"])
+            assert b"COMPLETE" not in bytes(seen["data"])
+            assert second["result"] in {"DEDUP", "NO_ACTION"}
+            assert second["notifications"] == 0
+            assert send_effect("NOTIFY_OWNER", {**effect, "level": "COMPLETE"})["outcome"] == "NOT_SENT"
+
+
 
 
 def test_unconfirmed_send_is_not_delivery() -> None:
@@ -913,7 +790,7 @@ def test_unconfirmed_send_is_not_delivery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, facts, BRANCH)
             effect = signed_effect(base, facts, BRANCH, state)
@@ -991,14 +868,12 @@ def test_packet_text_cannot_falsify_machine_facts() -> None:
     lied = json.loads(json.dumps(facts))
     lied["git"]["dirty"] = False
     lied["git"]["unpushed"] = False
-    lied["worker"]["present"] = False
-    lied["worker"]["progress_evidence"] = False
     lied["resource"]["result"] = "PASS"
     lied["admission"]["decision"] = "ALLOW"
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         with observed_machine(
-            base, dirty=True, unpushed=True, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=True, unpushed=True, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, lied, BRANCH, pr=False, bodies=[render_body(lied, BRANCH)])
             with fake_gh(base, state):
@@ -1009,20 +884,16 @@ def test_packet_text_cannot_falsify_machine_facts() -> None:
                     watch_class=facts["watch"]["watch_class"],
                 )
         git = collected["facts"]["git"]
-        worker = collected["facts"]["worker"]
         assert git["dirty"] is True
         assert git["unpushed"] is True
-        assert worker["present"] is True
-        assert worker["progress_evidence"] is True
-        assert collected["facts"]["resource"]["result"] in {"PASS", "WARN"}
+        assert "worker" not in collected["facts"]
+        assert collected["facts"]["resource"]["result"] == "PASS"
     clean = json.loads(json.dumps(facts))
-    clean["worker"]["present"] = True
-    clean["worker"]["progress_evidence"] = True
     clean["git"]["dirty"] = True
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=False, claim=False, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=False, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, clean, BRANCH, pr=False, bodies=[render_body(clean, BRANCH)])
             with fake_gh(base, state):
@@ -1032,7 +903,7 @@ def test_packet_text_cannot_falsify_machine_facts() -> None:
                     issue_id=TARGET,
                     watch_class=facts["watch"]["watch_class"],
                 )
-        assert collected["facts"]["worker"]["present"] is False
+        assert "worker" not in collected["facts"]
         assert collected["facts"]["git"]["dirty"] is False
         assert collected["facts"]["admission"]["decision"] == "UNKNOWN"
 
@@ -1042,13 +913,18 @@ def test_unobserved_machine_facts_are_not_passing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         state = gh_state(base, facts, BRANCH, bodies=[render_body(facts, BRANCH)])
-        with fake_gh(base, state):
-            collected = collect_authoritative(
-                repository=REPO,
-                workstream=WORKSTREAM,
-                issue_id=TARGET,
-                watch_class=facts["watch"]["watch_class"],
-            )
+        previous_meminfo = collect._TEST_MEMINFO_BODIES
+        collect._TEST_MEMINFO_BODIES = []
+        try:
+            with fake_gh(base, state):
+                collected = collect_authoritative(
+                    repository=REPO,
+                    workstream=WORKSTREAM,
+                    issue_id=TARGET,
+                    watch_class=facts["watch"]["watch_class"],
+                )
+        finally:
+            collect._TEST_MEMINFO_BODIES = previous_meminfo
     git = collected["facts"]["git"]
     assert "dirty" not in git
     assert "unpushed" not in git
@@ -1062,7 +938,7 @@ def test_foreign_reservation_blocks_send() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         with observed_machine(
-            base, dirty=False, unpushed=False, session=True, claim=True, meminfo=[HEALTHY_MEMINFO]
+            base, dirty=False, unpushed=False, claim=True, meminfo=[HEALTHY_MEMINFO]
         ):
             state = gh_state(base, facts, BRANCH)
             effect = signed_effect(base, facts, BRANCH, state)
@@ -1111,14 +987,8 @@ def test_cli_quiet_wait() -> None:
 def main_tests() -> int:
     test_unchanged_wait_takes_no_action()
     test_exact_head_ci_wakes_once_and_replay_dedups()
-    test_progress_resumes_once()
-    test_wrong_branch_session_does_not_resume()
-    test_wrong_head_session_does_not_resume()
-    test_different_claim_worktree_does_not_resume()
-    test_liveness_without_progress_does_not_resume()
     test_revision_change_before_action_delivers_nothing()
     test_subject_change_before_action_delivers_nothing()
-    test_resource_block_before_resume_leaves_sessions_untouched()
     test_requested_branch_mismatch_consumes_nothing()
     test_forged_authoritative_file_cannot_authorize()
     test_noncanonical_lock_cannot_escape_or_split_identity()

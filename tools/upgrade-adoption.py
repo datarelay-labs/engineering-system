@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,13 +19,15 @@ from adopt import (
     ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
-    RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
+    TERMINAL_COMPLETION_NOTIFY_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
     WORK_PACKET_TEMPLATE_MANAGED,
+    apply_execution_policy_sync,
     canonical_baseline,
     canonical_version,
+    plan_execution_policy_sync,
     engineering_workflow,
     release_workflow,
 )
@@ -186,28 +190,30 @@ def legacy_release_workflow(baseline: str, preflight_command: str, release_comma
     return "\n".join(lines)
 
 
-def known_managed_resume_texts(canonical_text: str) -> set[str]:
-    """Return known managed resume adapter texts that may be safely replaced."""
-    known = {canonical_text}
-    history_dir = CANONICAL / "tools" / "managed_adapter_history" / "resume"
-    if history_dir.is_dir():
-        for path in sorted(history_dir.glob("*.md")):
-            known.add(path.read_text(encoding="utf-8"))
-    return known
-
-
-def known_managed_cursor_rule_texts(canonical_text: str) -> set[str]:
-    known = {canonical_text}
-    history_dir = CANONICAL / "tools" / "managed_adapter_history" / "rule"
-    if history_dir.is_dir():
-        for path in sorted(history_dir.glob("*.mdc")):
-            known.add(path.read_text(encoding="utf-8"))
-    return known
-
-
-def known_managed_file_hashes(rel: str, canonical_bytes: bytes) -> set[str]:
+def known_managed_file_hashes(rel: str, canonical_bytes: bytes, old_baseline: str = "") -> set[str]:
     """Return trusted hashes for current and historical adoption-managed files."""
     known = {hashlib.sha256(canonical_bytes).hexdigest()}
+    if old_baseline and re.fullmatch(r"[0-9a-f]{40}", old_baseline):
+        try:
+            prior = subprocess.run(
+                ["git", "-C", str(CANONICAL), "show", f"{old_baseline}:{rel}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+            )
+            if prior.returncode == 0:
+                known.add(hashlib.sha256(prior.stdout).hexdigest())
+            # Some adopted repositories were created from canonical managed bytes
+            # whose formatting was normalized during adoption. Compare semantics
+            # for JSON managed files before classifying those bytes as custom.
+            if rel.endswith(".json") and prior.returncode == 0:
+                try:
+                    known_json = json.loads(prior.stdout.decode("utf-8"))
+                    canonical_json = json.loads(canonical_bytes.decode("utf-8"))
+                    if known_json == canonical_json:
+                        pass
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
+        except OSError:
+            pass
     history_dir = CANONICAL / "tools" / "managed_adapter_history" / "file_hashes"
     if not history_dir.is_dir():
         return known
@@ -228,7 +234,7 @@ def known_managed_file_hashes(rel: str, canonical_bytes: bytes) -> set[str]:
 
 
 def plan_managed_file_install(
-    root: Path, managed: tuple[str, ...], *, label: str
+    root: Path, managed: tuple[str, ...], *, label: str, old_baseline: str = ""
 ) -> dict[str, str]:
     """Plan updates only for current or cryptographically known managed bytes."""
     planned: dict[str, str] = {}
@@ -250,119 +256,52 @@ def plan_managed_file_install(
         if existing_bytes == canonical_bytes:
             continue
         digest = hashlib.sha256(existing_bytes).hexdigest()
-        if digest in known_managed_file_hashes(rel, canonical_bytes):
+        if digest in known_managed_file_hashes(rel, canonical_bytes, old_baseline):
             planned[rel] = canonical_text
             continue
+        if rel.endswith(".json") and old_baseline and re.fullmatch(r"[0-9a-f]{40}", old_baseline):
+            prior = subprocess.run(["git", "-C", str(CANONICAL), "show", f"{old_baseline}:{rel}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            if prior.returncode == 0:
+                try:
+                    if json.loads(existing_bytes.decode("utf-8")) == json.loads(prior.stdout.decode("utf-8")):
+                        planned[rel] = canonical_text
+                        continue
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
         raise SystemExit(
             f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
         )
     return planned
 
 
-def plan_cursor_rule_update(root: Path) -> str | None:
-    source = CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc"
-    if not source.is_file():
-        raise SystemExit("FAIL canonical Cursor engineering-system rule missing")
-    canonical_text = source.read_text(encoding="utf-8")
-    path = root / ".cursor/rules/engineering-system.mdc"
-    if not path.is_file():
-        return canonical_text
-    existing = path.read_text(encoding="utf-8")
-    if existing == canonical_text:
-        return None
-    if existing in known_managed_cursor_rule_texts(canonical_text):
-        return canonical_text
-    raise SystemExit(
-        "FAIL .cursor/rules/engineering-system.mdc contains local/custom changes; "
-        "preserve/review them manually before upgrade"
-    )
+RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
 
 
-def apply_cursor_rule_update(root: Path, planned_text: str | None) -> bool:
-    if planned_text is None:
-        return False
-    path = root / ".cursor/rules/engineering-system.mdc"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(planned_text, encoding="utf-8")
-    return True
+def existing_retired_agent_artifacts(root: Path) -> list[str]:
+    return [rel for rel in RETIRED_AGENT_ARTIFACT_PATHS if (root / rel).exists() or (root / rel).is_symlink()]
 
 
-def plan_cursorignore_install(root: Path) -> str | None:
-    path = root / ".cursorignore"
-    if path.exists():
-        return None
-    source = CANONICAL / "templates" / ".cursorignore"
-    if not source.is_file():
-        raise SystemExit("FAIL canonical .cursorignore template missing")
-    return source.read_text(encoding="utf-8")
-
-
-def apply_cursorignore_install(root: Path, planned_text: str | None) -> bool:
-    if planned_text is None:
-        return False
-    (root / ".cursorignore").write_text(planned_text, encoding="utf-8")
-    return True
-
-
-def plan_cursor_resume_adapters(root: Path) -> dict[str, str]:
-    """Validate managed Cursor resume adapters before any repository mutation."""
-    source = CANONICAL / "templates" / ".cursor" / "commands" / "resume.md"
-    if not source.is_file():
-        raise SystemExit("FAIL canonical Cursor resume template missing")
-    text = source.read_text(encoding="utf-8")
-    known = known_managed_resume_texts(text)
-    planned: dict[str, str] = {}
-
-    resume_path = root / ".cursor/commands/resume.md"
-    if not resume_path.is_file():
-        planned[".cursor/commands/resume.md"] = text
-    else:
-        existing = resume_path.read_text(encoding="utf-8")
-        if existing == text:
-            pass
-        elif existing in known:
-            planned[".cursor/commands/resume.md"] = text
-        else:
-            raise SystemExit(
-                "FAIL .cursor/commands/resume.md contains local/custom changes; "
-                "preserve/review them manually before upgrade"
-            )
-
-    for rel in RESUME_ADAPTER_ALIASES:
+def remove_retired_agent_artifacts(root: Path) -> list[str]:
+    """Remove all repository-local retired agent compatibility artifacts without following symlinks."""
+    removed: list[str] = []
+    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
         path = root / rel
-        if not path.is_file():
-            continue
-        existing = path.read_text(encoding="utf-8")
-        if existing == text:
-            continue
-        if existing in known:
-            planned[rel] = text
-            continue
-        raise SystemExit(
-            f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
-        )
-    return planned
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+            removed.append(rel)
+        elif path.is_dir():
+            shutil.rmtree(path)
+            removed.append(rel)
+        elif path.exists():
+            path.unlink()
+            removed.append(rel)
+    return removed
 
 
-def apply_cursor_resume_adapters(root: Path, planned: dict[str, str]) -> list[str]:
-    updated: list[str] = []
-    for rel, text in planned.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        updated.append(rel)
-    return updated
-
-
-def sync_cursor_resume_adapters(root: Path) -> list[str]:
-    """Compatibility wrapper for callers outside the upgrade transaction."""
-    return apply_cursor_resume_adapters(root, plan_cursor_resume_adapters(root))
-
-
-def plan_work_packet_template_install(root: Path) -> dict[str, str]:
+def plan_work_packet_template_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed Work Packet template bytes."""
     return plan_managed_file_install(
-        root, WORK_PACKET_TEMPLATE_MANAGED, label="Work Packet template"
+        root, WORK_PACKET_TEMPLATE_MANAGED, label="Work Packet template", old_baseline=old_baseline
     )
 
 
@@ -376,10 +315,10 @@ def apply_work_packet_template_install(root: Path, planned: dict[str, str]) -> l
     return installed
 
 
-def plan_engineering_system_dependencies_install(root: Path) -> dict[str, str]:
+def plan_engineering_system_dependencies_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install the canonical Python dependency declaration for managed helpers."""
     return plan_managed_file_install(
-        root, ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED, label="Engineering System dependencies"
+        root, ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED, label="Engineering System dependencies", old_baseline=old_baseline
     )
 
 
@@ -395,10 +334,10 @@ def apply_engineering_system_dependencies_install(
     return installed
 
 
-def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
+def plan_knowledge_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed knowledge-contract bytes."""
     return plan_managed_file_install(
-        root, KNOWLEDGE_CONTRACT_MANAGED, label="knowledge contract"
+        root, KNOWLEDGE_CONTRACT_MANAGED, label="knowledge contract", old_baseline=old_baseline
     )
 
 
@@ -412,10 +351,10 @@ def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> lis
     return installed
 
 
-def plan_runtime_contract_install(root: Path) -> dict[str, str]:
+def plan_runtime_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed runtime-contract bytes."""
     return plan_managed_file_install(
-        root, RUNTIME_CONTRACT_MANAGED, label="runtime contract"
+        root, RUNTIME_CONTRACT_MANAGED, label="runtime contract", old_baseline=old_baseline
     )
 
 
@@ -429,10 +368,10 @@ def apply_runtime_contract_install(root: Path, planned: dict[str, str]) -> list[
     return installed
 
 
-def plan_skills_contract_install(root: Path) -> dict[str, str]:
+def plan_skills_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed skills-contract bytes."""
     return plan_managed_file_install(
-        root, SKILLS_CONTRACT_MANAGED, label="skills contract"
+        root, SKILLS_CONTRACT_MANAGED, label="skills contract", old_baseline=old_baseline
     )
 
 
@@ -446,9 +385,9 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
     return installed
 
 
-def plan_implementation_preflight_install(root: Path) -> dict[str, str]:
+def plan_implementation_preflight_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     return plan_managed_file_install(
-        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight"
+        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight", old_baseline=old_baseline
     )
 
 
@@ -462,10 +401,32 @@ def apply_implementation_preflight_install(root: Path, planned: dict[str, str]) 
     return installed
 
 
-def plan_context_epoch_install(root: Path) -> dict[str, str]:
+def plan_terminal_completion_notify_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade only the managed terminal completion notifier."""
+    return plan_managed_file_install(
+        root,
+        TERMINAL_COMPLETION_NOTIFY_MANAGED,
+        label="terminal completion notifier",
+        old_baseline=old_baseline,
+    )
+
+
+def apply_terminal_completion_notify_install(
+    root: Path, planned: dict[str, str]
+) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_context_epoch_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed context-epoch bytes."""
     return plan_managed_file_install(
-        root, CONTEXT_EPOCH_MANAGED, label="context epoch"
+        root, CONTEXT_EPOCH_MANAGED, label="context epoch", old_baseline=old_baseline
     )
 
 
@@ -479,10 +440,10 @@ def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str
     return installed
 
 
-def plan_engineering_context_install(root: Path) -> dict[str, str]:
+def plan_engineering_context_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed engineering-context bytes."""
     return plan_managed_file_install(
-        root, ENGINEERING_CONTEXT_MANAGED, label="engineering context"
+        root, ENGINEERING_CONTEXT_MANAGED, label="engineering context", old_baseline=old_baseline
     )
 
 
@@ -496,10 +457,10 @@ def apply_engineering_context_install(root: Path, planned: dict[str, str]) -> li
     return installed
 
 
-def plan_verification_contract_install(root: Path) -> dict[str, str]:
+def plan_verification_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
-        root, VERIFICATION_CONTRACT_MANAGED, label="verification contract"
+        root, VERIFICATION_CONTRACT_MANAGED, label="verification contract", old_baseline=old_baseline
     )
 
 
@@ -557,7 +518,8 @@ def rewrite_known_baseline_declarations(
 
 
 def plan_baseline_declaration_updates(
-    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
+    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str,
+    source_overrides: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Compute rewrite + stale validation for AGENTS.md/README before any mutation.
 
@@ -570,9 +532,10 @@ def plan_baseline_declaration_updates(
         if not path.is_file():
             continue
         original = path.read_text(encoding="utf-8")
+        source = (source_overrides or {}).get(rel, original)
         try:
-            rewritten, changed = rewrite_known_baseline_declarations(
-                original, new_version, new_baseline
+            rewritten, _changed = rewrite_known_baseline_declarations(
+                source, new_version, new_baseline
             )
         except SystemExit as exc:
             message = str(exc)
@@ -589,7 +552,7 @@ def plan_baseline_declaration_updates(
                 f"FAIL {rel} still contains stale Engineering System baseline "
                 f"{old_baseline} after managed declaration sync; review manually"
             )
-        if changed:
+        if rewritten != original:
             planned.append((rel, rewritten))
     return planned
 
@@ -670,6 +633,7 @@ def main() -> int:
     old_baseline = str(engineering.get("baseline") or "")
     current_version = canonical_version()
     new_baseline = canonical_baseline(args.baseline_sha)
+    retired_agent_artifacts = existing_retired_agent_artifacts(root)
     ci_mode = str(engineering.get("ci_mode") or "")
     if ci_mode not in {"shared", "native"}:
         raise SystemExit("FAIL existing adoption has invalid ci_mode")
@@ -696,19 +660,29 @@ def main() -> int:
         )
 
     if old_version == current_version and old_baseline == new_baseline:
-        planned_engineering_context = plan_engineering_context_install(root)
-        if not planned_engineering_context:
+        planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_execution_policy = plan_execution_policy_sync(root)
+        if not planned_engineering_context and planned_execution_policy is None and not retired_agent_artifacts:
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
-        print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_engineering_context:
+            print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_execution_policy is not None:
+            print("EXECUTION_POLICY_REPAIR=REQUIRED")
+        if retired_agent_artifacts:
+            print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
             print("ADOPTION_UPGRADE_AUDIT=PASS")
             if not args.apply:
                 return 0
+        removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
+        print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
         installed_engineering_context = apply_engineering_context_install(
             root, planned_engineering_context
         )
-        print("ENGINEERING_CONTEXT_INSTALLED=" + ",".join(installed_engineering_context))
+        print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+        print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         checker = CANONICAL / "tools" / "check-adoption.py"
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
@@ -813,6 +787,8 @@ def main() -> int:
     }
     for key, value in plan.items():
         print(f"{key.upper()}={value}")
+    if retired_agent_artifacts:
+        print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
 
     if args.audit or not args.apply:
         print("ADOPTION_UPGRADE_AUDIT=PASS")
@@ -862,21 +838,33 @@ def main() -> int:
 
     # Validate managed declaration rewrites AND stale old-version/old-baseline
     # checks for both files before mutating metadata/workflows/adapters.
-    planned_declarations = plan_baseline_declaration_updates(
+    # Preserve the established declaration-validation order before composing
+    # the managed execution-policy repair into the same AGENTS.md write.
+    plan_baseline_declaration_updates(
         root, old_version, old_baseline, current_version, new_baseline
     )
-    planned_cursor_rule = plan_cursor_rule_update(root)
-    planned_cursorignore = plan_cursorignore_install(root)
-    planned_resume_adapters = plan_cursor_resume_adapters(root)
-    planned_work_packet_template = plan_work_packet_template_install(root)
-    planned_dependencies = plan_engineering_system_dependencies_install(root)
-    planned_knowledge_contract = plan_knowledge_contract_install(root)
-    planned_runtime_contract = plan_runtime_contract_install(root)
-    planned_skills_contract = plan_skills_contract_install(root)
-    planned_verification_contract = plan_verification_contract_install(root)
-    planned_implementation_preflight = plan_implementation_preflight_install(root)
-    planned_context_epoch = plan_context_epoch_install(root)
-    planned_engineering_context = plan_engineering_context_install(root)
+    planned_execution_policy = plan_execution_policy_sync(root)
+    source_overrides = (
+        {"AGENTS.md": planned_execution_policy}
+        if planned_execution_policy is not None
+        else None
+    )
+    planned_declarations = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, current_version, new_baseline,
+        source_overrides=source_overrides,
+    )
+    planned_work_packet_template = plan_work_packet_template_install(root, old_baseline)
+    planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
+    planned_knowledge_contract = plan_knowledge_contract_install(root, old_baseline)
+    planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
+    planned_skills_contract = plan_skills_contract_install(root, old_baseline)
+    planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+    planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
+    planned_terminal_completion_notify = plan_terminal_completion_notify_install(
+        root, old_baseline
+    )
+    planned_context_epoch = plan_context_epoch_install(root, old_baseline)
+    planned_engineering_context = plan_engineering_context_install(root, old_baseline)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -885,17 +873,8 @@ def main() -> int:
     if release_contract_enabled:
         release_workflow_path.write_text(release_workflow(new_baseline), encoding="utf-8")
 
-    cursor_rule_updated = apply_cursor_rule_update(root, planned_cursor_rule)
-    print("CURSOR_RULE_SYNCED=" + ("YES" if cursor_rule_updated else "NO"))
-
-    cursorignore_installed = apply_cursorignore_install(root, planned_cursorignore)
-    print("CURSORIGNORE_INSTALLED=" + ("YES" if cursorignore_installed else "NO"))
-
-    synced_adapters = apply_cursor_resume_adapters(root, planned_resume_adapters)
-    if synced_adapters:
-        print("CURSOR_RESUME_ADAPTERS_SYNCED=" + ",".join(synced_adapters))
-    else:
-        print("CURSOR_RESUME_ADAPTERS_SYNCED=<none>")
+    removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
+    print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
 
     installed_work_packet_template = apply_work_packet_template_install(
         root, planned_work_packet_template
@@ -945,6 +924,17 @@ def main() -> int:
     else:
         print("IMPLEMENTATION_PREFLIGHT_INSTALLED=<none>")
 
+    installed_terminal_completion_notify = apply_terminal_completion_notify_install(
+        root, planned_terminal_completion_notify
+    )
+    if installed_terminal_completion_notify:
+        print(
+            "TERMINAL_COMPLETION_NOTIFY_INSTALLED="
+            + ",".join(installed_terminal_completion_notify)
+        )
+    else:
+        print("TERMINAL_COMPLETION_NOTIFY_INSTALLED=<none>")
+
     installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
     if installed_context_epoch:
         print("CONTEXT_EPOCH_INSTALLED=" + ",".join(installed_context_epoch))
@@ -964,6 +954,9 @@ def main() -> int:
         print("BASELINE_DECLARATIONS_SYNCED=" + ",".join(synced_declarations))
     else:
         print("BASELINE_DECLARATIONS_SYNCED=<none>")
+
+    execution_policy_synced = planned_execution_policy is not None
+    print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
 
     checker = CANONICAL / "tools" / "check-adoption.py"
     result = subprocess.run([sys.executable, str(checker), "--root", str(root)])

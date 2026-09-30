@@ -277,8 +277,24 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
     if completed.returncode == 0 and "ENGINEERING_SYSTEM_ADOPTION=PASS" in completed.stdout:
         return True, "structural adoption validation passed"
     detail = completed.stdout.strip().splitlines()
-    summary = detail[-1] if detail else "structural adoption validation failed"
+    failures = [line for line in detail if line.startswith("FAIL ")]
+    if failures:
+        summary = "; ".join(failures[:3])
+    else:
+        summary = detail[-1] if detail else "structural adoption validation failed"
     return False, summary
+
+
+REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
+    "AGENTS.md missing managed continuous-execution policy",
+    "AGENTS.md contains retired agent/Cursor compatibility rules",
+    "retired agent artifact must be removed:",
+    "Chat-primary adoption missing required helper tools/engineering-context.py",
+)
+
+
+def repairable_structural_failure(detail: str) -> bool:
+    return any(marker in detail for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
 
 
 def classify_checkout(root: Path, target_version: str, target_baseline: str) -> RepoResult:
@@ -287,9 +303,7 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
         (root / rel).exists()
         for rel in (
             ".engineering",
-            ".cursor/rules/engineering-system.mdc",
             ".github/workflows/engineering-system.yml",
-            ".cursor/commands/resume.md",
         )
     )
     agents = (root / "AGENTS.md").is_file()
@@ -380,6 +394,16 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
     if version == target_version and target_baseline and baseline == target_baseline:
         ok, detail = structural_adoption_ok(root)
         if not ok:
+            if repairable_structural_failure(detail):
+                return RepoResult(
+                    full_name="",
+                    state="OUTDATED",
+                    action="UPGRADE",
+                    version=version,
+                    baseline=baseline,
+                    mode=mode,
+                    detail=f"version/baseline match with managed repair required: {detail}",
+                )
             return RepoResult(
                 full_name="",
                 state="INCOMPLETE",

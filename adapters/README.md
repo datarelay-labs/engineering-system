@@ -17,12 +17,9 @@ Adapters translate the core into tool-specific instruction surfaces:
 | Adapter | Implementation |
 |---|---|
 | ChatGPT | `templates/CHATGPT_CUSTOM_INSTRUCTION.txt`, `templates/CHATGPT_PROJECT_INSTRUCTION.txt` |
-| Cursor global | `templates/CURSOR_USER_RULE.txt` |
-| Cursor repository | `templates/.cursor/rules/engineering-system.mdc` |
 | Repository-neutral entrypoint | `templates/AGENTS.md` |
 | GitHub enforcement | reusable workflows under `.github/workflows/` |
 | GitHub session continuity | repository-scoped AI Work Packet Issue template |
-| Cursor resume workflow | `templates/.cursor/commands/resume.md` |
 
 Future tools may add adapters without changing the engineering lifecycle.
 

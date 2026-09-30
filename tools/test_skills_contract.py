@@ -131,23 +131,27 @@ def test_authorize_without_host_trust_anchor_is_boundary_unavailable() -> None:
         root = Path(tmp) / "repo"
         root.mkdir()
         write_schema(root)
-        # Even with caller env set, production CLI must ignore it.
+        # Test the boundary in-process so a real production host anchor cannot
+        # make this regression environment-dependent. Caller env remains inert.
         keys = Path(tmp) / "keys"
         _, pub = fixtures.generate_keypair(keys)
-        env = dict(os.environ)
-        env[contract.TRUST_ANCHOR_ENV] = str(pub)
-        result = run_cli(
-            "authorize",
-            "--root",
-            str(root),
-            "--binding-assertion",
-            str(root / "missing-binding.json"),
-            "--dispatch-assertion",
-            str(root / "missing-dispatch.json"),
-            env=env,
-        )
-        assert result.returncode != 0
-        assert "REASON=BOUNDARY_UNAVAILABLE" in result.stdout
+        previous = contract._TEST_TRUST_ANCHOR_UNAVAILABLE
+        contract._TEST_TRUST_ANCHOR_UNAVAILABLE = True
+        try:
+            assert contract.resolve_trust_anchor() is None
+            decision = contract.authorize(
+                root,
+                binding_assertion=root / "missing-binding.json",
+                dispatch_assertion=root / "missing-dispatch.json",
+                request_json="{}",
+            )
+            assert decision.allowed is False
+            assert decision.reason == "BOUNDARY_UNAVAILABLE"
+            os.environ[contract.TRUST_ANCHOR_ENV] = str(pub)
+            assert contract.resolve_trust_anchor() is None
+        finally:
+            contract._TEST_TRUST_ANCHOR_UNAVAILABLE = previous
+            os.environ.pop(contract.TRUST_ANCHOR_ENV, None)
 
 
 def test_path_shadow_verifier_is_never_executed() -> None:
@@ -266,20 +270,34 @@ def test_caller_env_trust_anchor_does_not_alter_authorization() -> None:
         env[contract.TRUST_ANCHOR_ENV] = str(pub)
         env["ENGINEERING_SKILLS_TRUST_ANCHOR"] = str(pub)
         env["SKILLS_TRUST_ANCHOR_PUBKEY"] = str(decoy)
-        denied = run_cli(
-            "authorize",
-            "--root",
-            str(root),
-            "--binding-assertion",
-            str(binding),
-            "--dispatch-assertion",
-            str(dispatch),
-            "--request-json",
-            json.dumps(request),
-            env=env,
-        )
-        assert denied.returncode != 0
-        assert "REASON=BOUNDARY_UNAVAILABLE" in denied.stdout
+        # Exercise resolution in-process with the production host anchor forced
+        # unavailable. The caller-controlled environment and repo-local decoy
+        # must not become authority even on a host that has a real anchor.
+        previous = contract._TEST_TRUST_ANCHOR_UNAVAILABLE
+        contract._TEST_TRUST_ANCHOR_UNAVAILABLE = True
+        previous_env = {key: os.environ.get(key) for key in (
+            contract.TRUST_ANCHOR_ENV,
+            "ENGINEERING_SKILLS_TRUST_ANCHOR",
+            "SKILLS_TRUST_ANCHOR_PUBKEY",
+        )}
+        try:
+            os.environ.update(env)
+            assert contract.resolve_trust_anchor() is None
+            denied = contract.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            assert denied.allowed is False
+            assert denied.reason == "BOUNDARY_UNAVAILABLE"
+        finally:
+            contract._TEST_TRUST_ANCHOR_UNAVAILABLE = previous
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
         # Source must not read caller environment for trust-anchor resolution.
         source = TOOL.read_text(encoding="utf-8")
         assert "os.environ" not in source
@@ -790,21 +808,25 @@ def test_self_minted_readonly_assertions_denied_on_production_cli() -> None:
         os.chmod(session, 0o555)
         env = dict(os.environ)
         env[contract.TRUST_ANCHOR_ENV] = str(pub)
-        denied = run_cli(
-            "authorize",
-            "--root",
-            str(root),
-            "--binding-assertion",
-            str(binding),
-            "--dispatch-assertion",
-            str(dispatch),
-            "--request-json",
-            json.dumps(request),
-            env=env,
-        )
-        assert denied.returncode != 0
-        assert "REASON=BOUNDARY_UNAVAILABLE" in denied.stdout
-        assert "DECISION=ALLOW" not in denied.stdout
+        previous = contract._TEST_TRUST_ANCHOR_UNAVAILABLE
+        previous_env = os.environ.get(contract.TRUST_ANCHOR_ENV)
+        contract._TEST_TRUST_ANCHOR_UNAVAILABLE = True
+        try:
+            os.environ[contract.TRUST_ANCHOR_ENV] = str(pub)
+            denied = contract.authorize(
+                root,
+                binding_assertion=binding,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            assert denied.allowed is False
+            assert denied.reason == "BOUNDARY_UNAVAILABLE"
+        finally:
+            contract._TEST_TRUST_ANCHOR_UNAVAILABLE = previous
+            if previous_env is None:
+                os.environ.pop(contract.TRUST_ANCHOR_ENV, None)
+            else:
+                os.environ[contract.TRUST_ANCHOR_ENV] = previous_env
 
 
 def test_unsupported_platform_authorize_is_boundary_unavailable() -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,9 +20,6 @@ FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RULE_SURFACES = (
     "AGENTS.md",
     "CLAUDE.md",
-    ".cursorrules",
-    ".cursor/rules",
-    ".cursor/commands",
     ".github/copilot-instructions.md",
 )
 
@@ -63,14 +61,18 @@ IMPLEMENTATION_PREFLIGHT_MANAGED = (
     "tools/implementation_preflight.py",
 )
 
-# Context-epoch projection is invoked by the managed Cursor resume adapter, so
-# adopted repositories must carry the exact canonical helper beside that adapter.
+# Terminal completion notification is managed because adopted AGENTS.md
+# makes this helper a hard terminal gate.
+TERMINAL_COMPLETION_NOTIFY_MANAGED = (
+    "tools/terminal_completion_notify.py",
+)
+
+# Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
 )
 
-# Exact-HEAD repository orientation is invoked by the managed resume adapter.
-# Adopted repositories must carry the exact canonical helper beside that adapter.
+# Exact-HEAD repository orientation is a provider-neutral managed helper.
 ENGINEERING_CONTEXT_MANAGED = (
     "tools/engineering-context.py",
 )
@@ -88,9 +90,6 @@ REQUIRED_MANAGED = (
     ".engineering/project.yaml",
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
-    ".cursor/rules/engineering-system.mdc",
-    ".cursorignore",
-    ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
     *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
@@ -99,14 +98,115 @@ REQUIRED_MANAGED = (
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
     *IMPLEMENTATION_PREFLIGHT_MANAGED,
+    *TERMINAL_COMPLETION_NOTIFY_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
 )
 
-# Known Cursor resume aliases kept in sync when present or installed as managed adapters.
-RESUME_ADAPTER_ALIASES = (
-    ".cursor/commands/work-resume.md",
+RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
+EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
+EXECUTION_RULES_HEADING = "## Execution rules"
+RETIRED_AGENT_RULE_REPLACEMENTS = (
+    (
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.",
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope.",
+    ),
+    (
+        "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.",
+        "",
+    ),
 )
+
+
+def rewrite_retired_agent_rules(text: str) -> str:
+    updated = text
+    for old, new in RETIRED_AGENT_RULE_REPLACEMENTS:
+        updated = updated.replace(old, new)
+    return updated
+
+
+def retired_agent_rules_present(text: str) -> bool:
+    return "Cursor" in text or "IMPLEMENTER=CURSOR" in text
+
+
+def canonical_execution_policy_line() -> str:
+    template = CANONICAL / "templates" / "AGENTS.md"
+    if not template.is_file():
+        raise SystemExit("FAIL canonical AGENTS template missing")
+    matches = [
+        line
+        for line in template.read_text(encoding="utf-8").splitlines()
+        if line.startswith(EXECUTION_POLICY_MARKER)
+    ]
+    if len(matches) != 1:
+        raise SystemExit("FAIL canonical AGENTS template must contain exactly one managed execution policy")
+    return matches[0]
+
+
+def plan_execution_policy_sync(root: Path) -> str | None:
+    """Synchronize canonical execution policy and remove known retired agent rules.
+
+    Product-specific rules remain untouched. Unknown Cursor-specific text fails
+    closed rather than being guessed away.
+    """
+    path = root / "AGENTS.md"
+    if not path.is_file():
+        return None
+    original = path.read_text(encoding="utf-8")
+    cleaned = rewrite_retired_agent_rules(original)
+    if retired_agent_rules_present(cleaned):
+        raise SystemExit(
+            "FAIL AGENTS.md contains unrecognized retired agent/Cursor rules; review manually"
+        )
+
+    canonical = canonical_execution_policy_line()
+    lines = cleaned.splitlines()
+    policy_indexes = [i for i, line in enumerate(lines) if line.startswith(EXECUTION_POLICY_MARKER)]
+    if len(policy_indexes) > 1:
+        raise SystemExit("FAIL AGENTS.md contains duplicate managed execution policy lines")
+    if policy_indexes:
+        idx = policy_indexes[0]
+        if lines[idx] != canonical:
+            lines[idx] = canonical
+    else:
+        heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
+        if len(heading_indexes) != 1:
+            raise SystemExit(
+                "FAIL AGENTS.md must contain exactly one '## Execution rules' heading "
+                "before managed execution policy synchronization"
+            )
+        insert_at = heading_indexes[0] + 1
+        if insert_at < len(lines) and lines[insert_at] == "":
+            insert_at += 1
+        lines.insert(insert_at, canonical)
+    rewritten = "\n".join(lines)
+    if original.endswith("\n"):
+        rewritten += "\n"
+    return None if rewritten == original else rewritten
+
+
+def apply_execution_policy_sync(root: Path, planned_text: str | None) -> bool:
+    if planned_text is None:
+        return False
+    (root / "AGENTS.md").write_text(planned_text, encoding="utf-8")
+    return True
+
+
+def remove_retired_agent_artifacts(root: Path) -> list[str]:
+    removed: list[str] = []
+    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
+        path = root / rel
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+            removed.append(rel)
+        elif path.is_dir():
+            shutil.rmtree(path)
+            removed.append(rel)
+        elif path.exists():
+            path.unlink()
+            removed.append(rel)
+    return removed
+
 
 # Prefer committed candidate/base diffs when ENGINEERING_BASE_REF is provided by shared CI.
 WHITESPACE_CHECK_COMMAND = (
@@ -386,9 +486,6 @@ def rule_surfaces(root: Path) -> list[str]:
 def review_required_rules(root: Path, rules: list[str]) -> list[str]:
     exact_generated = {
         "AGENTS.md": CANONICAL / "templates" / "AGENTS.md",
-        ".cursor/rules/engineering-system.mdc": CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc",
-        ".cursor/commands/resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
-        ".cursor/commands/work-resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
     }
     required: list[str] = []
     for rel in rules:
@@ -529,6 +626,25 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def require_repository_relative_contract(root: Path, value: str, label: str) -> Path:
+    raw = value.strip()
+    relative = Path(raw)
+    if not raw or relative.is_absolute() or ".." in relative.parts:
+        raise SystemExit(
+            f"FAIL user-facing {label} contract path must be repository-relative and stay inside repository: {raw}"
+        )
+    try:
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        raise SystemExit(
+            f"FAIL user-facing {label} contract path must be repository-relative and stay inside repository: {raw}"
+        )
+    if not candidate.is_file():
+        raise SystemExit(f"FAIL user-facing {label} contract missing: {raw}")
+    return candidate
+
+
 def parse_domain_tests(values: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for value in values:
@@ -552,6 +668,8 @@ def project_yaml(
     merge_gate_status: str,
     project_type: str,
     maturity: str,
+    user_facing: bool,
+    primary_user_surface: str,
     domains: list[str],
     platform: str,
     operations_mode: str,
@@ -584,6 +702,8 @@ def project_yaml(
             f"  name: {yaml_scalar(root.name)}",
             f"  type: {yaml_scalar(project_type)}",
             f"  maturity: {yaml_scalar(maturity)}",
+            f"  user_facing: {'true' if user_facing else 'false'}",
+            f"  primary_user_surface: {yaml_scalar(primary_user_surface if user_facing else 'none')}",
             "",
             "domains:",
         ]
@@ -773,33 +893,62 @@ def release_yaml(
     operational_e2e_command: str,
     full_e2e_passes: int,
     public_smoke_command: str,
+    user_facing: bool,
+    primary_user_surface: str,
+    surface_reconciliation_contract: str,
+    full_user_e2e_contract: str,
 ) -> str:
     production = operations_mode == "production"
-    return (
-        "version: 1\n\n"
-        "exact_head_required: true\n"
-        f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}\n"
-        f"provenance_required: {'true' if provenance_command else 'false'}\n"
-        f"sbom_required: {'true' if sbom_command else 'false'}\n"
-        f"execution_context: {yaml_scalar(release_execution_context)}\n"
-        f"setup_command: {yaml_scalar(release_setup_command)}\n"
-        f"preflight_required: {'true' if preflight_command else 'false'}\n"
-        f"preflight_command: {yaml_scalar(preflight_command)}\n"
-        f"qualification_command: {yaml_scalar(release_command)}\n"
-        f"artifact_hash_command: {yaml_scalar(artifact_hash_command)}\n"
-        f"provenance_command: {yaml_scalar(provenance_command)}\n"
-        f"sbom_command: {yaml_scalar(sbom_command)}\n"
-        f"operational_e2e_required: {'true' if production else 'false'}\n"
-        f"operational_e2e_command: {yaml_scalar(operational_e2e_command)}\n"
-        f"full_e2e_passes: {full_e2e_passes if production else 0}\n"
-        f"public_smoke_required: {'true' if production else 'false'}\n"
-        f"public_smoke_command: {yaml_scalar(public_smoke_command)}\n\n"
-        "blockers:\n"
-        "  p0: true\n"
-        "  p1: true\n"
-        "  user_blocking_p2: true\n"
-    )
-
+    lines = [
+        "version: 1",
+        "",
+        "exact_head_required: true",
+        f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}",
+        f"provenance_required: {'true' if provenance_command else 'false'}",
+        f"sbom_required: {'true' if sbom_command else 'false'}",
+        f"execution_context: {yaml_scalar(release_execution_context)}",
+        f"setup_command: {yaml_scalar(release_setup_command)}",
+        f"preflight_required: {'true' if preflight_command else 'false'}",
+        f"preflight_command: {yaml_scalar(preflight_command)}",
+        f"qualification_command: {yaml_scalar(release_command)}",
+        f"artifact_hash_command: {yaml_scalar(artifact_hash_command)}",
+        f"provenance_command: {yaml_scalar(provenance_command)}",
+        f"sbom_command: {yaml_scalar(sbom_command)}",
+        f"operational_e2e_required: {'true' if production else 'false'}",
+        f"operational_e2e_command: {yaml_scalar(operational_e2e_command)}",
+        f"full_e2e_passes: {full_e2e_passes if production else 0}",
+        f"public_smoke_required: {'true' if production else 'false'}",
+        f"public_smoke_command: {yaml_scalar(public_smoke_command)}",
+        f"human_equivalent_user_tests_required: {'true' if user_facing else 'false'}",
+    ]
+    if user_facing:
+        browser_required = primary_user_surface in {"browser", "mixed"}
+        lines.extend([
+            "human_equivalent_user_tests:",
+            "  executor: CHATGPT_CHAT",
+            "  actual_user_surface_required: true",
+            f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
+            f"  actual_browser_process_required: {'true' if browser_required else 'false'}",
+            "  same_candidate_required: true",
+            "  ci_contract_validation_only: true",
+            "  surface_reconciliation:",
+            "    mandatory: true",
+            f"    contract: {yaml_scalar(surface_reconciliation_contract)}",
+            "    minimum_passes: 1",
+            "  full_user_e2e:",
+            "    mandatory: true",
+            f"    contract: {yaml_scalar(full_user_e2e_contract)}",
+            "    minimum_passes: 1",
+        ])
+    lines.extend([
+        "",
+        "blockers:",
+        "  p0: true",
+        "  p1: true",
+        "  user_blocking_p2: true",
+        "",
+    ])
+    return "\n".join(lines)
 
 def engineering_workflow(baseline: str, ci_mode: str) -> str:
     lines = [
@@ -925,6 +1074,20 @@ def ensure_implementation_preflight_compatible(root: Path) -> None:
         )
 
 
+def ensure_terminal_completion_notify_compatible(root: Path) -> None:
+    """Reject a custom terminal completion notifier before adoption writes any files."""
+    for rel in TERMINAL_COMPLETION_NOTIFY_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_context_epoch_compatible(root: Path) -> None:
     """Reject a custom context-epoch helper before adoption writes any files."""
     for rel in CONTEXT_EPOCH_MANAGED:
@@ -1037,6 +1200,10 @@ def main() -> int:
     parser.add_argument("--full-e2e-passes", type=int, default=1)
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
+    parser.add_argument("--user-facing", action="store_true")
+    parser.add_argument("--primary-user-surface", default="none", choices=("none", "browser", "cli", "desktop", "mobile", "mixed", "other"))
+    parser.add_argument("--surface-reconciliation-contract", default="")
+    parser.add_argument("--full-user-e2e-contract", default="")
     parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
     parser.add_argument("--native-ci-workflow", action="append", default=[])
     parser.add_argument("--merge-gate-status", default="auto", choices=("auto", "verified", "advisory", "unknown"))
@@ -1056,6 +1223,16 @@ def main() -> int:
     root = Path(args.root).expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"FAIL target root does not exist: {root}")
+
+    if args.user_facing:
+        if args.primary_user_surface == "none":
+            raise SystemExit("FAIL --user-facing requires --primary-user-surface")
+        if not args.surface_reconciliation_contract.strip() or not args.full_user_e2e_contract.strip():
+            raise SystemExit("FAIL --user-facing requires both --surface-reconciliation-contract and --full-user-e2e-contract")
+        for label, rel in (("surface reconciliation", args.surface_reconciliation_contract), ("Full User E2E", args.full_user_e2e_contract)):
+            require_repository_relative_contract(root, rel, label)
+    elif args.primary_user_surface != "none":
+        raise SystemExit("FAIL --primary-user-surface requires --user-facing")
 
     data = inventory(root)
     if args.audit or not args.apply:
@@ -1205,43 +1382,25 @@ def main() -> int:
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
     ensure_implementation_preflight_compatible(root)
+    ensure_terminal_completion_notify_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
+    planned_execution_policy = plan_execution_policy_sync(root)
+
+    removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
 
     written: list[str] = []
     skipped: list[str] = []
 
     write_missing(root, "AGENTS.md", (CANONICAL / "templates" / "AGENTS.md").read_text(encoding="utf-8"), written, skipped)
-    write_missing(
-        root,
-        ".cursor/rules/engineering-system.mdc",
-        (CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8"),
-        written,
-        skipped,
-    )
-    write_missing(
-        root,
-        ".cursorignore",
-        (CANONICAL / "templates" / ".cursorignore").read_text(encoding="utf-8"),
-        written,
-        skipped,
-    )
-    resume_text = (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-    write_missing(
-        root,
-        ".cursor/commands/resume.md",
-        resume_text,
-        written,
-        skipped,
-    )
-    for alias in RESUME_ADAPTER_ALIASES:
-        write_missing(root, alias, resume_text, written, skipped)
+    execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
     for rel in (
         *KNOWLEDGE_CONTRACT_MANAGED,
         *RUNTIME_CONTRACT_MANAGED,
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
+        *TERMINAL_COMPLETION_NOTIFY_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
         *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
@@ -1272,6 +1431,8 @@ def main() -> int:
             merge_gate_status,
             project_type,
             args.maturity,
+            args.user_facing,
+            args.primary_user_surface,
             domains,
             args.platform,
             operations_mode,
@@ -1308,6 +1469,10 @@ def main() -> int:
             operational_e2e_command,
             args.full_e2e_passes,
             public_smoke_command,
+            args.user_facing,
+            args.primary_user_surface,
+            args.surface_reconciliation_contract.strip(),
+            args.full_user_e2e_contract.strip(),
         ),
         written,
         skipped,
@@ -1355,6 +1520,8 @@ def main() -> int:
     print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
+    print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
+    print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
     if setup_command:
         print(f"SETUP_COMMAND={setup_command}")
     else:

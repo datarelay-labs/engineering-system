@@ -4,16 +4,13 @@
 The packet records incident control state. It never grants production,
 destructive, or mitigation authority. SAFETY_FREEZE=ON only narrows execution.
 
-Capture reads fixed Git metadata, Linux memory/swap/load/PSI facts, and the
-aggregate Cursor persistent-session count. It writes one JSON artifact inside
-the repository Git directory and does not call GitHub, a model, a project
-runtime command, or any mutating service command. It does not stop or mutate
-Cursor sessions.
+Capture reads fixed Git metadata and Linux memory/swap/load/PSI facts. It
+writes one JSON artifact inside the repository Git directory and does not call
+GitHub, a model, a project runtime command, or any mutating service command.
 """
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -39,7 +36,6 @@ MAX_TEXT_BYTES = 64 * 1024
 LOW_MEM_AVAILABLE_BYTES = 1024**3
 MATERIAL_SWAP_USED_BYTES = 1024**3
 ELEVATED_PSI_AVG10 = 10.0
-HIGH_SESSION_COUNT = 8
 
 INCIDENT_ID_RE = re.compile(r"^INC-[0-9]{8}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 CAPTURE_ID_RE = re.compile(r"^CAP-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
@@ -104,7 +100,6 @@ PRESSURE_ORDER = (
     "MATERIAL_SWAP_USE",
     "ELEVATED_MEMORY_PRESSURE",
     "ELEVATED_IO_PRESSURE",
-    "HIGH_PERSISTENT_SESSION_COUNT",
 )
 
 
@@ -128,19 +123,32 @@ def validate_record(record: dict, schema: dict | None = None) -> list[str]:
     return rendered
 
 
-def load_preflight():
-    name = "cursor_resource_preflight"
-    cached = sys.modules.get(name)
-    if cached is not None:
-        return cached
-    path = Path(__file__).with_name("cursor-resource-preflight.py")
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise EvidenceBlocked("PREFLIGHT_UNAVAILABLE")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+def parse_meminfo(text: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for raw in text.splitlines():
+        if ":" not in raw:
+            continue
+        key, rest = raw.split(":", 1)
+        parts = rest.split()
+        if not parts:
+            continue
+        try:
+            value = int(parts[0])
+        except ValueError as exc:
+            raise EvidenceBlocked("MEMINFO_UNPARSEABLE") from exc
+        if len(parts) > 1 and parts[1] == "kB":
+            value *= 1024
+        values[key.strip()] = value
+    for required in ("MemTotal", "MemAvailable", "SwapTotal"):
+        if required not in values:
+            raise EvidenceBlocked("MEMINFO_INCOMPLETE")
+    if values["MemTotal"] <= 0 or values["MemAvailable"] < 0 or values["SwapTotal"] < 0:
+        raise EvidenceBlocked("MEMINFO_INVALID")
+    if values["SwapTotal"] > 0 and "SwapFree" not in values:
+        raise EvidenceBlocked("MEMINFO_INCOMPLETE")
+    if values.get("SwapFree", 0) < 0:
+        raise EvidenceBlocked("MEMINFO_INVALID")
+    return values
 
 
 def emit(lines: dict[str, str]) -> str:
@@ -519,12 +527,12 @@ def _memory_and_swap(text: str | None, problem: str | None, supported: bool) -> 
     if problem == "UNPARSEABLE" or text is None:
         return _source("UNAVAILABLE", "MEMINFO_UNPARSEABLE"), _source("UNAVAILABLE", "MEMINFO_UNPARSEABLE")
     try:
-        parsed = load_preflight().parse_meminfo(text)
+        parsed = parse_meminfo(text)
     except Exception as exc:
         reason = getattr(exc, "reason", "")
-        if "missing" in reason:
+        if reason == "MEMINFO_INCOMPLETE":
             code = "MEMINFO_INCOMPLETE"
-        elif "negative" in reason or "not positive" in reason:
+        elif reason == "MEMINFO_INVALID":
             code = "MEMINFO_INVALID"
         else:
             code = "MEMINFO_UNPARSEABLE"
@@ -604,37 +612,7 @@ def _psi(text: str | None, problem: str | None, supported: bool, absent: str, ba
     return _source("CAPTURED", "OK", **parsed)
 
 
-def _sessions(persist_text: str | None, problem: str | None) -> dict:
-    if problem == "UNBOUNDED":
-        return _source("UNAVAILABLE", "SESSION_LIST_UNBOUNDED")
-    if problem == "UNPARSEABLE":
-        return _source("UNAVAILABLE", "SESSION_LIST_UNPARSEABLE")
-    try:
-        preflight = load_preflight()
-    except Exception:
-        return _source("UNAVAILABLE", "PREFLIGHT_UNAVAILABLE")
-    if persist_text is None and problem == "ABSENT":
-        return _source("UNAVAILABLE", "SESSION_LIST_UNAVAILABLE")
-    if persist_text is None:
-        try:
-            persist_text = preflight.read_persist_list("agent")
-        except Exception as exc:
-            reason = getattr(exc, "reason", "")
-            if "timed out" in reason:
-                return _source("UNAVAILABLE", "SESSION_LIST_TIMEOUT")
-            if "unavailable" in reason:
-                return _source("UNAVAILABLE", "SESSION_LIST_UNAVAILABLE")
-            return _source("UNAVAILABLE", "SESSION_LIST_FAILED")
-        if len(persist_text.encode("utf-8")) > MAX_TEXT_BYTES:
-            return _source("UNAVAILABLE", "SESSION_LIST_UNBOUNDED")
-    try:
-        count = preflight.parse_persist_list(persist_text)
-    except Exception:
-        return _source("UNAVAILABLE", "SESSION_LIST_UNPARSEABLE")
-    return _source("CAPTURED", "OK", persistent_count=count)
-
-
-def _pressure(memory: dict, swap: dict, psi_memory: dict, psi_io: dict, sessions: dict) -> list[str]:
+def _pressure(memory: dict, swap: dict, psi_memory: dict, psi_io: dict) -> list[str]:
     facts: list[str] = []
     if memory.get("state") == "CAPTURED" and int(memory["available_bytes"]) < LOW_MEM_AVAILABLE_BYTES:
         facts.append("LOW_MEM_AVAILABLE")
@@ -644,8 +622,6 @@ def _pressure(memory: dict, swap: dict, psi_memory: dict, psi_io: dict, sessions
         facts.append("ELEVATED_MEMORY_PRESSURE")
     if psi_io.get("state") == "CAPTURED" and float(psi_io["some_avg10"]) >= ELEVATED_PSI_AVG10:
         facts.append("ELEVATED_IO_PRESSURE")
-    if sessions.get("state") == "CAPTURED" and int(sessions["persistent_count"]) >= HIGH_SESSION_COUNT:
-        facts.append("HIGH_PERSISTENT_SESSION_COUNT")
     return [fact for fact in PRESSURE_ORDER if fact in facts]
 
 
@@ -727,11 +703,10 @@ def build_record(
     load: dict,
     psi_memory: dict,
     psi_io: dict,
-    sessions: dict,
     platform: str,
     support: str,
 ) -> dict:
-    sources = [memory, swap, load, psi_memory, psi_io, sessions]
+    sources = [memory, swap, load, psi_memory, psi_io]
     return {
         "schema_version": 1,
         "kind": "incident-evidence",
@@ -746,8 +721,7 @@ def build_record(
         "load": load,
         "psi_memory": psi_memory,
         "psi_io": psi_io,
-        "sessions": sessions,
-        "pressure_facts": _pressure(memory, swap, psi_memory, psi_io, sessions),
+        "pressure_facts": _pressure(memory, swap, psi_memory, psi_io),
         "overall": _overall(repository, git, sources),
         "authority": "NONE",
     }
@@ -819,11 +793,6 @@ def capture(args: argparse.Namespace) -> tuple[str, int]:
             "PSI_IO_UNPARSEABLE",
             "PSI_IO_UNBOUNDED",
         )
-        if args.persist_list_file:
-            session_text, session_problem = _optional_text(args.persist_list_file, "PERSIST_LIST_FILE")
-        else:
-            session_text, session_problem = None, None
-        sessions = _sessions(session_text, session_problem)
         record = build_record(
             incident_id=args.incident_id,
             capture_id=capture_id,
@@ -835,7 +804,6 @@ def capture(args: argparse.Namespace) -> tuple[str, int]:
             load=load,
             psi_memory=psi_memory,
             psi_io=psi_io,
-            sessions=sessions,
             platform=platform,
             support=support,
         )
@@ -892,7 +860,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     capture_parser.add_argument("--meminfo-file")
     capture_parser.add_argument("--psi-memory-file")
     capture_parser.add_argument("--psi-io-file")
-    capture_parser.add_argument("--persist-list-file")
     capture_parser.add_argument("--loadavg-file")
     capture_parser.add_argument("--now")
     capture_parser.add_argument("--capture-id")

@@ -6,28 +6,77 @@ A release is qualified for an exact source revision and the artifacts produced f
 
 ## Default lifecycle
 
+Release closure is defect-discovery-first. Do not spend CI, packaging, SBOM, provenance, or publication cycles on a candidate that is still expected to change because product/user findings are being collected.
+
 ```text
-candidate freeze
- -> fast release preflight
- -> full deterministic qualification
- -> build artifacts
- -> provenance / hashes / SBOM as required
- -> platform + lifecycle qualification
- -> performance / resilience
- -> operational E2E
- -> release decision
+development complete enough for release closure
+ -> product Feature/Scenario PASS1 (continue safe scenarios; collect all findings)
+ -> one batched remediation of PASS1 findings
+ -> new candidate
+ -> product Feature/Scenario PASS2 (zero mandatory findings)
+ -> Full User E2E PASS1 (continue safe journeys; collect all findings)
+ -> one batched remediation of E2E PASS1 findings
+ -> new candidate
+ -> Full User E2E PASS2 (zero mandatory findings)
+ -> release-specific upgrade / migration / platform qualification
+ -> final exact-head automated CI/regression qualification
+ -> release artifact rebuild
+ -> hashes / SBOM / provenance / manifest / attestation as required
+ -> final release audit: every mandatory evidence class binds to the same exact candidate
+ -> merge/tag/stable publication authorization
  -> immutable tag/release
  -> public smoke
  -> monitor / rollback if required
 ```
 
-A blocking failure stops downstream expensive stages. Fix the blocker, create the new exact candidate if source changes, then restart the required qualification from the appropriate boundary.
+For products whose public surface is not a CLI, `Feature/Scenario` means the equivalent breadth-first product capability/public-surface scenario suite. Surface Reconciliation is the canonical human-equivalent form of this breadth-first gate.
+
+### PASS1 / remediation / PASS2 semantics
+
+PASS1 is a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When PASS1 finishes, classify the complete bounded finding set and perform one batched remediation rather than alternating one fix with one remote CI run.
+
+Any product/harness/public-surface source change during remediation creates a new candidate. PASS2 restarts the same suite from the beginning on that new candidate. PASS2 requires zero mandatory FAIL/PARTIAL/BLOCKED findings.
+
+The same rule applies independently to Full User E2E: E2E PASS1 exhausts safe real-user journeys and collects findings; remediation is batched; E2E PASS2 restarts from the beginning and must be clean.
+
+### Stage ordering and invalidation
+
+Do not start release-specific upgrade/platform qualification until product Feature/Scenario PASS2 and Full User E2E PASS2 are clean for the candidate. Do not run final exact-head CI until those semantic/user gates and required release-specific qualification are complete. Do not build final release artifacts, SBOM, hashes, provenance, manifest, or attestation until final exact-head CI is green and product code is frozen.
+
+If source changes after a clean PASS2, upgrade/platform qualification, final CI, or integrity stage, invalidate the affected downstream evidence and resume from the earliest stage whose evidence is no longer exact-candidate valid. Never preserve a later-stage PASS across a source change.
+
+### Release-stage parallelism
+
+Within a release closure, do not parallelize downstream stages against an upstream stage that can still change the release candidate.
+
+- while Feature/Scenario PASS1/PASS2 is active, do not run Full User E2E qualification, upgrade qualification, final CI, or release integrity work for that candidate;
+- while Full User E2E PASS1/PASS2 is active, do not run upgrade qualification, final CI, or release integrity work for that candidate;
+- while release-specific qualification is active, do not run final CI or integrity work for that candidate;
+- final CI may fan out independent platform/regression jobs for the same frozen HEAD;
+- integrity work may fan out hashes/SBOM/provenance/manifest/attestation only after final CI green on the frozen HEAD.
+
+ChatGPT may still use idle capacity for unrelated roadmap work whose worktree, owned paths, runtime, release candidate, and dependencies do not overlap this release closure. The external-wait work-conservation rule never authorizes running a downstream release stage early.
+
+A blocking or non-blocking finding during PASS1 is collected according to safe-continuation rules. A blocking PASS2 or later-stage failure prevents downstream progression; remediate in a bounded batch, create the new candidate if source changes, and restart from the earliest invalidated stage.
 
 ## Fast release preflight
 
 Before a long full suite, run a short deterministic command containing the highest-value blockers: syntax/static validation, known critical regressions, release-governance checks, and other project-specific fast checks.
 
 The preflight should take minutes rather than hours. It is not a substitute for required full qualification; its purpose is to avoid wasting time and compute on a candidate that is already known to fail.
+
+## Mandatory user-facing product release gates
+
+When `.engineering/project.yaml` declares `project.user_facing: true`, the release contract MUST declare `human_equivalent_user_tests_required: true` and configure both required gates:
+
+1. `surface_reconciliation` — capability/public-surface/control/scenario completeness;
+2. `full_user_e2e` — complete real-user missions with actual outcomes, failures/recovery, destructive lifecycle, and cleanup.
+
+The release profile must bind both gates to the same exact candidate and retain their contract paths. CI may validate that the contracts exist and are wired, but CI/static validation alone MUST NOT be interpreted as execution PASS. Actual PASS authority comes from the active release Work Packet plus retained exact-candidate run evidence.
+
+For `project.primary_user_surface: browser`, the release profile MUST require an actual Chromium/Chrome browser process. Browser automation frameworks are drivers, not substitutes for the browser. Headless mode is allowed because it still launches a real browser engine.
+
+A product/harness/public-surface change after either gate PASS invalidates affected evidence. Re-establish the required exact-HEAD sequence before release.
 
 ## Avoid duplicate qualification
 

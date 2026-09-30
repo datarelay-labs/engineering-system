@@ -64,7 +64,7 @@ Record:
 - existing build/test/lint/typecheck commands and package-manager scripts
 - existing CI workflows and release workflows
 - source/test directory layout
-- existing AI instruction surfaces such as AGENTS.md, CLAUDE.md, .cursorrules, .cursor/rules/**, .cursor/commands/**, and repository-specific agent files
+- existing AI instruction surfaces such as AGENTS.md, CLAUDE.md, and repository-specific agent files
 - release/version/artifact sources
 - product-specific architecture, security, persistence, migration, API, operational, and compatibility invariants
 - production/deployment signals, runbook/incident expectations, and release/rollback ownership
@@ -113,11 +113,26 @@ python tools/adopt.py \
 
 The tool installs only missing generated surfaces by default. It does not overwrite existing project files.
 
-New adoptions also install a conservative `.cursorignore` for dependency/cache/build noise. Existing project `.cursorignore` content is preserved and is never overwritten by managed upgrade. Efficiency telemetry is stored under the adopted repository Git directory (`engineering-system/telemetry/` inside `git rev-parse --absolute-git-dir`), so adoption does not rewrite `.gitignore` to create that boundary. Test scenarios may declare optional `cost`, `estimated_seconds`, `timeout_seconds`, `agent_default`, and `scope` metadata so agents can choose the cheapest safe check deterministically; older manifests remain valid and use conservative level-based cost inference.
+Efficiency telemetry is stored under the adopted repository Git directory (`engineering-system/telemetry/` inside `git rev-parse --absolute-git-dir`), so adoption does not rewrite `.gitignore` to create that boundary. Test scenarios may declare optional `cost`, `estimated_seconds`, `timeout_seconds`, `agent_default`, and `scope` metadata so agents can choose the cheapest safe check deterministically; older manifests remain valid and use conservative level-based cost inference.
 
 For repositories with a known release qualification command, also provide `--release-command`. Provide `--preflight-command` only when the command is a genuinely cheap deterministic release blocker.
 
 For production-oriented repositories, pass `--operations-mode production`. The generated project profile then requires runbook/incident handling and the release profile requires operational E2E plus public smoke. If deployment signals exist while maturity is not clearly production/non-production, automatic mode fails closed for review instead of silently writing `production_oriented: false`.
+
+For a user-facing product, also pass `--user-facing`, identify the actual primary public surface, and provide both user-test contracts:
+
+```bash
+python tools/adopt.py \
+  --root /path/to/project \
+  --apply \
+  --user-facing \
+  --primary-user-surface browser \
+  --surface-reconciliation-contract docs/SURFACE_RECONCILIATION.md \
+  --full-user-e2e-contract docs/FULL_USER_E2E.md \
+  ...
+```
+
+Supported primary surfaces are browser, CLI, desktop, mobile, mixed, or other. Browser/mixed products require actual-browser execution in the release profile. The two contract paths must already exist; adoption fails closed rather than inventing product-specific scenarios.
 
 The audit also reports discovered build/lint/typecheck commands and candidate domains. Override them only when repository evidence supports a better mapping.
 
@@ -130,15 +145,13 @@ AGENTS.md
 .engineering/project.yaml
 .engineering/tests.yaml
 .engineering/release.yaml
-.cursor/rules/engineering-system.mdc
-.cursor/commands/resume.md
 .github/ISSUE_TEMPLATE/ai-work-packet.md
 .github/workflows/engineering-system.yml
 ```
 
 The project profile records the Engineering System version and immutable canonical baseline SHA.
 
-Managed optional Cursor adapters may retain `tools/context_epoch.py` and `tools/engineering-context.py`, while the Chat-primary path uses `tools/implementation_preflight.py` only as canonical source/parity material for local Git binding after an external authenticated GitHub coordinator has independently verified Work Packet and author-permission authority. Bootstrap and managed upgrade install exact canonical copies for drift detection and regression, but **the adopted repository copy is worker-writable and therefore is never mutation authority**. For an authoritative pre-mutation check, the coordinator fetches the helper source from the immutable canonical Engineering System baseline through the authenticated connector and executes the fetched source directly with fixed `/usr/bin/python3 -I - check ...` whose symlink node (if any) is root-owned and whose parent path plus resolved executable are root-owned, non-group/world-writable, and not writable by the implementation UID over the remote-control channel with cwd `/` and a controlled minimal environment, without worker-writable materialization, or invokes an equivalent host-administered immutable copy. The trusted preflight performs no GitHub/network read and grants no mutation authority. Its `identity` mode captures a no-follow device/inode chain for the authorized lexical worktree path; `check` requires that chain as `--expected-worktree-identity`, verifies it before and after protected Git reads, rejects symlinked ancestors/path replacement, and verifies root-administered/config-isolated Git facts for the expected worktree/repository/branch/HEAD and clean-tree state. Reusable adoption compliance enforces the Chat-primary AGENTS instruction and byte-identical managed-helper parity unconditionally for applicable adopted repositories; it must not depend on repository-edited AGENTS text to decide whether those helpers are required.
+Adopted repositories may carry managed Engineering System helpers for deterministic contract checks. These repository copies are project tooling, not a separate implementation authority; normal repository work uses ordinary authenticated Git/GitHub operations, while high-risk production/destructive/credential/publication boundaries follow their specific security contracts.
 
 Managed adoption installs `.engineering/requirements-engineering-system.txt` with exact PyYAML/jsonschema pins used by managed contract CLIs. Shared workflows install from that file. A direct CLI run in an environment missing those dependencies fails closed with `ENGINEERING_SYSTEM_DEPENDENCY_MISSING` and the exact pinned install command; managed helpers never auto-install packages.
 
@@ -258,8 +271,6 @@ python tools/upgrade-adoption.py \
 ```
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
-
-Managed upgrades may retain and synchronize the dormant Cursor compatibility resume adapter (`.cursor/commands/resume.md`). Its presence does not activate Cursor; the owner must explicitly reactivate Cursor for a Work Packet before it can execute. When a known local alias such as `.cursor/commands/work-resume.md` is already present, the helper keeps that alias synchronized to the same canonical resume text. Existing resume adapters are replaced only when their content matches a known managed version; project-custom resume content fails closed for manual review. The managed resume text includes the Cursor persistent-session resource-guard handoff. Host thresholds stay outside the adopted repository; custom resume text is preserved by failing closed rather than being overwritten.
 
 Managed upgrades also synchronize known managed Engineering System version and immutable baseline SHA declarations in `AGENTS.md` and `README.md` when those exact managed forms are present. Surrounding project-specific text is preserved. Ambiguous or custom declaration forms fail closed for manual review rather than broad replacement.
 

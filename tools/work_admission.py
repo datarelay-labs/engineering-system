@@ -3,7 +3,7 @@
 
 Coordinator-facing oracle for whether a second worker may start. Decisions are
 pure functions over packet/claim/worktree/resource facts. This tool never
-stops, kills, attaches to, or otherwise mutates existing Cursor sessions.
+stops, kills, attaches to, or otherwise mutates existing worker sessions.
 
 Commands:
   admit   ALLOW/DENY starting a proposed worker claim
@@ -619,5 +619,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # Fact evaluation only; never stop/kill/mutate existing Cursor sessions.
+    # Fact evaluation only; never stop/kill/mutate existing worker sessions.
     raise SystemExit(main())

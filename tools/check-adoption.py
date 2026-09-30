@@ -9,17 +9,16 @@ from pathlib import Path
 import yaml
 
 import ci_policy_audit
+from adopt import canonical_execution_policy_line, retired_agent_rules_present
 
 REQUIRED = (
     "AGENTS.md",
     ".engineering/project.yaml",
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
-    ".cursor/rules/engineering-system.mdc",
 )
 
 CONTINUITY_REQUIRED = (
-    ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
 )
 
@@ -31,8 +30,6 @@ MANAGED_ADOPTION_REQUIRED = (
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANONICAL_URL = "https://github.com/datarelay-labs/engineering-system"
-
-
 def canonical_checker_version() -> str:
     """Return the version shipped with this checker, not target-controlled data."""
     path = Path(__file__).resolve().parents[1] / ".engineering" / "project.yaml"
@@ -47,6 +44,25 @@ def canonical_checker_version() -> str:
 def load_yaml(path: Path):
     with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)
+
+
+def repository_relative_contract(root: Path, value: object) -> tuple[str, Path | None]:
+    if not isinstance(value, str):
+        return "invalid", None
+    raw = value.strip()
+    if not raw:
+        return "empty", None
+    relative = Path(raw)
+    if relative.is_absolute() or ".." in relative.parts:
+        return "invalid", None
+    try:
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return "invalid", None
+    if not candidate.is_file():
+        return "missing", candidate
+    return "ok", candidate
 
 
 def version_at_least(version: str, minimum: tuple[int, int, int]) -> bool:
@@ -69,6 +85,7 @@ def main() -> int:
 
     project: dict = {}
     engineering: dict = {}
+    project_meta: dict = {}
     operations: dict = {}
     version = ""
     mode = ""
@@ -85,6 +102,7 @@ def main() -> int:
         try:
             project = load_yaml(project_path) or {}
             engineering = project.get("engineering_system") or {}
+            project_meta = project.get("project") or {}
             operations = project.get("operations") or {}
             version = str(engineering.get("version") or "")
             mode = str(engineering.get("mode") or "")
@@ -101,6 +119,16 @@ def main() -> int:
 
             if not project_domains:
                 failures.append("project.yaml must define at least one domain")
+
+            user_facing = bool(project_meta.get("user_facing"))
+            primary_user_surface = str(project_meta.get("primary_user_surface") or "none")
+            allowed_user_surfaces = {"none", "browser", "cli", "desktop", "mobile", "mixed", "other"}
+            if primary_user_surface not in allowed_user_surfaces:
+                failures.append(f"project.yaml has unsupported project.primary_user_surface: {primary_user_surface}")
+            if user_facing and primary_user_surface == "none":
+                failures.append("user-facing project requires project.primary_user_surface")
+            if not user_facing and primary_user_surface != "none":
+                failures.append("project.primary_user_surface requires project.user_facing=true")
 
             if version_at_least(version, (1, 4, 0)):
                 if mode not in {"canonical", "adopted"}:
@@ -161,59 +189,21 @@ def main() -> int:
             if not (root / rel).is_file():
                 failures.append(f"Engineering System >=1.3.0 missing session-continuity file: {rel}")
 
-    context_epoch_referenced = any(
-        path.is_file()
-        and "tools/context_epoch.py" in path.read_text(encoding="utf-8", errors="replace")
-        for path in (
-            root / ".cursor/commands/resume.md",
-            root / ".cursor/commands/work-resume.md",
-        )
-    )
-    if context_epoch_referenced:
-        target_context_epoch = root / "tools/context_epoch.py"
-        canonical_context_epoch = Path(__file__).resolve().parent / "context_epoch.py"
-        if not target_context_epoch.is_file():
-            failures.append(
-                "Cursor resume adapter references context-epoch helper but missing tools/context_epoch.py"
-            )
-        elif not canonical_context_epoch.is_file():
-            failures.append(
-                "canonical adoption checker is missing tools/context_epoch.py"
-            )
-        elif target_context_epoch.read_bytes() != canonical_context_epoch.read_bytes():
-            failures.append(
-                "tools/context_epoch.py differs from canonical managed helper"
-            )
-
-    engineering_context_referenced = any(
-        path.is_file()
-        and "tools/engineering-context.py" in path.read_text(encoding="utf-8", errors="replace")
-        for path in (
-            root / ".cursor/commands/resume.md",
-            root / ".cursor/commands/work-resume.md",
-        )
-    )
-    if engineering_context_referenced:
-        target_engineering_context = root / "tools/engineering-context.py"
-        canonical_engineering_context = Path(__file__).resolve().parent / "engineering-context.py"
-        if not target_engineering_context.is_file():
-            failures.append(
-                "Cursor resume adapter references engineering-context helper but missing tools/engineering-context.py"
-            )
-        elif not canonical_engineering_context.is_file():
-            failures.append(
-                "canonical adoption checker is missing tools/engineering-context.py"
-            )
-        elif target_engineering_context.read_bytes() != canonical_engineering_context.read_bytes():
-            failures.append(
-                "tools/engineering-context.py differs from canonical managed helper"
-            )
-
     agents_path = root / "AGENTS.md"
     if agents_path.is_file():
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
         if CANONICAL_URL not in agents_text:
             failures.append("AGENTS.md does not reference canonical Engineering System")
+        if mode == "adopted":
+            try:
+                execution_policy = canonical_execution_policy_line()
+            except SystemExit as exc:
+                failures.append(str(exc))
+            else:
+                if execution_policy not in agents_text:
+                    failures.append("AGENTS.md missing managed continuous-execution policy")
+            if retired_agent_rules_present(agents_text):
+                failures.append("AGENTS.md contains retired agent/Cursor compatibility rules")
         if version_at_least(version, (1, 5, 0)):
             if "standards/DESIGN.md" not in agents_text:
                 failures.append("AGENTS.md missing minimal design-gate routing")
@@ -223,14 +213,6 @@ def main() -> int:
             if mode == "adopted" and version != checker_version:
                 failures.append(
                     "engineering_system.version does not match canonical checker version"
-                )
-            if "ChatGPT Chat is the default implementer" not in agents_text:
-                failures.append(
-                    "AGENTS.md missing Chat-primary daytime implementer instruction"
-                )
-            if "implementation_preflight.py check" not in agents_text:
-                failures.append(
-                    "AGENTS.md missing Chat-primary implementation preflight instruction"
                 )
             packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
             if packet_template.is_file():
@@ -242,7 +224,9 @@ def main() -> int:
                         )
             for rel in (
                 "tools/implementation_preflight.py",
+                "tools/terminal_completion_notify.py",
                 "tools/context_epoch.py",
+                "tools/engineering-context.py",
                 "tools/work_packet_authority.py",
                 ".github/ISSUE_TEMPLATE/ai-work-packet.md",
                 ".engineering/requirements-engineering-system.txt",
@@ -295,16 +279,10 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references verification contract but missing {rel}"
                     )
-    if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
-        failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
-
-    cursor_path = root / ".cursor/rules/engineering-system.mdc"
-    if cursor_path.is_file():
-        text = cursor_path.read_text(encoding="utf-8", errors="replace")
-        if "alwaysApply: true" not in text:
-            failures.append("Cursor engineering-system rule is not alwaysApply: true")
-        if mode == "adopted" and "canonical Engineering System" not in text:
-            failures.append("Cursor engineering-system rule does not identify canonical Engineering System")
+    for rel in (".cursor", ".cursorignore", ".cursorrules"):
+        path = root / rel
+        if path.exists() or path.is_symlink():
+            failures.append(f"retired agent artifact must be removed: {rel}")
 
     tests_path = root / ".engineering/tests.yaml"
     if tests_path.is_file():
@@ -359,6 +337,49 @@ def main() -> int:
                     failures.append("production-oriented adoption requires full_e2e_passes>=1")
                 if not bool(release.get("public_smoke_required")):
                     failures.append("production-oriented adoption requires public_smoke_required=true")
+
+            user_facing = bool(project_meta.get("user_facing"))
+            primary_user_surface = str(project_meta.get("primary_user_surface") or "none")
+            if user_facing:
+                if release.get("human_equivalent_user_tests_required") is not True:
+                    failures.append("user-facing project requires human_equivalent_user_tests_required=true")
+                user_tests = release.get("human_equivalent_user_tests")
+                if not isinstance(user_tests, dict):
+                    failures.append("user-facing project requires release.human_equivalent_user_tests mapping")
+                else:
+                    if not str(user_tests.get("executor") or "").strip():
+                        failures.append("human-equivalent user tests require an executor")
+                    if user_tests.get("actual_user_surface_required") is not True:
+                        failures.append("human-equivalent user tests require actual_user_surface_required=true")
+                    if str(user_tests.get("primary_user_surface") or "") != primary_user_surface:
+                        failures.append("release human-equivalent primary_user_surface must match project.primary_user_surface")
+                    if user_tests.get("same_candidate_required") is not True:
+                        failures.append("human-equivalent user tests require same_candidate_required=true")
+                    if user_tests.get("ci_contract_validation_only") is not True:
+                        failures.append("human-equivalent user tests require ci_contract_validation_only=true")
+                    if primary_user_surface in {"browser", "mixed"} and user_tests.get("actual_browser_process_required") is not True:
+                        failures.append("browser user-facing project requires actual_browser_process_required=true")
+                    for gate_name in ("surface_reconciliation", "full_user_e2e"):
+                        gate = user_tests.get(gate_name)
+                        if not isinstance(gate, dict):
+                            failures.append(f"human-equivalent user tests missing {gate_name} gate")
+                            continue
+                        if gate.get("mandatory") is not True:
+                            failures.append(f"human-equivalent {gate_name} gate must be mandatory")
+                        if int(gate.get("minimum_passes") or 0) < 1:
+                            failures.append(f"human-equivalent {gate_name} gate requires minimum_passes>=1")
+                        contract_value = gate.get("contract")
+                        contract = str(contract_value or "").strip()
+                        if not contract:
+                            failures.append(f"human-equivalent {gate_name} gate requires contract path")
+                        else:
+                            contract_status, _ = repository_relative_contract(root, contract_value)
+                            if contract_status == "invalid":
+                                failures.append(
+                                    f"human-equivalent {gate_name} contract must be repository-relative and stay inside repository: {contract}"
+                                )
+                            elif contract_status == "missing":
+                                failures.append(f"human-equivalent {gate_name} contract missing: {contract}")
 
             if version_at_least(version, (1, 6, 0)) and mode == "adopted":
                 for key in (
