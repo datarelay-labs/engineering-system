@@ -1879,6 +1879,10 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "engineering_system.baseline does not match called workflow SHA",
         "engineering_system.version does not match called baseline version",
         "canonical_version_tuple >= (1, 6, 5)",
+        "AGENTS.md missing current ChatGPT implementation-path instruction",
+        "AGENTS.md missing current repository-binding preflight instruction",
+        'if "ChatGPT Chat is the implementation path" not in text:',
+        'if "verify the target repository/branch/HEAD before mutation" not in text:',
     )
     for token in required:
         assert token in workflow, token
@@ -1886,6 +1890,8 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     preflight_check = workflow.index("Chat-primary adoption missing required helper")
     assert agents_definition < preflight_check
     assert 'if "tools/implementation_preflight.py" in text:' not in workflow
+    assert '"ChatGPT Chat is the default implementer" not in text' not in workflow
+    assert '"implementation_preflight.py check" not in text' not in workflow
     assert "if version_tuple >= (1, 6, 5):" not in workflow
 
 
