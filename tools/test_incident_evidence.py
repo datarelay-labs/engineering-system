@@ -300,6 +300,23 @@ def test_capture_is_schema_valid_real_git_and_redacted() -> None:
     assert incident.validate_record(record) == []
 
 
+def test_meminfo_failure_codes_are_preserved() -> None:
+    incomplete = incident._memory_and_swap(
+        "MemTotal: 1024 kB\nMemAvailable: 512 kB\n",
+        None,
+        True,
+    )
+    invalid = incident._memory_and_swap(
+        "MemTotal: 1024 kB\nMemAvailable: -1 kB\nSwapTotal: 0 kB\n",
+        None,
+        True,
+    )
+    assert incomplete[0] == {"state": "UNAVAILABLE", "reason": "MEMINFO_INCOMPLETE"}
+    assert incomplete[1] == {"state": "UNAVAILABLE", "reason": "MEMINFO_INCOMPLETE"}
+    assert invalid[0] == {"state": "UNAVAILABLE", "reason": "MEMINFO_INVALID"}
+    assert invalid[1] == {"state": "UNAVAILABLE", "reason": "MEMINFO_INVALID"}
+
+
 def test_missing_source_is_partial_without_fabricated_zero() -> None:
     absent = incident._psi(None, "ABSENT", True, "PSI_MEMORY_ABSENT", "PSI_MEMORY_UNPARSEABLE", "PSI_MEMORY_UNBOUNDED")
     unsupported = incident._memory_and_swap(None, None, False)
@@ -468,6 +485,7 @@ def main() -> int:
     test_freeze_off_does_not_grant()
     test_historical_pressure_fixture_states_facts_without_root_cause()
     test_capture_is_schema_valid_real_git_and_redacted()
+    test_meminfo_failure_codes_are_preserved()
     test_missing_source_is_partial_without_fabricated_zero()
     test_fsmonitor_sentinel_is_not_executed()
     test_retention_bounds_and_traversal_fail_closed()

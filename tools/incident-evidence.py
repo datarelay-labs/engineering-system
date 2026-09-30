@@ -530,9 +530,9 @@ def _memory_and_swap(text: str | None, problem: str | None, supported: bool) -> 
         parsed = parse_meminfo(text)
     except Exception as exc:
         reason = getattr(exc, "reason", "")
-        if "missing" in reason:
+        if reason == "MEMINFO_INCOMPLETE":
             code = "MEMINFO_INCOMPLETE"
-        elif "negative" in reason or "not positive" in reason:
+        elif reason == "MEMINFO_INVALID":
             code = "MEMINFO_INVALID"
         else:
             code = "MEMINFO_UNPARSEABLE"
