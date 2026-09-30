@@ -693,6 +693,36 @@ def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
             clear_trust()
 
 
+def test_trace_observer_is_hidden_from_tracee_proc() -> None:
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "parent = os.getppid()\n"
+        "visible = Path(f'/proc/{parent}/fd').exists()\n"
+        "print(f'PPID={parent} PARENT_FDS={\"VISIBLE\" if visible else \"HIDDEN\"}')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "trace observer namespace isolation")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "PPID=0 PARENT_FDS=HIDDEN\n"
+        finally:
+            clear_trust()
+
+
 def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
     command = "python3 health.py"
     script = (
@@ -1450,6 +1480,7 @@ def main() -> int:
     test_unrelated_symlink_does_not_block_subject_tree()
     test_unrelated_gitlink_does_not_block_subject_tree()
     test_indirect_symlink_fallback_is_rejected()
+    test_trace_observer_is_hidden_from_tracee_proc()
     test_indirect_gitlink_fallback_is_rejected()
     test_unsafe_tree_requires_tracer_before_execution()
     test_trace_parser_fails_closed_on_ambiguous_relative_state()

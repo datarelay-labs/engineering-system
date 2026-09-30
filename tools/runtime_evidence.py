@@ -63,6 +63,20 @@ TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 TRACE_DIRFD_RE = re.compile(
     r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
 )
+TRACE_TARGET_LAUNCHER = """import os, sys
+for name in os.listdir(\"/proc/self/fd\"):
+    try:
+        fd = int(name)
+    except ValueError:
+        continue
+    if fd <= 2:
+        continue
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+os.execv(sys.argv[1], sys.argv[1:])
+"""
 IDENTITY_FIELDS = (
     "incident_id",
     "evidence_kind",
@@ -800,16 +814,27 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         return "EXECUTION_FAILED", "CODE_UNBOUND", b""
 
     trace_enabled = bool(unsafe_paths)
+    trace_read_fd: int | None = None
+    trace_write_fd: int | None = None
+    pass_fds: tuple[int, ...] = ()
     exec_argv = trusted
     if trace_enabled:
         tracer = _trusted_trace_argv()
-        wrapper = _trusted_argv(["sh"])
-        if tracer is None or wrapper is None:
+        unshare = _trusted_argv(["unshare"])
+        launcher = _trusted_argv(["python3", "-c", TRACE_TARGET_LAUNCHER])
+        collector = _trusted_argv(["dd"])
+        if tracer is None or unshare is None or launcher is None or collector is None:
             _release_subject_tree(temporary)
             return "EXECUTION_FAILED", "TRACE_SETUP_UNAVAILABLE", b""
-        # Keep strace on its own stderr pipe. The fixed trusted wrapper redirects
-        # the tracee's stderr to stdout before exec, so the traced command never
-        # receives the trace channel and cannot replace/forge terminal evidence.
+        trace_read_fd, trace_write_fd = os.pipe()
+        os.set_inheritable(trace_write_fd, True)
+        collector_command = "|" + shlex.join(
+            [*collector, f"of=/proc/self/fd/{trace_write_fd}", "status=none"]
+        )
+        # The tracee runs in a private PID/proc namespace and a fixed launcher
+        # closes every inherited descriptor above stderr before the real command.
+        # The strace pipe collector stays outside that namespace, so the tracee
+        # cannot discover, drain, replace, or forge the observation channel.
         exec_argv = [
             *tracer,
             "-f",
@@ -818,36 +843,43 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             "4096",
             "-e",
             "trace=%file",
+            "-o",
+            collector_command,
             "--",
-            *wrapper,
+            *unshare,
             "-c",
-            'exec "$@" 2>&1',
-            "engineering-runtime-evidence",
+            "-p",
+            "-f",
+            "--mount-proc",
+            "--",
+            *launcher,
             *trusted,
         ]
+        pass_fds = (trace_write_fd,)
 
     proc: subprocess.Popen[bytes] | None = None
-    trace_stream: object | None = None
     try:
         proc = subprocess.Popen(
             exec_argv,
             cwd=work,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if trace_enabled else subprocess.STDOUT,
+            stderr=subprocess.STDOUT,
             shell=False,
             start_new_session=True,
             env=_execution_environment(),
+            pass_fds=pass_fds,
         )
+        if trace_write_fd is not None:
+            os.close(trace_write_fd)
+            trace_write_fd = None
         stdout = proc.stdout
-        trace_stream = proc.stderr if trace_enabled else None
-        if stdout is None or (trace_enabled and trace_stream is None):
+        if stdout is None:
             _stop_group(proc, stdout)
             return "EXECUTION_FAILED", "OUTPUT_PIPE", b""
         output_fd = stdout.fileno()
         os.set_blocking(output_fd, False)
-        trace_fd = None
-        if trace_enabled:
-            trace_fd = trace_stream.fileno()  # type: ignore[union-attr]
+        trace_fd = trace_read_fd
+        if trace_fd is not None:
             os.set_blocking(trace_fd, False)
 
         chunks: list[bytes] = []
@@ -932,8 +964,6 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         except subprocess.TimeoutExpired:
             return "TIMEOUT", "TIMEOUT", b""
         stdout.close()
-        if trace_stream is not None:
-            trace_stream.close()  # type: ignore[union-attr]
         output = b"".join(chunks)
         if code != 0:
             return "EXECUTION_FAILED", f"EXIT_{code}", output
@@ -948,13 +978,13 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     finally:
         if proc is not None:
             _stop_group(proc, proc.stdout)
-        if trace_stream is not None:
-            close = getattr(trace_stream, "close", None)
-            if close is not None:
-                try:
-                    close()
-                except OSError:
-                    pass
+        for descriptor in (trace_write_fd, trace_read_fd):
+            if descriptor is None:
+                continue
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         _release_subject_tree(temporary)
 
 def _retention_destination(root: Path, incident_id: str, capture_id: str) -> Path:
