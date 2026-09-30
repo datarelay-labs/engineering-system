@@ -386,7 +386,11 @@ def test_managed_upgrade_to_1_6() -> None:
             if line.startswith("- **Execute useful work continuously.**")
         )
         agents_text = agents_text.replace(policy_line + "\n", "", 1)
-        agents_text += "\n## Product-specific invariant\n\n- preserve-project-rule\n"
+        agents_text = (
+            f"Adoption baseline: Engineering System version 1.5.0 at immutable commit `{BASELINE}`.\n\n"
+            + agents_text
+            + "\n## Product-specific invariant\n\n- preserve-project-rule\n"
+        )
         agents_path.write_text(agents_text, encoding="utf-8")
 
         (target / ".cursor/rules").mkdir(parents=True)
@@ -407,6 +411,8 @@ def test_managed_upgrade_to_1_6() -> None:
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-project-rule" in upgraded_agents
+        assert f"Engineering System version 1.6.5 at immutable commit `{NEW_BASELINE}`" in upgraded_agents
+        assert BASELINE not in upgraded_agents
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.6.5"
