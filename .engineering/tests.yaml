@@ -23,8 +23,6 @@ paths:
     domains: [release-contract]
   ".github/ISSUE_TEMPLATE/**":
     domains: [session-continuity]
-  ".cursor/commands/**":
-    domains: [session-continuity]
   "tools/**":
     domains: [workflows]
   "tools/adopt.py":
@@ -91,10 +89,6 @@ paths:
     domains: [session-continuity]
   "evals/context-optimization/**":
     domains: [session-continuity, ai]
-  "tools/cursor-resource-preflight.py":
-    domains: [session-continuity, workflows]
-  "tools/test_cursor_resource_preflight.py":
-    domains: [session-continuity]
   "tools/work_admission.py":
     domains: [session-continuity, workflows]
   "tools/test_work_admission.py":
@@ -453,22 +447,6 @@ scenarios:
       - "optional file slicing reads exact-HEAD UTF-8 blobs and emits only bounded JSON-encoded relevant line windows"
       - "mandatory context binary symlink unsafe dirty and oversized slice inputs fail closed"
       - "legacy diff/domain routing is unchanged without task orientation"
-    release_gate: true
-
-  - id: ENG-RESOURCE-001
-    cost: cheap
-    estimated_seconds: 5
-    timeout_seconds: 60
-    agent_default: true
-    scope: static
-    name: Cursor persistent-session resource preflight
-    level: static
-    domains: [session-continuity]
-    triggers: [affected, pr, preflight, release]
-    platforms: [linux]
-    command: "python3 tools/test_cursor_resource_preflight.py"
-    invariants:
-      - "new persistent Cursor sessions fail closed under host resource pressure"
     release_gate: true
 
   - id: ENG-TELEGRAM-COMPLETE-001

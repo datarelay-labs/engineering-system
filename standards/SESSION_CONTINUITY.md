@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Long-running AI-assisted engineering must not depend on replaying or copying old ChatGPT/Cursor conversations.
+Long-running AI-assisted engineering must not depend on replaying or copying old assistant conversations.
 
 Conversation history is temporary working context. Durable engineering state belongs in Git, GitHub, tests, specifications, and a small repository-scoped working-state record.
 
@@ -225,7 +225,7 @@ Before handing work to an implementation agent, the coordinating agent must sync
 5. If the new request is still the same workstream, update the existing packet. If it is a genuinely independent workstream, create a separate packet.
 6. If `Goal`, `OWNER_INTENT`, `TASK_KIND`, and `Next Action` materially conflict, do not execute the packet. Report `WORK_PACKET_SCOPE_MISMATCH` and obtain or record the minimum correction needed.
 
-`STATUS` is deliberately small and fixed. Do not invent transient values such as `CURSOR_READY`, `WAITING`, or `DONE`.
+`STATUS` is deliberately small and fixed. Do not invent transient readiness values such as `WAITING` or `DONE`.
 
 - `ACTIVE` — work is runnable or waiting on a machine-observable condition that can be resumed automatically.
 - `PAUSED` — the owner intentionally paused the workstream.
@@ -242,7 +242,7 @@ Do not paste:
 
 - old conversations
 - previous handoff prompts
-- previous Cursor prompts
+- previous assistant prompts
 - Product Master/specification contents
 - Engineering System contents
 - raw multi-megabyte logs
@@ -273,7 +273,7 @@ History already exists in Git commits, PRs, CI, Issue edits/comments, and closed
 
 Routine resume must not copy an append-only Issue body into model context. After authenticated GitHub retrieval and author-permission verification, pipe the selected body through `tools/context_epoch.py packet-project` and use that bounded current-state projection for ordinary execution.
 
-`tools/context_epoch.py` is a managed adoption helper because the Cursor resume adapter invokes it in adopted repositories. Bootstrap and managed upgrade install the byte-identical canonical helper; a missing copy makes the adopted execution surface incomplete and must fail closed rather than falling back to the raw Issue body. Bootstrap and managed upgrade also reject an incompatible pre-existing helper before mutation.
+`tools/context_epoch.py` is a managed provider-neutral adoption helper. Bootstrap and managed upgrade install the byte-identical canonical helper; a missing copy makes the adopted execution surface incomplete and must fail closed rather than falling back to the raw Issue body. Bootstrap and managed upgrade also reject an incompatible pre-existing helper before mutation.
 
 Candidate selection and routine projection are two separate authenticated reads, so the second read must be bound to both the structural values and the content digest emitted by `packet-identity`. `packet-project` validates `PACKET_VERSION`, `TARGET_REPO`, `WORKSTREAM`, `STATUS`, `BRANCH`, `TASK_KIND`, `INTENT_REVISION`, and `PACKET_BODY_SHA256` against the exact same bytes it projects. This catches body-only changes such as a modified Goal, OWNER_INTENT, Current State, or Next Action even when structural metadata is unchanged. Any mismatch fails closed and restarts candidate resolution; never project a refetched body first and validate its identity afterward.
 The thin resume adapter may persist only the bounded `packet-identity` output to a temporary identity file and pass it back with `packet-project --expect-identity-file`. That file contains structural identity, audit state, and body SHA only; it is not a Work Packet copy. Direct `--expect-*` arguments remain supported for compatibility. Markdown headings or metadata-looking text inside fenced code blocks are content, not packet structure.
@@ -317,7 +317,7 @@ One arm represents one exact system HEAD, one arm/case pair may appear only once
 
 The measurement helper is offline/read-only: it launches no worker, calls no provider/model/network service, mutates no GitHub/runtime state, and retains no raw context text, prompt, absolute path, credential, or tool output in its reports.
 
-Before a real provider/model A/B result is treated as economically comparable, `tools/context_canary_gate.py` must bind every #106 arm/case record to exactly one existing efficiency-telemetry record. #106 run records remain backward-compatible, but live-canary records carry an optional `TELEMETRY_RUN_ID` that the live gate requires and must match the validated telemetry `run_id` exactly; caller-supplied arm/case wrappers alone are never binding authority. The gate also requires one known provider/model/reasoning/toolset profile with no switches, one Engineering System HEAD across all arms, EXACT_HEAD/PASS telemetry bound to each run HEAD, complete provider-exposed input/output/cache-read/cache-write/cost fields, and exact agreement between #106 measured model cost and telemetry cost. It preserves #106 same-case-set and verified-solved requirements. Any mismatch or unknown fact blocks canary eligibility; the report is factual only and never selects, ranks, or recommends an optimizer. After live-canary comparability passes, `tools/context_shadow_gate.py` provides the strict P0.75-B shadow action-equivalence gate. It consumes caller-supplied bounded observations only and performs no provider execution. Every observation must bind to the authoritative arm/case plus `TELEMETRY_RUN_ID`, contain only the bounded material action/target vocabulary, terminate at `COMPLETE`, and match the selected control arm's ordered material trace exactly for the same case. Missing, duplicated, swapped, non-terminal, or divergent observations fail closed; bounded `BLOCK` and `WAIT` actions remain valid material facts when both arms follow the same trace and ultimately reach `COMPLETE`. The report emits only bounded factual counts and `EQUIVALENT`; it exposes no raw traces and grants no optimizer-promotion, merge, release, deployment, or policy authority. Probabilistic/learned equivalence remains a separate later gate. Learned/full-request compression remains research-only unless a candidate fits the existing Cursor/provider workflow without dedicated local model-serving infrastructure, has explicit privacy/egress approval, and passes the existing live-comparability and shadow-equivalence gates. Engineering System does not require Ollama, a local LLM, or a dedicated GPU/inference server.
+Before a real provider/model A/B result is treated as economically comparable, `tools/context_canary_gate.py` must bind every #106 arm/case record to exactly one existing efficiency-telemetry record. #106 run records remain backward-compatible, but live-canary records carry an optional `TELEMETRY_RUN_ID` that the live gate requires and must match the validated telemetry `run_id` exactly; caller-supplied arm/case wrappers alone are never binding authority. The gate also requires one known provider/model/reasoning/toolset profile with no switches, one Engineering System HEAD across all arms, EXACT_HEAD/PASS telemetry bound to each run HEAD, complete provider-exposed input/output/cache-read/cache-write/cost fields, and exact agreement between #106 measured model cost and telemetry cost. It preserves #106 same-case-set and verified-solved requirements. Any mismatch or unknown fact blocks canary eligibility; the report is factual only and never selects, ranks, or recommends an optimizer. After live-canary comparability passes, `tools/context_shadow_gate.py` provides the strict P0.75-B shadow action-equivalence gate. It consumes caller-supplied bounded observations only and performs no provider execution. Every observation must bind to the authoritative arm/case plus `TELEMETRY_RUN_ID`, contain only the bounded material action/target vocabulary, terminate at `COMPLETE`, and match the selected control arm's ordered material trace exactly for the same case. Missing, duplicated, swapped, non-terminal, or divergent observations fail closed; bounded `BLOCK` and `WAIT` actions remain valid material facts when both arms follow the same trace and ultimately reach `COMPLETE`. The report emits only bounded factual counts and `EQUIVALENT`; it exposes no raw traces and grants no optimizer-promotion, merge, release, deployment, or policy authority. Probabilistic/learned equivalence remains a separate later gate. Learned/full-request compression remains research-only unless a candidate fits the approved provider workflow without dedicated local model-serving infrastructure, has explicit privacy/egress approval, and passes the existing live-comparability and shadow-equivalence gates. Engineering System does not require Ollama, a local LLM, or a dedicated GPU/inference server.
 
 The P0.75-C factual net-economics layer in tools/context_economics.py runs only after the live-comparability and shadow-equivalence gates. It uses the explicit control arm and emits only candidate-minus-control deltas for provider-measured cost, kept/original context bytes, input/output/cache-read/cache-write tokens, tool turns, retries/rereads/compactions, rework, and human interventions. Token classes remain separate because provider billing/cache semantics must not be inferred from arithmetic token totals. A zero-cost control yields no percentage delta. The report is EVIDENCE_ONLY, selects no optimizer, grants no routing/promotion/merge/release/deployment authority, and performs no provider/model/network/process execution.
 
@@ -328,7 +328,7 @@ The P0.75-C factual net-economics layer in tools/context_economics.py runs only 
 
 Folded UTF-8 bytes are retained only under the current worktree's absolute Git metadata directory in a private bounded store. The store creates a random local key, derives HMAC-SHA256 content handles from that key and exact bytes, uses private directory/file permissions, rejects symlink/out-of-bound/corrupt state, enforces entry/count/total-byte limits, and never evicts live entries merely to make room. Expansion authenticates the marker and keyed content address and returns exact original text or fails closed; explicit purge removes retained entries.
 
-The model-visible marker contains only version, store-local opaque handle, and original byte length. Fold telemetry is content-free aggregate data only and never includes raw text, reference/path, handle, digest, secret, or credential. Disabled mode writes no store state and preserves the input structure. This primitive performs no model/embedding/network call, does not change Context Compiler selection semantics, is not enabled by default in Cursor, and does not claim provider token, cache, billing, or solved-task improvement from byte reduction alone. Promotion requires the #104/#106 measured canary gates.
+The model-visible marker contains only version, store-local opaque handle, and original byte length. Fold telemetry is content-free aggregate data only and never includes raw text, reference/path, handle, digest, secret, or credential. Disabled mode writes no store state and preserves the input structure. This primitive performs no model/embedding/network call, does not change Context Compiler selection semantics, is not enabled by default, and does not claim provider token, cache, billing, or solved-task improvement from byte reduction alone. Promotion requires the #104/#106 measured canary gates.
 
 
 ## Deterministic packet resolution
@@ -356,7 +356,7 @@ After resolving Git identity and before ordinary work:
 
 1. Check whether repository `AGENTS.md` and `.engineering/project.yaml` exist.
 2. If they exist, read them first.
-3. If the repository shows Engineering System adoption markers (for example `.engineering/`, `.cursor/rules/engineering-system.mdc`, managed `engineering-system.yml`, or session-continuity adapters) but mandatory `AGENTS.md` or `.engineering/project.yaml` is missing or unreadable, record `ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE` and fail closed unless the selected packet is an explicit adoption-repair flow (`TASK_KIND=ADOPTION`).
+3. If the repository shows Engineering System adoption markers (for example `.engineering/`, managed `engineering-system.yml`, or session-continuity adapters) but mandatory `AGENTS.md` or `.engineering/project.yaml` is missing or unreadable, record `ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE` and fail closed unless the selected packet is an explicit adoption-repair flow (`TASK_KIND=ADOPTION`).
 4. If they are absent because the repository has not yet adopted the Engineering System or adoption is intentionally pending in a separate workstream/PR, record `ENGINEERING_SYSTEM_ADOPTION=ABSENT_OR_PENDING` and continue under the canonical Engineering System default. Do not create, merge, or modify adoption files unless the current Work Packet explicitly authorizes that work.
 5. Read test/release metadata only when relevant and only if present for the adopted project state.
 6. Read only canonical references required by `Next Action`.
@@ -473,7 +473,7 @@ Prefer subject/version identity or exact revision over arbitrary time-to-live. H
 
 ## Coordinator / worker execution model
 
-The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity. Cursor is dormant compatibility only and is excluded from normal worker selection unless the owner explicitly reactivates it for the packet.
+The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity.
 
 A coordinator or equivalent outer loop should, when automation exists:
 
@@ -485,7 +485,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority. Cursor is retired and has no session-continuity path.
+Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority.
 
 ## Pure coordinator planner
 
@@ -516,7 +516,7 @@ Contract:
 
 ## Bounded coordinator watch
 
-The watch evaluator is a pure function from structured facts plus durable watch state to one re-entry result. It calls the planner. It does not poll, spawn processes, call GitHub, merge, send notifications, or start/stop Cursor. Host scheduling and delivery are a separate later adapter.
+The watch evaluator is a pure function from structured facts plus durable watch state to one re-entry result. It calls the planner. It does not poll, spawn processes, call GitHub, merge, or send notifications. Host scheduling and delivery are a separate later adapter.
 
 ```bash
 python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>
@@ -691,7 +691,7 @@ P0b records verified exact-head outcomes against cost, time, rework, and human i
 - Persist only a generated run ID, repo, workstream, task kind, the session profile, timestamps, exposed usage fields, counts, validation IDs, exact-head evidence, and terminal PASS, BLOCK, or FAIL.
 - Do not persist prompts, conversation, source, tool payloads, secrets, logs, or absolute local paths. Additional fields fail closed.
 - Missing provider usage, cache, or cost stays null. Do not estimate.
-- Default output is `engineering-system/telemetry/` under the repository's absolute Git directory (`git rev-parse --absolute-git-dir`). That location is Git metadata, so generated records stay outside the tracked worktree for canonical repositories, adopted repositories, and linked worktrees. The directory is bounded to 32 records and easy to disable with a `DISABLED` marker. `.cursorignore` and a textual `.gitignore` rule are not the retention boundary. There is no automatic network export.
+- Default output is `engineering-system/telemetry/` under the repository's absolute Git directory (`git rev-parse --absolute-git-dir`). That location is Git metadata, so generated records stay outside the tracked worktree for canonical repositories, adopted repositories, and linked worktrees. The directory is bounded to 32 records and easy to disable with a `DISABLED` marker. A textual `.gitignore` rule is not the retention boundary. There is no automatic network export.
 - Capture provider, model, reasoning, and toolset at session start. A later change requires a recorded justification. Do not switch profiles silently.
 - Soft task budgets are optional. Exhaustion yields terminal `BLOCK` with disposition `YIELD`. Further retries fail closed.
 

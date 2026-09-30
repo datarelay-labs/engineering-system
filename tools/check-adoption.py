@@ -15,11 +15,9 @@ REQUIRED = (
     ".engineering/project.yaml",
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
-    ".cursor/rules/engineering-system.mdc",
 )
 
 CONTINUITY_REQUIRED = (
-    ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
 )
 
@@ -192,54 +190,6 @@ def main() -> int:
             if not (root / rel).is_file():
                 failures.append(f"Engineering System >=1.3.0 missing session-continuity file: {rel}")
 
-    context_epoch_referenced = any(
-        path.is_file()
-        and "tools/context_epoch.py" in path.read_text(encoding="utf-8", errors="replace")
-        for path in (
-            root / ".cursor/commands/resume.md",
-            root / ".cursor/commands/work-resume.md",
-        )
-    )
-    if context_epoch_referenced:
-        target_context_epoch = root / "tools/context_epoch.py"
-        canonical_context_epoch = Path(__file__).resolve().parent / "context_epoch.py"
-        if not target_context_epoch.is_file():
-            failures.append(
-                "Cursor resume adapter references context-epoch helper but missing tools/context_epoch.py"
-            )
-        elif not canonical_context_epoch.is_file():
-            failures.append(
-                "canonical adoption checker is missing tools/context_epoch.py"
-            )
-        elif target_context_epoch.read_bytes() != canonical_context_epoch.read_bytes():
-            failures.append(
-                "tools/context_epoch.py differs from canonical managed helper"
-            )
-
-    engineering_context_referenced = any(
-        path.is_file()
-        and "tools/engineering-context.py" in path.read_text(encoding="utf-8", errors="replace")
-        for path in (
-            root / ".cursor/commands/resume.md",
-            root / ".cursor/commands/work-resume.md",
-        )
-    )
-    if engineering_context_referenced:
-        target_engineering_context = root / "tools/engineering-context.py"
-        canonical_engineering_context = Path(__file__).resolve().parent / "engineering-context.py"
-        if not target_engineering_context.is_file():
-            failures.append(
-                "Cursor resume adapter references engineering-context helper but missing tools/engineering-context.py"
-            )
-        elif not canonical_engineering_context.is_file():
-            failures.append(
-                "canonical adoption checker is missing tools/engineering-context.py"
-            )
-        elif target_engineering_context.read_bytes() != canonical_engineering_context.read_bytes():
-            failures.append(
-                "tools/engineering-context.py differs from canonical managed helper"
-            )
-
     agents_path = root / "AGENTS.md"
     if agents_path.is_file():
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
@@ -266,6 +216,7 @@ def main() -> int:
             for rel in (
                 "tools/implementation_preflight.py",
                 "tools/context_epoch.py",
+                "tools/engineering-context.py",
                 "tools/work_packet_authority.py",
                 ".github/ISSUE_TEMPLATE/ai-work-packet.md",
                 ".engineering/requirements-engineering-system.txt",
@@ -318,16 +269,10 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references verification contract but missing {rel}"
                     )
-    if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
-        failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
-
-    cursor_path = root / ".cursor/rules/engineering-system.mdc"
-    if cursor_path.is_file():
-        text = cursor_path.read_text(encoding="utf-8", errors="replace")
-        if "alwaysApply: true" not in text:
-            failures.append("Cursor engineering-system rule is not alwaysApply: true")
-        if mode == "adopted" and "canonical Engineering System" not in text:
-            failures.append("Cursor engineering-system rule does not identify canonical Engineering System")
+    for rel in (".cursor", ".cursorignore", ".cursorrules"):
+        path = root / rel
+        if path.exists() or path.is_symlink():
+            failures.append(f"retired agent artifact must be removed: {rel}")
 
     tests_path = root / ".engineering/tests.yaml"
     if tests_path.is_file():

@@ -235,14 +235,9 @@ def test_affected_parser_fails_closed() -> None:
     _fail("malformed status was accepted")
 
 
-def test_resource_mutation_token_fails() -> None:
-    if behavior_eval.resource_source_safe("value = 1\nos.kill(pid, 9)\n"):
-        _fail("session mutation token was accepted")
-    if not behavior_eval.resource_source_safe("RESULT = BLOCK\n"):
-        _fail("non-mutating resource source was rejected")
 
 
-def test_wait_and_review_contract_tokens() -> None:
+def test_wait_contract_tokens() -> None:
     try:
         behavior_eval._require_tokens("polling only", ("polling", "WAITING_FOR_", "yield"))
     except behavior_eval.EvalError as exc:
@@ -250,95 +245,15 @@ def test_wait_and_review_contract_tokens() -> None:
             _fail(f"wait regression returned {exc.code}")
     else:
         _fail("incomplete wait contract was accepted")
-    resume = (ROOT / ".cursor/commands/resume.md").read_text(encoding="utf-8").replace(
-        "evidence-backed disposition",
-        "untracked note",
-    )
-    if behavior_eval.review_resume_ok(resume):
-        _fail("review disposition regression was accepted")
-    if not behavior_eval.review_resume_ok((ROOT / ".cursor/commands/resume.md").read_text(encoding="utf-8")):
-        _fail("canonical resume lost the review disposition contract")
-    try:
-        behavior_eval.check_review(Path("/tmp/behavior-eval-missing-review-contract"))
-    except behavior_eval.EvalError as exc:
-        if exc.code != "MISSING_CONTRACT":
-            _fail(f"missing review contract returned {exc.code}")
-    else:
-        _fail("missing review contract was accepted")
+    outcome = behavior_eval.check_wait(ROOT)
+    if outcome["status"] != "PASS":
+        _fail("canonical wait/yield contract did not pass")
 
 
-def test_live_unavailable_and_metadata_filter() -> None:
-    def missing(*_args, **_kwargs):
-        raise FileNotFoundError("agent")
-
-    blocked = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=missing)
-    encoded = json.dumps(blocked)
-    if blocked["scenarios"][0]["status"] != "BLOCK":
-        _fail("missing provider did not block")
-    if blocked["scenarios"][0]["evidence"] != "PROVIDER_UNAVAILABLE":
-        _fail("missing provider evidence drifted")
-    if "CTX_ROUTING_BOUNDED" in encoded or "Invariant:" in encoded or blocked["provider"] is not None:
-        _fail("live block persisted prompt or invented a provider")
-
-    captured: dict[str, list[str]] = {}
-
-    def completed(command, **_kwargs):
-        captured["command"] = command
-        token = behavior_eval.LIVE_CANARY_TOKENS["BEH-CTX-001"]
-        payload = {
-            "provider": "cursor",
-            "model": "auto-resolved",
-            "result": token,
-            "prompt": command[-1],
-            "stdout": "class Secret:\n    token = 'hidden'\n",
-        }
-        return subprocess.CompletedProcess(args=["agent"], returncode=0, stdout=json.dumps(payload), stderr="")
-
-    passed = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=completed)
-    encoded = json.dumps(passed)
-    prompt = captured["command"][-1]
-    if "BEH-CTX-001" not in prompt or "CTX_ROUTING_BOUNDED" not in prompt:
-        _fail("live canary prompt was not scenario-specific")
-    if "Reply with exactly PASS" in prompt:
-        _fail("live canary still accepts a generic PASS reply")
-    other = behavior_eval.live_prompt(behavior_eval.load_catalog()[1])
-    if other == prompt or "WORK_PACKET_SCOPED" not in other:
-        _fail("live canary prompt did not change with the scenario")
-    if passed["provider"] != "cursor" or passed["model"] != "auto-resolved":
-        _fail("live metadata was not recorded")
-    if passed["scenarios"][0]["status"] != "PASS":
-        _fail("scenario-specific live PASS was not recorded")
-    if "Secret" in encoded or "hidden" in encoded or "prompt" in encoded or "CTX_ROUTING_BOUNDED" in encoded:
-        _fail("live result persisted prompt, canary text, or source content")
-
-    def generic(*_args, **_kwargs):
-        payload = {"provider": "cursor", "model": "auto-resolved", "result": "PASS"}
-        return subprocess.CompletedProcess(args=["agent"], returncode=0, stdout=json.dumps(payload), stderr="")
-
-    generic_result = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=generic)
-    if generic_result["scenarios"][0]["status"] != "FAIL":
-        _fail("generic PASS reply satisfied a scenario-specific canary")
-    if generic_result["scenarios"][0]["evidence"] != "LIVE_SCENARIO_FAIL":
-        _fail("generic live reply evidence drifted")
-
-    def unreadable(*_args, **_kwargs):
-        return subprocess.CompletedProcess(args=["agent"], returncode=2, stdout="", stderr="auth failed")
-
-    denied = behavior_eval.run_live(ROOT, "BEH-CTX-001", invoke=unreadable)
-    if denied["scenarios"][0]["evidence"] != "PROVIDER_UNAVAILABLE":
-        _fail("provider failure was not a clean block")
-    if "auth failed" in json.dumps(denied):
-        _fail("provider stderr was persisted")
 
 
-def test_unknown_scenario_and_duplicate_catalog() -> None:
-    try:
-        behavior_eval.run_live(ROOT, "BEH-MISSING-999", invoke=lambda *_a, **_k: None)
-    except behavior_eval.EvalError as exc:
-        if exc.code != "UNKNOWN_SCENARIO":
-            _fail(f"unknown scenario returned {exc.code}")
-    else:
-        _fail("unknown scenario was accepted")
+
+
 
 
 def test_trust_checker_does_not_import_verification_fixtures() -> None:
@@ -377,10 +292,7 @@ def main() -> None:
     test_context_fails_without_unrelated_repository_rule()
     test_work_packet_boundaries()
     test_affected_parser_fails_closed()
-    test_resource_mutation_token_fails()
-    test_wait_and_review_contract_tokens()
-    test_live_unavailable_and_metadata_filter()
-    test_unknown_scenario_and_duplicate_catalog()
+    test_wait_contract_tokens()
     test_trust_checker_does_not_import_verification_fixtures()
     test_deterministic_run_passes()
     print("PASS behavior eval framework")

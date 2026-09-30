@@ -7,7 +7,6 @@ mutate GitHub, accept a caller command or URL, or send notifications.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
@@ -29,14 +28,12 @@ TRUSTED_GH = Path("/usr/bin/gh")
 # Production fixed path. Tests may retarget this seam; caller PATH is never searched.
 _TRUSTED_GH_PATH = TRUSTED_GH
 TRUSTED_GIT = Path("/usr/bin/git")
-TRUSTED_AGENT = Path("/usr/bin/agent")
 WORKTREE_PIN = Path("/etc/engineering-system/coordinator-watch-worktree")
 CLAIM_DIR = Path("/var/lib/engineering-system/coordinator-watch-host/claims")
 ACTIVE_CLAIM_STATUSES = frozenset({"CLAIMED", "ACTIVE", "WAIT", "YIELD", "RETRY"})
 # Test-only location seams. Production never reads PATH, the request, or the environment for these.
 _TEST_TRUSTED_GH: Path | None = None
 _TEST_TRUSTED_GIT: Path | None = None
-_TEST_TRUSTED_AGENT: Path | None = None
 _TEST_WORKTREE: Path | None = None
 _TEST_CLAIM_DIR: Path | None = None
 _TEST_MEMINFO_BODIES: list[str] | None = None
@@ -273,44 +270,6 @@ def _observe_git(worktree: Path, repository: str, branch: str, head: str) -> tup
     return dirty, int(count.strip()) > 0
 
 
-def _parse_sessions(text: str) -> list[dict[str, str]] | None:
-    lowered = text.lower()
-    if "no cursor-managed persistent sessions" in lowered or "no persistent sessions" in lowered:
-        if "workspace:" not in lowered:
-            return []
-    sessions: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-
-    def flush() -> None:
-        if current.get("workspace"):
-            sessions.append(dict(current))
-        current.clear()
-
-    for raw in text.splitlines():
-        line = raw.strip()
-        if line.startswith("Task:"):
-            flush()
-            continue
-        if line.startswith("Status:"):
-            current["status"] = line.split(":", 1)[1].strip()
-        elif line.startswith("Workspace:"):
-            current["workspace"] = line.split(":", 1)[1].strip()
-    flush()
-    if not sessions and "persistent session" not in lowered:
-        return None
-    return sessions
-
-
-def _observe_sessions() -> list[dict[str, str]] | None:
-    binary = resolve_trusted_executable(TRUSTED_AGENT, _TEST_TRUSTED_AGENT)
-    if binary is None:
-        return None
-    completed = _run_observed(binary, ["persist", "list"])
-    if completed is None or completed.returncode != 0:
-        return None
-    return _parse_sessions(completed.stdout)
-
-
 def _read_meminfo() -> str | None:
     bodies = _TEST_MEMINFO_BODIES
     if bodies is not None:
@@ -325,29 +284,41 @@ def _read_meminfo() -> str | None:
         return None
 
 
-def _resource_module():
-    path = Path(__file__).resolve().with_name("cursor-resource-preflight.py")
-    spec = importlib.util.spec_from_file_location("cursor_resource_preflight", path)
-    if spec is None or spec.loader is None:
-        raise CollectError("resource preflight module is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _observe_resource(session_count: int | None) -> str:
-    if session_count is None:
-        return "UNKNOWN"
+def _observe_resource() -> str:
     text = _read_meminfo()
     if text is None:
         return "UNKNOWN"
+    values = {}
     try:
-        module = _resource_module()
-        meminfo = module.parse_meminfo(text)
-        thresholds = module.apply_override(meminfo["MemTotal"], None, "builtin")
-        return str(module.evaluate(meminfo, session_count, thresholds)["RESULT"])
-    except Exception:
+        for raw in text.splitlines():
+            if ":" not in raw:
+                continue
+            key, rest = raw.split(":", 1)
+            parts = rest.split()
+            if not parts:
+                continue
+            value = int(parts[0])
+            if len(parts) > 1 and parts[1] == "kB":
+                value *= 1024
+            values[key.strip()] = value
+        total = values["MemTotal"]
+        available = values["MemAvailable"]
+        swap_total = values["SwapTotal"]
+        swap_free = values.get("SwapFree", 0)
+        if total <= 0 or available < 0 or swap_total < 0 or swap_free < 0:
+            return "UNKNOWN"
+    except (KeyError, ValueError):
         return "UNKNOWN"
+    gib = 1024 ** 3
+    mib = 1024 ** 2
+    if total >= 24 * gib:
+        block_mem, block_swap = 8 * gib, 1 * gib
+    elif total >= 8 * gib:
+        block_mem, block_swap = max(1 * gib, total // 4), 1 * gib
+    else:
+        block_mem, block_swap = max(64 * mib, total // 5), 256 * mib
+    swap_used = max(0, swap_total - swap_free) if swap_total else 0
+    return "BLOCK" if available < block_mem or (swap_total and swap_used > block_swap) else "PASS"
 
 
 def _claim_dir() -> Path | None:
@@ -550,12 +521,10 @@ def collect_authoritative(
     else:
         pr_state = ""
     worktree = _pinned_worktree()
-    sessions = _observe_sessions()
     dirty, unpushed = (
         _observe_git(worktree, repository, branch, sha) if worktree is not None else (None, None)
     )
-    worker = _observe_worker(sessions, worktree, repository, workstream, branch, sha, dirty)
-    resource = _observe_resource(None if sessions is None else len(sessions))
+    resource = _observe_resource()
     admission = _observe_admission(resource, repository, workstream, intent_revision)
     observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     git_facts: dict[str, Any] = {"head": sha, "yielded_for_audit": False}
@@ -587,8 +556,6 @@ def collect_authoritative(
         "gates": {"org_rollout": "NOT_REQUIRED"},
         "watch": {"watch_class": watch_class, "observed_at": observed_at},
     }
-    if worker is not None:
-        facts["worker"] = worker
     if str(fields.get("PUBLICATION_REVISION") or "").strip():
         facts["publication"]["authorized_intent_revision"] = int(str(fields["PUBLICATION_REVISION"]))
     if pr_exists:

@@ -187,7 +187,7 @@ def analyze_packet(
     if change_risk and change_risk not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
         blocking.append("CHANGE_RISK_INVALID")
     implementer = packet.metadata.get("IMPLEMENTER")
-    if implementer and implementer not in {"CHATGPT_CHAT", "CURSOR"}:
+    if implementer and implementer != "CHATGPT_CHAT":
         blocking.append("IMPLEMENTER_INVALID")
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
@@ -458,7 +458,7 @@ def sanitize_hook(payload: dict[str, Any]) -> dict[str, Any]:
         value = payload.get(key)
         if isinstance(value, str) and value:
             result[key + "_hash"] = _hash_id(value)
-    for key in ("cursor_version", "model", "model_id", "trigger", "status"):
+    for key in ("client_version", "model", "model_id", "trigger", "status"):
         value = payload.get(key)
         if isinstance(value, str) and SAFE_HOOK_LABEL_RE.fullmatch(value):
             result[key] = value

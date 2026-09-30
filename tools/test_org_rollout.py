@@ -112,8 +112,7 @@ def test_org_rollout_matrix() -> None:
 
         adopt_python(archived, BASELINE)
         (incomplete / ".engineering").mkdir()
-        (incomplete / ".cursor" / "rules").mkdir(parents=True)
-        (incomplete / ".cursor" / "rules" / "engineering-system.mdc").write_text("x\n", encoding="utf-8")
+        (incomplete / ".engineering" / "incomplete-marker").write_text("incomplete\n", encoding="utf-8")
         commit_all(incomplete, "incomplete adoption markers")
 
         inventory = base / "inventory.json"

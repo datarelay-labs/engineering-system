@@ -33,7 +33,7 @@ def main():
           ("ok","admin","CHATGPT_CHAT",HEAD,True,""),
           ("permission","read","CHATGPT_CHAT",HEAD,False,"permission is insufficient"),
           ("head","admin","CHATGPT_CHAT","0"*40,False,"branch HEAD mismatch"),
-          ("implementer","admin","CURSOR",HEAD,False,"does not authorize canonical ChatGPT"),
+          ("implementer","admin","OTHER",HEAD,False,"does not authorize canonical ChatGPT"),
         ]:
             t=base/name;t.mkdir();gh=t/"gh";fakegh(gh,perm,impl,head)
             cp,b,d=run(t,gh,priv,pub)

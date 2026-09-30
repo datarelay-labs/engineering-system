@@ -15,7 +15,7 @@
       "properties": {
         "schema_version": {"type": "integer", "const": 1},
         "kind": {"type": "string", "const": "behavior-eval-run"},
-        "runner": {"type": "string", "enum": ["deterministic", "cursor-cli"]},
+        "runner": {"type": "string", "const": "deterministic"},
         "head": {"$ref": "#/$defs/sha"},
         "provider": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_.:@/+-]{1,80}$"},
         "model": {

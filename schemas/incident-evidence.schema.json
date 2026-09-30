@@ -17,7 +17,6 @@
     "load",
     "psi_memory",
     "psi_io",
-    "sessions",
     "pressure_facts",
     "overall",
     "authority"
@@ -36,18 +35,16 @@
     "load": {"$ref": "#/$defs/load"},
     "psi_memory": {"$ref": "#/$defs/psi"},
     "psi_io": {"$ref": "#/$defs/psi"},
-    "sessions": {"$ref": "#/$defs/sessions"},
     "pressure_facts": {
       "type": "array",
-      "maxItems": 5,
+      "maxItems": 4,
       "uniqueItems": true,
       "items": {
         "enum": [
           "LOW_MEM_AVAILABLE",
           "MATERIAL_SWAP_USE",
           "ELEVATED_MEMORY_PRESSURE",
-          "ELEVATED_IO_PRESSURE",
-          "HIGH_PERSISTENT_SESSION_COUNT"
+          "ELEVATED_IO_PRESSURE"
         ]
       }
     },
@@ -346,32 +343,6 @@
               ]
             }
           }
-        }
-      ]
-    },
-    "sessions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["state", "reason"],
-      "properties": {
-        "state": {"$ref": "#/$defs/sourceState"},
-        "reason": {"$ref": "#/$defs/reason"},
-        "persistent_count": {"type": "integer", "minimum": 0, "maximum": 100000}
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {"state": {"const": "CAPTURED"}},
-            "required": ["state"]
-          },
-          "then": {"required": ["persistent_count"]}
-        },
-        {
-          "if": {
-            "properties": {"state": {"enum": ["UNAVAILABLE", "UNSUPPORTED", "REDACTED"]}},
-            "required": ["state"]
-          },
-          "then": {"not": {"required": ["persistent_count"]}}
         }
       ]
     }

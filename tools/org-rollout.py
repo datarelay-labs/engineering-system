@@ -287,9 +287,7 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
         (root / rel).exists()
         for rel in (
             ".engineering",
-            ".cursor/rules/engineering-system.mdc",
             ".github/workflows/engineering-system.yml",
-            ".cursor/commands/resume.md",
         )
     )
     agents = (root / "AGENTS.md").is_file()

@@ -91,11 +91,10 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
-Engineering System 1.6.4는 기존 1.6.x adoption/release contract 위에 Cursor token efficiency를 추가합니다. always-applied Cursor rule을 최소화하고, 기존 PR 작업은 Git diff부터 시작하며, test manifest에 cost/timeout/default metadata를 둘 수 있습니다. `tools/engineering-test.py`는 가장 저렴한 안전한 affected check를 선택하고, verbose command output을 제한하며, 새 adoption에는 보수적인 `.cursorignore` 기본값을 설치합니다. 1.6.4는 bounded Work Packet action마다 별도의 coding-agent session을 우선했지만, 그 기본값은 더 이상 현재 정책이 아닙니다. managed upgrade는 known-managed Cursor rule만 동기화하면서 custom `.cursorignore`는 보존합니다. 채택 저장소는 계속 `engineering_system.version`과 immutable `engineering_system.baseline` SHA를 pin하며, org-wide rollout은 version뿐 아니라 해당 baseline까지 비교합니다.
+Engineering System 1.6.5는 ChatGPT Chat을 단일 구현 경로로 사용합니다. managed adoption은 immutable baseline pin을 유지하고, context/test 선택은 provider-neutral 비용 기준을 유지하며, managed upgrade는 더 이상 쓰지 않는 editor-agent artifact를 호환 실행 경로로 보존하지 않고 제거합니다.
 
-Engineering System 1.6.5는 Cursor persistent session resource guard를 추가합니다. 새 persistent session을 `agent persist`로 만들기 전에 `python3 tools/cursor-resource-preflight.py`를 실행합니다. Exit 0은 `PASS` 또는 `WARN`이며 진행할 수 있고, 0이 아닌 `BLOCK`은 새 세션만 거절하며 기존 세션을 중단하지 않습니다. 임계값은 small/medium/large 호스트에 맞게 정해지며, repository를 수정하지 않는 host-local override를 지원합니다. 이 preflight는 새 persistent session을 실제로 만들 때만 실행합니다.
 
-현재 기본값은 건강한 project persistent Cursor session 하나를 Work Packet에 걸쳐 재사용합니다. 대화 맥락은 `/clear`로 지우고 `/work-resume`로 다시 시작합니다. 새 persistent session은 재사용 가능한 건강한 세션이 없거나, 현재 세션을 쓸 수 없거나, 승인된 병렬 작업에 격리된 worker가 필요할 때만 만듭니다.
+
 
 ### 3. Adoption qualification
 
@@ -157,8 +156,6 @@ AGENTS.md
 .engineering/project.yaml
 .engineering/tests.yaml
 .engineering/release.yaml
-.cursor/rules/engineering-system.mdc
-.cursor/commands/resume.md
 .github/ISSUE_TEMPLATE/ai-work-packet.md
 .github/workflows/engineering-system.yml
 ```

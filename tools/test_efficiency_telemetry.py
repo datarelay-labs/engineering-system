@@ -106,7 +106,7 @@ def _missing_validation() -> dict:
 
 
 def _profile() -> dict[str, str | None]:
-    return {"provider": "cursor", "model": "auto", "reasoning": "low", "toolset": "default"}
+    return {"provider": "chatgpt", "model": "auto", "reasoning": "low", "toolset": "default"}
 
 
 def _record(**overrides):

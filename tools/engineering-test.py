@@ -24,13 +24,9 @@ LEVEL_COST = {
 }
 METADATA_PATHS = {
     "AGENTS.md",
-    ".cursorignore",
     ".engineering/project.yaml",
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
-    ".cursor/rules/engineering-system.mdc",
-    ".cursor/commands/resume.md",
-    ".cursor/commands/work-resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
     ".github/workflows/engineering-release.yml",

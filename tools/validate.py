@@ -28,13 +28,8 @@ REQUIRED_STANDARDS = (
 
 REQUIRED_ENFORCEMENT_TEMPLATES = (
     "templates/AGENTS.md",
-    "templates/.cursor/rules/engineering-system.mdc",
-    "templates/.cursorignore",
     "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
     "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
-    "templates/CURSOR_USER_RULE.txt",
-    "templates/.cursor/commands/resume.md",
-    "templates/.cursor/commands/work-resume.md",
     "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md",
     "templates/.github/workflows/engineering-system.yml",
 )
@@ -212,7 +207,6 @@ def validate_bun_discovery():
 
 def validate_work_packet_author_authority():
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
-    resume = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
     authority = (ROOT / "tools/work_packet_authority.py").read_text(encoding="utf-8")
     for token in (
         "WORK_PACKET_AUTHOR_UNTRUSTED",
@@ -225,8 +219,6 @@ def validate_work_packet_author_authority():
     ):
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing Work Packet author token: {token}")
-        if token not in resume:
-            raise SystemExit(f"FAIL resume template missing Work Packet author token: {token}")
     for token in (
         "AUTHORIZED_WORK_PACKET_PERMISSIONS",
         "write",
@@ -250,32 +242,6 @@ def validate_chat_primary_contract():
         if token not in source:
             raise SystemExit(f"FAIL implementation preflight missing executable invariant: {token}")
     print("PASS Chat-primary executable coordination artifacts")
-
-def validate_resource_guard_contract():
-    tool = (ROOT / "tools/cursor-resource-preflight.py").read_text(encoding="utf-8")
-    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
-    instruction = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
-    resume = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
-    for token in ("PASS", "WARN", "BLOCK", "agent persist list", "MemAvailable"):
-        if token not in tool:
-            raise SystemExit(f"FAIL resource preflight missing token: {token}")
-    for token in ("os.kill", "persist stop", "SIGKILL"):
-        if token in tool:
-            raise SystemExit(f"FAIL resource preflight encodes session mutation: {token}")
-    for label, text in (
-        ("session continuity", session),
-        ("resume template", resume),
-    ):
-        if "cursor-resource-preflight.py" not in text:
-            raise SystemExit(f"FAIL {label} missing optional-adapter resource preflight command")
-        if "BLOCK" not in text:
-            raise SystemExit(f"FAIL {label} missing BLOCK result")
-    if "Cursor is retired from the default workflow" not in instruction:
-        raise SystemExit("FAIL ChatGPT custom instruction does not retire Cursor default")
-    if "DISABLED BY DEFAULT" not in resume:
-        raise SystemExit("FAIL Cursor resume compatibility adapter is not disabled by default")
-    print("PASS dormant Cursor compatibility resource guard contract")
-
 
 def validate_work_admission_contract():
     tool = (ROOT / "tools/work_admission.py").read_text(encoding="utf-8")
@@ -803,26 +769,6 @@ def validate_context_economics_contract():
 
 
 def validate_token_efficiency_contract():
-    rule = (ROOT / ".cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
-    rule_template = (ROOT / "templates/.cursor/rules/engineering-system.mdc").read_text(encoding="utf-8")
-    if rule != rule_template:
-        raise SystemExit("FAIL canonical/template Cursor engineering-system rule drift")
-    if len(rule.splitlines()) > 16:
-        raise SystemExit("FAIL always-applied Cursor rule exceeds compact context budget")
-    if "@AGENTS.md" in rule or "@.engineering/project.yaml" in rule:
-        raise SystemExit("FAIL always-applied Cursor rule force-attaches repository context")
-    for token in ("diff", "cheapest", "verbose", "polling"):
-        if token not in rule:
-            raise SystemExit(f"FAIL compact Cursor rule missing token-efficiency token: {token}")
-
-    ignore = (ROOT / ".cursorignore").read_text(encoding="utf-8")
-    ignore_template = (ROOT / "templates/.cursorignore").read_text(encoding="utf-8")
-    if ignore != ignore_template:
-        raise SystemExit("FAIL canonical/template .cursorignore drift")
-    for token in ("node_modules/", "__pycache__/", "*.log"):
-        if token not in ignore:
-            raise SystemExit(f"FAIL .cursorignore missing safe-noise token: {token}")
-
     schema = load_json(ROOT / "schemas/tests.schema.json")
     scenario_props = schema["properties"]["scenarios"]["items"]["properties"]
     for token in ("cost", "estimated_seconds", "timeout_seconds", "agent_default", "scope"):
@@ -837,24 +783,7 @@ def validate_token_efficiency_contract():
     for token in ("TEST_COST", "SKIP_EXPENSIVE_METADATA_ONLY", "agent-logs"):
         if token not in test_tool:
             raise SystemExit(f"FAIL engineering-test helper missing token: {token}")
-    print("PASS token-efficient Cursor context/test routing contract")
-
-
-def validate_resume_template_parity():
-    canonical = (ROOT / ".cursor/commands/resume.md").read_text(encoding="utf-8")
-    template = (ROOT / "templates/.cursor/commands/resume.md").read_text(encoding="utf-8")
-    if canonical != template:
-        raise SystemExit(
-            "FAIL templates/.cursor/commands/resume.md drifted from canonical .cursor/commands/resume.md"
-        )
-    for rel in (
-        ".cursor/commands/work-resume.md",
-        "templates/.cursor/commands/work-resume.md",
-    ):
-        alias = (ROOT / rel).read_text(encoding="utf-8")
-        if alias != canonical:
-            raise SystemExit(f"FAIL {rel} drifted from canonical .cursor/commands/resume.md")
-    print("PASS canonical/template Cursor resume parity")
+    print("PASS token-efficient provider-neutral context/test routing contract")
 
 
 def validate_issue_template_parity():
@@ -868,77 +797,26 @@ def validate_issue_template_parity():
 
 
 def validate_session_continuity_templates():
-    issue_path = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
-    resume_path = ROOT / "templates/.cursor/commands/resume.md"
-
-    issue_text = issue_path.read_text(encoding="utf-8")
-    resume_text = resume_path.read_text(encoding="utf-8")
-
+    issue_text = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
     issue_tokens = (
-        "PACKET_VERSION=2",
-        "TARGET_REPO=",
-        "WORKSTREAM=",
-        "STATUS=ACTIVE",
-        "BRANCH=",
-        "TASK_KIND=",
-        "OWNER_INTENT=",
-        "LAST_VERIFIED_HEAD=",
-        "IMPLEMENTER=CHATGPT_CHAT",
-        "## Next Action",
-        "## Canonical References",
-        "## Latest Evidence",
-        "## Blockers",
+        "PACKET_VERSION=2", "TARGET_REPO=", "WORKSTREAM=", "STATUS=ACTIVE",
+        "BRANCH=", "TASK_KIND=", "OWNER_INTENT=", "LAST_VERIFIED_HEAD=",
+        "IMPLEMENTER=CHATGPT_CHAT", "## Next Action", "## Canonical References",
+        "## Latest Evidence", "## Blockers",
     )
-    resume_tokens = (
-        "ENVIRONMENT_BLOCKER",
-        "git remote get-url origin",
-        "git branch --show-current",
-        "git rev-parse HEAD",
-        "TARGET_REPO",
-        "STATUS=ACTIVE",
-        "TASK_KIND",
-        "OWNER_INTENT",
-        "WORK_PACKET_SCOPE_MISMATCH",
-        "WORK_PACKET_PROVENANCE_UNTRUSTED",
-        "WORK_PACKET_AUTHOR_UNTRUSTED",
-        "collaborators/{author}/permission",
-        "write",
-        "maintain",
-        "admin",
-        "author_association",
-        "MUST NOT authorize",
-        "authenticated",
-        "ENGINEERING_SYSTEM_ADOPTION=INCOMPLETE",
-        "TASK_KIND=ADOPTION",
-        "exactly one match",
-        "Next Action",
-        "STATUS=COMPLETE",
-        "actionable review feedback",
-        "update the same Work Packet",
-    )
-
-    failures = []
     for token in issue_tokens:
         if token not in issue_text:
-            failures.append(f"AI Work Packet template missing token: {token}")
-    for token in resume_tokens:
-        if token not in resume_text:
-            failures.append(f"Cursor resume template missing token: {token}")
-
-    forbidden_resume = ("STATUS=DONE", "STATUS=CURSOR_READY")
-    for token in forbidden_resume:
-        if token in resume_text:
-            failures.append(f"Cursor resume template contains non-canonical status: {token}")
-
-    if "CURSOR_READY" in issue_text or "STATUS=DONE" in issue_text:
-        failures.append("AI Work Packet template contains a non-canonical status")
-
-    if failures:
-        for item in failures:
-            print(f"FAIL {item}")
-        raise SystemExit(1)
-
-    print("PASS AI Work Packet and Cursor resume template contract")
+            raise SystemExit(f"FAIL AI Work Packet template missing token: {token}")
+    if "STATUS=DONE" in issue_text:
+        raise SystemExit("FAIL AI Work Packet template contains a non-canonical status")
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    for token in (
+        "WORK_PACKET_SCOPE_MISMATCH", "WORK_PACKET_PROVENANCE_UNTRUSTED",
+        "WORK_PACKET_AUTHOR_UNTRUSTED", "MUST NOT authorize", "actionable review",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing contract token: {token}")
+    print("PASS AI Work Packet and provider-neutral session continuity contract")
 
 
 def validate_actionable_review_gate():
@@ -946,13 +824,8 @@ def validate_actionable_review_gate():
         "standards/CORE.md",
         "AGENTS.md",
         "templates/AGENTS.md",
-        ".cursor/commands/resume.md",
-        "templates/.cursor/commands/resume.md",
-        ".cursor/rules/engineering-system.mdc",
-        "templates/.cursor/rules/engineering-system.mdc",
         "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
         "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
-        "templates/CURSOR_USER_RULE.txt",
     )
     missing = []
     for rel in required_paths:
@@ -1158,7 +1031,9 @@ def validate_incident_evidence():
         "RETENTION_SIZE_BOUND",
         "INCIDENT_ID_INVALID",
         "engineering-system/incidents",
-        "parse_persist_list",
+        "parse_meminfo",
+        "LOW_MEM_AVAILABLE",
+        "ELEVATED_MEMORY_PRESSURE",
     ):
         if token not in tool:
             raise SystemExit(f"FAIL incident evidence tool missing token: {token}")
@@ -1519,6 +1394,8 @@ def main():
     validate_context_economics_contract()
     validate_token_efficiency_contract()
     validate_issue_template_parity()
+    validate_session_continuity_templates()
+    validate_actionable_review_gate()
     validate_adoption_contract()
     validate_knowledge_contract()
     validate_runtime_contract()

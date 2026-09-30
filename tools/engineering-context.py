@@ -28,7 +28,7 @@ TERM_RE = re.compile(r"[\w][\w.-]{1,}", re.UNICODE)
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 TOKEN_SEPARATOR_RE = re.compile(r"[_/:=.-]+")
 MANDATORY_CONTEXT_PATHS = frozenset({"AGENTS.md", ".engineering/project.yaml"})
-NON_SLICEABLE_PATHS = MANDATORY_CONTEXT_PATHS | frozenset({".cursor/rules/engineering-system.mdc"})
+NON_SLICEABLE_PATHS = MANDATORY_CONTEXT_PATHS
 
 
 def fail_context(message: str) -> None:
