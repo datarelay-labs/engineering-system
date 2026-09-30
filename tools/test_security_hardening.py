@@ -114,6 +114,8 @@ def production_root(base: Path) -> Path:
 
 
 class StaticObservedStateProvider:
+    network_boundary = "GITHUB_READ"
+
     def __init__(self, fixture: dict[str, object]) -> None:
         self.fixture = fixture
         self.calls: list[dict[str, object]] = []
@@ -572,6 +574,29 @@ def test_custom_execute_requires_observed_state_provider() -> None:
             fail("custom authoritative execute bypassed fresh observed-state requirement")
 
 
+def test_custom_observed_state_provider_requires_network_boundary() -> None:
+    class UndeclaredProvider:
+        def read(self, root, repository, seed_fixture):
+            return disabled_fixture()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        try:
+            HARDENING.apply_plan(
+                root,
+                disabled_fixture(),
+                allowed_controls=["secret_scanning"],
+                execute=True,
+                mutator=DeclaredCustomMutator(),
+                observed_state_provider=UndeclaredProvider(),
+            )
+        except HARDENING.HardeningError as exc:
+            if "network_boundary=GITHUB_READ" not in str(exc):
+                fail(f"unexpected observed-provider network-boundary error: {exc}")
+        else:
+            fail("custom observed-state provider omitted its network boundary")
+
+
 def test_custom_authoritative_mutator_requires_network_boundary() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -871,6 +896,7 @@ def main() -> None:
     test_live_provider_treats_dependabot_204_as_enabled()
     test_execute_rechecks_stale_fixture_before_mutation()
     test_custom_execute_requires_observed_state_provider()
+    test_custom_observed_state_provider_requires_network_boundary()
     test_custom_authoritative_mutator_requires_network_boundary()
     test_declared_custom_mutator_reports_github_settings_boundary()
     test_authoritative_custom_mutator_rejects_non_applied_results()

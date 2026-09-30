@@ -365,6 +365,8 @@ def build_plan(
 
 
 class ObservedStateProvider(Protocol):
+    network_boundary: str
+
     def read(
         self,
         root: Path,
@@ -429,6 +431,8 @@ def _repository_security_status(document: dict[str, Any], key: str) -> str:
 
 class GhApiObservedStateProvider:
     """Fresh GitHub-native observation used only at the real execute boundary."""
+
+    network_boundary = "GITHUB_READ"
 
     def read(
         self,
@@ -653,8 +657,13 @@ def apply_plan(
                         "authoritative execute requires an observed-state provider"
                     )
                 provider = GhApiObservedStateProvider()
+            provider_network = getattr(provider, "network_boundary", None)
+            if provider_network != "GITHUB_READ":
+                raise HardeningError(
+                    "authoritative observed-state provider must declare network_boundary=GITHUB_READ"
+                )
             effective_fixture = provider.read(root, repository, fixture)
-            github_read = isinstance(provider, GhApiObservedStateProvider)
+            github_read = True
 
     plan = build_plan(
         root,
