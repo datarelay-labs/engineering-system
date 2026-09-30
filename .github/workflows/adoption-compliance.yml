@@ -37,6 +37,7 @@ jobs:
             .engineering/project.yaml
             .engineering/requirements-engineering-system.txt
             .github/ISSUE_TEMPLATE/ai-work-packet.md
+            templates/AGENTS.md
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
