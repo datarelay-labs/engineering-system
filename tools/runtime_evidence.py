@@ -16,6 +16,7 @@ Exit status:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -57,6 +58,11 @@ OUTPUT_LIMIT_BYTES = 4096
 MAX_SUBJECT_FILES = 128
 MAX_SUBJECT_BYTES = 1_048_576
 MAX_SUBJECT_SECONDS = 2
+TRACE_LIMIT_BYTES = 262_144
+TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
+TRACE_DIRFD_RE = re.compile(
+    r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
+)
 IDENTITY_FIELDS = (
     "incident_id",
     "evidence_kind",
@@ -623,13 +629,16 @@ def _git_readonly(
         return subprocess.CompletedProcess(command, 124, "" if text else b"", "" if text else b"")
 
 
-def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.TemporaryDirectory[str], Path] | None:
-    """Copy committed blobs into a private directory.
+def _materialize_subject_tree(
+    root: Path,
+    subject_head: str,
+) -> tuple[tempfile.TemporaryDirectory[str], Path, tuple[str, ...]] | None:
+    """Copy exact-HEAD regular blobs into a private directory.
 
-    Uses read-only object lookup and ignores repository replace refs. Does not
-    register a worktree, checkout, or run repository hooks, filters, or other
-    local configuration. File count, byte count, and elapsed time are capped
-    before the command deadline starts.
+    Committed symlinks and gitlinks are represented only by inert placeholders:
+    a dangling symlink and an empty directory respectively. Their paths are
+    returned so execution can prove they were not observed by the command.
+    The materializer never follows a symlink or fetches submodule content.
     """
     deadline = time.monotonic() + MAX_SUBJECT_SECONDS
     if time.monotonic() >= deadline:
@@ -651,6 +660,7 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
     temporary = tempfile.TemporaryDirectory(prefix="runtime-evidence-exec-")
     work = Path(temporary.name) / "tree"
     total = 0
+    unsafe_paths: list[str] = []
     try:
         work.mkdir()
         base = work.resolve()
@@ -661,20 +671,23 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
             if separator != b"\t":
                 raise ValueError("tree entry")
             mode, kind, oid = meta.split()
-            # Symlinks and gitlinks/submodules are intentionally omitted from
-            # the private subject tree. Never follow or fetch them. A command
-            # that depends on an omitted entry will fail closed because the
-            # path is absent from the exact-HEAD materialization.
-            if mode in {b"120000", b"160000"}:
-                continue
-            if kind != b"blob":
-                raise ValueError("unsupported tree entry")
             relative = path.decode("utf-8", "surrogateescape")
             if relative.startswith("/") or "\x00" in relative:
                 raise ValueError("tree path")
             destination = (work / relative).resolve()
             if destination != base and base not in destination.parents:
                 raise ValueError("tree path")
+            if mode in {b"120000", b"160000"}:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                unsafe_paths.append(relative)
+                if mode == b"120000":
+                    marker = hashlib.sha256(relative.encode("utf-8", "surrogateescape")).hexdigest()[:16]
+                    destination.symlink_to(f"/__engineering_runtime_evidence_blocked__/{marker}")
+                else:
+                    destination.mkdir()
+                continue
+            if kind != b"blob":
+                raise ValueError("unsupported tree entry")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ValueError("tree deadline")
@@ -691,11 +704,75 @@ def _materialize_subject_tree(root: Path, subject_head: str) -> tuple[tempfile.T
     except (OSError, UnicodeError, ValueError):
         temporary.cleanup()
         return None
-    return temporary, work
+    return temporary, work, tuple(unsafe_paths)
 
 
 def _release_subject_tree(temporary: tempfile.TemporaryDirectory[str]) -> None:
     temporary.cleanup()
+
+
+def _trusted_trace_argv() -> list[str] | None:
+    return _trusted_argv(["strace"])
+
+
+def _decode_trace_string(raw: str) -> str | None:
+    try:
+        value = ast.literal_eval('"' + raw + '"')
+    except (SyntaxError, ValueError):
+        return None
+    return value if isinstance(value, str) else None
+
+
+def _trace_unsafe_access_reason(trace_path: Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
+    try:
+        if not trace_path.is_file():
+            return "TRACE_UNAVAILABLE"
+        if trace_path.stat().st_size > TRACE_LIMIT_BYTES:
+            return "TRACE_LIMIT"
+        trace = trace_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "TRACE_UNAVAILABLE"
+
+    base = os.path.normpath(str(work.resolve()))
+    unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
+    for line in trace.splitlines():
+        # Relative paths after a cwd change cannot be bound to the original
+        # subject root without reconstructing process state. Fail closed.
+        if "chdir(" in line or "fchdir(" in line:
+            return "TRACE_AMBIGUOUS"
+
+        match = TRACE_DIRFD_RE.search(line)
+        if match is not None:
+            decoded = _decode_trace_string(match.group(2))
+            if decoded is None:
+                return "TRACE_AMBIGUOUS"
+            if decoded and not os.path.isabs(decoded) and match.group(1).strip() != "AT_FDCWD":
+                return "TRACE_AMBIGUOUS"
+
+        for raw in TRACE_QUOTED_RE.findall(line):
+            decoded = _decode_trace_string(raw)
+            if decoded is None:
+                return "TRACE_AMBIGUOUS"
+            if not decoded or "\x00" in decoded:
+                continue
+            if os.path.isabs(decoded):
+                normalized = os.path.normpath(decoded)
+                if normalized == base:
+                    relative = "."
+                elif normalized.startswith(base + os.sep):
+                    relative = os.path.relpath(normalized, base)
+                else:
+                    continue
+            else:
+                normalized = os.path.normpath(decoded)
+                if normalized == ".." or normalized.startswith(".." + os.sep):
+                    continue
+                relative = normalized
+            relative_posix = Path(relative).as_posix()
+            for blocked in unsafe:
+                if relative_posix == blocked or relative_posix.startswith(blocked + "/"):
+                    return "UNSAFE_TREE_DEPENDENCY"
+    return None
 
 
 def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str, bytes]:
@@ -711,14 +788,37 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
     checked_out = _materialize_subject_tree(root, subject_head)
     if checked_out is None:
         return "EXECUTION_FAILED", "SUBJECT_TREE", b""
-    temporary, work = checked_out
+    temporary, work, unsafe_paths = checked_out
     if not _executable_arguments_bound(trusted, work):
         _release_subject_tree(temporary)
         return "EXECUTION_FAILED", "CODE_UNBOUND", b""
+
+    trace_path: Path | None = None
+    exec_argv = trusted
+    if unsafe_paths:
+        tracer = _trusted_trace_argv()
+        if tracer is None:
+            _release_subject_tree(temporary)
+            return "EXECUTION_FAILED", "TRACE_SETUP_UNAVAILABLE", b""
+        trace_path = Path(temporary.name) / "file-access.trace"
+        exec_argv = [
+            *tracer,
+            "-f",
+            "-qq",
+            "-s",
+            "4096",
+            "-e",
+            "trace=%file",
+            "-o",
+            str(trace_path),
+            "--",
+            *trusted,
+        ]
+
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
-            trusted,
+            exec_argv,
             cwd=work,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -751,6 +851,14 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             if remaining <= 0:
                 status = "timeout"
                 break
+            if trace_path is not None:
+                try:
+                    if trace_path.is_file() and trace_path.stat().st_size > TRACE_LIMIT_BYTES:
+                        status = "trace_limit"
+                        break
+                except OSError:
+                    status = "trace_unavailable"
+                    break
             exited = proc.poll() is not None
             if pipe_open:
                 readable, _, _ = select.select([fd], [], [], 0 if exited else min(0.2, remaining))
@@ -780,9 +888,13 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
                 if not absorb(block):
                     status = "limit"
                     break
-        if status in {"limit", "timeout"}:
+        if status in {"limit", "timeout", "trace_limit", "trace_unavailable"}:
             if status == "limit":
                 return "OUTPUT_UNBOUNDED", "OUTPUT_LIMIT", b""
+            if status == "trace_limit":
+                return "EXECUTION_FAILED", "TRACE_LIMIT", b""
+            if status == "trace_unavailable":
+                return "EXECUTION_FAILED", "TRACE_UNAVAILABLE", b""
             return "TIMEOUT", "TIMEOUT", b""
         try:
             code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
@@ -792,6 +904,10 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         output = b"".join(chunks)
         if code != 0:
             return "EXECUTION_FAILED", f"EXIT_{code}", output
+        if trace_path is not None:
+            trace_reason = _trace_unsafe_access_reason(trace_path, work, unsafe_paths)
+            if trace_reason is not None:
+                return "EXECUTION_FAILED", trace_reason, b""
         return "CAPTURED", "OK", output
     except subprocess.TimeoutExpired:
         return "TIMEOUT", "TIMEOUT", b""
@@ -1055,6 +1171,7 @@ def collect(root: Path, request: dict[str, Any]) -> dict[str, str]:
         "SUBJECT_TREE",
         "EXECUTABLE_UNTRUSTED",
         "CODE_UNBOUND",
+        "TRACE_SETUP_UNAVAILABLE",
     }
     terminal = {
         "schema_version": 1,

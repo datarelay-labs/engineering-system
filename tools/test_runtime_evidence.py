@@ -627,6 +627,100 @@ def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
             clear_trust()
 
 
+def test_indirect_symlink_fallback_is_rejected() -> None:
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "indirect symlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["result"] == "EXECUTION_FAILED"
+            assert "raw_output" not in private_record(repo)
+        finally:
+            clear_trust()
+
+
+def test_indirect_gitlink_fallback_is_rejected() -> None:
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('vendor/dependency/config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"health.py": script})
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "indirect gitlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_unsafe_tree_requires_tracer_before_execution() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "tracer required")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        original = runtime_evidence._trusted_trace_argv
+        runtime_evidence._trusted_trace_argv = lambda: None
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+            assert report["EXECUTED"] == "NO"
+            assert runs(repo) == 0
+        finally:
+            runtime_evidence._trusted_trace_argv = original
+            clear_trust()
+
+
+def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        work = base / "tree"
+        work.mkdir()
+        trace = base / "trace"
+        trace.write_text('123 chdir("vendor") = 0\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(3, "dependency", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+
+
 def test_referenced_gitlink_does_not_execute() -> None:
     command = "python3 vendor/dependency"
     with tempfile.TemporaryDirectory() as tmp:
@@ -1289,6 +1383,10 @@ def main() -> int:
     test_symlink_subject_tree_does_not_execute()
     test_unrelated_symlink_does_not_block_subject_tree()
     test_unrelated_gitlink_does_not_block_subject_tree()
+    test_indirect_symlink_fallback_is_rejected()
+    test_indirect_gitlink_fallback_is_rejected()
+    test_unsafe_tree_requires_tracer_before_execution()
+    test_trace_parser_fails_closed_on_ambiguous_relative_state()
     test_referenced_gitlink_does_not_execute()
     test_replace_ref_cannot_rewrite_subject_head()
     test_caller_environment_cannot_inject_execution()
