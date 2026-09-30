@@ -577,9 +577,72 @@ def test_symlink_subject_tree_does_not_execute() -> None:
         try:
             report = collect(repo, request)
             assert report["RESULT"] == "EXECUTION_FAILED"
-            assert report["REASON"] == "SUBJECT_TREE"
+            assert report["REASON"] == "CODE_UNBOUND"
             assert report["EXECUTED"] == "NO"
             assert "DIRTY_SCRIPT_RAN" not in "\n".join(report.values())
+        finally:
+            clear_trust()
+
+
+def test_unrelated_symlink_does_not_block_subject_tree() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "unrelated symlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "ok\n"
+        finally:
+            clear_trust()
+
+
+def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "unrelated gitlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "ok\n"
+        finally:
+            clear_trust()
+
+
+def test_referenced_gitlink_does_not_execute() -> None:
+    command = "python3 vendor/dependency"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command)
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "referenced gitlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "CODE_UNBOUND"
+            assert report["EXECUTED"] == "NO"
         finally:
             clear_trust()
 
@@ -1224,6 +1287,9 @@ def main() -> int:
     test_bounded_stop_terminates_descendants()
     test_subject_tree_does_not_mutate_git_or_run_hooks()
     test_symlink_subject_tree_does_not_execute()
+    test_unrelated_symlink_does_not_block_subject_tree()
+    test_unrelated_gitlink_does_not_block_subject_tree()
+    test_referenced_gitlink_does_not_execute()
     test_replace_ref_cannot_rewrite_subject_head()
     test_caller_environment_cannot_inject_execution()
     test_descendant_cannot_survive_leader_exit()
