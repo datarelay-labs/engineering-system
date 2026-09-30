@@ -49,6 +49,25 @@ def load_yaml(path: Path):
         return yaml.safe_load(fh)
 
 
+def repository_relative_contract(root: Path, value: object) -> tuple[str, Path | None]:
+    if not isinstance(value, str):
+        return "invalid", None
+    raw = value.strip()
+    if not raw:
+        return "empty", None
+    relative = Path(raw)
+    if relative.is_absolute() or ".." in relative.parts:
+        return "invalid", None
+    try:
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return "invalid", None
+    if not candidate.is_file():
+        return "missing", candidate
+    return "ok", candidate
+
+
 def version_at_least(version: str, minimum: tuple[int, int, int]) -> bool:
     match = SEMVER_RE.fullmatch(version.strip())
     if not match:
@@ -375,7 +394,7 @@ def main() -> int:
             user_facing = bool(project_meta.get("user_facing"))
             primary_user_surface = str(project_meta.get("primary_user_surface") or "none")
             if user_facing:
-                if not bool(release.get("human_equivalent_user_tests_required")):
+                if release.get("human_equivalent_user_tests_required") is not True:
                     failures.append("user-facing project requires human_equivalent_user_tests_required=true")
                 user_tests = release.get("human_equivalent_user_tests")
                 if not isinstance(user_tests, dict):
@@ -402,11 +421,18 @@ def main() -> int:
                             failures.append(f"human-equivalent {gate_name} gate must be mandatory")
                         if int(gate.get("minimum_passes") or 0) < 1:
                             failures.append(f"human-equivalent {gate_name} gate requires minimum_passes>=1")
-                        contract = str(gate.get("contract") or "").strip()
+                        contract_value = gate.get("contract")
+                        contract = str(contract_value or "").strip()
                         if not contract:
                             failures.append(f"human-equivalent {gate_name} gate requires contract path")
-                        elif not (root / contract).is_file():
-                            failures.append(f"human-equivalent {gate_name} contract missing: {contract}")
+                        else:
+                            contract_status, _ = repository_relative_contract(root, contract_value)
+                            if contract_status == "invalid":
+                                failures.append(
+                                    f"human-equivalent {gate_name} contract must be repository-relative and stay inside repository: {contract}"
+                                )
+                            elif contract_status == "missing":
+                                failures.append(f"human-equivalent {gate_name} contract missing: {contract}")
 
             if version_at_least(version, (1, 6, 0)) and mode == "adopted":
                 for key in (
