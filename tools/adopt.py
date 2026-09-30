@@ -99,6 +99,27 @@ REQUIRED_MANAGED = (
 RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
 EXECUTION_RULES_HEADING = "## Execution rules"
+RETIRED_AGENT_RULE_REPLACEMENTS = (
+    (
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.",
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope.",
+    ),
+    (
+        "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.",
+        "",
+    ),
+)
+
+
+def rewrite_retired_agent_rules(text: str) -> str:
+    updated = text
+    for old, new in RETIRED_AGENT_RULE_REPLACEMENTS:
+        updated = updated.replace(old, new)
+    return updated
+
+
+def retired_agent_rules_present(text: str) -> bool:
+    return "Cursor" in text or "IMPLEMENTER=CURSOR" in text
 
 
 def canonical_execution_policy_line() -> str:
@@ -116,26 +137,30 @@ def canonical_execution_policy_line() -> str:
 
 
 def plan_execution_policy_sync(root: Path) -> str | None:
-    """Synchronize the existing canonical continuous-execution policy only.
+    """Synchronize canonical execution policy and remove known retired agent rules.
 
-    Product-specific rules remain untouched. Existing repositories must expose the
-    established Execution rules section so the managed policy can be inserted
-    without guessing a custom document structure.
+    Product-specific rules remain untouched. Unknown Cursor-specific text fails
+    closed rather than being guessed away.
     """
     path = root / "AGENTS.md"
     if not path.is_file():
         return None
     original = path.read_text(encoding="utf-8")
+    cleaned = rewrite_retired_agent_rules(original)
+    if retired_agent_rules_present(cleaned):
+        raise SystemExit(
+            "FAIL AGENTS.md contains unrecognized retired agent/Cursor rules; review manually"
+        )
+
     canonical = canonical_execution_policy_line()
-    lines = original.splitlines()
+    lines = cleaned.splitlines()
     policy_indexes = [i for i, line in enumerate(lines) if line.startswith(EXECUTION_POLICY_MARKER)]
     if len(policy_indexes) > 1:
         raise SystemExit("FAIL AGENTS.md contains duplicate managed execution policy lines")
     if policy_indexes:
         idx = policy_indexes[0]
-        if lines[idx] == canonical:
-            return None
-        lines[idx] = canonical
+        if lines[idx] != canonical:
+            lines[idx] = canonical
     else:
         heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
         if len(heading_indexes) != 1:
@@ -150,7 +175,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
     rewritten = "\n".join(lines)
     if original.endswith("\n"):
         rewritten += "\n"
-    return rewritten
+    return None if rewritten == original else rewritten
 
 
 def apply_execution_policy_sync(root: Path, planned_text: str | None) -> bool:

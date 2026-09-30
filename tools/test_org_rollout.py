@@ -327,7 +327,7 @@ def test_incomplete_surfaces_not_reported_current() -> None:
         assert "OUTCOME=NEEDS_INPUT" in audit.stdout
 
 
-def test_current_baseline_with_stale_execution_policy_is_incomplete() -> None:
+def test_current_baseline_with_stale_execution_policy_is_repairable() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         repo = base / "stale-policy"
@@ -365,9 +365,10 @@ def test_current_baseline_with_stale_execution_policy_is_incomplete() -> None:
             "--baseline-sha",
             BASELINE,
         )
-        assert "STATE=INCOMPLETE" in audit.stdout
+        assert "STATE=OUTDATED" in audit.stdout
+        assert "ACTION=UPGRADE" in audit.stdout
         assert "AGENTS.md missing managed continuous-execution policy" in audit.stdout
-        assert "OUTCOME=NEEDS_INPUT" in audit.stdout
+        assert "OUTCOME=PLANNED" in audit.stdout
 
 
 def test_checkout_failure_continues_inventory() -> None:
@@ -486,7 +487,7 @@ def main() -> int:
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()
     test_incomplete_surfaces_not_reported_current()
-    test_current_baseline_with_stale_execution_policy_is_incomplete()
+    test_current_baseline_with_stale_execution_policy_is_repairable()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
