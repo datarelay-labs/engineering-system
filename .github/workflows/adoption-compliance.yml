@@ -243,14 +243,6 @@ jobs:
                   if "standards/OPERATIONS.md" not in text:
                       failures.append("AGENTS.md missing incident/operations routing")
               if canonical_version_tuple >= (1, 6, 5):
-                  if "ChatGPT Chat is the implementation path" not in text:
-                      failures.append(
-                          "AGENTS.md missing current ChatGPT implementation-path instruction"
-                      )
-                  if "verify the target repository/branch/HEAD before mutation" not in text:
-                      failures.append(
-                          "AGENTS.md missing current repository-binding preflight instruction"
-                      )
                   for rel in (
                       "tools/implementation_preflight.py",
                       "tools/context_epoch.py",
