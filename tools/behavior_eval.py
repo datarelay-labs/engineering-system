@@ -654,28 +654,27 @@ def check_permissions(root: Path) -> dict[str, str]:
         base = Path(tmp)
         keys = base / "keys"
         _priv, pub = fixtures.generate_keypair(keys)
-        env_with_caller_anchor = dict(os.environ)
-        env_with_caller_anchor[skills.TRUST_ANCHOR_ENV] = str(pub)
-        unavailable = subprocess.run(
-            [
-                sys.executable,
-                str(TOOLS / "skills-contract.py"),
-                "authorize",
-                "--root",
-                str(root),
-                "--binding-assertion",
-                str(root / "missing-b.json"),
-                "--dispatch-assertion",
-                str(root / "missing-d.json"),
-            ],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            env=env_with_caller_anchor,
-        )
-        if unavailable.returncode == 0 or "BOUNDARY_UNAVAILABLE" not in unavailable.stdout:
-            return _outcome("FAIL", "PERMISSION_BOUNDARY")
+        previous_unavailable = skills._TEST_TRUST_ANCHOR_UNAVAILABLE
+        previous_env_anchor = os.environ.get(skills.TRUST_ANCHOR_ENV)
+        skills._TEST_TRUST_ANCHOR_UNAVAILABLE = True
+        try:
+            os.environ[skills.TRUST_ANCHOR_ENV] = str(pub)
+            if skills.resolve_trust_anchor() is not None:
+                return _outcome("FAIL", "PERMISSION_BOUNDARY")
+            unavailable = skills.authorize(
+                root,
+                binding_assertion=root / "missing-b.json",
+                dispatch_assertion=root / "missing-d.json",
+                request_json="{}",
+            )
+            if unavailable.allowed or unavailable.reason != "BOUNDARY_UNAVAILABLE":
+                return _outcome("FAIL", "PERMISSION_BOUNDARY")
+        finally:
+            skills._TEST_TRUST_ANCHOR_UNAVAILABLE = previous_unavailable
+            if previous_env_anchor is None:
+                os.environ.pop(skills.TRUST_ANCHOR_ENV, None)
+            else:
+                os.environ[skills.TRUST_ANCHOR_ENV] = previous_env_anchor
 
         coord = base / "coord"
         atk = base / "atk"

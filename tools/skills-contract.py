@@ -69,6 +69,7 @@ HOST_OPENSSL_PATH = Path("/usr/bin/openssl")
 # ``_TEST_VERIFIER_AVAILABLE=False`` only forces the fixed verifier unavailable.
 # It cannot select a different executable.
 _TEST_TRUST_ANCHOR_PATH: Path | None = None
+_TEST_TRUST_ANCHOR_UNAVAILABLE: bool = False
 _TEST_VERIFIER_AVAILABLE: bool | None = None
 _TEST_REPLAY_BOUNDARY_AVAILABLE: bool | None = None
 _TEST_REPLAY_STORE: set[str] | None = None
@@ -758,6 +759,8 @@ def resolve_trust_anchor() -> Path | None:
     agent controlling ``ENGINEERING_SKILLS_TRUST_ANCHOR_PUBKEY`` (or any other
     env var) cannot select the production trust anchor.
     """
+    if _TEST_TRUST_ANCHOR_UNAVAILABLE:
+        return None
     if _TEST_TRUST_ANCHOR_PATH is not None:
         path = Path(_TEST_TRUST_ANCHOR_PATH)
         return path.resolve() if path.is_file() else None

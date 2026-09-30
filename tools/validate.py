@@ -94,8 +94,16 @@ REQUIRED_METHOD_FILES = (
     "tools/coordinator_watch_host.py",
     "tools/test_coordinator_watch_host.py",
     "schemas/coordinator-watch-host.schema.json",
+    "tools/terminal_completion_notify.py",
+    "tools/test_terminal_completion_notify.py",
+    "tools/trusted_worker_adapter.py",
+    "tools/test_trusted_worker_adapter.py",
     "tools/worker_adapter.py",
     "tools/test_worker_adapter.py",
+    "tools/trusted_external_write_signer.py",
+    "tools/test_trusted_external_write_signer.py",
+    "tools/trusted_external_write_coordinator.py",
+    "tools/test_trusted_external_write_coordinator.py",
     "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
@@ -445,6 +453,22 @@ def validate_work_admission_contract():
     ):
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing admission token: {token}")
+    for token in (
+        "External-wait work conservation",
+        "machine-observable wait is not a reason for ChatGPT to idle",
+        "scan the same repository roadmap",
+        "idle only when no safe eligible roadmap work exists",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing external-wait work-conservation token: {token}")
+    for label, text in (("AGENTS.md", agents), ("templates/AGENTS.md", agents_template)):
+        if "External-wait work conservation is mandatory" not in text:
+            raise SystemExit(f"FAIL {label} missing mandatory external-wait work conservation")
+    project_instruction = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
+    for token in ("do not idle or poll", "scan the repository roadmap/trusted packets", "no safe eligible roadmap work exists"):
+        if token not in project_instruction:
+            raise SystemExit(f"FAIL ChatGPT project instruction missing external-wait work-conservation token: {token}")
+    print("PASS external-wait roadmap work-conservation contract")
     print("PASS parallel-work admission and WIP ownership contract")
 
 
@@ -1749,7 +1773,19 @@ def main():
     completed = subprocess.run(["python3", "tools/test_coordinator_watch_host.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_terminal_completion_notify.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_worker_adapter.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_worker_adapter.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_external_write_signer.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_external_write_coordinator.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)

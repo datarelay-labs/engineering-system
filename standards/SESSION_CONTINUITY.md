@@ -590,6 +590,8 @@ A revision, target, or head mismatch returns `STALE_WORKER` and authorizes zero 
 
 Human attention is a constrained engineering resource.
 
+**Mandatory ChatGPT terminal Telegram gate:** whenever ChatGPT finishes an implementation, test/validation, audit/review, release, migration, or other executable Work Packet outcome, exactly one verified Telegram COMPLETE notification bound to exact repository/workstream/terminal HEAD is required before reporting COMPLETE/PASS to the owner. Run tools/terminal_completion_notify.py. TERMINAL_TELEGRAM=PASS is terminal evidence; failed, unavailable, ambiguous, or stale delivery leaves completion BLOCKED. Do not notify for micro-steps or individual test invocations; coalesce one notification around the bounded completed outcome. If ChatGPT must stop because a genuine owner action, credential/permission, infrastructure failure, or irreconcilable external dependency prevents further progress, send one verified BLOCKED Telegram notification before returning control to the owner. Normal CI waiting, bounded retry/backoff, or work ChatGPT can perform directly is not BLOCKED and must not notify.
+
 - Notify on meaningful Work Packet transitions, terminal outcomes, or a decision/action that actually requires the owner.
 - Do not notify for every micro-edit, test invocation, short agent session, or intermediate subtask completion.
 - Deduplicate/coalesce repeated notifications for the same Work Packet and state.
@@ -673,6 +675,19 @@ python3 tools/cursor-resource-preflight.py
 ```
 
 `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD`, when set, names that preflight executable. It is never threshold configuration and is never parsed as YAML. Host policy may override thresholds without editing a repository, using `ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD_CONFIG` or `~/.config/engineering-system/cursor-resource-guard.yaml` (then `/etc/engineering-system/cursor-resource-guard.yaml`). A missing or malformed explicit override fails closed. Exit 0 is `PASS` or `WARN` and may proceed. Exit 2 blocks on memory, swap, or session pressure. Exit 3 blocks because memory facts, `agent persist list`, or the override could not be trusted. Neither blocking result may stop or mutate existing Cursor sessions. Unsupported platforms report `BLOCK` instead of guessing. The always-applied Cursor rule stays small; this tool and this standard hold the procedure.
+
+## External-wait work conservation
+
+A machine-observable wait is not a reason for ChatGPT to idle. When an active workstream is waiting on CI, tests, review, deployment, scheduled checks, or another external condition:
+
+1. persist/reconcile the exact waiting condition and delegate re-entry to coordinator/automation rather than polling;
+2. scan the same repository roadmap plus trusted ACTIVE/eligible Work Packets, then portfolio roadmap only when repository-local eligible work is exhausted;
+3. select the highest owner-priority dependency-eligible item whose worktree, owned paths, runtime, external mutation boundary, and declared dependencies do not overlap the waiting work;
+4. run normal work_admission.py admit and all authority/preflight gates before starting it in a separate worktree/state owner;
+5. continue useful independent work while the original external wait remains, and return when automation/coordinator observes the terminal condition;
+6. idle only when no safe eligible roadmap work exists.
+
+This is work conservation, not unrestricted concurrency. Never bypass WIP/resource limits, dependency order, exact-HEAD binding, repository authority, or overlapping-path/runtime protections. Do not manufacture low-value work merely to avoid waiting.
 
 ## Parallel-work admission and WIP ownership
 
