@@ -308,13 +308,15 @@ def test_resource_guard_names_agree() -> None:
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     instruction = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
     tool = TOOL.read_text(encoding="utf-8")
-    for text in (resume_text, session, instruction, tool):
+    # Resource-guard naming belongs to the dormant Cursor adapter, not the
+    # default ChatGPT implementation contract.
+    for text in (resume_text, session, tool):
         assert executable_env in text
         assert config_env in text
     assert "never threshold YAML" in resume_text
     assert "from the canonical Engineering System checkout" in resume_text
     assert "never parsed as YAML" in session
-    assert "never threshold YAML" in instruction
+    assert "Cursor is retired from the default workflow" in instruction
     assert 'os.environ.get("ENGINEERING_SYSTEM_CURSOR_RESOURCE_GUARD"' not in tool
     assert "os.environ.get(RESOURCE_GUARD_CONFIG_ENV" in tool
 
@@ -479,14 +481,18 @@ def test_tool_never_encodes_session_mutation() -> None:
 
 
 def test_chatgpt_handoff_requires_preflight_before_persist() -> None:
-    text = (ROOT / "templates" / "CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
-    preflight_at = text.index("tools/cursor-resource-preflight.py")
-    persist_at = text.index("agent persist /work-resume")
-    assert preflight_at < persist_at
-    assert "Exit 0" in text
-    assert "WARN" in text
-    assert "do not create a new persistent session" in text
-    assert "Never stop, kill" in text
+    # Legacy function name retained for regression history. The active contract
+    # now forbids automatic ChatGPT->Cursor handoff entirely.
+    chat = (ROOT / "templates" / "CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    resume = (ROOT / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
+    assert "Cursor is retired from the default workflow" in chat
+    assert "do not resume or hand work back to Cursor" in chat
+    assert "IMPLEMENTER=CHATGPT_CHAT" in chat
+    assert "DISABLED BY DEFAULT" in resume
+    assert "IMPLEMENTER=CURSOR" in resume
+    assert "cursor-resource-preflight.py" in resume
+    assert "agent persist /work-resume" in resume
+    assert resume.index("DISABLED BY DEFAULT") < resume.index("agent persist /work-resume")
 
 
 def test_known_resume_upgrades_and_custom_resume_fails_closed() -> None:

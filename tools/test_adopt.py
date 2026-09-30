@@ -95,6 +95,7 @@ def test_clean_python_bootstrap() -> None:
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".github/workflows/engineering-system.yml",
             ".github/workflows/engineering-release.yml",
+            "tools/implementation_preflight.py",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -473,6 +474,7 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
             rule_history, encoding="utf-8"
         )
         (target / "tools/context_epoch.py").unlink()
+        (target / "tools/implementation_preflight.py").unlink()
         commit_all(target, "simulate canonical pre-context-epoch 1.6.5 baseline")
 
         upgraded = run(
@@ -492,6 +494,7 @@ def test_same_version_1_6_5_pre_context_epoch_upgrade() -> None:
             in upgraded.stdout
         )
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert "IMPLEMENTATION_PREFLIGHT_INSTALLED=tools/implementation_preflight.py" in upgraded.stdout
 
         project = load_yaml(target / ".engineering/project.yaml")
         assert project["engineering_system"]["version"] == "1.6.5"
@@ -2049,6 +2052,19 @@ def test_engineering_context_helper_adoption_and_upgrade() -> None:
         assert not (target / "AGENTS.md").exists()
 
 
+def test_local_adoption_checker_chat_contract_is_not_target_version_gated() -> None:
+    checker = CHECK.read_text(encoding="utf-8")
+    required = (
+        "canonical_checker_version",
+        "checker_chat_primary = version_at_least(checker_version, (1, 6, 5))",
+        "engineering_system.version does not match canonical checker version",
+        "if checker_chat_primary:",
+    )
+    for token in required:
+        assert token in checker, token
+    assert "if version_at_least(version, (1, 6, 5)):" not in checker
+
+
 def test_adoption_compliance_workflow_checks_engineering_context_helper() -> None:
     workflow = (ROOT / ".github" / "workflows" / "adoption-compliance.yml").read_text(
         encoding="utf-8"
@@ -2058,9 +2074,26 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         ".engineering-system-runtime/tools/engineering-context.py",
         "references engineering-context helper but missing tools/engineering-context.py",
         "tools/engineering-context.py differs from canonical managed helper",
+        "tools/implementation_preflight.py",
+        "tools/work_packet_authority.py",
+        "Chat-primary adoption missing required helper",
+        "AGENTS.md missing Chat-primary implementation preflight instruction",
+        "canonical compliance runtime missing {rel}",
+        "{rel} differs from canonical managed helper",
+        ".engineering-system-runtime/.engineering/project.yaml",
+        "CALLED_WORKFLOW_SHA: ${{ job.workflow_sha }}",
+        "reusable adoption compliance requires engineering_system.mode=adopted",
+        "engineering_system.baseline does not match called workflow SHA",
+        "engineering_system.version does not match called baseline version",
+        "canonical_version_tuple >= (1, 6, 5)",
     )
     for token in required:
         assert token in workflow, token
+    agents_definition = workflow.index('agents = Path("AGENTS.md")')
+    preflight_check = workflow.index("Chat-primary adoption missing required helper")
+    assert agents_definition < preflight_check
+    assert 'if "tools/implementation_preflight.py" in text:' not in workflow
+    assert "if version_tuple >= (1, 6, 5):" not in workflow
 
 
 def test_release_execution_context_is_bounded_and_upgradeable() -> None:
@@ -2403,6 +2436,40 @@ def test_release_execution_context_is_bounded_and_upgradeable() -> None:
         assert upgraded_release["execution_context"] == "protected-production"
 
 
+
+
+def test_managed_contract_dependency_failure_is_deterministic() -> None:
+    requirements = ROOT / ".engineering" / "requirements-engineering-system.txt"
+    text = requirements.read_text(encoding="utf-8")
+    assert "PyYAML==6.0.2" in text
+    assert "jsonschema==4.25.1" in text
+    install = (
+        "python3 -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    )
+    for rel in (
+        "tools/knowledge-contract.py",
+        "tools/runtime-contract.py",
+        "tools/skills-contract.py",
+        "tools/verification-contract.py",
+    ):
+        completed = run(sys.executable, "-S", str(ROOT / rel), "--help", check=False)
+        assert completed.returncode != 0, rel
+        assert "ENGINEERING_SYSTEM_DEPENDENCY_MISSING=" in completed.stdout, (rel, completed.stdout)
+        assert install in completed.stdout, (rel, completed.stdout)
+        assert "Traceback" not in completed.stdout, (rel, completed.stdout)
+
+
+def test_managed_work_packet_template_requires_v2_authority_metadata() -> None:
+    template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
+        encoding="utf-8"
+    )
+    for key in ("INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER"):
+        assert re.search(rf"(?m)^{key}=", template), key
+    checker = CHECK.read_text(encoding="utf-8")
+    assert "managed Work Packet template missing required packet-v2 metadata" in checker
+
+
 def test_bun_native_discovery() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-bun"
@@ -2454,8 +2521,11 @@ def main() -> int:
     test_fresh_adoption_installs_verification_t4_dependency()
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
+    test_local_adoption_checker_chat_contract_is_not_target_version_gated()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_release_execution_context_is_bounded_and_upgradeable()
+    test_managed_contract_dependency_failure_is_deterministic()
+    test_managed_work_packet_template_requires_v2_authority_metadata()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

@@ -237,30 +237,27 @@ def evaluate(request: dict[str, Any]) -> dict[str, str]:
     implementer = parse_actor(request.get("implementer"), "implementer")
     verifier_required = change_risk in {"HIGH", "CRITICAL"}
     verifier_raw = request.get("verifier")
-    if verifier_required:
-        if verifier_raw is None:
-            return deny(
-                "HIGH/CRITICAL requires an independent verifier actor",
-                "VERIFIER_REQUIRED",
-                SUBJECT_HEAD=subject_head,
-                CHANGE_RISK=change_risk,
-                VERIFIER_REQUIRED="YES",
-            )
+    if verifier_required and verifier_raw is None:
+        return deny(
+            "HIGH/CRITICAL requires an independent verifier actor",
+            "VERIFIER_REQUIRED",
+            SUBJECT_HEAD=subject_head,
+            CHANGE_RISK=change_risk,
+            VERIFIER_REQUIRED="YES",
+        )
+    if verifier_raw is not None:
         verifier = parse_actor(verifier_raw, "verifier")
         if (
             verifier["identity"] == implementer["identity"]
             or verifier["context_id"] == implementer["context_id"]
         ):
             return deny(
-                "implementer identity/context cannot satisfy independent verifier requirement",
+                "implementer identity/context cannot satisfy an independent verifier actor",
                 "SAME_ACTOR",
                 SUBJECT_HEAD=subject_head,
                 CHANGE_RISK=change_risk,
-                VERIFIER_REQUIRED="YES",
+                VERIFIER_REQUIRED="YES" if verifier_required else "NO",
             )
-    elif verifier_raw is not None:
-        # Optional for LOW/MEDIUM; if supplied, still parse for well-formedness.
-        parse_actor(verifier_raw, "verifier")
 
     oracles_raw = _require_list(request.get("oracle_evidence"), "oracle_evidence")
     if not oracles_raw:
@@ -384,9 +381,11 @@ def evaluate(request: dict[str, Any]) -> dict[str, str]:
                 VERIFIER_REQUIRED="YES",
             )
         approval_map = _require_mapping(approval, "human_approval")
-        required = _require_bool(approval_map.get("required", True), "human_approval.required")
+        # Parse caller metadata for schema hygiene, but never let it weaken the
+        # CRITICAL policy: an actual approval must always be present.
+        _require_bool(approval_map.get("required", True), "human_approval.required")
         present = _require_bool(approval_map.get("present"), "human_approval.present")
-        if required and not present:
+        if not present:
             return deny(
                 "CRITICAL human approval is required but not present",
                 "HUMAN_APPROVAL_MISSING",

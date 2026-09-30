@@ -297,15 +297,18 @@ def canonical_state_paths(directory: Path) -> dict[str, Path]:
     }
 
 
-def owner_notice_effect(watch_result: dict[str, Any]) -> dict[str, Any]:
-    """Bounded INFO notice. COMPLETE is reserved for whole-packet completion."""
+def owner_notice_effect(watch_result: dict[str, Any], branch: str) -> dict[str, Any]:
+    """Bounded INFO notice bound to the same exact execution identity as writes."""
+    subject = str(watch_result["next_watch_state"]["subject_version"])
     return {
+        "branch": branch,
         "coordinator_decision": watch_result["coordinator_decision"],
         "intent_revision": watch_result["intent_revision"],
         "kind": "owner_notice",
         "level": "INFO",
         "notification_key": watch_result["notification_key"],
-        "subject_version": watch_result["next_watch_state"]["subject_version"],
+        "subject_head": subject,
+        "subject_version": subject,
         "target_repo": watch_result["repository"],
         "watch_class": watch_result["watch_class"],
         "watch_result": watch_result["result"],
@@ -727,7 +730,7 @@ def _deliver_notice(request: dict[str, Any], watch_result: dict[str, Any]) -> st
         return "trusted verification assertions are missing; caller-supplied permission or dispatch facts are not authority"
     return _authorize_concrete_effect(
         request["verification"],
-        owner_notice_effect(watch_result),
+        owner_notice_effect(watch_result, str(request["branch"])),
         consume_replay=False,
     )
 
@@ -1007,7 +1010,7 @@ def _finish_typed(
             next_check=watch_result.get("next_eligible_check_at"),
         )
     if name == "NOTIFY_OWNER":
-        effect = owner_notice_effect(watch_result)
+        effect = owner_notice_effect(watch_result, authoritative_branch)
         if effect.get("level") != "INFO":
             return _base_result(
                 result="AUTHORITY_DENIED",

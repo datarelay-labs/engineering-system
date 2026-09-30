@@ -14,11 +14,14 @@ import yaml
 from adopt import (
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
+    ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
+    IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
     RESUME_ADAPTER_ALIASES,
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
+    WORK_PACKET_TEMPLATE_MANAGED,
     canonical_baseline,
     canonical_version,
     engineering_workflow,
@@ -356,6 +359,42 @@ def sync_cursor_resume_adapters(root: Path) -> list[str]:
     return apply_cursor_resume_adapters(root, plan_cursor_resume_adapters(root))
 
 
+def plan_work_packet_template_install(root: Path) -> dict[str, str]:
+    """Install or upgrade only known managed Work Packet template bytes."""
+    return plan_managed_file_install(
+        root, WORK_PACKET_TEMPLATE_MANAGED, label="Work Packet template"
+    )
+
+
+def apply_work_packet_template_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_engineering_system_dependencies_install(root: Path) -> dict[str, str]:
+    """Install the canonical Python dependency declaration for managed helpers."""
+    return plan_managed_file_install(
+        root, ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED, label="Engineering System dependencies"
+    )
+
+
+def apply_engineering_system_dependencies_install(
+    root: Path, planned: dict[str, str]
+) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
     """Install or upgrade only known managed knowledge-contract bytes."""
     return plan_managed_file_install(
@@ -398,6 +437,22 @@ def plan_skills_contract_install(root: Path) -> dict[str, str]:
 
 
 def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
+def plan_implementation_preflight_install(root: Path) -> dict[str, str]:
+    return plan_managed_file_install(
+        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight"
+    )
+
+
+def apply_implementation_preflight_install(root: Path, planned: dict[str, str]) -> list[str]:
     installed: list[str] = []
     for rel, text in planned.items():
         path = root / rel
@@ -813,10 +868,13 @@ def main() -> int:
     planned_cursor_rule = plan_cursor_rule_update(root)
     planned_cursorignore = plan_cursorignore_install(root)
     planned_resume_adapters = plan_cursor_resume_adapters(root)
+    planned_work_packet_template = plan_work_packet_template_install(root)
+    planned_dependencies = plan_engineering_system_dependencies_install(root)
     planned_knowledge_contract = plan_knowledge_contract_install(root)
     planned_runtime_contract = plan_runtime_contract_install(root)
     planned_skills_contract = plan_skills_contract_install(root)
     planned_verification_contract = plan_verification_contract_install(root)
+    planned_implementation_preflight = plan_implementation_preflight_install(root)
     planned_context_epoch = plan_context_epoch_install(root)
     planned_engineering_context = plan_engineering_context_install(root)
 
@@ -838,6 +896,22 @@ def main() -> int:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=" + ",".join(synced_adapters))
     else:
         print("CURSOR_RESUME_ADAPTERS_SYNCED=<none>")
+
+    installed_work_packet_template = apply_work_packet_template_install(
+        root, planned_work_packet_template
+    )
+    if installed_work_packet_template:
+        print("WORK_PACKET_TEMPLATE_SYNCED=" + ",".join(installed_work_packet_template))
+    else:
+        print("WORK_PACKET_TEMPLATE_SYNCED=<none>")
+
+    installed_dependencies = apply_engineering_system_dependencies_install(
+        root, planned_dependencies
+    )
+    if installed_dependencies:
+        print("ENGINEERING_SYSTEM_DEPENDENCIES_SYNCED=" + ",".join(installed_dependencies))
+    else:
+        print("ENGINEERING_SYSTEM_DEPENDENCIES_SYNCED=<none>")
 
     installed_knowledge = apply_knowledge_contract_install(root, planned_knowledge_contract)
     if installed_knowledge:
@@ -862,6 +936,14 @@ def main() -> int:
         print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
     else:
         print("VERIFICATION_CONTRACT_INSTALLED=<none>")
+
+    installed_preflight = apply_implementation_preflight_install(
+        root, planned_implementation_preflight
+    )
+    if installed_preflight:
+        print("IMPLEMENTATION_PREFLIGHT_INSTALLED=" + ",".join(installed_preflight))
+    else:
+        print("IMPLEMENTATION_PREFLIGHT_INSTALLED=<none>")
 
     installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
     if installed_context_epoch:

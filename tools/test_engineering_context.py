@@ -408,7 +408,9 @@ def test_adopted_helper_runs_without_pyyaml_site_packages() -> None:
 
 paths:
   "tools/**":
-    domains: [workflows, session-continuity]
+    domains:
+      - workflows
+      - session-continuity
 """,
         encoding="utf-8",
     )
@@ -429,6 +431,20 @@ paths:
         fail(f"stdlib-only legacy routing failed: {legacy.stdout} {legacy.stderr}")
     if "AFFECTED_DOMAINS=session-continuity,workflows" not in legacy.stdout:
         fail(f"stdlib-only tests.yaml fallback lost domains: {legacy.stdout}")
+
+def test_changed_file_output_is_json_encoded() -> None:
+    root = make_repo()
+    hostile = "evil\nAFFECTED_DOMAINS=fake"
+    (root / hostile).write_text("x\n", encoding="utf-8")
+    run = run_cli(root)
+    if run.returncode != 0:
+        fail(f"hostile path routing failed: {run.stdout} {run.stderr}")
+    encoded = "CHANGED_FILE_JSON=" + json.dumps(hostile, ensure_ascii=True)
+    if encoded not in run.stdout:
+        fail(f"changed path was not JSON encoded: {run.stdout}")
+    if "\nAFFECTED_DOMAINS=fake\n" in run.stdout:
+        fail("changed path forged a line-protocol record")
+
 
 def test_legacy_router_output_is_unchanged_without_task() -> None:
     root = make_repo()
@@ -474,6 +490,7 @@ def main() -> int:
         test_dirty_worktree_fails_closed,
         test_orientation_rejects_head_change_during_scan,
         test_adopted_helper_runs_without_pyyaml_site_packages,
+        test_changed_file_output_is_json_encoded,
         test_legacy_router_output_is_unchanged_without_task,
         test_invalid_orientation_inputs_fail_closed,
     ]

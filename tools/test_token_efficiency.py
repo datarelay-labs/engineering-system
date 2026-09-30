@@ -2,6 +2,7 @@
 """Deterministic regressions for token-efficient context and test routing."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -84,7 +85,7 @@ def fixture() -> Path:
 def test_diff_first_context_and_cheapest_selection():
     repo = fixture()
     context = run(sys.executable, str(CONTEXT), "--root", str(repo), "--base", "main")
-    assert "CHANGED_FILE=src/demo.py" in context.stdout
+    assert 'CHANGED_FILE_JSON="src/demo.py"' in context.stdout
     assert "AFFECTED_DOMAINS=core" in context.stdout
     selected = run(sys.executable, str(TEST), "--root", str(repo), "--base", "main")
     assert "TEST_SELECTED=CHEAP-SECOND" in selected.stdout
@@ -176,10 +177,10 @@ def test_special_character_paths_keep_exact_names():
     )
     context = run(sys.executable, str(CONTEXT), "--root", str(repo), "--base", "main")
     for path in expected:
-        assert f"CHANGED_FILE={path}\n" in context.stdout
-    assert 'CHANGED_FILE="' not in context.stdout
-    assert "CHANGED_FILE=src/from\n" not in context.stdout
-    assert "CHANGED_FILE=to.py\n" not in context.stdout
+        assert f"CHANGED_FILE_JSON={json.dumps(path)}\n" in context.stdout
+    assert "CHANGED_FILE=" not in context.stdout
+    assert "CHANGED_FILE_JSON=src/from\n" not in context.stdout
+    assert "CHANGED_FILE_JSON=to.py\n" not in context.stdout
     assert "AFFECTED_DOMAINS=core" in context.stdout
     selected = run(sys.executable, str(TEST), "--root", str(repo), "--base", "main")
     assert "TEST_DOMAINS=core" in selected.stdout
@@ -257,7 +258,7 @@ def test_dirty_worktree_is_unioned_with_committed_diff():
     (repo / ".engineering" / "notes.yaml").write_text("x: 1\n", encoding="utf-8")
     context = run(sys.executable, str(CONTEXT), "--root", str(repo), "--base", "main")
     for path in ("src/demo.py", "src/renamed.py", "src/untracked.py", ".engineering/notes.yaml"):
-        assert f"CHANGED_FILE={path}" in context.stdout
+        assert f"CHANGED_FILE_JSON={json.dumps(path)}" in context.stdout
     assert "AFFECTED_DOMAINS=config,core" in context.stdout
     selected = run(sys.executable, str(TEST), "--root", str(repo), "--base", "main")
     assert "TEST_DOMAINS=config,core" in selected.stdout

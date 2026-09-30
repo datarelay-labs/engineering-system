@@ -43,6 +43,10 @@ paths:
     domains: [session-continuity]
   "tools/test_work_packet_authority.py":
     domains: [session-continuity]
+  "tools/implementation_preflight.py":
+    domains: [session-continuity, workflows]
+  "tools/test_implementation_preflight.py":
+    domains: [session-continuity]
   "tools/context_epoch.py":
     domains: [session-continuity, workflows]
   "tools/test_context_epoch.py":
@@ -269,6 +273,22 @@ scenarios:
     command: "python3 tools/test_work_packet_authority.py"
     invariants:
       - "executable Work Packet authors require write/maintain/admin effective permission"
+    release_gate: true
+
+  - id: ENG-IMPLEMENTATION-PREFLIGHT-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Provider-neutral implementation pre-mutation binding
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_implementation_preflight.py"
+    invariants:
+      - "Chat direct mutation requires authenticated packet permission exact repo branch HEAD clean-tree intent implementer and risk binding"
     release_gate: true
 
   - id: ENG-CONTEXT-EPOCH-001

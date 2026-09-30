@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install validation dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Install Engineering System dependencies
+        run: python -m pip install --disable-pip-version-check -r .engineering/requirements-engineering-system.txt
 
       - name: Fail if .engineering-system-runtime already exists
         run: test ! -e .engineering-system-runtime
@@ -32,6 +32,11 @@ jobs:
             tools/ci_policy_audit.py
             tools/context_epoch.py
             tools/engineering-context.py
+            tools/implementation_preflight.py
+            tools/work_packet_authority.py
+            .engineering/project.yaml
+            .engineering/requirements-engineering-system.txt
+            .github/ISSUE_TEMPLATE/ai-work-packet.md
           sparse-checkout-cone-mode: false
 
       - name: Audit native CI policy
@@ -39,9 +44,12 @@ jobs:
 
       - name: Validate Engineering System adoption
         shell: bash
+        env:
+          CALLED_WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           set -euo pipefail
           python - <<'PY'
+          import os
           import re
           from pathlib import Path
           import yaml
@@ -76,6 +84,23 @@ jobs:
           merge_gate_status = ""
           operations = {}
           project_domains = set()
+          called_workflow_sha = os.environ.get("CALLED_WORKFLOW_SHA", "").strip()
+          canonical_project_path = Path(".engineering-system-runtime/.engineering/project.yaml")
+          canonical_version = ""
+          canonical_version_tuple = (0, 0, 0)
+          if not sha_re.fullmatch(called_workflow_sha):
+              failures.append("called Engineering System workflow SHA is unavailable or invalid")
+          if not canonical_project_path.is_file():
+              failures.append("called Engineering System baseline profile is missing")
+          else:
+              canonical_profile = load(canonical_project_path)
+              canonical_engineering = canonical_profile.get("engineering_system") or {}
+              canonical_version = str(canonical_engineering.get("version") or "")
+              canonical_match = semver_re.fullmatch(canonical_version)
+              if not canonical_match:
+                  failures.append("called Engineering System baseline version is invalid")
+              else:
+                  canonical_version_tuple = tuple(int(part) for part in canonical_match.groups())
 
           project_path = Path(".engineering/project.yaml")
           if project_path.is_file():
@@ -94,6 +119,13 @@ jobs:
               version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
               if not match:
                   failures.append(f"invalid engineering_system.version: {version or '<empty>'}")
+
+              if mode != "adopted":
+                  failures.append("reusable adoption compliance requires engineering_system.mode=adopted")
+              if sha_re.fullmatch(called_workflow_sha) and baseline != called_workflow_sha:
+                  failures.append("engineering_system.baseline does not match called workflow SHA")
+              if canonical_version and version != canonical_version:
+                  failures.append("engineering_system.version does not match called baseline version")
 
               if not project_domains:
                   failures.append("project.yaml must define at least one domain")
@@ -203,6 +235,30 @@ jobs:
                       failures.append("AGENTS.md missing design-gate routing")
                   if "standards/OPERATIONS.md" not in text:
                       failures.append("AGENTS.md missing incident/operations routing")
+              if canonical_version_tuple >= (1, 6, 5):
+                  if "ChatGPT Chat is the default implementer" not in text:
+                      failures.append(
+                          "AGENTS.md missing Chat-primary daytime implementer instruction"
+                      )
+                  if "implementation_preflight.py check" not in text:
+                      failures.append(
+                          "AGENTS.md missing Chat-primary implementation preflight instruction"
+                      )
+                  for rel in (
+                      "tools/implementation_preflight.py",
+                      "tools/context_epoch.py",
+                      "tools/work_packet_authority.py",
+                      ".engineering/requirements-engineering-system.txt",
+                      ".github/ISSUE_TEMPLATE/ai-work-packet.md",
+                  ):
+                      target_helper = Path(rel)
+                      canonical_helper = Path(".engineering-system-runtime") / rel
+                      if not target_helper.is_file():
+                          failures.append(f"Chat-primary adoption missing required helper {rel}")
+                      elif not canonical_helper.is_file():
+                          failures.append(f"canonical compliance runtime missing {rel}")
+                      elif target_helper.read_bytes() != canonical_helper.read_bytes():
+                          failures.append(f"{rel} differs from canonical managed helper")
 
           cursor = Path(".cursor/rules/engineering-system.mdc")
           if cursor.is_file():

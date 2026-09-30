@@ -82,6 +82,20 @@ def write_schema(root: Path) -> None:
     )
 
 
+
+
+def scoped_request(**overrides: object) -> dict[str, object]:
+    value: dict[str, object] = {
+        "target_repo": "datarelay-labs/engineering-system",
+        "workstream": "skills-contract-test",
+        "branch": "test/skills-contract",
+        "subject_head": "a" * 40,
+        "intent_revision": 7,
+    }
+    value.update(overrides)
+    return value
+
+
 def write_contract(root: Path, payload: dict) -> None:
     (root / ".engineering").mkdir(parents=True, exist_ok=True)
     (root / ".engineering" / "skills.yaml").write_text(
@@ -369,7 +383,7 @@ def test_caller_cannot_self_promote_with_own_keypair_against_pinned_anchor() -> 
         c_priv, c_pub = fixtures.generate_keypair(base / "coord")
         a_priv, a_pub = fixtures.generate_keypair(base / "atk")
         _, _, digest = contract.load_effective_state(root)
-        request = {"target": "prod-db", "op": "write"}
+        request = scoped_request(target="prod-db", op="write")
         binding = base / "atk-binding.json"
         dispatch = base / "atk-dispatch.json"
         fixtures.write_binding_assertion(
@@ -412,7 +426,7 @@ def test_request_json_cannot_under_classify() -> None:
         write_schema(root)
         priv, pub = fixtures.generate_keypair(base / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request_a = {"op": "upload", "url": "https://example.invalid"}
+        request_a = scoped_request(op="upload", url="https://example.invalid")
         binding = base / "binding.json"
         dispatch = base / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -445,6 +459,78 @@ def test_request_json_cannot_under_classify() -> None:
         assert decision.reason == "UNTRUSTED_OVERRIDE"
 
 
+def test_dispatch_is_bound_to_exact_binding_and_worktree() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        root = base / "repo"
+        other_root = base / "other-repo"
+        root.mkdir()
+        other_root.mkdir()
+        write_schema(root)
+        write_schema(other_root)
+        priv, pub = fixtures.generate_keypair(base / "keys")
+        _, _, digest = contract.load_effective_state(root)
+        request = scoped_request(op="upload", target="external")
+        privileged = base / "privileged-binding.json"
+        intended = base / "intended-binding.json"
+        dispatch = base / "dispatch.json"
+        fixtures.write_binding_assertion(
+            privileged,
+            private_key=priv,
+            public_key=pub,
+            profile="production_write",
+            policy_digest=digest,
+            authority_permission="admin",
+            approved_classes=["production_write", "destructive", "external_write"],
+        )
+        fixtures.write_binding_assertion(
+            intended,
+            private_key=priv,
+            public_key=pub,
+            profile="external_write",
+            policy_digest=digest,
+            authority_permission="write",
+            approved_classes=["external_write"],
+        )
+        fixtures.write_dispatch_assertion(
+            dispatch,
+            private_key=priv,
+            public_key=pub,
+            tool_id="network.post",
+            classes=contract.DEFAULT_TOOL_REGISTRY["network.post"],
+            policy_digest=digest,
+            request_payload=request,
+            binding_assertion=intended,
+            worktree=root,
+            dispatch_id="scope-bind-1",
+            expires_at_unix=int(time.time()) + 3600,
+        )
+        with trust_anchor(pub, replay=True):
+            mixed = contract.authorize(
+                root,
+                binding_assertion=privileged,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            wrong_root = contract.authorize(
+                other_root,
+                binding_assertion=intended,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+            allowed = contract.authorize(
+                root,
+                binding_assertion=intended,
+                dispatch_assertion=dispatch,
+                request_json=json.dumps(request),
+            )
+        assert not mixed.allowed
+        assert mixed.reason == "BINDING_ASSERTION_MISMATCH"
+        assert not wrong_root.allowed
+        assert wrong_root.reason == "WORKTREE_SCOPE_MISMATCH"
+        assert allowed.allowed, allowed.reason
+
+
 def test_request_binding_mismatch_denies_reuse() -> None:
     """Round 6: signed dispatch for request A must DENY when reused with request B."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -454,8 +540,8 @@ def test_request_binding_mismatch_denies_reuse() -> None:
         write_schema(root)
         priv, pub = fixtures.generate_keypair(base / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request_a = {"target": "bucket-a", "op": "put"}
-        request_b = {"target": "bucket-b", "op": "put"}
+        request_a = scoped_request(target="bucket-a", op="put")
+        request_b = scoped_request(target="bucket-b", op="put")
         binding = base / "binding.json"
         dispatch = base / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -505,7 +591,7 @@ def test_denied_policy_mismatch_does_not_consume_high_risk_dispatch() -> None:
         write_schema(root)
         priv, pub = fixtures.generate_keypair(base / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request = {"target": "bucket-a", "op": "put"}
+        request = scoped_request(target="bucket-a", op="put")
         binding = base / "binding.json"
         dispatch = base / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -578,7 +664,7 @@ def test_duplicate_same_request_high_risk_dispatch_is_replay() -> None:
         write_schema(root)
         priv, pub = fixtures.generate_keypair(base / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request = {"target": "bucket-a", "op": "put"}
+        request = scoped_request(target="bucket-a", op="put")
         binding = base / "binding.json"
         dispatch = base / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -627,7 +713,7 @@ def test_high_risk_without_replay_boundary_unavailable() -> None:
         write_schema(root)
         priv, pub = fixtures.generate_keypair(base / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request = {"target": "prod", "op": "write"}
+        request = scoped_request(target="prod", op="write")
         binding = base / "binding.json"
         dispatch = base / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -672,7 +758,7 @@ def test_self_minted_readonly_assertions_denied_on_production_cli() -> None:
         session.mkdir()
         priv, pub = fixtures.generate_keypair(session / "keys")
         _, _, digest = contract.load_effective_state(root)
-        request = {"target": "prod", "op": "write"}
+        request = scoped_request(target="prod", op="write")
         binding = session / "binding.json"
         dispatch = session / "dispatch.json"
         fixtures.write_binding_assertion(
@@ -834,6 +920,7 @@ def main() -> int:
     test_authorize_with_fixture_assertions()
     test_caller_cannot_self_promote_with_own_keypair_against_pinned_anchor()
     test_request_json_cannot_under_classify()
+    test_dispatch_is_bound_to_exact_binding_and_worktree()
     test_request_binding_mismatch_denies_reuse()
     test_denied_policy_mismatch_does_not_consume_high_risk_dispatch()
     test_duplicate_same_request_high_risk_dispatch_is_replay()

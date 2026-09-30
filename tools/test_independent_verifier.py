@@ -148,10 +148,28 @@ def test_mutable_requires_subject_version_identity() -> None:
         assert "version_id" in exc.reason
 
 
-def test_low_medium_without_distinct_verifier() -> None:
+def test_low_medium_optional_verifier_must_still_be_independent() -> None:
     low = evaluate(base(risk="LOW", include_verifier=False, mutable=[]))
     assert low["DECISION"] == "PASS"
     assert low["VERIFIER_REQUIRED"] == "NO"
+    same_low = evaluate(
+        base(
+            risk="LOW",
+            verifier_id="impl-1",
+            verifier_ctx="ctx-other",
+            mutable=[],
+        )
+    )
+    assert same_low["DENY_CLASS"] == "SAME_ACTOR"
+    same_medium = evaluate(
+        base(
+            risk="MEDIUM",
+            verifier_id="other",
+            verifier_ctx="ctx-impl",
+            mutable=[],
+        )
+    )
+    assert same_medium["DENY_CLASS"] == "SAME_ACTOR"
     medium = evaluate(
         base(
             risk="MEDIUM",
@@ -216,8 +234,13 @@ def test_p1b_verifier_001_stale_ci_denied() -> None:
 
 def test_critical_requires_human_approval() -> None:
     assert evaluate(base(risk="CRITICAL"))["DENY_CLASS"] == "HUMAN_APPROVAL_MISSING"
+    bypass = evaluate(
+        base(risk="CRITICAL", human_approval={"required": False, "present": False})
+    )
+    assert bypass["DECISION"] == "DENY"
+    assert bypass["DENY_CLASS"] == "HUMAN_APPROVAL_MISSING"
     ok = evaluate(
-        base(risk="CRITICAL", human_approval={"required": True, "present": True})
+        base(risk="CRITICAL", human_approval={"required": False, "present": True})
     )
     assert ok["DECISION"] == "PASS"
 
@@ -254,7 +277,7 @@ def main() -> int:
     test_head_mismatch_and_oracle_not_pass()
     test_review_open_denied_fixed_allowed()
     test_mutable_requires_subject_version_identity()
-    test_low_medium_without_distinct_verifier()
+    test_low_medium_optional_verifier_must_still_be_independent()
     test_high_requires_every_declared_mutable_kind_including_ci()
     test_p1b_verifier_001_stale_ci_denied()
     test_critical_requires_human_approval()

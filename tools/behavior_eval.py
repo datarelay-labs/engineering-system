@@ -470,11 +470,37 @@ def check_wait(root: Path) -> dict[str, str]:
 def check_taskswitch(root: Path) -> dict[str, str]:
     resume = _read(root, ".cursor/commands/resume.md")
     session = _read(root, "standards/SESSION_CONTINUITY.md")
+    agents = _read(root, "AGENTS.md")
+
+    _require_tokens(
+        agents,
+        (
+            "ChatGPT Chat is the default implementer",
+            "implementation_preflight.py check",
+            "Cursor adapter is disabled by default",
+        ),
+    )
+    _require_tokens(
+        session,
+        (
+            "ChatGPT Chat implementation behavior",
+            "default implementer",
+            "implementation_preflight.py check",
+            "GitHub durable state",
+            "Dormant optional Cursor adapter behavior",
+            "Cursor is disabled by default",
+            "Cursor quota/session availability is never a prerequisite",
+        ),
+    )
+
+    # Cursor remains a supported optional adapter. If selected, preserve its
+    # bounded persistent-session reuse and resource-safety contract.
     for label, text in (("resume", resume), ("session continuity", session)):
         if "fresh coding-agent session" in text or "preferring a fresh session" in text:
             return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
         if label == "resume" and "Prefer a fresh" in text:
             return _outcome("FAIL", "TASKSWITCH_FRESH_SESSION_DEFAULT")
+
     _require_tokens(
         resume,
         (
@@ -493,10 +519,10 @@ def check_taskswitch(root: Path) -> dict[str, str]:
             "/clear",
             "/work-resume",
             "reusable project",
-            "do not create",
             "dirty, unpushed, or ambiguous",
         ),
     )
+
     preflight = _load_tool("cursor-resource-preflight.py", "cursor_resource_preflight")
     mem_total = 2 * 1024**3
     thresholds = preflight.apply_override(mem_total, None, "builtin")
@@ -656,7 +682,14 @@ def check_permissions(root: Path) -> dict[str, str]:
         c_priv, c_pub = fixtures.generate_keypair(coord)
         a_priv, a_pub = fixtures.generate_keypair(atk)
         _, _, digest = skills.load_effective_state(root)
-        request = {"target": "prod-db", "op": "write"}
+        authority_context = {
+            "target_repo": "datarelay-labs/engineering-system",
+            "workstream": "behavior-eval",
+            "branch": "eval/skills-contract",
+            "subject_head": "a" * 40,
+            "intent_revision": 1,
+        }
+        request = {**authority_context, "target": "prod-db", "op": "write"}
         binding = base / "atk-binding.json"
         dispatch = base / "atk-dispatch.json"
         fixtures.write_binding_assertion(
@@ -719,7 +752,8 @@ def check_permissions(root: Path) -> dict[str, str]:
             tool_id="shell.external_write",
             classes=skills.DEFAULT_TOOL_REGISTRY["shell.external_write"],
             policy_digest=digest,
-            request_payload={"op": "upload"},
+            request_payload={**authority_context, "op": "upload"},
+            binding_assertion=good_binding,
             dispatch_id="ext-beh-1",
             expires_at_unix=int(time.time()) + 3600,
         )
@@ -737,7 +771,7 @@ def check_permissions(root: Path) -> dict[str, str]:
                 root,
                 binding_assertion=good_binding,
                 dispatch_assertion=good_dispatch,
-                request_json=json.dumps({"op": "other"}),
+                request_json=json.dumps({**authority_context, "op": "other"}),
             )
             # Same dispatch + same bound request must not ALLOW twice.
             ok_binding = base / "ok-binding.json"
@@ -758,7 +792,8 @@ def check_permissions(root: Path) -> dict[str, str]:
                 tool_id="production.write",
                 classes=skills.DEFAULT_TOOL_REGISTRY["production.write"],
                 policy_digest=digest,
-                request_payload={"target": "prod", "op": "write"},
+                request_payload={**authority_context, "target": "prod", "op": "write"},
+                binding_assertion=ok_binding,
                 dispatch_id="prod-beh-replay-1",
                 expires_at_unix=int(time.time()) + 3600,
             )
@@ -766,13 +801,13 @@ def check_permissions(root: Path) -> dict[str, str]:
                 root,
                 binding_assertion=ok_binding,
                 dispatch_assertion=ok_dispatch,
-                request_json=json.dumps({"target": "prod", "op": "write"}),
+                request_json=json.dumps({**authority_context, "target": "prod", "op": "write"}),
             )
             second = skills.authorize(
                 root,
                 binding_assertion=ok_binding,
                 dispatch_assertion=ok_dispatch,
-                request_json=json.dumps({"target": "prod", "op": "write"}),
+                request_json=json.dumps({**authority_context, "target": "prod", "op": "write"}),
             )
         finally:
             skills._TEST_TRUST_ANCHOR_PATH = previous_anchor

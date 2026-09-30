@@ -25,11 +25,23 @@ CONTINUITY_REQUIRED = (
 
 MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
+    ".engineering/requirements-engineering-system.txt",
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANONICAL_URL = "https://github.com/datarelay-labs/engineering-system"
+
+
+def canonical_checker_version() -> str:
+    """Return the version shipped with this checker, not target-controlled data."""
+    path = Path(__file__).resolve().parents[1] / ".engineering" / "project.yaml"
+    try:
+        payload = load_yaml(path) or {}
+    except Exception:
+        return ""
+    engineering = payload.get("engineering_system") or {}
+    return str(engineering.get("version") or "")
 
 
 def load_yaml(path: Path):
@@ -65,6 +77,8 @@ def main() -> int:
     native_ci_workflows: list[str] = []
     merge_gate_status = ""
     project_domains: set[str] = set()
+    checker_version = canonical_checker_version()
+    checker_chat_primary = version_at_least(checker_version, (1, 6, 5))
 
     project_path = root / ".engineering/project.yaml"
     if project_path.is_file():
@@ -205,6 +219,42 @@ def main() -> int:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
+        if checker_chat_primary:
+            if mode == "adopted" and version != checker_version:
+                failures.append(
+                    "engineering_system.version does not match canonical checker version"
+                )
+            if "ChatGPT Chat is the default implementer" not in agents_text:
+                failures.append(
+                    "AGENTS.md missing Chat-primary daytime implementer instruction"
+                )
+            if "implementation_preflight.py check" not in agents_text:
+                failures.append(
+                    "AGENTS.md missing Chat-primary implementation preflight instruction"
+                )
+            packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
+            if packet_template.is_file():
+                packet_text = packet_template.read_text(encoding="utf-8", errors="replace")
+                for key in ("INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER"):
+                    if re.search(rf"(?m)^{key}=", packet_text) is None:
+                        failures.append(
+                            f"managed Work Packet template missing required packet-v2 metadata {key}"
+                        )
+            for rel in (
+                "tools/implementation_preflight.py",
+                "tools/context_epoch.py",
+                "tools/work_packet_authority.py",
+                ".github/ISSUE_TEMPLATE/ai-work-packet.md",
+                ".engineering/requirements-engineering-system.txt",
+            ):
+                target = root / rel
+                canonical = Path(__file__).resolve().parents[1] / rel
+                if not target.is_file():
+                    failures.append(f"Chat-primary adoption missing required helper {rel}")
+                elif not canonical.is_file():
+                    failures.append(f"canonical adoption checker is missing {rel}")
+                elif target.read_bytes() != canonical.read_bytes():
+                    failures.append(f"{rel} differs from canonical managed helper")
         if "tools/knowledge-contract.py" in agents_text:
             for rel in (
                 "tools/knowledge-contract.py",
@@ -245,7 +295,6 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references verification contract but missing {rel}"
                     )
-
     if version_at_least(version, (1, 6, 4)) and not (root / ".cursorignore").is_file():
         failures.append("Engineering System >=1.6.4 adoption requires .cursorignore")
 
