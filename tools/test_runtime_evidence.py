@@ -147,6 +147,15 @@ def private_record(repo: Path, capture: str = CAPTURE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def trace_runtime_or_failclosed(report: dict[str, str], supported: bool) -> bool:
+    if supported:
+        return True
+    assert report["RESULT"] == "EXECUTION_FAILED", report
+    assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+    assert report["EXECUTED"] == "NO", report
+    return False
+
+
 def test_exact_head_health_executes_once() -> None:
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
@@ -585,6 +594,7 @@ def test_symlink_subject_tree_does_not_execute() -> None:
 
 
 def test_unrelated_symlink_does_not_block_subject_tree() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -600,6 +610,8 @@ def test_unrelated_symlink_does_not_block_subject_tree() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "CAPTURED", report
             assert report["EXECUTED"] == "YES"
             assert private_record(repo)["raw_output"] == "ok\n"
@@ -608,6 +620,7 @@ def test_unrelated_symlink_does_not_block_subject_tree() -> None:
 
 
 def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -620,6 +633,8 @@ def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "CAPTURED", report
             assert report["EXECUTED"] == "YES"
             assert private_record(repo)["raw_output"] == "ok\n"
@@ -628,6 +643,7 @@ def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
 
 
 def test_indirect_symlink_fallback_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     script = (
         "from pathlib import Path\n"
@@ -648,6 +664,8 @@ def test_indirect_symlink_fallback_is_rejected() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "EXECUTION_FAILED", report
             assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
             assert report["EXECUTED"] == "YES"
@@ -658,6 +676,7 @@ def test_indirect_symlink_fallback_is_rejected() -> None:
 
 
 def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     script = (
         "from pathlib import Path\n"
@@ -685,6 +704,8 @@ def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "EXECUTION_FAILED", report
             assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
             assert report["EXECUTED"] == "YES"
@@ -694,6 +715,7 @@ def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
 
 
 def test_trace_observer_is_hidden_from_tracee_proc() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     script = (
         "import os\n"
@@ -716,14 +738,18 @@ def test_trace_observer_is_hidden_from_tracee_proc() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
-            assert report["RESULT"] == "CAPTURED", report
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
             assert report["EXECUTED"] == "YES"
-            assert private_record(repo)["raw_output"] == "PPID=0 PARENT_FDS=HIDDEN\n"
+            assert "raw_output" not in private_record(repo)
         finally:
             clear_trust()
 
 
 def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     script = (
         "from pathlib import Path\n"
@@ -744,6 +770,8 @@ def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "EXECUTION_FAILED", report
             assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
             assert report["EXECUTED"] == "YES"
@@ -752,6 +780,7 @@ def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
 
 
 def test_indirect_gitlink_fallback_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     script = (
         "from pathlib import Path\n"
@@ -769,6 +798,98 @@ def test_indirect_gitlink_fallback_is_rejected() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_unavailable_trace_isolation_blocks_before_execution() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "trace isolation unavailable")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        original = runtime_evidence._trace_isolation_supported
+        runtime_evidence._trace_isolation_supported = lambda: False
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+            assert report["EXECUTED"] == "NO", report
+            assert runs(repo) == 0
+        finally:
+            runtime_evidence._trace_isolation_supported = original
+            clear_trust()
+
+
+def test_procfs_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('/proc/self/cwd/optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "procfs unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_non_ascii_unsafe_path_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    name = "caf\u00e9"
+    script = (
+        "from pathlib import Path\n"
+        f"path = Path({name!r})\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / name).symlink_to(outside)
+        git(repo, "add", name)
+        git(repo, "commit", "-m", "non ascii unsafe path")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "EXECUTION_FAILED", report
             assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
             assert report["EXECUTED"] == "YES"
@@ -815,6 +936,14 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
         trace.write_text('123 newfstatat(AT_FDCWD, "../tree/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "UNSAFE_TREE_DEPENDENCY"
+        trace.write_text('123 newfstatat(AT_FDCWD, "/proc/self/cwd/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(AT_FDCWD, "/proc/self/fd/7/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = 124\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        assert runtime_evidence._decode_trace_string(r"caf\303\251") == "caf\u00e9"
+        assert runtime_evidence._decode_trace_string(r"bad\377") == os.fsdecode(b"bad\xff")
 
 
 def test_referenced_gitlink_does_not_execute() -> None:
@@ -1484,6 +1613,9 @@ def main() -> int:
     test_trace_observer_is_hidden_from_tracee_proc()
     test_parent_relative_alias_to_unsafe_entry_is_rejected()
     test_indirect_gitlink_fallback_is_rejected()
+    test_unavailable_trace_isolation_blocks_before_execution()
+    test_procfs_alias_to_unsafe_entry_is_rejected()
+    test_non_ascii_unsafe_path_is_rejected()
     test_unsafe_tree_requires_tracer_before_execution()
     test_trace_parser_fails_closed_on_ambiguous_relative_state()
     test_referenced_gitlink_does_not_execute()

@@ -16,7 +16,6 @@ Exit status:
 from __future__ import annotations
 
 import argparse
-import ast
 import hashlib
 import importlib.util
 import json
@@ -63,18 +62,13 @@ TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 TRACE_DIRFD_RE = re.compile(
     r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
 )
-TRACE_TARGET_LAUNCHER = """import os, sys
-for name in os.listdir(\"/proc/self/fd\"):
-    try:
-        fd = int(name)
-    except ValueError:
-        continue
-    if fd <= 2:
-        continue
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+TRACE_PROC_ALIAS_RE = re.compile(r"^/proc/(?:self|thread-self|[0-9]+)/(?:cwd|root|fd)(?:/|$)")
+TRACE_DEV_FD_ALIAS_RE = re.compile(r"^/dev/(?:fd(?:/|$)|stdin$|stdout$|stderr$)")
+TRACE_TARGET_LAUNCHER = """import os, resource, sys
+limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+if limit == resource.RLIM_INFINITY or limit > 1048576:
+    limit = 1048576
+os.closerange(3, int(limit))
 os.execv(sys.argv[1], sys.argv[1:])
 """
 IDENTITY_FIELDS = (
@@ -729,12 +723,75 @@ def _trusted_trace_argv() -> list[str] | None:
     return _trusted_argv(["strace"])
 
 
-def _decode_trace_string(raw: str) -> str | None:
+def _trace_isolation_supported() -> bool:
+    unshare = _trusted_argv(["unshare"])
+    probe = _trusted_argv(["true"])
+    if unshare is None or probe is None:
+        return False
     try:
-        value = ast.literal_eval('"' + raw + '"')
-    except (SyntaxError, ValueError):
-        return None
-    return value if isinstance(value, str) else None
+        completed = subprocess.run(
+            [*unshare, "-c", "-p", "-f", "--mount-proc", "--", *probe],
+            cwd="/",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            env=_execution_environment(),
+            timeout=1,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
+def _decode_trace_string(raw: str) -> str | None:
+    decoded = bytearray()
+    index = 0
+    simple = {
+        "a": 7,
+        "b": 8,
+        "t": 9,
+        "n": 10,
+        "v": 11,
+        "f": 12,
+        "r": 13,
+        "\\": 92,
+        '"': 34,
+    }
+    while index < len(raw):
+        char = raw[index]
+        if char != "\\":
+            try:
+                decoded.extend(os.fsencode(char))
+            except UnicodeEncodeError:
+                return None
+            index += 1
+            continue
+        index += 1
+        if index >= len(raw):
+            return None
+        escape = raw[index]
+        if escape in "01234567":
+            end = index + 1
+            while end < len(raw) and end < index + 3 and raw[end] in "01234567":
+                end += 1
+            decoded.append(int(raw[index:end], 8))
+            index = end
+            continue
+        if escape == "x":
+            if index + 2 >= len(raw):
+                return None
+            token = raw[index + 1 : index + 3]
+            if not all(item in "0123456789abcdefABCDEF" for item in token):
+                return None
+            decoded.append(int(token, 16))
+            index += 3
+            continue
+        value = simple.get(escape)
+        if value is None:
+            return None
+        decoded.append(value)
+        index += 1
+    return os.fsdecode(bytes(decoded))
 
 
 def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
@@ -755,6 +812,10 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
     base = os.path.normpath(str(work.resolve()))
     unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
     for line in trace.splitlines():
+        # Any CLONE_UNTRACED request can create a descendant outside strace -f
+        # coverage. Seeing the flag is enough to invalidate terminal evidence.
+        if "CLONE_UNTRACED" in line:
+            return "TRACE_AMBIGUOUS"
         # Relative paths after a cwd change cannot be bound to the original
         # subject root without reconstructing process state. Fail closed.
         if "chdir(" in line or "fchdir(" in line:
@@ -774,6 +835,8 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
                 return "TRACE_AMBIGUOUS"
             if not decoded or "\x00" in decoded:
                 continue
+            if TRACE_PROC_ALIAS_RE.match(decoded) or TRACE_DEV_FD_ALIAS_RE.match(decoded):
+                return "TRACE_AMBIGUOUS"
             if os.path.isabs(decoded):
                 normalized = os.path.normpath(decoded)
             else:
@@ -823,7 +886,13 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
         unshare = _trusted_argv(["unshare"])
         launcher = _trusted_argv(["python3", "-c", TRACE_TARGET_LAUNCHER])
         collector = _trusted_argv(["dd"])
-        if tracer is None or unshare is None or launcher is None or collector is None:
+        if (
+            tracer is None
+            or unshare is None
+            or launcher is None
+            or collector is None
+            or not _trace_isolation_supported()
+        ):
             _release_subject_tree(temporary)
             return "EXECUTION_FAILED", "TRACE_SETUP_UNAVAILABLE", b""
         trace_read_fd, trace_write_fd = os.pipe()
@@ -842,7 +911,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             "-s",
             "4096",
             "-e",
-            "trace=%file",
+            "trace=%file,%process",
             "-o",
             collector_command,
             "--",
