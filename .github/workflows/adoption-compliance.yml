@@ -233,6 +233,8 @@ jobs:
                       failures.append("canonical AGENTS template missing unique managed execution policy")
                   elif policy_lines[0] not in text:
                       failures.append("AGENTS.md missing managed continuous-execution policy")
+              if "Cursor" in text or "IMPLEMENTER=CURSOR" in text:
+                  failures.append("AGENTS.md contains retired agent/Cursor compatibility rules")
               match = semver_re.fullmatch(version)
               version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
               if version_tuple >= (1, 5, 0):

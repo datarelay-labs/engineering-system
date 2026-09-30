@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 import ci_policy_audit
-from adopt import canonical_execution_policy_line
+from adopt import canonical_execution_policy_line, retired_agent_rules_present
 
 REQUIRED = (
     "AGENTS.md",
@@ -202,6 +202,8 @@ def main() -> int:
             else:
                 if execution_policy not in agents_text:
                     failures.append("AGENTS.md missing managed continuous-execution policy")
+            if retired_agent_rules_present(agents_text):
+                failures.append("AGENTS.md contains retired agent/Cursor compatibility rules")
         if version_at_least(version, (1, 5, 0)):
             if "standards/DESIGN.md" not in agents_text:
                 failures.append("AGENTS.md missing minimal design-gate routing")

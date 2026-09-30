@@ -389,6 +389,8 @@ def test_managed_upgrade_to_1_6() -> None:
         agents_text = (
             f"Adoption baseline: Engineering System version 1.5.0 at immutable commit `{BASELINE}`.\n\n"
             + agents_text
+            + "\nChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.\n"
+            + "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.\n"
             + "\n## Product-specific invariant\n\n- preserve-project-rule\n"
         )
         agents_path.write_text(agents_text, encoding="utf-8")
@@ -411,6 +413,8 @@ def test_managed_upgrade_to_1_6() -> None:
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-project-rule" in upgraded_agents
+        assert "Cursor" not in upgraded_agents
+        assert "IMPLEMENTER=CURSOR" not in upgraded_agents
         assert f"Engineering System version 1.6.5 at immutable commit `{NEW_BASELINE}`" in upgraded_agents
         assert BASELINE not in upgraded_agents
 
@@ -482,6 +486,33 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         repaired_agents = agents_path.read_text(encoding="utf-8")
         assert repaired_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-same-baseline-rule" in repaired_agents
+
+
+def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "unknown-cursor-rule"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text("module example.invalid/cursor-rule\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(
+            sys.executable, str(ADOPT), "--root", str(target), "--apply",
+            "--baseline-sha", BASELINE, "--test-command", "go test ./...",
+        )
+        agents = target / "AGENTS.md"
+        agents.write_text(
+            agents.read_text(encoding="utf-8") + "\nCustom Cursor execution rule that is not canonical.\n",
+            encoding="utf-8",
+        )
+        commit_all(target, "custom cursor rule")
+        before = agents.read_bytes()
+        blocked = run(
+            sys.executable, str(UPGRADE), "--root", str(target), "--apply",
+            "--baseline-sha", NEW_BASELINE, check=False,
+        )
+        assert blocked.returncode != 0
+        assert "unrecognized retired agent/Cursor rules" in blocked.stdout
+        assert agents.read_bytes() == before
 
 
 def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
@@ -2414,6 +2445,7 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_same_baseline_repairs_managed_execution_policy()
+    test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
     test_managed_file_old_baseline_is_trusted_without_manifest()
