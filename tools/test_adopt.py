@@ -413,6 +413,7 @@ def test_managed_upgrade_to_1_6() -> None:
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert "does not serialize unrelated repository work behind a waiting packet" in upgraded_agents
+        assert "begin the first concrete repository action in the same turn" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert "Cursor" not in upgraded_agents
         assert "IMPLEMENTER=CURSOR" not in upgraded_agents

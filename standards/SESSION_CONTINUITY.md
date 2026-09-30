@@ -652,7 +652,7 @@ understand -> implement a coherent small/medium batch -> affected local tests ->
 ```
 
 Guidance:
-- A progress update is not a handoff. Continue while a safe authorized next action exists.
+- A progress update is not a handoff. Continue while a safe authorized next action exists. If a trusted runnable implementation packet is already selected, perform at least the first concrete repository action in the same turn instead of returning control after a statement of future intent.
 - Prefer the cheapest relevant local tests during implementation. Fast CI is feedback, not release qualification; do not run expensive/full/release suites after every edit.
 - Batch related corrective findings before the next expensive qualification run.
 - When a workstream is waiting on CI/review/deploy or another machine-observable condition, persist the named wait and yield that workstream back to repository-level scheduling. Select the highest-priority dependency-eligible independent ACTIVE Work Packet/worktree when safe rather than polling or stopping. The single matching ACTIVE packet rule is scoped to the current branch/workstream and must not be interpreted as repository-wide serialization behind a waiting packet.
