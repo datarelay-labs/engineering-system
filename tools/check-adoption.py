@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 import ci_policy_audit
+from adopt import canonical_execution_policy_line
 
 REQUIRED = (
     "AGENTS.md",
@@ -29,8 +30,6 @@ MANAGED_ADOPTION_REQUIRED = (
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANONICAL_URL = "https://github.com/datarelay-labs/engineering-system"
-
-
 def canonical_checker_version() -> str:
     """Return the version shipped with this checker, not target-controlled data."""
     path = Path(__file__).resolve().parents[1] / ".engineering" / "project.yaml"
@@ -195,6 +194,14 @@ def main() -> int:
         agents_text = agents_path.read_text(encoding="utf-8", errors="replace")
         if CANONICAL_URL not in agents_text:
             failures.append("AGENTS.md does not reference canonical Engineering System")
+        if mode == "adopted":
+            try:
+                execution_policy = canonical_execution_policy_line()
+            except SystemExit as exc:
+                failures.append(str(exc))
+            else:
+                if execution_policy not in agents_text:
+                    failures.append("AGENTS.md missing managed continuous-execution policy")
         if version_at_least(version, (1, 5, 0)):
             if "standards/DESIGN.md" not in agents_text:
                 failures.append("AGENTS.md missing minimal design-gate routing")

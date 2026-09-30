@@ -379,20 +379,34 @@ def test_managed_upgrade_to_1_6() -> None:
         )
         workflow_path.write_text(workflow_text.replace(enforcement_block, ""), encoding="utf-8")
 
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        policy_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Execute useful work continuously.**")
+        )
+        agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text += "\n## Product-specific invariant\n\n- preserve-project-rule\n"
+        agents_path.write_text(agents_text, encoding="utf-8")
+
         (target / ".cursor/rules").mkdir(parents=True)
         (target / ".cursor/rules/project-custom.mdc").write_text("custom legacy adapter\n", encoding="utf-8")
         (target / ".cursorignore").write_text("custom legacy ignore\n", encoding="utf-8")
         (target / ".cursorrules").write_text("custom legacy rules\n", encoding="utf-8")
-        commit_all(target, "legacy adapter fixture")
+        commit_all(target, "legacy adapter and stale policy fixture")
 
         upgraded = run(
             sys.executable, str(UPGRADE), "--root", str(target), "--apply",
             "--baseline-sha", NEW_BASELINE,
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
+        assert "EXECUTION_POLICY_SYNCED=YES" in upgraded.stdout
         assert "RETIRED_AGENT_ARTIFACTS_REMOVED=.cursor,.cursorignore,.cursorrules" in upgraded.stdout
         for rel in (".cursor", ".cursorignore", ".cursorrules"):
             assert not (target / rel).exists(), rel
+        upgraded_agents = agents_path.read_text(encoding="utf-8")
+        assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
+        assert "- preserve-project-rule" in upgraded_agents
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.6.5"
@@ -403,10 +417,65 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
 
 
+def test_same_baseline_repairs_managed_execution_policy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-policy-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/policy-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
 
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
 
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        policy_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Execute useful work continuously.**")
+        )
+        agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text += "\n## Product-specific invariant\n\n- preserve-same-baseline-rule\n"
+        agents_path.write_text(agents_text, encoding="utf-8")
+        commit_all(target, "simulate managed policy drift")
 
+        failed = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert failed.returncode != 0
+        assert "AGENTS.md missing managed continuous-execution policy" in failed.stdout
 
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "EXECUTION_POLICY_REPAIR=REQUIRED" in repaired.stdout
+        assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        repaired_agents = agents_path.read_text(encoding="utf-8")
+        assert repaired_agents.count("- **Execute useful work continuously.**") == 1
+        assert "- preserve-same-baseline-rule" in repaired_agents
 
 
 def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
@@ -484,6 +553,53 @@ def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> 
 
 
 
+
+
+def test_managed_file_old_baseline_is_trusted_without_manifest() -> None:
+    upgrade_path = ROOT / "tools" / "upgrade-adoption.py"
+    spec = importlib.util.spec_from_file_location("upgrade_adoption_old_baseline", upgrade_path)
+    assert spec and spec.loader
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        canonical = base / "canonical"
+        target = base / "target"
+        rel = "tools/example-managed.py"
+        canonical.mkdir()
+        init_repo(canonical)
+        (canonical / rel).parent.mkdir(parents=True, exist_ok=True)
+        prior = b"prior baseline managed bytes\n"
+        current = b"current managed bytes\n"
+        custom = b"project custom bytes\n"
+        (canonical / rel).write_bytes(prior)
+        commit_all(canonical, "prior baseline")
+        prior_sha = run("git", "rev-parse", "HEAD", cwd=canonical).stdout.strip()
+        (canonical / rel).write_bytes(current)
+        commit_all(canonical, "current baseline")
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+
+        original = upgrade.CANONICAL
+        upgrade.CANONICAL = canonical
+        try:
+            (target / rel).write_bytes(prior)
+            planned = upgrade.plan_managed_file_install(
+                target, (rel,), label="fixture", old_baseline=prior_sha
+            )
+            assert planned == {rel: current.decode("utf-8")}
+
+            (target / rel).write_bytes(custom)
+            try:
+                upgrade.plan_managed_file_install(
+                    target, (rel,), label="fixture", old_baseline=prior_sha
+                )
+            except SystemExit as exc:
+                assert "local/custom changes" in str(exc)
+            else:
+                raise AssertionError("custom bytes were accepted from old baseline trust")
+        finally:
+            upgrade.CANONICAL = original
 
 
 def test_grant_style_baseline_declarations_upgraded() -> None:
@@ -1713,6 +1829,8 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         'canonical_helper = Path(".engineering-system-runtime") / rel',
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
+        "AGENTS.md missing managed continuous-execution policy",
+        "- **Execute useful work continuously.**",
         "Chat-primary adoption missing required helper",
         "canonical compliance runtime missing {rel}",
         "{rel} differs from canonical managed helper",
@@ -2289,8 +2407,10 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_same_baseline_repairs_managed_execution_policy()
     test_managed_file_hash_manifests_match_immutable_revisions()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
+    test_managed_file_old_baseline_is_trusted_without_manifest()
     test_grant_style_baseline_declarations_upgraded()
     test_ambiguous_baseline_declaration_fails_closed()
     test_stale_outside_form_declaration_fails_without_partial_upgrade()

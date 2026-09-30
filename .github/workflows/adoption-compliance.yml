@@ -219,6 +219,19 @@ jobs:
               text = agents.read_text(encoding="utf-8")
               if "https://github.com/datarelay-labs/engineering-system" not in text:
                   failures.append("AGENTS.md does not reference canonical Engineering System")
+              canonical_agents = Path(".engineering-system-runtime/templates/AGENTS.md")
+              if not canonical_agents.is_file():
+                  failures.append("canonical compliance runtime missing templates/AGENTS.md")
+              else:
+                  policy_lines = [
+                      line
+                      for line in canonical_agents.read_text(encoding="utf-8").splitlines()
+                      if line.startswith("- **Execute useful work continuously.**")
+                  ]
+                  if len(policy_lines) != 1:
+                      failures.append("canonical AGENTS template missing unique managed execution policy")
+                  elif policy_lines[0] not in text:
+                      failures.append("AGENTS.md missing managed continuous-execution policy")
               match = semver_re.fullmatch(version)
               version_tuple = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
               if version_tuple >= (1, 5, 0):

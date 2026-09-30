@@ -327,6 +327,49 @@ def test_incomplete_surfaces_not_reported_current() -> None:
         assert "OUTCOME=NEEDS_INPUT" in audit.stdout
 
 
+def test_current_baseline_with_stale_execution_policy_is_incomplete() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "stale-policy"
+        repo.mkdir()
+        init_repo(repo)
+        adopt_python(repo, BASELINE)
+        agents_path = repo / "AGENTS.md"
+        agents = agents_path.read_text(encoding="utf-8")
+        policy_line = next(
+            line for line in agents.splitlines()
+            if line.startswith("- **Execute useful work continuously.**")
+        )
+        agents_path.write_text(
+            agents.replace(policy_line + "\n", "", 1),
+            encoding="utf-8",
+        )
+        commit_all(repo, "remove managed execution policy")
+
+        inventory = base / "inventory.json"
+        write_inventory(
+            inventory,
+            [{
+                "full_name": "demo/stale-policy",
+                "archived": False,
+                "default_branch": "main",
+                "local_path": str(repo),
+            }],
+        )
+        audit = run(
+            sys.executable,
+            str(ROLLOUT),
+            "--inventory-file",
+            str(inventory),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "STATE=INCOMPLETE" in audit.stdout
+        assert "AGENTS.md missing managed continuous-execution policy" in audit.stdout
+        assert "OUTCOME=NEEDS_INPUT" in audit.stdout
+
+
 def test_checkout_failure_continues_inventory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -443,6 +486,7 @@ def main() -> int:
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()
     test_incomplete_surfaces_not_reported_current()
+    test_current_baseline_with_stale_execution_policy_is_incomplete()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")

@@ -23,8 +23,10 @@ from adopt import (
     SKILLS_CONTRACT_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
     WORK_PACKET_TEMPLATE_MANAGED,
+    apply_execution_policy_sync,
     canonical_baseline,
     canonical_version,
+    plan_execution_policy_sync,
     engineering_workflow,
     release_workflow,
 )
@@ -295,10 +297,10 @@ def remove_retired_agent_artifacts(root: Path) -> list[str]:
     return removed
 
 
-def plan_work_packet_template_install(root: Path) -> dict[str, str]:
+def plan_work_packet_template_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed Work Packet template bytes."""
     return plan_managed_file_install(
-        root, WORK_PACKET_TEMPLATE_MANAGED, label="Work Packet template"
+        root, WORK_PACKET_TEMPLATE_MANAGED, label="Work Packet template", old_baseline=old_baseline
     )
 
 
@@ -312,10 +314,10 @@ def apply_work_packet_template_install(root: Path, planned: dict[str, str]) -> l
     return installed
 
 
-def plan_engineering_system_dependencies_install(root: Path) -> dict[str, str]:
+def plan_engineering_system_dependencies_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install the canonical Python dependency declaration for managed helpers."""
     return plan_managed_file_install(
-        root, ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED, label="Engineering System dependencies"
+        root, ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED, label="Engineering System dependencies", old_baseline=old_baseline
     )
 
 
@@ -331,10 +333,10 @@ def apply_engineering_system_dependencies_install(
     return installed
 
 
-def plan_knowledge_contract_install(root: Path) -> dict[str, str]:
+def plan_knowledge_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed knowledge-contract bytes."""
     return plan_managed_file_install(
-        root, KNOWLEDGE_CONTRACT_MANAGED, label="knowledge contract"
+        root, KNOWLEDGE_CONTRACT_MANAGED, label="knowledge contract", old_baseline=old_baseline
     )
 
 
@@ -348,10 +350,10 @@ def apply_knowledge_contract_install(root: Path, planned: dict[str, str]) -> lis
     return installed
 
 
-def plan_runtime_contract_install(root: Path) -> dict[str, str]:
+def plan_runtime_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed runtime-contract bytes."""
     return plan_managed_file_install(
-        root, RUNTIME_CONTRACT_MANAGED, label="runtime contract"
+        root, RUNTIME_CONTRACT_MANAGED, label="runtime contract", old_baseline=old_baseline
     )
 
 
@@ -382,9 +384,9 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
     return installed
 
 
-def plan_implementation_preflight_install(root: Path) -> dict[str, str]:
+def plan_implementation_preflight_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     return plan_managed_file_install(
-        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight"
+        root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight", old_baseline=old_baseline
     )
 
 
@@ -398,10 +400,10 @@ def apply_implementation_preflight_install(root: Path, planned: dict[str, str]) 
     return installed
 
 
-def plan_context_epoch_install(root: Path) -> dict[str, str]:
+def plan_context_epoch_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed context-epoch bytes."""
     return plan_managed_file_install(
-        root, CONTEXT_EPOCH_MANAGED, label="context epoch"
+        root, CONTEXT_EPOCH_MANAGED, label="context epoch", old_baseline=old_baseline
     )
 
 
@@ -415,10 +417,10 @@ def apply_context_epoch_install(root: Path, planned: dict[str, str]) -> list[str
     return installed
 
 
-def plan_engineering_context_install(root: Path) -> dict[str, str]:
+def plan_engineering_context_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed engineering-context bytes."""
     return plan_managed_file_install(
-        root, ENGINEERING_CONTEXT_MANAGED, label="engineering context"
+        root, ENGINEERING_CONTEXT_MANAGED, label="engineering context", old_baseline=old_baseline
     )
 
 
@@ -432,10 +434,10 @@ def apply_engineering_context_install(root: Path, planned: dict[str, str]) -> li
     return installed
 
 
-def plan_verification_contract_install(root: Path) -> dict[str, str]:
+def plan_verification_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
-        root, VERIFICATION_CONTRACT_MANAGED, label="verification contract"
+        root, VERIFICATION_CONTRACT_MANAGED, label="verification contract", old_baseline=old_baseline
     )
 
 
@@ -633,12 +635,15 @@ def main() -> int:
         )
 
     if old_version == current_version and old_baseline == new_baseline:
-        planned_engineering_context = plan_engineering_context_install(root)
-        if not planned_engineering_context and not retired_agent_artifacts:
+        planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_execution_policy = plan_execution_policy_sync(root)
+        if not planned_engineering_context and planned_execution_policy is None and not retired_agent_artifacts:
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
         if planned_engineering_context:
             print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_execution_policy is not None:
+            print("EXECUTION_POLICY_REPAIR=REQUIRED")
         if retired_agent_artifacts:
             print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
@@ -651,6 +656,8 @@ def main() -> int:
             root, planned_engineering_context
         )
         print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+        print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         checker = CANONICAL / "tools" / "check-adoption.py"
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
@@ -809,15 +816,16 @@ def main() -> int:
     planned_declarations = plan_baseline_declaration_updates(
         root, old_version, old_baseline, current_version, new_baseline
     )
-    planned_work_packet_template = plan_work_packet_template_install(root)
-    planned_dependencies = plan_engineering_system_dependencies_install(root)
-    planned_knowledge_contract = plan_knowledge_contract_install(root)
-    planned_runtime_contract = plan_runtime_contract_install(root)
+    planned_execution_policy = plan_execution_policy_sync(root)
+    planned_work_packet_template = plan_work_packet_template_install(root, old_baseline)
+    planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
+    planned_knowledge_contract = plan_knowledge_contract_install(root, old_baseline)
+    planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
     planned_skills_contract = plan_skills_contract_install(root, old_baseline)
-    planned_verification_contract = plan_verification_contract_install(root)
-    planned_implementation_preflight = plan_implementation_preflight_install(root)
-    planned_context_epoch = plan_context_epoch_install(root)
-    planned_engineering_context = plan_engineering_context_install(root)
+    planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+    planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
+    planned_context_epoch = plan_context_epoch_install(root, old_baseline)
+    planned_engineering_context = plan_engineering_context_install(root, old_baseline)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -896,6 +904,9 @@ def main() -> int:
         print("BASELINE_DECLARATIONS_SYNCED=" + ",".join(synced_declarations))
     else:
         print("BASELINE_DECLARATIONS_SYNCED=<none>")
+
+    execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+    print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
 
     checker = CANONICAL / "tools" / "check-adoption.py"
     result = subprocess.run([sys.executable, str(checker), "--root", str(root)])

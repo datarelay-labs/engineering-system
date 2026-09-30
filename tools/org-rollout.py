@@ -277,7 +277,11 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
     if completed.returncode == 0 and "ENGINEERING_SYSTEM_ADOPTION=PASS" in completed.stdout:
         return True, "structural adoption validation passed"
     detail = completed.stdout.strip().splitlines()
-    summary = detail[-1] if detail else "structural adoption validation failed"
+    failures = [line for line in detail if line.startswith("FAIL ")]
+    if failures:
+        summary = "; ".join(failures[:3])
+    else:
+        summary = detail[-1] if detail else "structural adoption validation failed"
     return False, summary
 
 
