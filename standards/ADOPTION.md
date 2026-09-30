@@ -119,6 +119,21 @@ For repositories with a known release qualification command, also provide `--rel
 
 For production-oriented repositories, pass `--operations-mode production`. The generated project profile then requires runbook/incident handling and the release profile requires operational E2E plus public smoke. If deployment signals exist while maturity is not clearly production/non-production, automatic mode fails closed for review instead of silently writing `production_oriented: false`.
 
+For a user-facing product, also pass `--user-facing`, identify the actual primary public surface, and provide both user-test contracts:
+
+```bash
+python tools/adopt.py \
+  --root /path/to/project \
+  --apply \
+  --user-facing \
+  --primary-user-surface browser \
+  --surface-reconciliation-contract docs/SURFACE_RECONCILIATION.md \
+  --full-user-e2e-contract docs/FULL_USER_E2E.md \
+  ...
+```
+
+Supported primary surfaces are browser, CLI, desktop, mobile, mixed, or other. Browser/mixed products require actual-browser execution in the release profile. The two contract paths must already exist; adoption fails closed rather than inventing product-specific scenarios.
+
 The audit also reports discovered build/lint/typecheck commands and candidate domains. Override them only when repository evidence supports a better mapping.
 
 ## Required adopted surfaces

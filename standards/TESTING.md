@@ -87,6 +87,36 @@ Important scenarios should have stable IDs plus level, domains, triggers, platfo
 
 Test help/navigation, wizard inputs, invalid input recovery, copy/paste, wrong context, cancellation/EOF/Ctrl+C, generated remediation commands, and cross-output consistency. Run affected UX tests during development and broader UX qualification near release.
 
+### Human-equivalent user-surface release tests — mandatory for user-facing products
+
+Deterministic unit/component/API/matrix tests are necessary but do not reproduce the user's complete environment, discoverability, action sequence, state transitions, cross-surface continuity, realistic mistakes, failure diagnosis/recovery, and final user-visible outcome. They therefore cannot be the only release evidence for a user-facing product.
+
+A user-facing release MUST add two separate human-equivalent gates after exact-candidate machine qualification:
+
+```text
+exact-head machine qualification
+ -> Surface Reconciliation
+ -> Full User E2E
+ -> owner/manual acceptance when required
+ -> release authorization
+```
+
+**Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
+
+**Full User E2E** is depth-first. It executes complete realistic user missions through the real primary product surface, proves actual outcomes, injects realistic mistakes/failures, performs user-visible diagnosis and recovery, exercises live edits/destructive lifecycle, and verifies cleanup/orphan truth.
+
+Both gates:
+- run on the same exact candidate HEAD;
+- are independently required and never substitute for each other;
+- require zero mandatory FAIL/PARTIAL/BLOCKED for release PASS;
+- may reuse machine evidence for verification but not to replace the user action;
+- must continue safe independent scenarios after a failure so one defect does not hide others;
+- must retain run/evidence identity in the active release Work Packet.
+
+For browser products, the user action MUST be performed by an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
+
+For CLI/desktop/mobile products, use the actual supported public primary interface with the same human-equivalent principle.
+
 ## Performance/resilience
 
 ```text

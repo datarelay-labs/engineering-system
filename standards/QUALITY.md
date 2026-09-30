@@ -57,6 +57,10 @@ Applicable user-facing products must test success paths plus misuse and recovery
 - stale/generated guidance
 - cross-output consistency
 
+For release qualification, this is not satisfied by component/API coverage alone. A user-facing product requires the two human-equivalent gates defined in `TESTING.md`: Surface Reconciliation and Full User E2E. Browser products must execute the real rendered UI in Chromium/Chrome; Playwright may drive the browser, but jsdom, mocked component rendering, API mutation, or static contract checks cannot stand in for the real user action.
+
+A release finding is based on the user's observable mission and outcome. If the implementation passes an internal/API check while the actual public user action is missing, undiscoverable, misleading, blocked, or unrecoverable, the user-facing gate fails.
+
 ## Change risk and verification depth
 
 Change kind describes what is being changed; change risk determines how much independent evidence is required. Risk does **not** determine roadmap priority.

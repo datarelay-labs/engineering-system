@@ -69,6 +69,11 @@
             "production",
             "maintenance"
           ]
+        },
+        "user_facing": {"type": "boolean"},
+        "primary_user_surface": {
+          "type": "string",
+          "enum": ["none", "browser", "cli", "desktop", "mobile", "mixed", "other"]
         }
       }
     },

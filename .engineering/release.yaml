@@ -16,6 +16,7 @@ sbom_command: ""
 operational_e2e_required: false
 operational_e2e_command: ""
 full_e2e_passes: 0
+human_equivalent_user_tests_required: false
 public_smoke_required: false
 public_smoke_command: ""
 

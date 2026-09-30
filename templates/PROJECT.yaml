@@ -10,6 +10,8 @@ project:
   name: "replace-me"
   type: "replace-me"
   maturity: "development"
+  user_facing: false
+  primary_user_surface: none
 
 domains:
   - core
