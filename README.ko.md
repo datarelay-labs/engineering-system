@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
-Engineering System 1.6.5는 ChatGPT Chat을 단일 구현 경로로 사용합니다. managed adoption은 immutable baseline pin을 유지하고, context/test 선택은 provider-neutral 비용 기준을 유지하며, managed upgrade는 더 이상 쓰지 않는 editor-agent artifact를 호환 실행 경로로 보존하지 않고 제거합니다.
+Engineering System 1.7.0은 ChatGPT Chat을 단일 구현 경로로 사용합니다. managed adoption은 immutable baseline pin을 유지하고, context/test 선택은 provider-neutral 비용 기준을 유지하며, managed upgrade는 더 이상 쓰지 않는 editor-agent artifact를 호환 실행 경로로 보존하지 않고 제거합니다.
 
 
 

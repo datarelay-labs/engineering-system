@@ -417,7 +417,7 @@ def adoption_fails_closed() -> dict[str, str]:
             (repo / "AGENTS.md").write_text(text, encoding="utf-8")
             before = (repo / "AGENTS.md").read_bytes()
             try:
-                upgrade.plan_baseline_declaration_updates(repo, "1.6.1", stale_sha, "1.6.5", "a" * 40)
+                upgrade.plan_baseline_declaration_updates(repo, "1.6.1", stale_sha, "1.7.0", "a" * 40)
             except SystemExit:
                 failed = True
             else:
