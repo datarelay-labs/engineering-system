@@ -18,8 +18,6 @@ The Engineering System core is agent-agnostic:
 
 Tool-specific behavior is implemented through adapters:
 - ChatGPT Custom/Project Instruction
-- Cursor User Rule
-- repository `.cursor/rules/engineering-system.mdc`
 - future AI-tool adapters
 
 An adapter may translate the core rules into tool-specific instructions but must not weaken them.
@@ -62,7 +60,7 @@ This rule composes with approval, permission, and replay protections; it does no
 
 Coordinator reconciliation for that classification is `python3 tools/coordinator.py plan --facts <facts.json>`. The planner reads structured facts and emits one bounded decision. Ambiguous mutation facts yield `RECONCILE_AMBIGUOUS` before retry. The planner itself does not spawn processes, mutate GitHub, merge, send messages, or stop sessions.
 
-A bounded watch re-entry is `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator calls the planner and emits one result. It does not spawn processes, call GitHub, merge, send Telegram, or start/stop Cursor. Ambiguous mutation facts yield `BLOCK_RECONCILIATION` and authorize no retry. A watch class cannot emit another class's authority. Caller subject overrides, observations older than the latest accepted observation, and an exhausted transient retry budget fail closed. Notification keys include the coordinator decision. Host scheduling and delivery stay outside this evaluator.
+A bounded watch re-entry is `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator calls the planner and emits one result. It does not spawn processes, call GitHub, merge, send Telegram,. Ambiguous mutation facts yield `BLOCK_RECONCILIATION` and authorize no retry. A watch class cannot emit another class's authority. Caller subject overrides, observations older than the latest accepted observation, and an exhausted transient retry budget fail closed. Notification keys include the coordinator decision. Host scheduling and delivery stay outside this evaluator.
 
 The run-once host is `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. It locks one canonical watch identity, calls the evaluator, refetches authoritative facts with `collect_authoritative` through trusted `/usr/bin/gh`, and delivers at most one typed action after `send_effect` returns a durable receipt. The dispatch is reserved for that effect before send and consumed only after the receipt. Caller `PATH`, commands, URLs, fact files, packet machine-fact text, and non-canonical state paths fail closed. A held lock, stale revision, stale subject, stale branch, pinned worktree branch or HEAD mismatch, missing or different claim worktree, resource or WIP denial, ambiguous send, foreign dispatch reservation, or missing trusted dispatch yields zero actions and does not stop unrelated sessions.
 
@@ -88,10 +86,8 @@ Every adopted repository must contain:
 - `.engineering/project.yaml`
 - `.engineering/tests.yaml`
 - `.engineering/release.yaml`
-- `.cursor/rules/engineering-system.mdc`
 
 Engineering System >=1.3.0 additionally requires:
-- `.cursor/commands/resume.md`
 - `.github/ISSUE_TEMPLATE/ai-work-packet.md`
 
 Engineering System >=1.4.0 managed adoption additionally requires:

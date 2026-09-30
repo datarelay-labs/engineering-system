@@ -28,7 +28,6 @@ SECRET_NAME = "secret-filename-do-not-capture.txt"
 SECRET_BODY = "SECRET_CONTENT_DO_NOT_CAPTURE"
 TOKEN = "supersecret-token-value"
 SENTINEL = "SENTINEL-SECRET-VALUE"
-SESSION_NAME = "secret-chat-id"
 EMAIL = "incident-evidence-test@example.com"
 
 
@@ -137,15 +136,11 @@ def fixtures(directory: Path) -> dict[str, str]:
     )
     loadavg = directory / "loadavg"
     loadavg.write_text("0.50 1.25 2.50\n", encoding="utf-8")
-    sessions = directory / "sessions"
-    rows = "\n".join(f"  Session: {SESSION_NAME}-{index}" for index in range(12))
-    sessions.write_text(f"12 persistent sessions:\n{rows}\n", encoding="utf-8")
     return {
         "meminfo": str(meminfo),
         "psi_memory": str(psi_memory),
         "psi_io": str(psi_io),
         "loadavg": str(loadavg),
-        "sessions": str(sessions),
     }
 
 
@@ -168,8 +163,6 @@ def capture_args(root: Path, files: dict[str, str], **extra: str) -> list[str]:
         files["psi_io"],
         "--loadavg-file",
         files["loadavg"],
-        "--persist-list-file",
-        files["sessions"],
     ]
     return args
 
@@ -260,11 +253,9 @@ def test_historical_pressure_fixture_states_facts_without_root_cause() -> None:
         "MATERIAL_SWAP_USE",
         "ELEVATED_MEMORY_PRESSURE",
         "ELEVATED_IO_PRESSURE",
-        "HIGH_PERSISTENT_SESSION_COUNT",
     ]
     assert record["memory"]["available_bytes"] == 262144 * 1024
     assert record["swap"]["used_bytes"] == (8388608 - 1048576) * 1024
-    assert record["sessions"]["persistent_count"] == 12
     assert record["psi_memory"]["some_avg10"] == 80.0
     assert record["psi_io"]["some_avg10"] == 25.0
     assert "root_cause" not in payload
@@ -302,7 +293,7 @@ def test_capture_is_schema_valid_real_git_and_redacted() -> None:
     assert root_text not in result.stdout
     assert git_text not in payload
     assert git_text not in result.stdout
-    for banned in (SECRET_NAME, SECRET_BODY, TOKEN, SENTINEL, SESSION_NAME, EMAIL, origin):
+    for banned in (SECRET_NAME, SECRET_BODY, TOKEN, SENTINEL, EMAIL, origin):
         assert banned not in payload
         assert banned not in result.stdout
     assert mode == 0o600
@@ -336,66 +327,8 @@ def test_missing_source_is_partial_without_fabricated_zero() -> None:
     assert record["memory"]["available_bytes"] == 262144 * 1024
 
 
-def test_session_file_seam_does_not_execute() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / "repo"
-        root.mkdir()
-        outside = Path(tmp) / "fixtures"
-        outside.mkdir()
-        sentinel = Path(tmp) / "agent-ran"
-        git_repo(root, "https://github.com/datarelay-labs/engineering-system.git")
-        files = fixtures(outside)
-        listed = run_cli(*capture_args(root, files, capture_id="CAP-20260924T010203Z-11111111"))
-        listed_record = json.loads(
-            evidence_path(root, "CAP-20260924T010203Z-11111111").read_text(encoding="utf-8")
-        )
-    assert listed.returncode == 0, listed.stdout
-    assert listed_record["sessions"]["persistent_count"] == 12
-    assert SESSION_NAME not in json.dumps(listed_record)
-    assert not sentinel.exists()
 
 
-def test_agent_bin_sentinel_is_not_executed() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / "repo"
-        root.mkdir()
-        outside = Path(tmp) / "fixtures"
-        outside.mkdir()
-        sentinel = Path(tmp) / "agent-ran"
-        program = Path(tmp) / "chosen-agent"
-        program.write_text(f"#!/bin/sh\ntouch {sentinel}\n", encoding="utf-8")
-        program.chmod(0o755)
-        git_repo(root, "https://github.com/datarelay-labs/engineering-system.git")
-        files = fixtures(outside)
-        result = run_cli(
-            "capture",
-            "--root",
-            str(root),
-            "--incident-id",
-            INCIDENT_ID,
-            "--now",
-            NOW,
-            "--capture-id",
-            CAPTURE_ID,
-            "--meminfo-file",
-            files["meminfo"],
-            "--psi-memory-file",
-            files["psi_memory"],
-            "--psi-io-file",
-            files["psi_io"],
-            "--loadavg-file",
-            files["loadavg"],
-            "--persist-list-file",
-            files["sessions"],
-            "--agent-bin",
-            str(program),
-        )
-        executed = sentinel.exists()
-    assert result.returncode != 0
-    assert not executed
-    source = TOOL.read_text(encoding="utf-8")
-    assert "--agent-bin" not in source
-    assert 'read_persist_list("agent")' in source
 
 
 def test_fsmonitor_sentinel_is_not_executed() -> None:
@@ -431,22 +364,6 @@ def test_fsmonitor_sentinel_is_not_executed() -> None:
     assert "core.fsmonitor=false" in TOOL.read_text(encoding="utf-8")
 
 
-def test_unavailable_agent_omits_count() -> None:
-    preflight = incident.load_preflight()
-    original = preflight.read_persist_list
-
-    def fixed_only(agent_bin: str) -> str:
-        if agent_bin != "agent":
-            raise AssertionError(agent_bin)
-        raise preflight.PreflightFailure("agent persist list unavailable")
-
-    preflight.read_persist_list = fixed_only
-    try:
-        result = incident._sessions(None, None)
-    finally:
-        preflight.read_persist_list = original
-    assert result == {"state": "UNAVAILABLE", "reason": "SESSION_LIST_UNAVAILABLE"}
-    assert "persistent_count" not in result
 
 
 def test_retention_bounds_and_traversal_fail_closed() -> None:
@@ -552,10 +469,7 @@ def main() -> int:
     test_historical_pressure_fixture_states_facts_without_root_cause()
     test_capture_is_schema_valid_real_git_and_redacted()
     test_missing_source_is_partial_without_fabricated_zero()
-    test_session_file_seam_does_not_execute()
-    test_agent_bin_sentinel_is_not_executed()
     test_fsmonitor_sentinel_is_not_executed()
-    test_unavailable_agent_omits_count()
     test_retention_bounds_and_traversal_fail_closed()
     test_command_fields_cannot_execute()
     test_schema_rejects_unsafe_record_shapes()

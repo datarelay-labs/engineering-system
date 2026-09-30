@@ -63,10 +63,8 @@ jobs:
               ".engineering/project.yaml",
               ".engineering/tests.yaml",
               ".engineering/release.yaml",
-              ".cursor/rules/engineering-system.mdc",
           )
           continuity_required = (
-              ".cursor/commands/resume.md",
               ".github/ISSUE_TEMPLATE/ai-work-packet.md",
           )
           for rel in required:
@@ -166,44 +164,6 @@ jobs:
                       if not Path(rel).is_file():
                           failures.append(f"Engineering System >=1.3.0 missing session-continuity file: {rel}")
 
-              context_epoch_referenced = any(
-                  path.is_file() and "tools/context_epoch.py" in path.read_text(encoding="utf-8")
-                  for path in (
-                      Path(".cursor/commands/resume.md"),
-                      Path(".cursor/commands/work-resume.md"),
-                  )
-              )
-              if context_epoch_referenced:
-                  target_helper = Path("tools/context_epoch.py")
-                  canonical_helper = Path(".engineering-system-runtime/tools/context_epoch.py")
-                  if not target_helper.is_file():
-                      failures.append(
-                          "Cursor resume adapter references context-epoch helper but missing tools/context_epoch.py"
-                      )
-                  elif not canonical_helper.is_file():
-                      failures.append("canonical compliance runtime missing tools/context_epoch.py")
-                  elif target_helper.read_bytes() != canonical_helper.read_bytes():
-                      failures.append("tools/context_epoch.py differs from canonical managed helper")
-
-              engineering_context_referenced = any(
-                  path.is_file() and "tools/engineering-context.py" in path.read_text(encoding="utf-8")
-                  for path in (
-                      Path(".cursor/commands/resume.md"),
-                      Path(".cursor/commands/work-resume.md"),
-                  )
-              )
-              if engineering_context_referenced:
-                  target_helper = Path("tools/engineering-context.py")
-                  canonical_helper = Path(".engineering-system-runtime/tools/engineering-context.py")
-                  if not target_helper.is_file():
-                      failures.append(
-                          "Cursor resume adapter references engineering-context helper but missing tools/engineering-context.py"
-                      )
-                  elif not canonical_helper.is_file():
-                      failures.append("canonical compliance runtime missing tools/engineering-context.py")
-                  elif target_helper.read_bytes() != canonical_helper.read_bytes():
-                      failures.append("tools/engineering-context.py differs from canonical managed helper")
-
               if version_tuple >= (1, 4, 0):
                   if mode not in {"canonical", "adopted"}:
                       failures.append("Engineering System >=1.4.0 requires mode=canonical|adopted")
@@ -278,6 +238,7 @@ jobs:
                   for rel in (
                       "tools/implementation_preflight.py",
                       "tools/context_epoch.py",
+                      "tools/engineering-context.py",
                       "tools/work_packet_authority.py",
                       ".engineering/requirements-engineering-system.txt",
                       ".github/ISSUE_TEMPLATE/ai-work-packet.md",
@@ -291,11 +252,10 @@ jobs:
                       elif target_helper.read_bytes() != canonical_helper.read_bytes():
                           failures.append(f"{rel} differs from canonical managed helper")
 
-          cursor = Path(".cursor/rules/engineering-system.mdc")
-          if cursor.is_file():
-              text = cursor.read_text(encoding="utf-8")
-              if "alwaysApply: true" not in text:
-                  failures.append("Cursor engineering-system rule is not alwaysApply: true")
+          for rel in (".cursor", ".cursorignore", ".cursorrules"):
+              path = Path(rel)
+              if path.exists() or path.is_symlink():
+                  failures.append(f"retired agent artifact must be removed: {rel}")
 
           tests_path = Path(".engineering/tests.yaml")
           if tests_path.is_file():

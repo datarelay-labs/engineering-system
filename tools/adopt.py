@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,9 +20,6 @@ FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RULE_SURFACES = (
     "AGENTS.md",
     "CLAUDE.md",
-    ".cursorrules",
-    ".cursor/rules",
-    ".cursor/commands",
     ".github/copilot-instructions.md",
 )
 
@@ -63,14 +61,12 @@ IMPLEMENTATION_PREFLIGHT_MANAGED = (
     "tools/implementation_preflight.py",
 )
 
-# Context-epoch projection is invoked by the managed Cursor resume adapter, so
-# adopted repositories must carry the exact canonical helper beside that adapter.
+# Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
 )
 
-# Exact-HEAD repository orientation is invoked by the managed resume adapter.
-# Adopted repositories must carry the exact canonical helper beside that adapter.
+# Exact-HEAD repository orientation is a provider-neutral managed helper.
 ENGINEERING_CONTEXT_MANAGED = (
     "tools/engineering-context.py",
 )
@@ -88,9 +84,6 @@ REQUIRED_MANAGED = (
     ".engineering/project.yaml",
     ".engineering/tests.yaml",
     ".engineering/release.yaml",
-    ".cursor/rules/engineering-system.mdc",
-    ".cursorignore",
-    ".cursor/commands/resume.md",
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
     ".github/workflows/engineering-system.yml",
     *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
@@ -103,10 +96,24 @@ REQUIRED_MANAGED = (
     *ENGINEERING_CONTEXT_MANAGED,
 )
 
-# Known Cursor resume aliases kept in sync when present or installed as managed adapters.
-RESUME_ADAPTER_ALIASES = (
-    ".cursor/commands/work-resume.md",
-)
+RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
+
+
+def remove_retired_agent_artifacts(root: Path) -> list[str]:
+    removed: list[str] = []
+    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
+        path = root / rel
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+            removed.append(rel)
+        elif path.is_dir():
+            shutil.rmtree(path)
+            removed.append(rel)
+        elif path.exists():
+            path.unlink()
+            removed.append(rel)
+    return removed
+
 
 # Prefer committed candidate/base diffs when ENGINEERING_BASE_REF is provided by shared CI.
 WHITESPACE_CHECK_COMMAND = (
@@ -386,9 +393,6 @@ def rule_surfaces(root: Path) -> list[str]:
 def review_required_rules(root: Path, rules: list[str]) -> list[str]:
     exact_generated = {
         "AGENTS.md": CANONICAL / "templates" / "AGENTS.md",
-        ".cursor/rules/engineering-system.mdc": CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc",
-        ".cursor/commands/resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
-        ".cursor/commands/work-resume.md": CANONICAL / "templates" / ".cursor" / "commands" / "resume.md",
     }
     required: list[str] = []
     for rel in rules:
@@ -1274,34 +1278,12 @@ def main() -> int:
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
 
+    removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
+
     written: list[str] = []
     skipped: list[str] = []
 
     write_missing(root, "AGENTS.md", (CANONICAL / "templates" / "AGENTS.md").read_text(encoding="utf-8"), written, skipped)
-    write_missing(
-        root,
-        ".cursor/rules/engineering-system.mdc",
-        (CANONICAL / "templates" / ".cursor" / "rules" / "engineering-system.mdc").read_text(encoding="utf-8"),
-        written,
-        skipped,
-    )
-    write_missing(
-        root,
-        ".cursorignore",
-        (CANONICAL / "templates" / ".cursorignore").read_text(encoding="utf-8"),
-        written,
-        skipped,
-    )
-    resume_text = (CANONICAL / "templates" / ".cursor" / "commands" / "resume.md").read_text(encoding="utf-8")
-    write_missing(
-        root,
-        ".cursor/commands/resume.md",
-        resume_text,
-        written,
-        skipped,
-    )
-    for alias in RESUME_ADAPTER_ALIASES:
-        write_missing(root, alias, resume_text, written, skipped)
     for rel in (
         *KNOWLEDGE_CONTRACT_MANAGED,
         *RUNTIME_CONTRACT_MANAGED,
@@ -1427,6 +1409,7 @@ def main() -> int:
     print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
+    print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
     if setup_command:
         print(f"SETUP_COMMAND={setup_command}")
     else:

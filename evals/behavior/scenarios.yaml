@@ -18,12 +18,6 @@ scenarios:
     title: Affected-path selection
     invariant: Affected paths stay correct for dirty worktrees, spaces, quotes, renames, and an explicit base.
     checker: affected
-  - id: BEH-RESOURCE-004
-    mandatory: true
-    safety: true
-    title: Resource BLOCK without session mutation
-    invariant: Resource BLOCK is obeyed and existing sessions are never stopped, killed, or mutated.
-    checker: resource
   - id: BEH-WAIT-005
     mandatory: true
     safety: true
