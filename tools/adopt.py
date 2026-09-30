@@ -552,6 +552,8 @@ def project_yaml(
     merge_gate_status: str,
     project_type: str,
     maturity: str,
+    user_facing: bool,
+    primary_user_surface: str,
     domains: list[str],
     platform: str,
     operations_mode: str,
@@ -584,6 +586,8 @@ def project_yaml(
             f"  name: {yaml_scalar(root.name)}",
             f"  type: {yaml_scalar(project_type)}",
             f"  maturity: {yaml_scalar(maturity)}",
+            f"  user_facing: {'true' if user_facing else 'false'}",
+            f"  primary_user_surface: {yaml_scalar(primary_user_surface if user_facing else 'none')}",
             "",
             "domains:",
         ]
@@ -773,33 +777,62 @@ def release_yaml(
     operational_e2e_command: str,
     full_e2e_passes: int,
     public_smoke_command: str,
+    user_facing: bool,
+    primary_user_surface: str,
+    surface_reconciliation_contract: str,
+    full_user_e2e_contract: str,
 ) -> str:
     production = operations_mode == "production"
-    return (
-        "version: 1\n\n"
-        "exact_head_required: true\n"
-        f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}\n"
-        f"provenance_required: {'true' if provenance_command else 'false'}\n"
-        f"sbom_required: {'true' if sbom_command else 'false'}\n"
-        f"execution_context: {yaml_scalar(release_execution_context)}\n"
-        f"setup_command: {yaml_scalar(release_setup_command)}\n"
-        f"preflight_required: {'true' if preflight_command else 'false'}\n"
-        f"preflight_command: {yaml_scalar(preflight_command)}\n"
-        f"qualification_command: {yaml_scalar(release_command)}\n"
-        f"artifact_hash_command: {yaml_scalar(artifact_hash_command)}\n"
-        f"provenance_command: {yaml_scalar(provenance_command)}\n"
-        f"sbom_command: {yaml_scalar(sbom_command)}\n"
-        f"operational_e2e_required: {'true' if production else 'false'}\n"
-        f"operational_e2e_command: {yaml_scalar(operational_e2e_command)}\n"
-        f"full_e2e_passes: {full_e2e_passes if production else 0}\n"
-        f"public_smoke_required: {'true' if production else 'false'}\n"
-        f"public_smoke_command: {yaml_scalar(public_smoke_command)}\n\n"
-        "blockers:\n"
-        "  p0: true\n"
-        "  p1: true\n"
-        "  user_blocking_p2: true\n"
-    )
-
+    lines = [
+        "version: 1",
+        "",
+        "exact_head_required: true",
+        f"artifact_hash_required: {'true' if artifact_hash_command else 'false'}",
+        f"provenance_required: {'true' if provenance_command else 'false'}",
+        f"sbom_required: {'true' if sbom_command else 'false'}",
+        f"execution_context: {yaml_scalar(release_execution_context)}",
+        f"setup_command: {yaml_scalar(release_setup_command)}",
+        f"preflight_required: {'true' if preflight_command else 'false'}",
+        f"preflight_command: {yaml_scalar(preflight_command)}",
+        f"qualification_command: {yaml_scalar(release_command)}",
+        f"artifact_hash_command: {yaml_scalar(artifact_hash_command)}",
+        f"provenance_command: {yaml_scalar(provenance_command)}",
+        f"sbom_command: {yaml_scalar(sbom_command)}",
+        f"operational_e2e_required: {'true' if production else 'false'}",
+        f"operational_e2e_command: {yaml_scalar(operational_e2e_command)}",
+        f"full_e2e_passes: {full_e2e_passes if production else 0}",
+        f"public_smoke_required: {'true' if production else 'false'}",
+        f"public_smoke_command: {yaml_scalar(public_smoke_command)}",
+        f"human_equivalent_user_tests_required: {'true' if user_facing else 'false'}",
+    ]
+    if user_facing:
+        browser_required = primary_user_surface in {"browser", "mixed"}
+        lines.extend([
+            "human_equivalent_user_tests:",
+            "  executor: CHATGPT_CHAT",
+            "  actual_user_surface_required: true",
+            f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
+            f"  actual_browser_process_required: {'true' if browser_required else 'false'}",
+            "  same_candidate_required: true",
+            "  ci_contract_validation_only: true",
+            "  surface_reconciliation:",
+            "    mandatory: true",
+            f"    contract: {yaml_scalar(surface_reconciliation_contract)}",
+            "    minimum_passes: 1",
+            "  full_user_e2e:",
+            "    mandatory: true",
+            f"    contract: {yaml_scalar(full_user_e2e_contract)}",
+            "    minimum_passes: 1",
+        ])
+    lines.extend([
+        "",
+        "blockers:",
+        "  p0: true",
+        "  p1: true",
+        "  user_blocking_p2: true",
+        "",
+    ])
+    return "\n".join(lines)
 
 def engineering_workflow(baseline: str, ci_mode: str) -> str:
     lines = [
@@ -1037,6 +1070,10 @@ def main() -> int:
     parser.add_argument("--full-e2e-passes", type=int, default=1)
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
+    parser.add_argument("--user-facing", action="store_true")
+    parser.add_argument("--primary-user-surface", default="none", choices=("none", "browser", "cli", "desktop", "mobile", "mixed", "other"))
+    parser.add_argument("--surface-reconciliation-contract", default="")
+    parser.add_argument("--full-user-e2e-contract", default="")
     parser.add_argument("--ci-mode", default="auto", choices=("auto", "shared", "native"))
     parser.add_argument("--native-ci-workflow", action="append", default=[])
     parser.add_argument("--merge-gate-status", default="auto", choices=("auto", "verified", "advisory", "unknown"))
@@ -1056,6 +1093,18 @@ def main() -> int:
     root = Path(args.root).expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"FAIL target root does not exist: {root}")
+
+    if args.user_facing:
+        if args.primary_user_surface == "none":
+            raise SystemExit("FAIL --user-facing requires --primary-user-surface")
+        if not args.surface_reconciliation_contract.strip() or not args.full_user_e2e_contract.strip():
+            raise SystemExit("FAIL --user-facing requires both --surface-reconciliation-contract and --full-user-e2e-contract")
+        for label, rel in (("surface reconciliation", args.surface_reconciliation_contract), ("Full User E2E", args.full_user_e2e_contract)):
+            path = root / rel
+            if not path.is_file():
+                raise SystemExit(f"FAIL user-facing {label} contract missing: {rel}")
+    elif args.primary_user_surface != "none":
+        raise SystemExit("FAIL --primary-user-surface requires --user-facing")
 
     data = inventory(root)
     if args.audit or not args.apply:
@@ -1272,6 +1321,8 @@ def main() -> int:
             merge_gate_status,
             project_type,
             args.maturity,
+            args.user_facing,
+            args.primary_user_surface,
             domains,
             args.platform,
             operations_mode,
@@ -1308,6 +1359,10 @@ def main() -> int:
             operational_e2e_command,
             args.full_e2e_passes,
             public_smoke_command,
+            args.user_facing,
+            args.primary_user_surface,
+            args.surface_reconciliation_contract.strip(),
+            args.full_user_e2e_contract.strip(),
         ),
         written,
         skipped,

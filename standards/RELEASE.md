@@ -15,6 +15,8 @@ candidate freeze
  -> platform + lifecycle qualification
  -> performance / resilience
  -> operational E2E
+ -> human-equivalent Surface Reconciliation when user-facing
+ -> human-equivalent Full User E2E when user-facing
  -> release decision
  -> immutable tag/release
  -> public smoke
@@ -28,6 +30,19 @@ A blocking failure stops downstream expensive stages. Fix the blocker, create th
 Before a long full suite, run a short deterministic command containing the highest-value blockers: syntax/static validation, known critical regressions, release-governance checks, and other project-specific fast checks.
 
 The preflight should take minutes rather than hours. It is not a substitute for required full qualification; its purpose is to avoid wasting time and compute on a candidate that is already known to fail.
+
+## Mandatory user-facing product release gates
+
+When `.engineering/project.yaml` declares `project.user_facing: true`, the release contract MUST declare `human_equivalent_user_tests_required: true` and configure both required gates:
+
+1. `surface_reconciliation` — capability/public-surface/control/scenario completeness;
+2. `full_user_e2e` — complete real-user missions with actual outcomes, failures/recovery, destructive lifecycle, and cleanup.
+
+The release profile must bind both gates to the same exact candidate and retain their contract paths. CI may validate that the contracts exist and are wired, but CI/static validation alone MUST NOT be interpreted as execution PASS. Actual PASS authority comes from the active release Work Packet plus retained exact-candidate run evidence.
+
+For `project.primary_user_surface: browser`, the release profile MUST require an actual Chromium/Chrome browser process. Browser automation frameworks are drivers, not substitutes for the browser. Headless mode is allowed because it still launches a real browser engine.
+
+A product/harness/public-surface change after either gate PASS invalidates affected evidence. Re-establish the required exact-HEAD sequence before release.
 
 ## Avoid duplicate qualification
 

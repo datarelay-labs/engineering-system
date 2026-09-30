@@ -10,6 +10,8 @@ project:
   name: "engineering-system"
   type: "engineering-governance"
   maturity: "development"
+  user_facing: false
+  primary_user_surface: none
 
 domains:
   - standards

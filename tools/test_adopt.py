@@ -2490,6 +2490,84 @@ def test_bun_native_discovery() -> None:
         assert "bun test" in audit.stdout
 
 
+def test_user_facing_browser_release_requires_human_equivalent_contracts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-browser-product"
+        target.mkdir()
+        init_repo(target)
+        (target / "tests").mkdir()
+        (target / "tests/test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+        (target / "docs").mkdir()
+        (target / "docs/SURFACE_RECONCILIATION.md").write_text("# Surface Reconciliation\n", encoding="utf-8")
+        (target / "docs/FULL_USER_E2E.md").write_text("# Full User E2E\n", encoding="utf-8")
+        commit_all(target)
+
+        applied = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
+        project = load_yaml(target / ".engineering/project.yaml")
+        assert project["project"]["user_facing"] is True
+        assert project["project"]["primary_user_surface"] == "browser"
+        release = load_yaml(target / ".engineering/release.yaml")
+        assert release["human_equivalent_user_tests_required"] is True
+        user_tests = release["human_equivalent_user_tests"]
+        assert user_tests["actual_user_surface_required"] is True
+        assert user_tests["actual_browser_process_required"] is True
+        assert user_tests["same_candidate_required"] is True
+        assert user_tests["ci_contract_validation_only"] is True
+        assert user_tests["surface_reconciliation"]["contract"] == "docs/SURFACE_RECONCILIATION.md"
+        assert user_tests["full_user_e2e"]["contract"] == "docs/FULL_USER_E2E.md"
+        assert run(sys.executable, str(CHECK), "--root", str(target)).returncode == 0
+
+        release["human_equivalent_user_tests"]["actual_browser_process_required"] = False
+        (target / ".engineering/release.yaml").write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+        assert blocked.returncode != 0
+        assert "browser user-facing project requires actual_browser_process_required=true" in blocked.stdout
+
+
+def test_user_facing_adoption_fails_without_contracts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-missing-user-contracts"
+        target.mkdir()
+        init_repo(target)
+        (target / "README.md").write_text("# Demo\n", encoding="utf-8")
+        commit_all(target)
+        blocked = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--allow-no-tests",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert "requires both --surface-reconciliation-contract and --full-user-e2e-contract" in blocked.stdout
+
+
+def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> None:
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for needle in (
+        "user-facing project requires human_equivalent_user_tests_required=true",
+        "human-equivalent user tests require actual_user_surface_required=true",
+        "browser user-facing project requires actual_browser_process_required=true",
+        'for gate_name in ("surface_reconciliation", "full_user_e2e")',
+        'failures.append(f"human-equivalent {gate_name} gate must be mandatory")',
+    ):
+        assert needle in workflow, needle
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_clean_python_bootstrap()
@@ -2526,6 +2604,9 @@ def main() -> int:
     test_release_execution_context_is_bounded_and_upgradeable()
     test_managed_contract_dependency_failure_is_deterministic()
     test_managed_work_packet_template_requires_v2_authority_metadata()
+    test_user_facing_browser_release_requires_human_equivalent_contracts()
+    test_user_facing_adoption_fails_without_contracts()
+    test_adoption_compliance_workflow_enforces_user_facing_release_gates()
     test_bun_native_discovery()
     print("ADOPTION_TOOL_TESTS=PASS")
     return 0

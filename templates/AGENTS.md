@@ -50,6 +50,7 @@ When resuming a workstream, resolve this repository first, load only its single 
 - Do not duplicate equivalent native/shared CI or run expensive downstream qualification after a blocking deterministic failure.
 - Add durable regression coverage for bugs when practical.
 - Never weaken validation or claim PASS from unexecuted, blocked, historical, or different-HEAD evidence.
+- For `project.user_facing: true`, release qualification requires both human-equivalent Surface Reconciliation and Full User E2E on the same exact candidate. Use the actual primary public user surface; browser products require a real Chromium/Chrome process (Playwright/headless allowed). jsdom/component/API/static/CI contract checks do not substitute for execution PASS.
 - Before merge or terminal completion, resolve every actionable review finding with revalidation or an evidence-backed disposition.
 - Do not keep a coding-agent session alive polling CI/review/external waits; persist concise state and yield to coordinator/automation.
 - If mandatory engineering context is missing or contradictory, fail closed instead of guessing.
