@@ -264,6 +264,7 @@ After meaningful progress:
 - replace `Latest Evidence`
 - replace `Blockers`
 - update `LAST_VERIFIED_HEAD`
+- after every ACTIVE packet create or material update, lint the exact resulting authoritative body with `python3 tools/context_epoch.py packet-lint --body-file <file>`; a BLOCK result means the packet is non-runnable and must be corrected before implementation, handoff, or any implementation session/process start or resume
 
 Do not keep accumulating old phase text in the Issue body.
 
@@ -634,6 +635,8 @@ When the user asks to continue/resume an existing engineering workstream:
 - resolve the target repository
 - load its active Work Packet
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
+- lint the exact fresh authoritative packet body and require `packet-lint=PASS`; `IMPLEMENTER=CURSOR` or any other non-`CHATGPT_CHAT` implementer is `IMPLEMENTER_INVALID`
+- immediately before any implementation adapter/session/process start or resume, re-read the authoritative packet and lint it again; do not start or resume on WARN/BLOCK ambiguity and never treat a handoff comment as authority
 - verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence when packet v2 is used
 - verify current GitHub/repository facts
 - continue from `Next Action` only when it still matches the current owner intent
