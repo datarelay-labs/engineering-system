@@ -396,8 +396,33 @@ def test_live_provider_replaces_caller_native_state() -> None:
                 "example/app",
                 enabled_fixture(scope="repo"),
             )
+            mutator = DeclaredCustomMutator()
+            applied = HARDENING.apply_plan(
+                root,
+                enabled_fixture(scope="repo"),
+                allowed_controls=[
+                    "secret_scanning",
+                    "push_protection",
+                    "dependabot_security_updates",
+                    "codeql_or_sast",
+                ],
+                execute=True,
+                mutator=mutator,
+                observed_state_provider=HARDENING.GhApiObservedStateProvider(),
+            )
         finally:
             HARDENING._run_gh_api = original
+
+        VALIDATOR.validate(applied)
+        if applied["mutation"] != "APPLIED":
+            fail(f"custom mutator + GitHub provider was not applied: {applied}")
+        if applied["network"] != "GITHUB_SETTINGS":
+            fail(
+                "custom mutator + GitHub provider lost network provenance: "
+                f"{applied['network']}"
+            )
+        if not mutator.calls:
+            fail("custom mutator + GitHub provider did not execute mutation")
 
         if live["secret_scanning"] != "disabled":
             fail(f"stale secret scanning state survived live read: {live}")
