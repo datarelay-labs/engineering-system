@@ -495,7 +495,8 @@ def rewrite_known_baseline_declarations(
 
 
 def plan_baseline_declaration_updates(
-    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str
+    root: Path, old_version: str, old_baseline: str, new_version: str, new_baseline: str,
+    source_overrides: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Compute rewrite + stale validation for AGENTS.md/README before any mutation.
 
@@ -508,9 +509,10 @@ def plan_baseline_declaration_updates(
         if not path.is_file():
             continue
         original = path.read_text(encoding="utf-8")
+        source = (source_overrides or {}).get(rel, original)
         try:
-            rewritten, changed = rewrite_known_baseline_declarations(
-                original, new_version, new_baseline
+            rewritten, _changed = rewrite_known_baseline_declarations(
+                source, new_version, new_baseline
             )
         except SystemExit as exc:
             message = str(exc)
@@ -527,7 +529,7 @@ def plan_baseline_declaration_updates(
                 f"FAIL {rel} still contains stale Engineering System baseline "
                 f"{old_baseline} after managed declaration sync; review manually"
             )
-        if changed:
+        if rewritten != original:
             planned.append((rel, rewritten))
     return planned
 
@@ -813,10 +815,21 @@ def main() -> int:
 
     # Validate managed declaration rewrites AND stale old-version/old-baseline
     # checks for both files before mutating metadata/workflows/adapters.
-    planned_declarations = plan_baseline_declaration_updates(
+    # Preserve the established declaration-validation order before composing
+    # the managed execution-policy repair into the same AGENTS.md write.
+    plan_baseline_declaration_updates(
         root, old_version, old_baseline, current_version, new_baseline
     )
     planned_execution_policy = plan_execution_policy_sync(root)
+    source_overrides = (
+        {"AGENTS.md": planned_execution_policy}
+        if planned_execution_policy is not None
+        else None
+    )
+    planned_declarations = plan_baseline_declaration_updates(
+        root, old_version, old_baseline, current_version, new_baseline,
+        source_overrides=source_overrides,
+    )
     planned_work_packet_template = plan_work_packet_template_install(root, old_baseline)
     planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
     planned_knowledge_contract = plan_knowledge_contract_install(root, old_baseline)
@@ -905,7 +918,7 @@ def main() -> int:
     else:
         print("BASELINE_DECLARATIONS_SYNCED=<none>")
 
-    execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+    execution_policy_synced = planned_execution_policy is not None
     print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
 
     checker = CANONICAL / "tools" / "check-adoption.py"
