@@ -173,6 +173,25 @@ class DeclaredCustomMutator:
         ]
 
 
+class NonAppliedCustomMutator:
+    network_boundary = "GITHUB_SETTINGS"
+
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+    def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
+        if self.status == "EMPTY":
+            return []
+        return [
+            {
+                "id": item["id"],
+                "status": self.status,
+                "detail": f"captured {self.status.lower()} custom mutation",
+            }
+            for item in mutations
+        ]
+
+
 def test_production_gaps_plan_and_eligibility() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -301,6 +320,26 @@ def test_unsupported_allowed_control_blocks() -> None:
             fail("unsupported allowed control must block eligibility")
         if not any("unsupported" in item for item in plan["blockers"]):
             fail(f"missing unsupported blocker: {plan['blockers']}")
+
+
+def test_required_non_applyable_gap_blocks_eligibility() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        workflow = root / ".github" / "workflows"
+        workflow.mkdir(parents=True)
+        (workflow / "release.yml").write_text(
+            "name: release\njobs:\n  publish:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - uses: actions/checkout@v4\n",
+            encoding="utf-8",
+        )
+        plan = HARDENING.build_plan(root, enabled_fixture(), allowed_controls=[])
+        VALIDATOR.validate(plan)
+        if action_of(plan, "sensitive_action_pin") != "BLOCK":
+            fail("required non-applyable sensitive-action gap was not BLOCK")
+        if plan["eligible_apply"]:
+            fail("required non-applyable gap did not block apply eligibility")
+        if not any("sensitive_action_pin" in item for item in plan["blockers"]):
+            fail(f"missing required non-applyable blocker: {plan['blockers']}")
 
 
 def test_ambiguous_github_facts_block() -> None:
@@ -544,6 +583,32 @@ def test_declared_custom_mutator_reports_github_settings_boundary() -> None:
             fail("declared authoritative mutator was not called")
 
 
+def test_authoritative_custom_mutator_rejects_non_applied_results() -> None:
+    for status in ("FAILED", "SKIPPED", "EMPTY"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = production_root(Path(tmp))
+            provider = StaticObservedStateProvider(disabled_fixture())
+            try:
+                HARDENING.apply_plan(
+                    root,
+                    disabled_fixture(),
+                    allowed_controls=[
+                        "secret_scanning",
+                        "push_protection",
+                        "dependabot_security_updates",
+                        "codeql_or_sast",
+                    ],
+                    execute=True,
+                    mutator=NonAppliedCustomMutator(status),
+                    observed_state_provider=provider,
+                )
+            except HARDENING.HardeningError as exc:
+                if "authoritative mutator" not in str(exc):
+                    fail(f"unexpected {status} result error: {exc}")
+            else:
+                fail(f"authoritative custom mutator accepted {status} results")
+
+
 def test_github_native_mutation_endpoints() -> None:
     dependabot = HARDENING._github_mutation_request(
         "example/app", "dependabot_security_updates", "enabled"
@@ -757,6 +822,7 @@ def main() -> None:
     test_empty_preproduct_is_deferred_noop()
     test_needs_input_blocks()
     test_unsupported_allowed_control_blocks()
+    test_required_non_applyable_gap_blocks_eligibility()
     test_ambiguous_github_facts_block()
     test_foreign_fixture_blocks_apply()
     test_stale_plan_digest_rejected()
@@ -765,6 +831,7 @@ def main() -> None:
     test_custom_execute_requires_observed_state_provider()
     test_custom_authoritative_mutator_requires_network_boundary()
     test_declared_custom_mutator_reports_github_settings_boundary()
+    test_authoritative_custom_mutator_rejects_non_applied_results()
     test_github_native_mutation_endpoints()
     test_execute_record_backend_is_idempotent_and_bounded()
     test_execute_blocked_without_eligibility()

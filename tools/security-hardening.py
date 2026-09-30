@@ -301,13 +301,13 @@ def evaluate_eligibility(
         if item["id"] not in allowed:
             blockers.append(f"required applyable gap is not in allowed set: {item['id']}")
 
-    # Ambiguous/unsupported required gaps always block eligibility.
+    # Every required blocked control, plus every ambiguous blocked control,
+    # prevents apply even when the control itself is not directly applyable here.
     for item in controls:
         if item["action"] != "BLOCK":
             continue
         if item["requirement"] == "REQUIRED" or item["observed_state"] in AMBIGUOUS_STATES:
-            if item["id"] in APPLYABLE_CONTROLS or item["observed_state"] in AMBIGUOUS_STATES:
-                blockers.append(f"blocking control prevents apply: {item['id']}")
+            blockers.append(f"blocking control prevents apply: {item['id']}")
 
     # Deduplicate blockers while preserving order.
     deduped: list[str] = []
@@ -593,6 +593,33 @@ class GhApiMutator:
         return results
 
 
+def validate_authoritative_apply_results(
+    planned_mutations: list[dict[str, str]],
+    results: list[dict[str, str]],
+) -> None:
+    expected_ids = [item["id"] for item in planned_mutations]
+    if len(results) != len(expected_ids):
+        raise HardeningError(
+            "authoritative mutator result count does not match planned mutations"
+        )
+    seen: set[str] = set()
+    for result in results:
+        result_id = result.get("id")
+        if result_id not in expected_ids or result_id in seen:
+            raise HardeningError(
+                "authoritative mutator results do not match planned mutation ids"
+            )
+        if result.get("status") != "APPLIED":
+            raise HardeningError(
+                f"authoritative mutator did not apply planned mutation: {result_id}"
+            )
+        seen.add(result_id)
+    if seen != set(expected_ids):
+        raise HardeningError(
+            "authoritative mutator results do not cover all planned mutations"
+        )
+
+
 def apply_plan(
     root: Path,
     fixture: dict[str, Any] | None,
@@ -683,6 +710,8 @@ def apply_plan(
             )
 
     results = active.apply(plan["repository"], plan["planned_mutations"])
+    if not isinstance(active, RecordingMutator):
+        validate_authoritative_apply_results(plan["planned_mutations"], results)
     plan["apply_result"] = results
     if isinstance(active, RecordingMutator):
         plan["mutation"] = "PLANNED"
