@@ -23,8 +23,10 @@ from adopt import (
     SKILLS_CONTRACT_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
     WORK_PACKET_TEMPLATE_MANAGED,
+    apply_execution_policy_sync,
     canonical_baseline,
     canonical_version,
+    plan_execution_policy_sync,
     engineering_workflow,
     release_workflow,
 )
@@ -634,11 +636,14 @@ def main() -> int:
 
     if old_version == current_version and old_baseline == new_baseline:
         planned_engineering_context = plan_engineering_context_install(root)
-        if not planned_engineering_context and not retired_agent_artifacts:
+        planned_execution_policy = plan_execution_policy_sync(root)
+        if not planned_engineering_context and planned_execution_policy is None and not retired_agent_artifacts:
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
         if planned_engineering_context:
             print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_execution_policy is not None:
+            print("EXECUTION_POLICY_REPAIR=REQUIRED")
         if retired_agent_artifacts:
             print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
@@ -651,6 +656,8 @@ def main() -> int:
             root, planned_engineering_context
         )
         print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+        print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         checker = CANONICAL / "tools" / "check-adoption.py"
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
@@ -809,6 +816,7 @@ def main() -> int:
     planned_declarations = plan_baseline_declaration_updates(
         root, old_version, old_baseline, current_version, new_baseline
     )
+    planned_execution_policy = plan_execution_policy_sync(root)
     planned_work_packet_template = plan_work_packet_template_install(root)
     planned_dependencies = plan_engineering_system_dependencies_install(root)
     planned_knowledge_contract = plan_knowledge_contract_install(root)
@@ -896,6 +904,9 @@ def main() -> int:
         print("BASELINE_DECLARATIONS_SYNCED=" + ",".join(synced_declarations))
     else:
         print("BASELINE_DECLARATIONS_SYNCED=<none>")
+
+    execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
+    print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
 
     checker = CANONICAL / "tools" / "check-adoption.py"
     result = subprocess.run([sys.executable, str(checker), "--root", str(root)])

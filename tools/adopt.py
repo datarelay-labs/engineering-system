@@ -97,6 +97,67 @@ REQUIRED_MANAGED = (
 )
 
 RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
+EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
+EXECUTION_RULES_HEADING = "## Execution rules"
+
+
+def canonical_execution_policy_line() -> str:
+    template = CANONICAL / "templates" / "AGENTS.md"
+    if not template.is_file():
+        raise SystemExit("FAIL canonical AGENTS template missing")
+    matches = [
+        line
+        for line in template.read_text(encoding="utf-8").splitlines()
+        if line.startswith(EXECUTION_POLICY_MARKER)
+    ]
+    if len(matches) != 1:
+        raise SystemExit("FAIL canonical AGENTS template must contain exactly one managed execution policy")
+    return matches[0]
+
+
+def plan_execution_policy_sync(root: Path) -> str | None:
+    """Synchronize the existing canonical continuous-execution policy only.
+
+    Product-specific rules remain untouched. Existing repositories must expose the
+    established Execution rules section so the managed policy can be inserted
+    without guessing a custom document structure.
+    """
+    path = root / "AGENTS.md"
+    if not path.is_file():
+        return None
+    original = path.read_text(encoding="utf-8")
+    canonical = canonical_execution_policy_line()
+    lines = original.splitlines()
+    policy_indexes = [i for i, line in enumerate(lines) if line.startswith(EXECUTION_POLICY_MARKER)]
+    if len(policy_indexes) > 1:
+        raise SystemExit("FAIL AGENTS.md contains duplicate managed execution policy lines")
+    if policy_indexes:
+        idx = policy_indexes[0]
+        if lines[idx] == canonical:
+            return None
+        lines[idx] = canonical
+    else:
+        heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
+        if len(heading_indexes) != 1:
+            raise SystemExit(
+                "FAIL AGENTS.md must contain exactly one '## Execution rules' heading "
+                "before managed execution policy synchronization"
+            )
+        insert_at = heading_indexes[0] + 1
+        if insert_at < len(lines) and lines[insert_at] == "":
+            insert_at += 1
+        lines.insert(insert_at, canonical)
+    rewritten = "\n".join(lines)
+    if original.endswith("\n"):
+        rewritten += "\n"
+    return rewritten
+
+
+def apply_execution_policy_sync(root: Path, planned_text: str | None) -> bool:
+    if planned_text is None:
+        return False
+    (root / "AGENTS.md").write_text(planned_text, encoding="utf-8")
+    return True
 
 
 def remove_retired_agent_artifacts(root: Path) -> list[str]:
@@ -1277,6 +1338,7 @@ def main() -> int:
     ensure_implementation_preflight_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
+    planned_execution_policy = plan_execution_policy_sync(root)
 
     removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
 
@@ -1284,6 +1346,7 @@ def main() -> int:
     skipped: list[str] = []
 
     write_missing(root, "AGENTS.md", (CANONICAL / "templates" / "AGENTS.md").read_text(encoding="utf-8"), written, skipped)
+    execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
     for rel in (
         *KNOWLEDGE_CONTRACT_MANAGED,
         *RUNTIME_CONTRACT_MANAGED,
@@ -1409,6 +1472,7 @@ def main() -> int:
     print("DOMAINS=" + ",".join(domains))
     print("FILES_WRITTEN=" + (",".join(written) if written else "<none>"))
     print("FILES_PRESERVED=" + (",".join(skipped) if skipped else "<none>"))
+    print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
     print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
     if setup_command:
         print(f"SETUP_COMMAND={setup_command}")
