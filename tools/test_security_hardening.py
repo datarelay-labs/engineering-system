@@ -155,6 +155,24 @@ class CustomMutator:
         raise AssertionError("custom mutator must not execute without fresh observed-state provider")
 
 
+class DeclaredCustomMutator:
+    network_boundary = "GITHUB_SETTINGS"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
+        self.calls.append({"repository": repository, "mutations": list(mutations)})
+        return [
+            {
+                "id": item["id"],
+                "status": "APPLIED",
+                "detail": "captured declared custom mutation",
+            }
+            for item in mutations
+        ]
+
+
 def test_production_gaps_plan_and_eligibility() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = production_root(Path(tmp))
@@ -449,6 +467,58 @@ def test_custom_execute_requires_observed_state_provider() -> None:
             fail("custom authoritative execute bypassed fresh observed-state requirement")
 
 
+def test_custom_authoritative_mutator_requires_network_boundary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        provider = StaticObservedStateProvider(disabled_fixture())
+        try:
+            HARDENING.apply_plan(
+                root,
+                disabled_fixture(),
+                allowed_controls=[
+                    "secret_scanning",
+                    "push_protection",
+                    "dependabot_security_updates",
+                    "codeql_or_sast",
+                ],
+                execute=True,
+                mutator=CustomMutator(),
+                observed_state_provider=provider,
+            )
+        except HARDENING.HardeningError as exc:
+            if "network_boundary=GITHUB_SETTINGS" not in str(exc):
+                fail(f"unexpected custom-mutator network-boundary error: {exc}")
+        else:
+            fail("custom authoritative mutator omitted its network boundary")
+
+
+def test_declared_custom_mutator_reports_github_settings_boundary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = production_root(Path(tmp))
+        provider = StaticObservedStateProvider(disabled_fixture())
+        mutator = DeclaredCustomMutator()
+        result = HARDENING.apply_plan(
+            root,
+            disabled_fixture(),
+            allowed_controls=[
+                "secret_scanning",
+                "push_protection",
+                "dependabot_security_updates",
+                "codeql_or_sast",
+            ],
+            execute=True,
+            mutator=mutator,
+            observed_state_provider=provider,
+        )
+        VALIDATOR.validate(result)
+        if result["mutation"] != "APPLIED":
+            fail(f"declared authoritative mutator was not APPLIED: {result}")
+        if result["network"] != "GITHUB_SETTINGS":
+            fail(f"authoritative custom mutator lost network boundary: {result['network']}")
+        if not mutator.calls:
+            fail("declared authoritative mutator was not called")
+
+
 def test_github_native_mutation_endpoints() -> None:
     dependabot = HARDENING._github_mutation_request(
         "example/app", "dependabot_security_updates", "enabled"
@@ -668,6 +738,8 @@ def main() -> None:
     test_live_provider_replaces_caller_native_state()
     test_execute_rechecks_stale_fixture_before_mutation()
     test_custom_execute_requires_observed_state_provider()
+    test_custom_authoritative_mutator_requires_network_boundary()
+    test_declared_custom_mutator_reports_github_settings_boundary()
     test_github_native_mutation_endpoints()
     test_execute_record_backend_is_idempotent_and_bounded()
     test_execute_blocked_without_eligibility()

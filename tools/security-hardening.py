@@ -65,6 +65,8 @@ class HardeningError(Exception):
 
 
 class Mutator(Protocol):
+    network_boundary: str
+
     def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
         ...
 
@@ -499,6 +501,8 @@ class GhApiObservedStateProvider:
 class RecordingMutator:
     """Network-free rehearsal that records intent but never claims external apply."""
 
+    network_boundary = "NONE"
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
@@ -550,6 +554,8 @@ def _github_mutation_request(
 
 class GhApiMutator:
     """Bounded GitHub settings mutator. Never logs credential values."""
+
+    network_boundary = "GITHUB_SETTINGS"
 
     def apply(self, repository: str, mutations: list[dict[str, str]]) -> list[dict[str, str]]:
         if PROFILE.REPO_RE.fullmatch(repository) is None:
@@ -667,6 +673,15 @@ def apply_plan(
         return plan
 
     assert active is not None
+    if isinstance(active, RecordingMutator):
+        mutation_network = "NONE"
+    else:
+        mutation_network = getattr(active, "network_boundary", None)
+        if mutation_network != "GITHUB_SETTINGS":
+            raise HardeningError(
+                "authoritative mutator must declare network_boundary=GITHUB_SETTINGS"
+            )
+
     results = active.apply(plan["repository"], plan["planned_mutations"])
     plan["apply_result"] = results
     if isinstance(active, RecordingMutator):
@@ -674,7 +689,7 @@ def apply_plan(
         plan["network"] = "NONE"
     else:
         plan["mutation"] = "APPLIED"
-        plan["network"] = "GITHUB_SETTINGS" if isinstance(active, GhApiMutator) else "NONE"
+        plan["network"] = mutation_network
     # Digest stays bound to desired-state material, not apply_result.
     Draft202012Validator(load_schema()).validate(plan)
     return plan
