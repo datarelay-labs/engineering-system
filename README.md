@@ -91,7 +91,7 @@ python tools/adopt.py \
 
 If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
-Engineering System 1.6.5 uses ChatGPT Chat as the sole implementation path. Managed adoption stays baseline-pinned, context/test selection remains cost-aware and provider-neutral, and managed upgrades remove retired editor-agent artifacts instead of preserving a compatibility execution path.
+Engineering System 1.7.0 uses ChatGPT Chat as the sole implementation path. Managed adoption stays baseline-pinned, context/test selection remains cost-aware and provider-neutral, and managed upgrades remove retired editor-agent artifacts instead of preserving a compatibility execution path.
 
 
 
