@@ -91,15 +91,23 @@ Test help/navigation, wizard inputs, invalid input recovery, copy/paste, wrong c
 
 Deterministic unit/component/API/matrix tests are necessary but do not reproduce the user's complete environment, discoverability, action sequence, state transitions, cross-surface continuity, realistic mistakes, failure diagnosis/recovery, and final user-visible outcome. They therefore cannot be the only release evidence for a user-facing product.
 
-A user-facing release MUST add two separate human-equivalent gates after exact-candidate machine qualification:
+A user-facing release MUST use the human-equivalent gates as the semantic defect-discovery stages **before final exact-head CI and release-integrity qualification**:
 
 ```text
-exact-head machine qualification
- -> Surface Reconciliation
- -> Full User E2E
+Surface Reconciliation / Feature-Scenario PASS1
+ -> batched remediation
+ -> PASS2 clean
+ -> Full User E2E PASS1
+ -> batched remediation
+ -> PASS2 clean
+ -> release-specific upgrade/platform qualification
+ -> final exact-head automated CI
+ -> release integrity / final audit
  -> owner/manual acceptance when required
  -> release authorization
 ```
+
+PASS1 continues every safe independent scenario/journey after findings to maximize defect discovery. PASS1 findings are remediated as one bounded batch. PASS2 restarts the complete gate on the new candidate and requires zero mandatory findings. Do not interleave each finding fix with remote CI.
 
 **Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
 
@@ -130,8 +138,11 @@ Run these when the change touches performance/resilience boundaries or at the re
 - development: affected L0-L5 only
 - PR: affected scenarios + cheap `pr` guardrails
 - optional nightly: broader deterministic/integration
-- release preflight: cheap `preflight` blockers
-- release candidate: full deterministic + selected L6/L7
-- stable release: required L8 operational E2E on the exact candidate
+- release closure discovery: breadth-first Feature/Scenario PASS1 -> batched remediation -> PASS2
+- release user validation: Full User E2E PASS1 -> batched remediation -> PASS2
+- release-specific qualification: upgrade/migration/platform/performance as applicable
+- final release candidate: one exact-head automated deterministic/platform CI qualification
+- integrity: artifact/hash/SBOM/provenance/manifest/attestation after final CI
+- stable release: final exact-candidate audit, authorization, publication, then public smoke
 
 A failure at an earlier mandatory level blocks starting downstream expensive qualification until the failure is resolved or explicitly classified as non-blocking.

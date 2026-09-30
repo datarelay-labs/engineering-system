@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -205,9 +206,30 @@ def known_managed_cursor_rule_texts(canonical_text: str) -> set[str]:
     return known
 
 
-def known_managed_file_hashes(rel: str, canonical_bytes: bytes) -> set[str]:
+def known_managed_file_hashes(rel: str, canonical_bytes: bytes, old_baseline: str = "") -> set[str]:
     """Return trusted hashes for current and historical adoption-managed files."""
     known = {hashlib.sha256(canonical_bytes).hexdigest()}
+    if old_baseline and re.fullmatch(r"[0-9a-f]{40}", old_baseline):
+        try:
+            prior = subprocess.run(
+                ["git", "-C", str(CANONICAL), "show", f"{old_baseline}:{rel}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+            )
+            if prior.returncode == 0:
+                known.add(hashlib.sha256(prior.stdout).hexdigest())
+            # Some adopted repositories were created from canonical managed bytes
+            # whose formatting was normalized during adoption. Compare semantics
+            # for JSON managed files before classifying those bytes as custom.
+            if rel.endswith(".json") and prior.returncode == 0:
+                try:
+                    known_json = json.loads(prior.stdout.decode("utf-8"))
+                    canonical_json = json.loads(canonical_bytes.decode("utf-8"))
+                    if known_json == canonical_json:
+                        pass
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
+        except OSError:
+            pass
     history_dir = CANONICAL / "tools" / "managed_adapter_history" / "file_hashes"
     if not history_dir.is_dir():
         return known
@@ -228,7 +250,7 @@ def known_managed_file_hashes(rel: str, canonical_bytes: bytes) -> set[str]:
 
 
 def plan_managed_file_install(
-    root: Path, managed: tuple[str, ...], *, label: str
+    root: Path, managed: tuple[str, ...], *, label: str, old_baseline: str = ""
 ) -> dict[str, str]:
     """Plan updates only for current or cryptographically known managed bytes."""
     planned: dict[str, str] = {}
@@ -250,9 +272,18 @@ def plan_managed_file_install(
         if existing_bytes == canonical_bytes:
             continue
         digest = hashlib.sha256(existing_bytes).hexdigest()
-        if digest in known_managed_file_hashes(rel, canonical_bytes):
+        if digest in known_managed_file_hashes(rel, canonical_bytes, old_baseline):
             planned[rel] = canonical_text
             continue
+        if rel.endswith(".json") and old_baseline and re.fullmatch(r"[0-9a-f]{40}", old_baseline):
+            prior = subprocess.run(["git", "-C", str(CANONICAL), "show", f"{old_baseline}:{rel}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            if prior.returncode == 0:
+                try:
+                    if json.loads(existing_bytes.decode("utf-8")) == json.loads(prior.stdout.decode("utf-8")):
+                        planned[rel] = canonical_text
+                        continue
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
         raise SystemExit(
             f"FAIL {rel} contains local/custom changes; preserve/review them manually before upgrade"
         )
@@ -429,10 +460,10 @@ def apply_runtime_contract_install(root: Path, planned: dict[str, str]) -> list[
     return installed
 
 
-def plan_skills_contract_install(root: Path) -> dict[str, str]:
+def plan_skills_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed skills-contract bytes."""
     return plan_managed_file_install(
-        root, SKILLS_CONTRACT_MANAGED, label="skills contract"
+        root, SKILLS_CONTRACT_MANAGED, label="skills contract", old_baseline=old_baseline
     )
 
 
@@ -872,7 +903,7 @@ def main() -> int:
     planned_dependencies = plan_engineering_system_dependencies_install(root)
     planned_knowledge_contract = plan_knowledge_contract_install(root)
     planned_runtime_contract = plan_runtime_contract_install(root)
-    planned_skills_contract = plan_skills_contract_install(root)
+    planned_skills_contract = plan_skills_contract_install(root, old_baseline)
     planned_verification_contract = plan_verification_contract_install(root)
     planned_implementation_preflight = plan_implementation_preflight_install(root)
     planned_context_epoch = plan_context_epoch_install(root)

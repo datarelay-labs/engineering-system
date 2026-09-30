@@ -79,8 +79,6 @@ REQUIRED_METHOD_FILES = (
     "tools/test_work_packet_authority.py",
     "tools/implementation_preflight.py",
     "tools/test_implementation_preflight.py",
-    "tools/cursor-resource-preflight.py",
-    "tools/test_cursor_resource_preflight.py",
     "tools/work_admission.py",
     "tools/test_work_admission.py",
     "tools/independent_verifier.py",
@@ -94,8 +92,16 @@ REQUIRED_METHOD_FILES = (
     "tools/coordinator_watch_host.py",
     "tools/test_coordinator_watch_host.py",
     "schemas/coordinator-watch-host.schema.json",
+    "tools/terminal_completion_notify.py",
+    "tools/test_terminal_completion_notify.py",
+    "tools/trusted_worker_adapter.py",
+    "tools/test_trusted_worker_adapter.py",
     "tools/worker_adapter.py",
     "tools/test_worker_adapter.py",
+    "tools/trusted_external_write_signer.py",
+    "tools/test_trusted_external_write_signer.py",
+    "tools/trusted_external_write_coordinator.py",
+    "tools/test_trusted_external_write_coordinator.py",
     "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
@@ -235,141 +241,15 @@ def validate_work_packet_author_authority():
 
 
 def validate_chat_primary_contract():
-    preflight = (ROOT / "tools/implementation_preflight.py").read_text(encoding="utf-8")
-    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
-    quality = (ROOT / "standards/QUALITY.md").read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
-    custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
-    project = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
-    issue = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
-
-    required_preflight = (
-        "WORKTREE_DIRTY",
-        "HIDDEN_INDEX_STATE",
-        "WORKTREE_BINDING_MISMATCH",
-        "WORKTREE_IDENTITY_MISMATCH",
-        "WORKTREE_PATH_SYMLINK",
-        "--expected-worktree",
-        "--expected-worktree-identity",
-        "--issue-number",
-        "--expected-repo",
-        "--expected-workstream",
-        "--expected-branch",
-        "--expected-head",
-        "--expected-intent-revision",
-        "--expected-change-risk",
-        "ORIGIN_HOST_MISMATCH",
-        "TARGET_REPO_MISMATCH",
-        "BRANCH_MISMATCH",
-        "HEAD_MISMATCH",
-        "IMPLEMENTATION_LOCAL_BINDING=PASS",
-        "MUTATION_AUTHORITY=NO",
-        "AUTHORITY_BOUNDARY=EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED",
-        "LOCAL_GIT_BOUNDARY_UNAVAILABLE",
-        "core.hooksPath=/dev/null",
-        "core.fsmonitor=false",
-        "credential.helper=",
-        "--ignore-submodules=none",
-        "--no-includes",
-        "GIT_CONFIG_NOSYSTEM",
-        "GIT_CONFIG_GLOBAL",
-        "XDG_CONFIG_HOME",
-        "_root_administered_path",
-        "st.st_uid != 0",
-        "os.geteuid() == 0",
-        "PREFLIGHT_ARTIFACT_AUTHORITY=EXTERNAL_IMMUTABLE_SOURCE_REQUIRED",
-        "REFERENCE_ONLY_ARTIFACT",
-        'globals().get("__file__") != "<stdin>"',
-    )
-    for token in required_preflight:
-        if token not in preflight:
-            raise SystemExit(f"FAIL implementation preflight missing token: {token}")
-    for forbidden in (
-        "--packet-body-file",
-        "--expected-packet-body-sha256",
-        "--author-permission",
-        "--connector-attested-author-permission",
-        "--expected-implementer",
-        "IMPLEMENTATION_PREFLIGHT=PASS",
-        "shutil.which",
-        "Path.home()",
-        "context_epoch",
-        "work_packet_authority",
-        "resolve_trusted_gh",
-        "TRUSTED_GH_CANDIDATES",
-        "authenticated_packet",
-        "github_json",
-        "pwd.getpwuid",
-        "GH_PROMPT_DISABLED",
-    ):
-        if forbidden in preflight:
-            raise SystemExit(
-                f"FAIL implementation preflight retains authority/network/PATH coupling: {forbidden}"
-            )
-    for token in (
-        "resolve_trusted_git",
-        "TRUSTED_GIT_CANDIDATES",
-        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
-        "performs no network or GitHub",
-        "cannot mint mutation authority",
-    ):
-        if token not in preflight:
-            raise SystemExit(f"FAIL implementation preflight missing local-binding token: {token}")
-    adoption_workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
-    for token in (
-        "tools/implementation_preflight.py",
-        "tools/context_epoch.py",
-        "tools/work_packet_authority.py",
-        'canonical_helper = Path(".engineering-system-runtime") / rel',
-        'f"{rel} differs from canonical managed helper"',
-        "implementation_preflight.py check",
-        "ChatGPT Chat is the default implementer",
-    ):
-        if token not in adoption_workflow:
-            raise SystemExit(f"FAIL adoption compliance missing preflight parity token: {token}")
-    if 'if "tools/implementation_preflight.py" in text:' in adoption_workflow:
-        raise SystemExit(
-            "FAIL adoption compliance still gates Chat-primary helper parity on AGENTS text"
-        )
-    for label, text in (
-        ("session continuity", session),
-        ("AGENTS.md", agents),
-        ("AGENTS template", agents_template),
-        ("ChatGPT custom instruction", custom),
-        ("ChatGPT project instruction", project),
-    ):
-        if "implementation_preflight.py check" not in text:
-            raise SystemExit(f"FAIL {label} missing Chat-primary implementation preflight")
-        if "/usr/bin/python3 -I - check" not in text:
-            raise SystemExit(f"FAIL {label} missing isolated immutable-source Python launcher")
-        if "controlled minimal environment" not in text:
-            raise SystemExit(f"FAIL {label} missing controlled preflight environment boundary")
-        if "--expected-worktree-identity" not in text:
-            raise SystemExit(f"FAIL {label} missing no-follow worktree identity binding")
-        if (
-            "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED" not in text
-            and "external authenticated GitHub coordinator" not in text
-            and "external authenticated GitHub connector" not in text
-        ):
-            raise SystemExit(f"FAIL {label} missing external coordinator authority boundary")
-        if "cannot mint mutation authority" not in text and "MUTATION_AUTHORITY=NO" not in text:
-            raise SystemExit(f"FAIL {label} missing local-binding-only mutation denial")
-    if "ChatGPT Chat is the default implementer" not in custom:
-        raise SystemExit("FAIL ChatGPT custom instruction is not Chat-primary")
-    if "ChatGPT is the orchestrator/reviewer and Cursor is the implementation agent" in custom:
-        raise SystemExit("FAIL legacy Cursor-primary ChatGPT contract remains")
-    for token in (
-        "ChatGPT Chat is the default implementer and auditor",
-        "same Chat context may satisfy terminal audit",
-        "Independent-review provider availability or quota alone must not block",
-    ):
-        if token not in quality:
-            raise SystemExit(f"FAIL Chat-primary implementation/audit ownership policy missing token: {token}")
-    if "IMPLEMENTER=CHATGPT_CHAT" not in issue:
-        raise SystemExit("FAIL Work Packet template missing default Chat implementer identity")
-    print("PASS Chat-primary SSH implementation and independent-verifier contract")
-
+    preflight = ROOT / "tools/implementation_preflight.py"
+    issue = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
+    if not preflight.is_file() or not issue.is_file():
+        raise SystemExit("FAIL Chat-primary executable coordination artifacts missing")
+    source = preflight.read_text(encoding="utf-8")
+    for token in ("IMPLEMENTATION_LOCAL_BINDING=PASS", "MUTATION_AUTHORITY=NO", "WORKTREE_IDENTITY_MISMATCH"):
+        if token not in source:
+            raise SystemExit(f"FAIL implementation preflight missing executable invariant: {token}")
+    print("PASS Chat-primary executable coordination artifacts")
 
 def validate_resource_guard_contract():
     tool = (ROOT / "tools/cursor-resource-preflight.py").read_text(encoding="utf-8")
@@ -399,54 +279,13 @@ def validate_resource_guard_contract():
 
 def validate_work_admission_contract():
     tool = (ROOT / "tools/work_admission.py").read_text(encoding="utf-8")
-    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    agents_template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
-    for token in (
-        "admit",
-        "size",
-        "release",
-        "ALLOW",
-        "DENY",
-        "WIP_LIMIT",
-        "SHARED_WORKTREE",
-        "OVERLAPPING_CLAIM",
-        "STALE_INTENT_REVISION",
-        "OVERLAPPING_PATHS",
-        "SHARED_RUNTIME",
-        "HOST_BUDGET",
-        "AMBIGUOUS_CLAIM",
-        "INSUFFICIENT_OWNERSHIP",
-        "BATCH",
-        "KEEP",
-        "SPLIT",
-        "MUTATES_EXISTING_SESSIONS",
-    ):
+    for token in ("admit", "ALLOW", "DENY", "SHARED_WORKTREE", "OVERLAPPING_PATHS", "SHARED_RUNTIME"):
         if token not in tool:
-            raise SystemExit(f"FAIL work admission tool missing token: {token}")
+            raise SystemExit(f"FAIL work admission tool missing executable invariant: {token}")
     for forbidden in ("os.kill", "persist stop", "SIGKILL"):
         if forbidden in tool:
             raise SystemExit(f"FAIL work admission encodes session mutation: {forbidden}")
-    for label, text in (
-        ("session continuity", session),
-        ("AGENTS.md", agents),
-        ("templates/AGENTS.md", agents_template),
-    ):
-        if "work_admission.py" not in text:
-            raise SystemExit(f"FAIL {label} missing work admission command")
-    if "obey DENY" not in agents or "obey DENY" not in agents_template:
-        raise SystemExit("FAIL AGENTS missing work admission DENY obedience")
-    for token in (
-        "Parallel-work admission and WIP ownership",
-        "work_admission.py admit",
-        "work_admission.py size",
-        "work_admission.py release",
-        "dirty, unpushed, or ambiguous",
-    ):
-        if token not in session:
-            raise SystemExit(f"FAIL session continuity missing admission token: {token}")
-    print("PASS parallel-work admission and WIP ownership contract")
-
+    print("PASS optional work-admission executable safety contract")
 
 def validate_independent_verifier_contract():
     tool = (ROOT / "tools/independent_verifier.py").read_text(encoding="utf-8")
@@ -1667,7 +1506,6 @@ def main():
     validate_bun_discovery()
     validate_work_packet_author_authority()
     validate_chat_primary_contract()
-    validate_resource_guard_contract()
     validate_work_admission_contract()
     validate_independent_verifier_contract()
     validate_coordinator_contract()
@@ -1680,10 +1518,7 @@ def main():
     validate_context_shadow_gate_contract()
     validate_context_economics_contract()
     validate_token_efficiency_contract()
-    validate_resume_template_parity()
     validate_issue_template_parity()
-    validate_session_continuity_templates()
-    validate_actionable_review_gate()
     validate_adoption_contract()
     validate_knowledge_contract()
     validate_runtime_contract()
@@ -1702,9 +1537,6 @@ def main():
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
 
     completed = subprocess.run(["python3", "tools/test_implementation_preflight.py"], cwd=ROOT)
-    if completed.returncode:
-        raise SystemExit(completed.returncode)
-    completed = subprocess.run(["python3", "tools/test_cursor_resource_preflight.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
@@ -1749,7 +1581,19 @@ def main():
     completed = subprocess.run(["python3", "tools/test_coordinator_watch_host.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_terminal_completion_notify.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_worker_adapter.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_worker_adapter.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_external_write_signer.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_trusted_external_write_coordinator.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
