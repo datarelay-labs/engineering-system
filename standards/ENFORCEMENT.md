@@ -41,7 +41,11 @@ When any of those surfaces changes:
 
 The base-owned governance floor reads the candidate manifest and candidate blobs as data only. It rejects a missing/stale base binding, epoch jump, incomplete/extra surface set, or blob mismatch. Candidate root-of-trust code is not used to authorize itself.
 
-The ordinary PR validation workflow then executes the candidate's deterministic tests on the exact candidate HEAD with its normal read-only CI boundary. A root-of-trust migration is merge-ready only when both the base-owned floor and exact-head validation pass and actionable review findings are dispositioned. Root-of-trust migration evidence never grants merge authority and is not eligible for automatic merge.
+The migration manifest is evidence, not authority. A root-of-trust migration additionally requires explicit current owner approval recorded in the trusted ACTIVE Work Packet for that migration. Root-of-trust migration evidence never grants merge authority and is never eligible for automatic merge.
+
+The ordinary PR validation workflow executes the candidate's deterministic tests on the exact candidate HEAD with its normal read-only CI boundary. After this migration contract is established on the base branch, a future root-of-trust migration is merge-ready only when the base-owned floor passes, exact-head validation passes, current owner approval is present, and actionable review findings are dispositioned.
+
+The one migration that establishes this contract is necessarily a bridge from the legacy self-protecting floor, which cannot authorize replacement of its own helper. For that establishing migration only, the legacy floor may remain BLOCK solely for the known self-change/prose-coupling reasons documented in the trusted Work Packet; the candidate migration contract must PASS against the exact old base, exact-head validation must PASS, the changed root surface set/blob digests must match the manifest, and explicit owner approval is mandatory. Once merged, this bootstrap disposition is retired and MUST NOT be reused.
 
 ## Context-loading enforcement
 
