@@ -84,8 +84,9 @@ TRACE_PRCTL_RE = re.compile(
 TRACE_SYSCALL_NAME_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?([A-Za-z0-9_]+)\("
 )
-TRACE_UNIX_SOCKET_PATH_RE = re.compile(r'\bsun_path="((?:\\.|[^"\\])*)"')
-TRACE_UNIX_SOCKET_ABSTRACT_RE = re.compile(r"\bsun_path=@")
+TRACE_UNIX_SOCKET_ADDR_RE = re.compile(
+    r'\bsun_path=(?P<abstract>@)?"(?P<path>(?:\\.|[^"\\])*)"'
+)
 TRACE_UNIX_SOCKET_SYSCALLS = frozenset({"connect", "bind", "sendto", "sendmsg", "sendmmsg"})
 TRACE_SYSCALL_FILTER = (
     "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,"
@@ -957,17 +958,18 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         if syscall in TRACE_UNIX_SOCKET_SYSCALLS:
             if "AF_UNIX" not in line:
                 continue
-            if TRACE_UNIX_SOCKET_ABSTRACT_RE.search(line):
-                continue
-            socket_path = TRACE_UNIX_SOCKET_PATH_RE.search(line)
-            if socket_path is None:
+            socket_addresses = list(TRACE_UNIX_SOCKET_ADDR_RE.finditer(line))
+            if not socket_addresses:
                 return "TRACE_AMBIGUOUS"
-            decoded = _decode_trace_string(socket_path.group(1))
-            if decoded is None:
-                return "TRACE_AMBIGUOUS"
-            reason = _trace_path_dependency_reason(decoded, base, unsafe)
-            if reason is not None:
-                return reason
+            for socket_address in socket_addresses:
+                if socket_address.group("abstract") is not None:
+                    continue
+                decoded = _decode_trace_string(socket_address.group("path"))
+                if decoded is None:
+                    return "TRACE_AMBIGUOUS"
+                reason = _trace_path_dependency_reason(decoded, base, unsafe)
+                if reason is not None:
+                    return reason
             continue
 
         for match in TRACE_DIRFD_PATH_RE.finditer(line):
@@ -1042,6 +1044,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             *tracer,
             "-f",
             "-qq",
+            "-v",
             "-s",
             "4096",
             "-e",

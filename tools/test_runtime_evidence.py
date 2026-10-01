@@ -1259,6 +1259,16 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         assert runtime_evidence._trace_unsafe_access_reason(
             trace, work, ("vendor/dependency",)
         ) is None
+        for multi_socket in (
+            '123 sendmmsg(3, [{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="safe.sock"}}}, '
+            '{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="vendor/dependency"}}}], 2, 0) = 2\n',
+            '123 sendmmsg(3, [{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path=@"abstract"}}}, '
+            '{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="vendor/dependency"}}}], 2, 0) = 2\n',
+        ):
+            trace.write_text(multi_socket, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "UNSAFE_TREE_DEPENDENCY"
         trace.write_text(
             '123 execve("/usr/bin/python3", ["python3", "health.py", "optional-config"], 0x0) = 0\n',
             encoding="utf-8",
