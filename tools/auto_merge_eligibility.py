@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Pure conditional auto-merge eligibility evaluator.
 
-This module consumes bounded Trust Engineering and current PR/policy facts and
-returns ELIGIBLE, DENY, or BLOCK. ELIGIBLE is a policy result only: every result
-sets authorizes_merge=false and this tool has no network, shell, GitHub,
-release, deployment, or external-write execution path.
+Positive eligibility reuses the #67 verification contract. Caller JSON cannot
+mint T5 authority: the public CLI has no boundary input and therefore cannot
+produce ELIGIBLE. In-process callers must supply the exact
+TrustedCoordinatorBoundary type consumed by verification-contract.py, whose
+assessor must independently return PASS/T5/AUTOMATION_ELIGIBLE=YES for the
+same repository, workstream, intent revision, and HEAD.
+
+ELIGIBLE remains evidence-only. Every result fixes merge/external mutation,
+command execution, and network I/O authority to false.
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +52,8 @@ def _result(
     reason_class: str,
     reason: str,
 ) -> dict[str, Any]:
-    subject = request.get("subject", {}) if isinstance(request, dict) else {}
+    candidate = request.get("subject") if isinstance(request, dict) else None
+    subject = candidate if isinstance(candidate, dict) else {}
     return {
         "schema_version": 1,
         "decision": decision,
@@ -64,13 +72,80 @@ def _result(
     }
 
 
-def evaluate(request: Any, root: Path = ROOT) -> dict[str, Any]:
+def verification_module() -> Any:
+    name = "verification_contract"
+    cached = sys.modules.get(name)
+    if cached is not None and hasattr(cached, "TrustedCoordinatorBoundary"):
+        return cached
+    path = Path(__file__).resolve().parent / "verification-contract.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("verification contract is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _trusted_t5_reason(
+    root: Path,
+    request: dict[str, Any],
+    boundary: Any,
+) -> tuple[str, str] | None:
+    try:
+        module = verification_module()
+    except (OSError, RuntimeError):
+        return ("TRUST_BOUNDARY_UNAVAILABLE", "verification contract boundary is unavailable")
+    if type(boundary) is not module.TrustedCoordinatorBoundary:
+        return (
+            "UNTRUSTED_BOUNDARY",
+            "T5 eligibility requires an in-process TrustedCoordinatorBoundary",
+        )
+
+    subject = request["subject"]
+    expected = {
+        "target_repo": subject["target_repo"],
+        "workstream": subject["workstream"],
+        "intent_revision": subject["intent_revision"],
+        "subject_head": subject["head_sha"],
+    }
+    verification = request["verification"]
+    report = module.assess(
+        root,
+        verification["receipt"],
+        expected,
+        verification["manifest"],
+        boundary,
+    )
+    if report.get("DECISION") != "PASS":
+        deny_class = str(report.get("DENY_CLASS") or "TRUST_BLOCKED")
+        reason = str(report.get("REASON") or "Trust Engineering assessment did not pass")
+        return (deny_class, reason)
+    if report.get("ACHIEVED") != "T5":
+        return ("TRUST_BELOW_T5", "Trust Engineering assessment is below T5")
+    if report.get("AUTOMATION_ELIGIBLE") != "YES":
+        return (
+            "AUTOMATION_NOT_ELIGIBLE",
+            "Trust Engineering assessment is not automation-eligible",
+        )
+    if report.get("EXTERNAL_MUTATION") != "NO":
+        return (
+            "TRUST_MUTATION_INVALID",
+            "Trust Engineering assessment unexpectedly carries mutation authority",
+        )
+    return None
+
+
+def evaluate(
+    request: Any,
+    root: Path = ROOT,
+    boundary: Any = None,
+) -> dict[str, Any]:
     malformed = _malformed_reason(root, request)
     if malformed is not None:
         return _result(request, "BLOCK", "MALFORMED", malformed)
 
     subject = request["subject"]
-    trust = request["trust"]
     policy = request["policy"]
     observed = request["observed"]
     head = subject["head_sha"]
@@ -92,21 +167,6 @@ def evaluate(request: Any, root: Path = ROOT) -> dict[str, Any]:
             "observed PR head does not match the eligibility subject",
         )
 
-    trust_bindings = (
-        ("target_repo", "target_repo"),
-        ("workstream", "workstream"),
-        ("intent_revision", "intent_revision"),
-        ("subject_head", "head_sha"),
-    )
-    for trust_field, subject_field in trust_bindings:
-        if trust[trust_field] != subject[subject_field]:
-            return _result(
-                request,
-                "BLOCK",
-                "STALE_TRUST",
-                f"trust {trust_field} is not bound to the current subject",
-            )
-
     mutation_state = observed["mutation_state"]
     if mutation_state == "AMBIGUOUS":
         return _result(request, "BLOCK", "MUTATION_AMBIGUOUS", "prior mutation outcome is ambiguous")
@@ -117,17 +177,10 @@ def evaluate(request: Any, root: Path = ROOT) -> dict[str, Any]:
     if mutation_state == "UNKNOWN":
         return _result(request, "BLOCK", "MUTATION_UNKNOWN", "mutation state is unknown")
 
-    if trust["decision"] != "PASS":
-        return _result(request, "BLOCK", "TRUST_BLOCKED", "Trust Engineering decision is not PASS")
-    if trust["achieved"] != "T5":
-        return _result(request, "BLOCK", "TRUST_BELOW_T5", "Trust Engineering level is below T5")
-    if trust["automation_eligible"] != "YES":
-        return _result(
-            request,
-            "BLOCK",
-            "AUTOMATION_NOT_ELIGIBLE",
-            "Trust Engineering does not mark this subject automation-eligible",
-        )
+    trust_problem = _trusted_t5_reason(root, request, boundary)
+    if trust_problem is not None:
+        reason_class, reason = trust_problem
+        return _result(request, "BLOCK", reason_class, reason)
 
     if subject["target_repo"] not in policy["allowed_repositories"]:
         return _result(request, "DENY", "REPOSITORY_NOT_ALLOWLISTED", "repository is not allowlisted")
@@ -189,6 +242,8 @@ def main() -> int:
         print(json.dumps(report, sort_keys=True))
         return 3
 
+    # The public CLI deliberately exposes no boundary option. It can validate
+    # and deny caller facts but can never produce ELIGIBLE.
     report = evaluate(request)
     print(json.dumps(report, sort_keys=True))
     return 3 if report["reason_class"] == "MALFORMED" else 0

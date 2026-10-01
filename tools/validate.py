@@ -1278,6 +1278,12 @@ def validate_auto_merge_eligibility_contract():
         "STALE_CI",
         "STALE_REVIEW",
         "AUTO_MERGE_DISABLED",
+        "TrustedCoordinatorBoundary",
+        "UNTRUSTED_BOUNDARY",
+        "AUTOMATION_NOT_ELIGIBLE",
+        "module.assess(",
+        'verification["receipt"]',
+        'verification["manifest"]',
         '"authorizes_merge": False',
         '"external_mutation": False',
         '"executes_commands": False',
@@ -1285,6 +1291,8 @@ def validate_auto_merge_eligibility_contract():
     ):
         if token not in tool:
             raise SystemExit(f"FAIL auto-merge eligibility tool missing token: {token}")
+    if 'add_argument("--boundary"' in tool or "args.boundary" in tool:
+        raise SystemExit("FAIL auto-merge eligibility CLI accepts a boundary file")
     for banned in (
         "subprocess",
         "os.system",

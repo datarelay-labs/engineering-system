@@ -15,15 +15,75 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from auto_merge_eligibility import evaluate  # noqa: E402
+import auto_merge_eligibility as gate  # noqa: E402
 
 TOOL = ROOT / "tools" / "auto_merge_eligibility.py"
 SCHEMA = json.loads(
     (ROOT / "schemas" / "auto-merge-eligibility.schema.json").read_text(encoding="utf-8")
 )
+RESULT_SCHEMA = json.loads(
+    (ROOT / "schemas" / "auto-merge-eligibility-result.schema.json").read_text(encoding="utf-8")
+)
 VALIDATOR = Draft202012Validator(SCHEMA)
+RESULT_VALIDATOR = Draft202012Validator(RESULT_SCHEMA)
 HEAD = "a" * 40
 OTHER = "b" * 40
+WORKSTREAM = "engineering-system-1.7-conditional-auto-merge-trust-gate"
+REVISION = 2
+
+
+def empty_role() -> dict:
+    return {"tests": [], "runtime": [], "skills": [], "profiles": []}
+
+
+def verification_manifest(*, level: str = "T5", automate: bool = True) -> dict:
+    drive = empty_role()
+    drive["tests"] = ["ENG-STATIC-001"]
+    observe = empty_role()
+    observe["runtime"] = ["health"]
+    return {
+        "version": 1,
+        "automation_eligible": ["runtime-health"] if automate else [],
+        "features": [
+            {
+                "id": "runtime-health",
+                "oracle": "RUNTIME_HEALTH_OBSERVED",
+                "minimum_level": level,
+                "domains": ["operations-contract"],
+                "references": {
+                    "launch": empty_role(),
+                    "drive": drive,
+                    "observe": observe,
+                    "cleanup": empty_role(),
+                },
+            }
+        ],
+    }
+
+
+def verification_receipt() -> dict:
+    return {
+        "schema_version": 1,
+        "kind": "trust-evidence-receipt",
+        "target_repo": "datarelay-labs/engineering-system",
+        "workstream": WORKSTREAM,
+        "intent_revision": REVISION,
+        "subject_head": HEAD,
+        "feature_id": "runtime-health",
+        "oracle": "RUNTIME_HEALTH_OBSERVED",
+        "runtime_subject": "worktree:canonical",
+        "items": [
+            {
+                "authority": "self_report",
+                "id": "health",
+                "status": "PASS",
+                "subject_head": HEAD,
+                "intent_revision": REVISION,
+                "reference": "self_report/health",
+                "external_digest": "c" * 64,
+            }
+        ],
+    }
 
 
 def request() -> dict:
@@ -31,8 +91,8 @@ def request() -> dict:
         "schema_version": 1,
         "subject": {
             "target_repo": "datarelay-labs/engineering-system",
-            "workstream": "engineering-system-1.7-conditional-auto-merge-trust-gate",
-            "intent_revision": 2,
+            "workstream": WORKSTREAM,
+            "intent_revision": REVISION,
             "pr_number": 200,
             "base_branch": "main",
             "head_branch": "feat/auto-merge-gate",
@@ -41,15 +101,9 @@ def request() -> dict:
             "change_risk": "HIGH",
             "policy_profile": "engineering-system",
         },
-        "trust": {
-            "decision": "PASS",
-            "achieved": "T5",
-            "automation_eligible": "YES",
-            "target_repo": "datarelay-labs/engineering-system",
-            "workstream": "engineering-system-1.7-conditional-auto-merge-trust-gate",
-            "intent_revision": 2,
-            "subject_head": HEAD,
-            "external_mutation": "NO",
+        "verification": {
+            "receipt": verification_receipt(),
+            "manifest": verification_manifest(),
         },
         "policy": {
             "allowed_repositories": ["datarelay-labs/engineering-system"],
@@ -73,54 +127,142 @@ def request() -> dict:
     }
 
 
+def evidence(authority: str, item_id: str, *, status: str = "PASS") -> dict:
+    return {
+        "authority": authority,
+        "id": item_id,
+        "status": status,
+        "subject_head": HEAD,
+        "intent_revision": REVISION,
+    }
+
+
+def trusted_boundary(*, evidence_items: list[dict] | None = None, eligible: bool = True):
+    module = gate.verification_module()
+    proven = evidence_items
+    if proven is None:
+        proven = [
+            evidence("test", "ENG-STATIC-001"),
+            evidence("ci", "exact-head"),
+            evidence("runtime", "health"),
+        ]
+    body = {
+        "schema_version": 1,
+        "kind": "trust-evidence-boundary",
+        "provenance": "coordinator-boundary",
+        "target_repo": "datarelay-labs/engineering-system",
+        "workstream": WORKSTREAM,
+        "intent_revision": REVISION,
+        "subject_head": HEAD,
+        "runtime_subject": "worktree:canonical",
+        "evidence": proven,
+        "verifier": {
+            "change_risk": "HIGH",
+            "implementer": {"identity": "impl-1", "context_id": "ctx-impl"},
+            "verifier": {"identity": "ver-1", "context_id": "ctx-ver"},
+            "oracle_id": "ENG-ORACLE-001",
+            "oracle_result": "PASS",
+            "ci_subject_id": "pr-174",
+            "ci_result": "PASS",
+        },
+        "automation_policy": {"feature_id": "runtime-health", "eligible": eligible},
+    }
+    return module.TrustedCoordinatorBoundary(body)
+
+
 def assert_no_authority(report: dict) -> None:
     assert report["authorizes_merge"] is False
     assert report["external_mutation"] is False
     assert report["executes_commands"] is False
     assert report["performs_network_io"] is False
+    assert not list(RESULT_VALIDATOR.iter_errors(report))
 
 
 def test_schema_and_happy_path() -> None:
     payload = request()
     assert not list(VALIDATOR.iter_errors(payload))
-    report = evaluate(payload)
+    report = gate.evaluate(payload, boundary=trusted_boundary())
     assert report["decision"] == "ELIGIBLE"
     assert report["reason_class"] == "ALL_GATES_PASS"
     assert report["eligible"] is True
     assert_no_authority(report)
-    assert evaluate(copy.deepcopy(payload)) == report
+    assert gate.evaluate(copy.deepcopy(payload), boundary=trusted_boundary()) == report
 
 
-def test_stale_identity_and_trust_block() -> None:
+def test_raw_json_and_boundary_copies_cannot_elevate() -> None:
+    payload = request()
+    raw = gate.evaluate(payload)
+    assert raw["decision"] == "BLOCK"
+    assert raw["reason_class"] == "UNTRUSTED_BOUNDARY"
+    assert_no_authority(raw)
+
+    boundary_dict = trusted_boundary().payload()
+    parsed = json.loads(json.dumps(boundary_dict))
+    module = gate.verification_module()
+    for candidate in (boundary_dict, parsed):
+        report = gate.evaluate(payload, boundary=candidate)
+        assert report["decision"] == "BLOCK"
+        assert report["reason_class"] == "UNTRUSTED_BOUNDARY"
+        assert not isinstance(candidate, module.TrustedCoordinatorBoundary)
+        assert_no_authority(report)
+
+
+def test_forged_t5_labels_and_empty_boundary_still_block() -> None:
+    payload = request()
+    payload["trust"] = {
+        "decision": "PASS",
+        "achieved": "T5",
+        "automation_eligible": "YES",
+    }
+    malformed = gate.evaluate(payload, boundary=trusted_boundary(evidence_items=[]))
+    assert malformed["decision"] == "BLOCK"
+    assert malformed["reason_class"] == "MALFORMED"
+    assert_no_authority(malformed)
+
+    payload = request()
+    report = gate.evaluate(payload, boundary=trusted_boundary(evidence_items=[]))
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] != "ALL_GATES_PASS"
+    assert_no_authority(report)
+
+
+def test_actual_verification_assessment_controls_t5() -> None:
+    payload = request()
+    payload["verification"]["manifest"] = verification_manifest(level="T4", automate=False)
+    report = gate.evaluate(payload, boundary=trusted_boundary(eligible=False))
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] != "ALL_GATES_PASS"
+    assert_no_authority(report)
+
+    payload = request()
+    bad = trusted_boundary(
+        evidence_items=[
+            evidence("test", "ENG-STATIC-001"),
+            evidence("ci", "exact-head"),
+        ]
+    )
+    report = gate.evaluate(payload, boundary=bad)
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] == "MISSING_RUNTIME"
+    assert_no_authority(report)
+
+
+def test_stale_identity_and_boundary_block() -> None:
     payload = request()
     payload["observed"]["head_sha"] = OTHER
-    assert evaluate(payload)["reason_class"] == "STALE_HEAD"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "STALE_HEAD"
 
     payload = request()
-    payload["trust"]["intent_revision"] = 1
-    assert evaluate(payload)["reason_class"] == "STALE_TRUST"
-
-    payload = request()
-    payload["trust"]["subject_head"] = OTHER
-    assert evaluate(payload)["reason_class"] == "STALE_TRUST"
+    boundary = trusted_boundary()
+    boundary.payload()["subject_head"] = OTHER
+    report = gate.evaluate(payload, boundary=boundary)
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] != "ALL_GATES_PASS"
+    assert_no_authority(report)
 
     payload = request()
     payload["observed"]["pr_number"] = 201
-    assert evaluate(payload)["reason_class"] == "STALE_IDENTITY"
-
-
-def test_trust_must_be_exact_t5_automation_eligible() -> None:
-    payload = request()
-    payload["trust"]["decision"] = "BLOCK"
-    assert evaluate(payload)["reason_class"] == "TRUST_BLOCKED"
-
-    payload = request()
-    payload["trust"]["achieved"] = "T4"
-    assert evaluate(payload)["reason_class"] == "TRUST_BELOW_T5"
-
-    payload = request()
-    payload["trust"]["automation_eligible"] = "NO"
-    assert evaluate(payload)["reason_class"] == "AUTOMATION_NOT_ELIGIBLE"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "STALE_IDENTITY"
 
 
 def test_policy_denials() -> None:
@@ -134,55 +276,55 @@ def test_policy_denials() -> None:
     for field, value, reason in cases:
         payload = request()
         payload["policy"][field] = value
-        report = evaluate(payload)
+        report = gate.evaluate(payload, boundary=trusted_boundary())
         assert report["decision"] == "DENY"
         assert report["reason_class"] == reason
         assert_no_authority(report)
 
     payload = request()
     payload["policy"]["ruleset_allows"] = False
-    assert evaluate(payload)["reason_class"] == "RULESET_FORBIDS"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "RULESET_FORBIDS"
 
     payload = request()
     payload["policy"]["auto_merge_enabled"] = False
-    report = evaluate(payload)
+    report = gate.evaluate(payload, boundary=trusted_boundary())
     assert report["decision"] == "DENY"
     assert report["reason_class"] == "AUTO_MERGE_DISABLED"
-
+    assert_no_authority(report)
 
 
 def test_ci_and_review_are_exact_head_and_current() -> None:
     payload = request()
     payload["observed"]["ci"]["head_sha"] = OTHER
-    assert evaluate(payload)["reason_class"] == "STALE_CI"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "STALE_CI"
 
     payload = request()
     payload["observed"]["ci"]["status"] = "UNKNOWN"
-    assert evaluate(payload)["reason_class"] == "CI_NOT_READY"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "CI_NOT_READY"
 
     payload = request()
     payload["observed"]["ci"]["status"] = "FAIL"
-    report = evaluate(payload)
+    report = gate.evaluate(payload, boundary=trusted_boundary())
     assert report["decision"] == "DENY"
     assert report["reason_class"] == "CI_FAILED"
 
     payload = request()
     payload["observed"]["review"]["head_sha"] = OTHER
-    assert evaluate(payload)["reason_class"] == "STALE_REVIEW"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "STALE_REVIEW"
 
     payload = request()
     payload["observed"]["review"]["status"] = "PENDING"
-    assert evaluate(payload)["reason_class"] == "REVIEW_NOT_READY"
+    assert gate.evaluate(payload, boundary=trusted_boundary())["reason_class"] == "REVIEW_NOT_READY"
 
     payload = request()
     payload["observed"]["review"]["status"] = "FAIL"
-    report = evaluate(payload)
+    report = gate.evaluate(payload, boundary=trusted_boundary())
     assert report["decision"] == "DENY"
     assert report["reason_class"] == "REVIEW_FAILED"
 
     payload = request()
     payload["observed"]["review"]["unresolved_threads"] = 1
-    report = evaluate(payload)
+    report = gate.evaluate(payload, boundary=trusted_boundary())
     assert report["decision"] == "DENY"
     assert report["reason_class"] == "UNRESOLVED_REVIEW_THREADS"
 
@@ -197,30 +339,27 @@ def test_mutation_replay_and_ambiguity_block() -> None:
     for state, reason in expected.items():
         payload = request()
         payload["observed"]["mutation_state"] = state
-        report = evaluate(payload)
+        report = gate.evaluate(payload, boundary=trusted_boundary())
         assert report["decision"] == "BLOCK"
         assert report["reason_class"] == reason
         assert_no_authority(report)
 
 
-def test_missing_unknown_or_execution_fields_fail_closed() -> None:
+def test_malformed_shapes_return_structured_block() -> None:
+    payload = request()
+    payload["subject"] = []
+    report = gate.evaluate(payload)
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] == "MALFORMED"
+    assert report["target_repo"] == ""
+    assert_no_authority(report)
+
     payload = request()
     del payload["observed"]["review"]
-    report = evaluate(payload)
+    report = gate.evaluate(payload)
     assert report["decision"] == "BLOCK"
     assert report["reason_class"] == "MALFORMED"
-
-    payload = request()
-    payload["command"] = "gh pr merge 200"
-    report = evaluate(payload)
-    assert report["decision"] == "BLOCK"
-    assert report["reason_class"] == "MALFORMED"
-
-    payload = request()
-    payload["policy"]["url"] = "https://example.invalid"
-    report = evaluate(payload)
-    assert report["decision"] == "BLOCK"
-    assert report["reason_class"] == "MALFORMED"
+    assert_no_authority(report)
 
 
 def test_implementation_has_no_execution_or_network_surface() -> None:
@@ -246,21 +385,14 @@ def test_implementation_has_no_execution_or_network_surface() -> None:
         "Popen(",
         "os.system(",
         "shell=True",
+        'add_argument("--boundary"',
+        "args.boundary",
     ):
         assert token not in text
 
 
-def test_result_schema_and_cli_roundtrip() -> None:
-    result_schema = json.loads(
-        (ROOT / "schemas" / "auto-merge-eligibility-result.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    result_validator = Draft202012Validator(result_schema)
+def test_cli_is_negative_only() -> None:
     payload = request()
-    report = evaluate(payload)
-    assert not list(result_validator.iter_errors(report))
-
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "request.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
@@ -273,25 +405,26 @@ def test_result_schema_and_cli_roundtrip() -> None:
             check=False,
         )
     assert completed.returncode == 0, completed.stderr
-    cli_report = json.loads(completed.stdout)
-    assert not list(result_validator.iter_errors(cli_report))
-    assert cli_report["decision"] == "ELIGIBLE"
-    assert_no_authority(cli_report)
+    report = json.loads(completed.stdout)
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] == "UNTRUSTED_BOUNDARY"
+    assert_no_authority(report)
 
 
 def main() -> None:
     test_schema_and_happy_path()
-    test_stale_identity_and_trust_block()
-    test_trust_must_be_exact_t5_automation_eligible()
+    test_raw_json_and_boundary_copies_cannot_elevate()
+    test_forged_t5_labels_and_empty_boundary_still_block()
+    test_actual_verification_assessment_controls_t5()
+    test_stale_identity_and_boundary_block()
     test_policy_denials()
     test_ci_and_review_are_exact_head_and_current()
     test_mutation_replay_and_ambiguity_block()
-    test_missing_unknown_or_execution_fields_fail_closed()
+    test_malformed_shapes_return_structured_block()
     test_implementation_has_no_execution_or_network_surface()
-    test_result_schema_and_cli_roundtrip()
+    test_cli_is_negative_only()
     print("PASS conditional auto-merge eligibility gate")
 
 
 if __name__ == "__main__":
     main()
-

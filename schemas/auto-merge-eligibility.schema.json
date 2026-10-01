@@ -4,11 +4,11 @@
   "title": "Conditional auto-merge eligibility request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "subject", "trust", "policy", "observed"],
+  "required": ["schema_version", "subject", "verification", "policy", "observed"],
   "properties": {
     "schema_version": {"const": 1},
     "subject": {"$ref": "#/$defs/subject"},
-    "trust": {"$ref": "#/$defs/trust"},
+    "verification": {"$ref": "#/$defs/verification"},
     "policy": {"$ref": "#/$defs/policy"},
     "observed": {"$ref": "#/$defs/observed"}
   },
@@ -41,22 +41,13 @@
         "policy_profile": {"$ref": "#/$defs/profile"}
       }
     },
-    "trust": {
+    "verification": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "decision", "achieved", "automation_eligible", "target_repo",
-        "workstream", "intent_revision", "subject_head", "external_mutation"
-      ],
+      "required": ["receipt", "manifest"],
       "properties": {
-        "decision": {"type": "string", "enum": ["PASS", "BLOCK"]},
-        "achieved": {"type": "string", "enum": ["T0", "T1", "T2", "T3", "T4", "T5"]},
-        "automation_eligible": {"type": "string", "enum": ["YES", "NO"]},
-        "target_repo": {"$ref": "#/$defs/repo"},
-        "workstream": {"$ref": "#/$defs/workstream"},
-        "intent_revision": {"type": "integer", "minimum": 1},
-        "subject_head": {"$ref": "#/$defs/sha"},
-        "external_mutation": {"const": "NO"}
+        "receipt": {"type": "object"},
+        "manifest": {"type": "object"}
       }
     },
     "policy": {
