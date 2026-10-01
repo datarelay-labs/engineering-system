@@ -68,6 +68,9 @@ TRACE_ROOT_CHANGE_RE = re.compile(
 TRACE_MOUNT_TOPOLOGY_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:mount|umount2|move_mount|open_tree|mount_setattr)\("
 )
+TRACE_PATH_TOPOLOGY_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:rename|renameat|renameat2|link|linkat|symlink|symlinkat)\("
+)
 TRACE_SETUP_PRIVATE_MOUNT_RE = re.compile(
     r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("none", "/", NULL, MS_REC\|MS_PRIVATE, NULL\) = 0$'
 )
@@ -864,6 +867,12 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         if TRACE_ROOT_CHANGE_RE.search(line):
             return "TRACE_AMBIGUOUS"
         if TRACE_MOUNT_TOPOLOGY_RE.search(line) and not _trace_setup_mount_allowed(line):
+            return "TRACE_AMBIGUOUS"
+        # Rename/link/symlink mutations can create a new alias for an unsafe
+        # path or move an unsafe ancestor so later path attribution no longer
+        # matches the exact materialized tree. Runtime evidence is read-only,
+        # so any such topology mutation is ambiguous while unsafe entries exist.
+        if TRACE_PATH_TOPOLOGY_RE.search(line):
             return "TRACE_AMBIGUOUS"
         # Any CLONE_UNTRACED request can create a descendant outside strace -f
         # coverage. Seeing the flag is enough to invalidate terminal evidence.

@@ -943,6 +943,35 @@ def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
             clear_trust()
 
 
+def test_ancestor_path_topology_change_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "os.rename('vendor', 'alias')\n"
+        "print('FOUND' if Path('alias/dependency').exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"health.py": script})
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "ancestor rename unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
 def test_directory_enumeration_preserves_unsafe_entry_name() -> None:
     supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
@@ -1072,6 +1101,15 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
             '123 name_to_handle_at(3</tmp/vendor>, "dependency", 0x0, 0x0, 0) = -1 ENOENT\n',
         ):
             trace.write_text(non_cwd_dirfd, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for path_topology_change in (
+            '123 renameat2(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
+            '123 linkat(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
+            '123 symlink("vendor", "alias") = 0\n',
+        ):
+            trace.write_text(path_topology_change, encoding="utf-8")
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
@@ -1786,6 +1824,7 @@ def main() -> int:
     test_procfs_alias_to_unsafe_entry_is_rejected()
     test_linux_alias_variants_to_unsafe_entry_are_rejected()
     test_mount_alias_to_unsafe_entry_is_rejected()
+    test_ancestor_path_topology_change_is_rejected()
     test_directory_enumeration_preserves_unsafe_entry_name()
     test_non_ascii_unsafe_path_is_rejected()
     test_unsafe_tree_requires_tracer_before_execution()
