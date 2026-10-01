@@ -943,6 +943,38 @@ def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
             clear_trust()
 
 
+def test_symlink_component_before_dotdot_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-dir/../status')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside_dir = base / "outside-dir"
+        outside_dir.mkdir()
+        (base / "status").write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-dir").symlink_to(outside_dir, target_is_directory=True)
+        git(repo, "add", "optional-dir")
+        git(repo, "commit", "-m", "symlink component before dotdot")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
 def test_unix_socket_path_to_unsafe_entry_is_rejected() -> None:
     import socket
 
@@ -1276,6 +1308,20 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         assert runtime_evidence._trace_unsafe_access_reason(
             trace, work, ("optional-config",)
         ) is None
+        for unresolved_path in (
+            "optional-dir/../status",
+            "vendor/dependency/../safe",
+            "vendor/./dependency/../safe",
+            f"{work}/optional-dir/../status",
+            f"//{str(work).lstrip('/')}/optional-dir/../status",
+            f"../{work.name}/optional-dir/../status",
+        ):
+            assert runtime_evidence._trace_path_dependency_reason(
+                unresolved_path, str(work), ("optional-dir", "vendor/dependency")
+            ) == "UNSAFE_TREE_DEPENDENCY"
+        assert runtime_evidence._trace_path_dependency_reason(
+            "safe/../vendor/dependency", str(work), ("vendor/dependency",)
+        ) == "UNSAFE_TREE_DEPENDENCY"
         for filter_install in (
             "123 seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, 0x7fff0000) = 3\n",
             "123 prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, 0x7fff0000) = 0\n",
@@ -2011,6 +2057,7 @@ def main() -> int:
     test_procfs_alias_to_unsafe_entry_is_rejected()
     test_linux_alias_variants_to_unsafe_entry_are_rejected()
     test_mount_alias_to_unsafe_entry_is_rejected()
+    test_symlink_component_before_dotdot_is_rejected()
     test_unix_socket_path_to_unsafe_entry_is_rejected()
     test_nonpath_argv_does_not_block_unrelated_placeholder()
     test_seccomp_filter_install_attempt_is_rejected()

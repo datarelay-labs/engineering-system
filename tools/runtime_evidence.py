@@ -864,6 +864,35 @@ def _trace_setup_mount_allowed(line: str) -> bool:
     )
 
 
+def _trace_unresolved_path_hits_unsafe(
+    decoded: str,
+    base: str,
+    unsafe: tuple[str, ...],
+) -> bool:
+    base_components = [part for part in base.split("/") if part]
+    if os.path.isabs(decoded):
+        components: list[str] = []
+    else:
+        components = list(base_components)
+
+    for component in decoded.split("/"):
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            if components:
+                components.pop()
+            continue
+        components.append(component)
+        if components[: len(base_components)] != base_components:
+            continue
+        relative_components = components[len(base_components) :]
+        candidate = "/".join(relative_components)
+        for blocked in unsafe:
+            if candidate == blocked or candidate.startswith(blocked + "/"):
+                return True
+    return False
+
+
 def _trace_path_dependency_reason(
     decoded: str,
     base: str,
@@ -871,6 +900,10 @@ def _trace_path_dependency_reason(
 ) -> str | None:
     if not decoded or "\x00" in decoded:
         return None
+    # Linux follows a symlink component before resolving a later "..". Check
+    # the unresolved component order before normpath can erase that evidence.
+    if _trace_unresolved_path_hits_unsafe(decoded, base, unsafe):
+        return "UNSAFE_TREE_DEPENDENCY"
     if os.path.isabs(decoded):
         normalized = _normalize_trace_path(decoded)
     else:
