@@ -865,6 +865,114 @@ def test_procfs_alias_to_unsafe_entry_is_rejected() -> None:
             clear_trust()
 
 
+def test_linux_alias_variants_to_unsafe_entry_are_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    scripts = {
+        "double-root": (
+            "from pathlib import Path\n"
+            "path = Path('//proc/self/cwd/optional-config')\n"
+            "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+        ),
+        "standard-stream": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "os.close(0)\n"
+            "fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY)\n"
+            "assert fd == 0\n"
+            "path = Path('/dev/stdin/optional-config')\n"
+            "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+        ),
+    }
+    for label, script in scripts.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            outside = base / "outside.conf"
+            outside.write_text("REAL\n", encoding="utf-8")
+            head = init_repo(repo, command, extra={"health.py": script})
+            (repo / "optional-config").symlink_to(outside)
+            git(repo, "add", "optional-config")
+            git(repo, "commit", "-m", f"{label} unsafe alias")
+            head = git(repo, "rev-parse", "HEAD")
+            request, pub = signed(repo, base, effect(head, command))
+            trust(pub)
+            try:
+                report = collect(repo, request)
+                if not trace_runtime_or_failclosed(report, supported):
+                    continue
+                assert report["RESULT"] == "EXECUTION_FAILED", (label, report)
+                assert report["REASON"] == "TRACE_AMBIGUOUS", (label, report)
+                assert report["EXECUTED"] == "YES"
+            finally:
+                clear_trust()
+
+
+def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import ctypes, os\n"
+        "from pathlib import Path\n"
+        "Path('alias').mkdir()\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "rc = libc.mount(b'.', b'alias', None, 4096, None)\n"
+        "path = Path('alias/optional-config')\n"
+        "print(path.read_text() if rc == 0 and path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "mount unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_directory_enumeration_preserves_unsafe_entry_name() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "print('FOUND' if 'optional-config' in os.listdir('.') else 'MISSING')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "directory enumeration placeholder fidelity")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "FOUND\n"
+        finally:
+            clear_trust()
+
+
 def test_non_ascii_unsafe_path_is_rejected() -> None:
     supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
@@ -943,13 +1051,52 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         for alias in (
             "/proc/./self/cwd/vendor/dependency/config",
             "/proc//self/cwd/vendor/dependency/config",
+            "//proc/self/cwd/vendor/dependency/config",
             "/proc/self/task/123/fd/7/vendor/dependency/config",
             "/dev/./fd/7/vendor/dependency/config",
+            "//dev/fd/7/vendor/dependency/config",
+            "/dev/stdin/vendor/dependency/config",
+            "/dev/stdout/vendor/dependency/config",
+            "/dev/stderr/vendor/dependency/config",
         ):
             trace.write_text(
                 f'123 newfstatat(AT_FDCWD, "{alias}", 0x0, 0) = -1 ENOENT\n',
                 encoding="utf-8",
             )
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for non_cwd_dirfd in (
+            '123 renameat2(3</tmp/vendor>, "dependency", AT_FDCWD, "moved", 0) = -1 ENOENT\n',
+            '123 linkat(3</tmp/vendor>, "dependency", AT_FDCWD, "linked", 0) = -1 ENOENT\n',
+            '123 name_to_handle_at(3</tmp/vendor>, "dependency", 0x0, 0x0, 0) = -1 ENOENT\n',
+        ):
+            trace.write_text(non_cwd_dirfd, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for topology_change in (
+            '123 mount(".", "/tmp/alias", NULL, MS_BIND, NULL) = 0\n',
+            '123 move_mount(3, "", 4, "", MOVE_MOUNT_F_EMPTY_PATH) = 0\n',
+            '123 open_tree(AT_FDCWD, ".", OPEN_TREE_CLONE) = 5\n',
+        ):
+            trace.write_text(topology_change, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for setup_mount in (
+            '123 mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL) = 0\n',
+            '123 mount("proc", "/proc", "proc", MS_NOSUID|MS_NODEV|MS_NOEXEC, NULL) = 0\n',
+        ):
+            trace.write_text(setup_mount, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) is None
+        for disguised_mount in (
+            '123 mount("none", "/", NULL, MS_BIND, NULL) = 0\n',
+            '123 mount("proc", "/proc", "proc", MS_BIND, NULL) = 0\n',
+        ):
+            trace.write_text(disguised_mount, encoding="utf-8")
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
@@ -1637,6 +1784,9 @@ def main() -> int:
     test_indirect_gitlink_fallback_is_rejected()
     test_unavailable_trace_isolation_blocks_before_execution()
     test_procfs_alias_to_unsafe_entry_is_rejected()
+    test_linux_alias_variants_to_unsafe_entry_are_rejected()
+    test_mount_alias_to_unsafe_entry_is_rejected()
+    test_directory_enumeration_preserves_unsafe_entry_name()
     test_non_ascii_unsafe_path_is_rejected()
     test_unsafe_tree_requires_tracer_before_execution()
     test_trace_parser_fails_closed_on_ambiguous_relative_state()

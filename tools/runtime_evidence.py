@@ -59,13 +59,24 @@ MAX_SUBJECT_BYTES = 1_048_576
 MAX_SUBJECT_SECONDS = 2
 TRACE_LIMIT_BYTES = 262_144
 TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
-TRACE_DIRFD_RE = re.compile(
-    r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
+TRACE_DIRFD_PATH_RE = re.compile(
+    r'(?:\(|,\s*)(AT_FDCWD|-?\d+)(?:<[^>]*>)?,\s*"((?:\\.|[^"\\])*)"'
 )
 TRACE_ROOT_CHANGE_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:chroot|pivot_root)\("
 )
-TRACE_DEV_FD_ALIAS_RE = re.compile(r"^/dev/(?:fd(?:/|$)|stdin$|stdout$|stderr$)")
+TRACE_MOUNT_TOPOLOGY_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:mount|umount2|move_mount|open_tree|mount_setattr)\("
+)
+TRACE_SETUP_PRIVATE_MOUNT_RE = re.compile(
+    r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("none", "/", NULL, MS_REC\|MS_PRIVATE, NULL\) = 0$'
+)
+TRACE_SETUP_PROC_MOUNT_RE = re.compile(
+    r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("proc", "/proc", "proc", MS_NOSUID\|MS_NODEV\|MS_NOEXEC, NULL\) = 0$'
+)
+TRACE_DEV_FD_ALIAS_RE = re.compile(
+    r"^/dev/(?:fd(?:/|$)|stdin(?:/|$)|stdout(?:/|$)|stderr(?:/|$))"
+)
 TRACE_TARGET_LAUNCHER = """import os, resource, sys
 limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
 if limit == resource.RLIM_INFINITY or limit > 1048576:
@@ -796,10 +807,19 @@ def _decode_trace_string(raw: str) -> str | None:
     return os.fsdecode(bytes(decoded))
 
 
+def _normalize_trace_path(path: str) -> str:
+    normalized = os.path.normpath(path)
+    # Linux resolves exactly two leading slashes as the ordinary filesystem
+    # root even though posixpath.normpath intentionally preserves them.
+    if normalized.startswith("//"):
+        normalized = "/" + normalized.lstrip("/")
+    return normalized
+
+
 def _trace_path_alias_ambiguous(path: str) -> bool:
     if not os.path.isabs(path):
         return False
-    normalized = os.path.normpath(path)
+    normalized = _normalize_trace_path(path)
     if TRACE_DEV_FD_ALIAS_RE.match(normalized):
         return True
     if not normalized.startswith("/proc/"):
@@ -808,6 +828,16 @@ def _trace_path_alias_ambiguous(path: str) -> bool:
     if not parts or parts[0] != "proc":
         return False
     return any(part in {"cwd", "root", "fd"} for part in parts[1:])
+
+
+def _trace_setup_mount_allowed(line: str) -> bool:
+    # util-linux unshare --mount-proc performs exactly these two mounts before
+    # the evidence command starts. Match the whole syscall including flags so
+    # a tracee cannot disguise a bind/move mount with the same source/target.
+    return bool(
+        TRACE_SETUP_PRIVATE_MOUNT_RE.fullmatch(line)
+        or TRACE_SETUP_PROC_MOUNT_RE.fullmatch(line)
+    )
 
 
 def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
@@ -825,13 +855,15 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         if len(trace.encode("utf-8", errors="replace")) > TRACE_LIMIT_BYTES:
             return "TRACE_LIMIT"
 
-    base = os.path.normpath(str(work.resolve()))
+    base = _normalize_trace_path(str(work.resolve()))
     unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
     for line in trace.splitlines():
         # Filesystem-root changes invalidate absolute-path attribution. Runtime
         # evidence never needs to alter the tracee root, so even an attempted
         # chroot/pivot_root is treated as ambiguous rather than reconstructed.
         if TRACE_ROOT_CHANGE_RE.search(line):
+            return "TRACE_AMBIGUOUS"
+        if TRACE_MOUNT_TOPOLOGY_RE.search(line) and not _trace_setup_mount_allowed(line):
             return "TRACE_AMBIGUOUS"
         # Any CLONE_UNTRACED request can create a descendant outside strace -f
         # coverage. Seeing the flag is enough to invalidate terminal evidence.
@@ -842,8 +874,7 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         if "chdir(" in line or "fchdir(" in line:
             return "TRACE_AMBIGUOUS"
 
-        match = TRACE_DIRFD_RE.search(line)
-        if match is not None:
+        for match in TRACE_DIRFD_PATH_RE.finditer(line):
             decoded = _decode_trace_string(match.group(2))
             if decoded is None:
                 return "TRACE_AMBIGUOUS"
@@ -857,13 +888,13 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
             if not decoded or "\x00" in decoded:
                 continue
             if os.path.isabs(decoded):
-                normalized = os.path.normpath(decoded)
+                normalized = _normalize_trace_path(decoded)
             else:
                 # strace reports AT_FDCWD-relative names exactly as supplied.
                 # Resolve them against the fixed subject cwd before deciding
                 # whether they escape. This catches aliases such as
                 # ../tree/optional-config that normalize back into the root.
-                normalized = os.path.normpath(os.path.join(base, decoded))
+                normalized = _normalize_trace_path(os.path.join(base, decoded))
             if _trace_path_alias_ambiguous(normalized):
                 return "TRACE_AMBIGUOUS"
             if normalized == base:
