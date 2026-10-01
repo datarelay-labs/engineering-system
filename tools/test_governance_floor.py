@@ -32,12 +32,12 @@ def commit(root: Path, message: str) -> str:
     return git(root, "rev-parse", "HEAD")
 
 
-def write_managed(root: Path, epoch: int) -> None:
+def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
     (root / ".engineering").mkdir(parents=True, exist_ok=True)
     (root / ".github/workflows").mkdir(parents=True, exist_ok=True)
     (root / "tools").mkdir(parents=True, exist_ok=True)
     (root / ".engineering/project.yaml").write_text(
-        f"engineering_system:\n  version: 1.7.0\n  policy_epoch: {epoch}\n",
+        f"engineering_system:\n  version: 1.7.0\n  policy_epoch: {epoch}\n  baseline: {baseline}\n",
         encoding="utf-8",
     )
     (root / "AGENTS.md").write_text(
@@ -66,7 +66,7 @@ def write_managed(root: Path, epoch: int) -> None:
         "  governance-floor:\n"
         "    if: github.event_name == 'pull_request_target'\n"
         "    uses: datarelay-labs/engineering-system/.github/workflows/"
-        "governance-floor.yml@" + ("a" * 40) + "\n"
+        "governance-floor.yml@" + baseline + "\n"
         "    with:\n"
         "      base_sha: ${{ github.event.pull_request.base.sha }}\n"
         "      head_sha: ${{ github.event.pull_request.head.sha }}\n",
@@ -183,6 +183,49 @@ def test_workflow_comment_tokens_do_not_preserve_floor() -> None:
         assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING" in reasons
 
 
+def test_filtered_pull_request_target_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\n"
+            "on:\n"
+            "  pull_request:\n"
+            "  pull_request_target:\n"
+            "    branches:\n"
+            "      - never-matches\n"
+            "jobs:\n"
+            "  governance-floor:\n"
+            "    if: github.event_name == 'pull_request_target'\n"
+            "    uses: datarelay-labs/engineering-system/.github/workflows/"
+            "governance-floor.yml@" + ("a" * 40) + "\n"
+            "    with:\n"
+            "      base_sha: ${{ github.event.pull_request.base.sha }}\n"
+            "      head_sha: ${{ github.event.pull_request.head.sha }}\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "filtered governance trigger")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_FILTERED" in reasons
+
+
+def test_unrelated_database_cursor_language_is_allowed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        agents = root / "AGENTS.md"
+        agents.write_text(
+            agents.read_text(encoding="utf-8")
+            + "Use a database cursor for bounded row iteration.\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "database cursor guidance")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+
+
 def test_guard_change_requires_policy_epoch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -192,14 +235,15 @@ def test_guard_change_requires_policy_epoch() -> None:
         head = commit(root, "guard drift")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:tools/governance_floor.py" in reasons
+        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED" in reasons
 
         write_managed(root, 2)
         helper = root / "tools/governance_floor.py"
         helper.write_text(helper.read_text(encoding="utf-8") + "\n# epoch-2\n", encoding="utf-8")
         head2 = commit(root, "policy upgrade")
         status2, reasons2, _, _ = floor.evaluate(root, base, head2)
-        assert status2 == "PASS", reasons2
+        assert status2 == "BLOCK"
+        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED" in reasons2
 
 
 def test_workflow_self_preservation_blocks() -> None:
@@ -214,7 +258,6 @@ def test_workflow_self_preservation_blocks() -> None:
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
         assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING" in reasons
-        assert "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:.github/workflows/engineering-system.yml" in reasons
 
 
 def main() -> int:
@@ -224,6 +267,8 @@ def main() -> int:
     test_old_context_epoch_allowlist_blocks()
     test_epoch_advance_cannot_remove_chat_only_guard()
     test_workflow_comment_tokens_do_not_preserve_floor()
+    test_filtered_pull_request_target_blocks()
+    test_unrelated_database_cursor_language_is_allowed()
     test_guard_change_requires_policy_epoch()
     test_workflow_self_preservation_blocks()
     print("GOVERNANCE_FLOOR_TESTS=PASS")

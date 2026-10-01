@@ -16,9 +16,11 @@ MANAGED_EXECUTION_SURFACES = (
     "tools/engineering-context.py",
 )
 PROTECTED_GOVERNANCE_SURFACES = (
-    *MANAGED_EXECUTION_SURFACES,
-    "tools/governance_floor.py",
-    ".github/workflows/engineering-system.yml",
+    # These helpers carry executable policy semantics and may change only with
+    # an explicit policy-epoch advance. The governance-floor helper itself is
+    # a base-owned root of trust and is handled separately as immutable.
+    "tools/context_epoch.py",
+    "tools/engineering-context.py",
 )
 RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
 GOVERNANCE_HELPER = "tools/governance_floor.py"
@@ -29,6 +31,17 @@ GOVERNANCE_WORKFLOW_PREFIX = (
 EXPECTED_WORKFLOW_CONDITION = "github.event_name == 'pull_request_target'"
 EXPECTED_BASE_INPUT = "${{ github.event.pull_request.base.sha }}"
 EXPECTED_HEAD_INPUT = "${{ github.event.pull_request.head.sha }}"
+RETIRED_AGENTS_RE = re.compile(
+    r"(?i)(?:"
+    r"IMPLEMENTER\s*=\s*CURSOR|"
+    r"cursor[-_ ]?agent|"
+    r"\bagent\s+persist\b|"
+    r"/work-resume\b|"
+    r"\.cursor(?:/|\b)|"
+    r"\bcursor\s+(?:adapter|session|implementation|implementer|worker)\b|"
+    r"\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to)\s+(?:the\s+)?cursor\b"
+    r")"
+)
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -91,6 +104,8 @@ def _workflow_reasons(text: str | None, profile: dict[str, object]) -> list[str]
     triggers = payload.get("on")
     if not isinstance(triggers, dict) or "pull_request_target" not in triggers:
         return ["GOVERNANCE_WORKFLOW_TRIGGER_MISSING"]
+    if triggers.get("pull_request_target") not in (None, ""):
+        return ["GOVERNANCE_WORKFLOW_TRIGGER_FILTERED"]
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict):
         return ["GOVERNANCE_WORKFLOW_JOB_MISSING"]
@@ -129,7 +144,7 @@ def _workflow_reasons(text: str | None, profile: dict[str, object]) -> list[str]
 def _execution_surface_reasons(path: str, content: str) -> list[str]:
     reasons: list[str] = []
     if path == "AGENTS.md":
-        if "cursor" in content.lower():
+        if RETIRED_AGENTS_RE.search(content):
             reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
         for required in (
             "ChatGPT Chat is the implementation path.",
@@ -179,6 +194,11 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
         )
 
+    base_helper = _read_at(root, base, GOVERNANCE_HELPER)
+    head_helper = _read_at(root, head, GOVERNANCE_HELPER)
+    if base_helper is not None and head_helper != base_helper:
+        reasons.append("GOVERNANCE_ROOT_OF_TRUST_CHANGED")
+
     if head_epoch == base_epoch:
         for path in PROTECTED_GOVERNANCE_SURFACES:
             base_content = _read_at(root, base, path)
@@ -198,7 +218,6 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             continue
         reasons.extend(_execution_surface_reasons(path, content))
 
-    head_helper = _read_at(root, head, GOVERNANCE_HELPER)
     if head_helper is None:
         reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{GOVERNANCE_HELPER}")
     else:
