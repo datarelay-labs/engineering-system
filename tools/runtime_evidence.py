@@ -62,7 +62,6 @@ TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 TRACE_DIRFD_RE = re.compile(
     r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
 )
-TRACE_PROC_ALIAS_RE = re.compile(r"^/proc/(?:self|thread-self|[0-9]+)/(?:cwd|root|fd)(?:/|$)")
 TRACE_DEV_FD_ALIAS_RE = re.compile(r"^/dev/(?:fd(?:/|$)|stdin$|stdout$|stderr$)")
 TRACE_TARGET_LAUNCHER = """import os, resource, sys
 limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -794,6 +793,20 @@ def _decode_trace_string(raw: str) -> str | None:
     return os.fsdecode(bytes(decoded))
 
 
+def _trace_path_alias_ambiguous(path: str) -> bool:
+    if not os.path.isabs(path):
+        return False
+    normalized = os.path.normpath(path)
+    if TRACE_DEV_FD_ALIAS_RE.match(normalized):
+        return True
+    if not normalized.startswith("/proc/"):
+        return False
+    parts = [part for part in normalized.split("/") if part]
+    if not parts or parts[0] != "proc":
+        return False
+    return any(part in {"cwd", "root", "fd"} for part in parts[1:])
+
+
 def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
     if isinstance(trace_source, Path):
         try:
@@ -835,8 +848,6 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
                 return "TRACE_AMBIGUOUS"
             if not decoded or "\x00" in decoded:
                 continue
-            if TRACE_PROC_ALIAS_RE.match(decoded) or TRACE_DEV_FD_ALIAS_RE.match(decoded):
-                return "TRACE_AMBIGUOUS"
             if os.path.isabs(decoded):
                 normalized = os.path.normpath(decoded)
             else:
@@ -845,6 +856,8 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
                 # whether they escape. This catches aliases such as
                 # ../tree/optional-config that normalize back into the root.
                 normalized = os.path.normpath(os.path.join(base, decoded))
+            if _trace_path_alias_ambiguous(normalized):
+                return "TRACE_AMBIGUOUS"
             if normalized == base:
                 relative = "."
             elif normalized.startswith(base + os.sep):

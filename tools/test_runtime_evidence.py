@@ -940,6 +940,19 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
         trace.write_text('123 newfstatat(AT_FDCWD, "/proc/self/fd/7/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        for alias in (
+            "/proc/./self/cwd/vendor/dependency/config",
+            "/proc//self/cwd/vendor/dependency/config",
+            "/proc/self/task/123/fd/7/vendor/dependency/config",
+            "/dev/./fd/7/vendor/dependency/config",
+        ):
+            trace.write_text(
+                f'123 newfstatat(AT_FDCWD, "{alias}", 0x0, 0) = -1 ENOENT\n',
+                encoding="utf-8",
+            )
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
         trace.write_text('123 clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = 124\n', encoding="utf-8")
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
         assert runtime_evidence._decode_trace_string(r"caf\303\251") == "caf\u00e9"
