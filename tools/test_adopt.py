@@ -389,10 +389,30 @@ def test_managed_upgrade_to_1_6() -> None:
 
         agents_path = target / "AGENTS.md"
         agents_text = agents_path.read_text(encoding="utf-8")
+        profile_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- The current managed execution profile authorizes")
+        )
         policy_line = next(
             line for line in agents_text.splitlines()
             if line.startswith("- **Execute useful work continuously.**")
         )
+        external_write_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- For ordinary authenticated GitHub Issue/PR coordination,")
+        )
+        legacy_profile = (
+            "- ChatGPT Chat is the implementation path. Treat the Work Packet as durable coordination state, "
+            "verify the target repository/branch/HEAD before mutation, and use ordinary authenticated Git/GitHub "
+            "operations for normal repository work."
+        )
+        legacy_external_write = (
+            "- Before an external Issue/PR write, run `python3 tools/worker_adapter.py evaluate --request-json "
+            "<facts.json>` against a fresh authoritative read. Proceed only on `APPLIED`. A revision or head "
+            "mismatch is `STALE_WORKER` and must not write."
+        )
+        agents_text = agents_text.replace(profile_line, legacy_profile, 1)
+        agents_text = agents_text.replace(external_write_line, legacy_external_write, 1)
         agents_text = agents_text.replace(policy_line + "\n", "", 1)
         agents_text = (
             f"Adoption baseline: Engineering System version 1.5.0 at immutable commit `{BASELINE}`.\n\n"
@@ -424,6 +444,11 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "make measurable progress in the same turn" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert "Cursor remains retired/prohibited" in upgraded_agents
+        assert "continue/resume request" in upgraded_agents
+        assert "additional magic phrase" in upgraded_agents
+        assert "ordinary authenticated GitHub Issue/PR coordination" in upgraded_agents
+        assert "high-risk external write" in upgraded_agents
+        assert "Before an external Issue/PR write, run `python3 tools/worker_adapter.py" not in upgraded_agents
         assert "IMPLEMENTER=CURSOR" not in upgraded_agents
         assert "owner explicitly reactivates" not in upgraded_agents
         assert "Cursor adapter is disabled by default" not in upgraded_agents

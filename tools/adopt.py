@@ -122,7 +122,11 @@ RETIRED_AGENT_RULE_RE = re.compile(
     r"\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to|reactivate)\s+(?:the\s+)?cursor\b"
     r")"
 )
+EXECUTION_PROFILE_MARKER = "- The current managed execution profile authorizes"
+LEGACY_EXECUTION_PROFILE_MARKERS = ("- ChatGPT Chat is the implementation path.",)
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
+EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
+LEGACY_EXTERNAL_WRITE_POLICY_MARKERS = ("- Before an external Issue/PR write,",)
 EXECUTION_RULES_HEADING = "## Execution rules"
 RETIRED_AGENT_RULE_REPLACEMENTS = (
     (
@@ -148,18 +152,30 @@ def retired_agent_rules_present(text: str) -> bool:
     return RETIRED_AGENT_RULE_RE.search(text) is not None
 
 
-def canonical_execution_policy_line() -> str:
+def _canonical_policy_line(marker: str, label: str) -> str:
     template = CANONICAL / "templates" / "AGENTS.md"
     if not template.is_file():
         raise SystemExit("FAIL canonical AGENTS template missing")
     matches = [
         line
         for line in template.read_text(encoding="utf-8").splitlines()
-        if line.startswith(EXECUTION_POLICY_MARKER)
+        if line.startswith(marker)
     ]
     if len(matches) != 1:
-        raise SystemExit("FAIL canonical AGENTS template must contain exactly one managed execution policy")
+        raise SystemExit(f"FAIL canonical AGENTS template must contain exactly one managed {label} policy")
     return matches[0]
+
+
+def canonical_execution_policy_line() -> str:
+    return _canonical_policy_line(EXECUTION_POLICY_MARKER, "continuous-execution")
+
+
+def canonical_managed_policy_lines() -> tuple[str, str, str]:
+    return (
+        _canonical_policy_line(EXECUTION_PROFILE_MARKER, "execution-profile"),
+        canonical_execution_policy_line(),
+        _canonical_policy_line(EXTERNAL_WRITE_POLICY_MARKER, "external-write-scope"),
+    )
 
 
 def plan_execution_policy_sync(root: Path) -> str | None:
@@ -178,16 +194,40 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             "FAIL AGENTS.md contains unrecognized retired agent/Cursor rules; review manually"
         )
 
-    canonical = canonical_execution_policy_line()
+    canonical_profile, canonical_execution, canonical_external_write = canonical_managed_policy_lines()
     lines = cleaned.splitlines()
-    policy_indexes = [i for i, line in enumerate(lines) if line.startswith(EXECUTION_POLICY_MARKER)]
-    if len(policy_indexes) > 1:
-        raise SystemExit("FAIL AGENTS.md contains duplicate managed execution policy lines")
-    if policy_indexes:
-        idx = policy_indexes[0]
-        if lines[idx] != canonical:
-            lines[idx] = canonical
-    else:
+    specs = (
+        (
+            "execution-profile",
+            canonical_profile,
+            (EXECUTION_PROFILE_MARKER,) + LEGACY_EXECUTION_PROFILE_MARKERS,
+        ),
+        (
+            "continuous-execution",
+            canonical_execution,
+            (EXECUTION_POLICY_MARKER,),
+        ),
+        (
+            "external-write-scope",
+            canonical_external_write,
+            (EXTERNAL_WRITE_POLICY_MARKER,) + LEGACY_EXTERNAL_WRITE_POLICY_MARKERS,
+        ),
+    )
+    missing: list[str] = []
+    for label, canonical, markers in specs:
+        indexes = [
+            i
+            for i, line in enumerate(lines)
+            if any(line.startswith(marker) for marker in markers)
+        ]
+        if len(indexes) > 1:
+            raise SystemExit(f"FAIL AGENTS.md contains duplicate managed {label} policy lines")
+        if indexes:
+            lines[indexes[0]] = canonical
+        else:
+            missing.append(canonical)
+
+    if missing:
         heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
         if len(heading_indexes) != 1:
             raise SystemExit(
@@ -197,7 +237,8 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         insert_at = heading_indexes[0] + 1
         if insert_at < len(lines) and lines[insert_at] == "":
             insert_at += 1
-        lines.insert(insert_at, canonical)
+        for canonical in reversed(missing):
+            lines.insert(insert_at, canonical)
     rewritten = "\n".join(lines)
     if original.endswith("\n"):
         rewritten += "\n"
