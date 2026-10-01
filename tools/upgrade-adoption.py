@@ -35,6 +35,7 @@ from adopt import (
 )
 
 CANONICAL = Path(__file__).resolve().parents[1]
+ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
 
 # Known managed version/baseline declaration forms. Only these are rewritten;
 # surrounding project-specific text is preserved. Ambiguous/custom forms fail closed.
@@ -508,6 +509,54 @@ def apply_governance_floor_install(root: Path, planned: dict[str, str]) -> list[
     return installed
 
 
+def git_blob_sha(text: str) -> str:
+    data = text.encode("utf-8")
+    header = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(header + data).hexdigest()
+
+
+def build_root_migration_manifest(
+    *,
+    base_sha: str,
+    from_epoch: int,
+    to_epoch: int,
+    planned_root_surfaces: dict[str, str],
+    old_baseline: str,
+    new_baseline: str,
+) -> dict[str, object] | None:
+    if not planned_root_surfaces:
+        return None
+    if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
+        raise SystemExit("FAIL root migration base HEAD is unavailable")
+    if to_epoch != from_epoch + 1:
+        raise SystemExit("FAIL root migration policy_epoch must advance exactly once")
+    return {
+        "contract_version": 1,
+        "base_sha": base_sha,
+        "from_policy_epoch": from_epoch,
+        "to_policy_epoch": to_epoch,
+        "requires_exact_head_validate": True,
+        "automation_eligible": False,
+        "rationale": (
+            f"Managed adoption upgrade {old_baseline} -> {new_baseline} changes "
+            "canonical governance root surfaces."
+        ),
+        "changed_surfaces": [
+            {"path": rel, "head_blob_sha": git_blob_sha(text)}
+            for rel, text in sorted(planned_root_surfaces.items())
+        ],
+    }
+
+
+def write_root_migration_manifest(root: Path, manifest: dict[str, object] | None) -> bool:
+    if manifest is None:
+        return False
+    path = root / ROOT_MIGRATION_MANIFEST
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_yaml(path, manifest)
+    return True
+
+
 def plan_verification_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
@@ -665,6 +714,9 @@ def main() -> int:
         raise SystemExit("FAIL target must be a Git repository")
     if run_git(root, "status", "--porcelain") and not args.allow_dirty:
         raise SystemExit("FAIL target worktree is dirty; preserve unrelated work before upgrade")
+    base_head = run_git(root, "rev-parse", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40}", base_head):
+        raise SystemExit("FAIL target base HEAD is unavailable")
 
     project_path = root / ".engineering/project.yaml"
     release_path = root / ".engineering/release.yaml"
@@ -720,11 +772,25 @@ def main() -> int:
 
     if old_version == current_version and old_baseline == new_baseline:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        policy_epoch_repair = existing_policy_epoch < POLICY_EPOCH
+        planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+        target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
+        if planned_root_surfaces:
+            target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
+        policy_epoch_repair = target_policy_epoch != existing_policy_epoch
+        root_migration = build_root_migration_manifest(
+            base_sha=base_head,
+            from_epoch=existing_policy_epoch,
+            to_epoch=target_policy_epoch,
+            planned_root_surfaces=planned_root_surfaces,
+            old_baseline=old_baseline,
+            new_baseline=new_baseline,
+        )
         if (
             not planned_engineering_context
+            and not planned_dependencies
             and not planned_governance_floor
             and planned_execution_policy is None
             and not retired_agent_artifacts
@@ -734,10 +800,14 @@ def main() -> int:
             return 0
         if planned_engineering_context:
             print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_dependencies:
+            print("ENGINEERING_SYSTEM_DEPENDENCIES_REPAIR=REQUIRED")
         if planned_governance_floor:
             print("GOVERNANCE_FLOOR_REPAIR=REQUIRED")
         if policy_epoch_repair:
-            print(f"POLICY_EPOCH_REPAIR={POLICY_EPOCH}")
+            print(f"POLICY_EPOCH_REPAIR={target_policy_epoch}")
+        if root_migration is not None:
+            print("GOVERNANCE_ROOT_MIGRATION=REQUIRED")
         if planned_execution_policy is not None:
             print("EXECUTION_POLICY_REPAIR=REQUIRED")
         if retired_agent_artifacts:
@@ -750,12 +820,18 @@ def main() -> int:
             engineering["policy_epoch"] = target_policy_epoch
             project["engineering_system"] = engineering
             write_yaml(project_path, project)
+        if write_root_migration_manifest(root, root_migration):
+            print("GOVERNANCE_ROOT_MIGRATION_WRITTEN=YES")
         removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
         print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
         installed_engineering_context = apply_engineering_context_install(
             root, planned_engineering_context
         )
         print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        installed_dependencies = apply_engineering_system_dependencies_install(
+            root, planned_dependencies
+        )
+        print("ENGINEERING_SYSTEM_DEPENDENCIES_SYNCED=" + (",".join(installed_dependencies) if installed_dependencies else "<none>"))
         installed_governance_floor = apply_governance_floor_install(
             root, planned_governance_floor
         )
@@ -947,9 +1023,24 @@ def main() -> int:
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)
+    planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+    if planned_root_surfaces:
+        target_policy_epoch = max(POLICY_EPOCH, existing_policy_epoch + 1)
+        engineering["policy_epoch"] = target_policy_epoch
+        project["engineering_system"] = engineering
+    root_migration = build_root_migration_manifest(
+        base_sha=base_head,
+        from_epoch=existing_policy_epoch,
+        to_epoch=target_policy_epoch,
+        planned_root_surfaces=planned_root_surfaces,
+        old_baseline=old_baseline,
+        new_baseline=new_baseline,
+    )
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
+    if write_root_migration_manifest(root, root_migration):
+        print("GOVERNANCE_ROOT_MIGRATION_WRITTEN=YES")
     workflow_path.write_text(engineering_workflow(new_baseline, ci_mode), encoding="utf-8")
 
     if release_contract_enabled:

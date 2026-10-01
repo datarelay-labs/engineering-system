@@ -442,6 +442,75 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
 
 
+def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-governance-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/governance-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        before_project = load_yaml(project_path)
+        before_epoch = before_project["engineering_system"]["policy_epoch"]
+        assert before_epoch == 2
+
+        (target / "tools/governance_floor.py").unlink()
+        commit_all(target, "remove managed governance helper")
+        migration_base = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "GOVERNANCE_FLOOR_REPAIR=REQUIRED" in repaired.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" in repaired.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION_WRITTEN=YES" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+
+        after_project = load_yaml(project_path)
+        assert after_project["engineering_system"]["policy_epoch"] == before_epoch + 1
+
+        migration_path = target / ".engineering/governance-migration.yaml"
+        migration = load_yaml(migration_path)
+        assert migration["contract_version"] == 1
+        assert migration["base_sha"] == migration_base
+        assert migration["from_policy_epoch"] == before_epoch
+        assert migration["to_policy_epoch"] == before_epoch + 1
+        assert migration["requires_exact_head_validate"] is True
+        assert migration["automation_eligible"] is False
+        assert [item["path"] for item in migration["changed_surfaces"]] == [
+            "tools/governance_floor.py"
+        ]
+        helper_blob = run(
+            "git",
+            "hash-object",
+            "tools/governance_floor.py",
+            cwd=target,
+        ).stdout.strip()
+        assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
+
+
 def test_same_baseline_repairs_managed_execution_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-policy-repair"
@@ -2484,6 +2553,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_same_baseline_governance_floor_repair_emits_root_migration()
     test_same_baseline_repairs_managed_execution_policy()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
