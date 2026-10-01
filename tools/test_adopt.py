@@ -108,7 +108,7 @@ def test_clean_python_bootstrap() -> None:
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.7.0"
-        assert engineering["policy_epoch"] == 1
+        assert engineering["policy_epoch"] == 2
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -421,10 +421,12 @@ def test_managed_upgrade_to_1_6() -> None:
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert "does not serialize unrelated repository work behind a waiting packet" in upgraded_agents
-        assert "begin the first concrete repository action in the same turn" in upgraded_agents
+        assert "make measurable progress in the same turn" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
-        assert "Cursor" not in upgraded_agents
+        assert "Cursor remains retired/prohibited" in upgraded_agents
         assert "IMPLEMENTER=CURSOR" not in upgraded_agents
+        assert "owner explicitly reactivates" not in upgraded_agents
+        assert "Cursor adapter is disabled by default" not in upgraded_agents
         assert f"Engineering System version 1.7.0 at immutable commit `{NEW_BASELINE}`" in upgraded_agents
         assert BASELINE not in upgraded_agents
 
@@ -472,6 +474,10 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         agents_text = agents_text.replace(policy_line + "\n", "", 1)
         agents_text += "\n## Product-specific invariant\n\n- preserve-same-baseline-rule\n"
         agents_path.write_text(agents_text, encoding="utf-8")
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["policy_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         commit_all(target, "simulate managed policy drift")
 
         failed = run(
@@ -495,10 +501,13 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         )
         assert "EXECUTION_POLICY_REPAIR=REQUIRED" in repaired.stdout
         assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
+        assert "POLICY_EPOCH_REPAIR=2" in repaired.stdout
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         repaired_agents = agents_path.read_text(encoding="utf-8")
         assert repaired_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-same-baseline-rule" in repaired_agents
+        repaired_project = load_yaml(project_path)
+        assert repaired_project["engineering_system"]["policy_epoch"] == 2
 
 
 def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:

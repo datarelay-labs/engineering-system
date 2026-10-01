@@ -22,6 +22,31 @@ Tool-specific behavior is implemented through adapters:
 
 An adapter may translate the core rules into tool-specific instructions but must not weaken them.
 
+## Governance root-of-trust migration
+
+Base-owned governance code must be able to validate a candidate without executing candidate-controlled governance code. A change to a governance root-of-trust surface is therefore a versioned migration, not an ordinary policy edit.
+
+Root-of-trust surfaces currently include:
+- `tools/governance_floor.py`;
+- `.engineering/requirements-engineering-system.txt`;
+- for the canonical repository, `.github/workflows/governance-floor.yml`.
+
+When any of those surfaces changes:
+- increment `engineering_system.policy_epoch` by exactly one;
+- add/update `.engineering/governance-migration.yaml` with `contract_version: 1`;
+- bind `base_sha` to the exact target-base commit and record matching `from_policy_epoch` / `to_policy_epoch`;
+- list the exact changed root surfaces with each candidate Git blob SHA;
+- set `requires_exact_head_validate: true` and `automation_eligible: false`;
+- record a bounded non-empty rationale.
+
+The base-owned governance floor reads the candidate manifest and candidate blobs as data only. It rejects a missing/stale base binding, epoch jump, incomplete/extra surface set, or blob mismatch. Candidate root-of-trust code is not used to authorize itself.
+
+The migration manifest is evidence, not authority. A root-of-trust migration additionally requires explicit current owner approval recorded in the trusted ACTIVE Work Packet for that migration. Root-of-trust migration evidence never grants merge authority and is never eligible for automatic merge.
+
+The ordinary PR validation workflow executes the candidate's deterministic tests on the exact candidate HEAD with its normal read-only CI boundary. After this migration contract is established on the base branch, a future root-of-trust migration is merge-ready only when the base-owned floor passes, exact-head validation passes, current owner approval is present, and actionable review findings are dispositioned.
+
+The one migration that establishes this contract is necessarily a bridge from the legacy self-protecting floor, which cannot authorize replacement of its own helper. For that establishing migration only, the legacy floor may remain BLOCK solely for the known self-change/prose-coupling reasons documented in the trusted Work Packet; the candidate migration contract must PASS against the exact old base, exact-head validation must PASS, the changed root surface set/blob digests must match the manifest, and explicit owner approval is mandatory. Once merged, this bootstrap disposition is retired and MUST NOT be reused.
+
 ## Context-loading enforcement
 
 Always read:

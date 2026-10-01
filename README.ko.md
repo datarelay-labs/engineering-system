@@ -140,6 +140,7 @@ release candidate
 | Operations, observability, backup/restore, incident, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
 | Product Master/OpenSpec/ADR/Wiki source-of-truth 역할과 optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
 | AI session continuity와 repository-scoped Work Packet | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
+| Provider guidance 정렬, 정책 계층, scaffolding 생명주기 | [`standards/PROVIDER_GUIDANCE.md`](standards/PROVIDER_GUIDANCE.md) |
 | Automated repository adoption과 qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
 | Core/adapters와 deterministic enforcement | [`standards/ENFORCEMENT.md`](standards/ENFORCEMENT.md) |
 

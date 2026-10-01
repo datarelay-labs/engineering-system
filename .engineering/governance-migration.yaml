@@ -1,0 +1,13 @@
+contract_version: 1
+base_sha: 0b09d0ddea19aca804bfdcebb79332783bf64c5c
+from_policy_epoch: 1
+to_policy_epoch: 2
+requires_exact_head_validate: true
+automation_eligible: false
+rationale: >-
+  Establish the first machine-enforced root-of-trust migration contract while
+  aligning Engineering System policy with current provider guidance and
+  removing prose-coupled governance checks.
+changed_surfaces:
+  - path: tools/governance_floor.py
+    head_blob_sha: ffe6d7c85ee9bccb014f4eaeb0d3756b800862ac

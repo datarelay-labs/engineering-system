@@ -14,11 +14,24 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 
 - **Owner:** product requirements, scope, final decisions, release approval, human UX judgment.
 - **Independent AI reviewer:** architecture, requirements, test strategy, independent review, incident analysis.
-- **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. ChatGPT Chat is the default implementer when a trusted Work Packet and pre-mutation gate authorize it.
-- **Implementation path:** ChatGPT Chat performs implementation; optional review/runtime tools never create authority or weaken repository/packet gates.
+- **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. The authorized implementer is selected by the current execution profile plus the trusted Work Packet; provider identity is not a core invariant.
+- **Implementation path:** the current managed execution profile is ChatGPT-primary. Optional review/runtime tools never create authority or weaken repository/packet gates; retired/prohibited adapters remain non-runnable until an explicit profile change is adopted.
 - **Automation:** deterministic validation, CI, security/performance checks, artifact verification.
 - **GitHub:** durable source of truth for code, history, gates, and releases.
 - **Wiki/Athena:** derived human-readable and AI-searchable knowledge; canonical Git content wins on conflict.
+
+## Provider-aligned policy layers
+
+The Engineering System separates durable engineering invariants from replaceable AI-provider scaffolding:
+
+1. **Provider guidance baseline** — current official provider guidance is reviewed as an upstream design input. It can motivate changes but never grants repository execution authority.
+2. **Core invariants** — durable rules for authority, security boundaries, repository isolation, verifiable outcomes, release integrity, and bounded human approval.
+3. **Execution profile** — replaceable organization/project choices such as the primary implementer, optional reviewers, runtime surface, and retired/prohibited adapters. The current managed profile is ChatGPT-primary and keeps Cursor retired/prohibited.
+4. **Project policy / Work Packet** — repository-specific constraints and the current bounded outcome.
+
+Before adding or retaining a harness rule, classify it as either a durable invariant or temporary scaffolding. Scaffolding must have a concrete failure mode it addresses and a review/removal condition. Prefer `KEEP`, `RELAX`, `MAKE_CONDITIONAL`, `PROVIDER_PROFILE`, or `DELETE` over indefinitely accumulating instructions.
+
+Provider/model upgrades trigger an assumption review: remove or relax scaffolding that no longer improves verified outcomes. Do not preserve a rule only because an older model once needed it. See `PROVIDER_GUIDANCE.md`.
 
 ## Solo-developer efficiency principles
 

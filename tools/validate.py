@@ -23,6 +23,7 @@ REQUIRED_STANDARDS = (
     "standards/SKILLS.md",
     "standards/ENFORCEMENT.md",
     "standards/SESSION_CONTINUITY.md",
+    "standards/PROVIDER_GUIDANCE.md",
     "standards/ADOPTION.md",
 )
 
@@ -35,6 +36,7 @@ REQUIRED_ENFORCEMENT_TEMPLATES = (
 )
 
 REQUIRED_METHOD_FILES = (
+    ".engineering/governance-migration.yaml",
     "adapters/README.md",
     ".github/workflows/affected-tests.yml",
     ".github/workflows/enforcement-check.yml",
@@ -950,6 +952,10 @@ def validate_governance_floor_contract():
         "RETIRED_IMPLEMENTER_REINTRODUCED",
         "RETIRED_AGENT_ARTIFACT_REINTRODUCED",
         "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH",
+        "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING",
+        "ROOT_MIGRATION_MANIFEST",
+        "requires_exact_head_validate",
+        "automation_eligible",
         "GOVERNANCE_FLOOR=",
     ):
         if token not in helper:
@@ -960,7 +966,7 @@ def validate_governance_floor_contract():
     for token in ("pull_request_target", "governance-floor.yml@", "base_sha:", "head_sha:"):
         if token not in adopted:
             raise SystemExit(f"FAIL adopted workflow missing governance-floor token: {token}")
-    if "POLICY_EPOCH = 1" not in adopt or "policy_epoch" not in check:
+    if "POLICY_EPOCH = 2" not in adopt or "policy_epoch" not in check:
         raise SystemExit("FAIL adoption tooling missing governance-floor policy epoch")
     policy = (
         schema.get("properties", {})
