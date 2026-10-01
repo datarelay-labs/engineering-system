@@ -41,7 +41,9 @@ def write_managed(root: Path, epoch: int) -> None:
         encoding="utf-8",
     )
     (root / "AGENTS.md").write_text(
-        "IMPLEMENTER=CURSOR is invalid; IMPLEMENTER=CHATGPT_CHAT is required.\n",
+        "ChatGPT Chat is the implementation path.\n"
+        "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
+        "IMPLEMENTER=CHATGPT_CHAT\n",
         encoding="utf-8",
     )
     (root / "tools/context_epoch.py").write_text(
@@ -136,6 +138,51 @@ def test_old_context_epoch_allowlist_blocks() -> None:
         assert "RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py" in reasons
 
 
+def test_epoch_advance_cannot_remove_chat_only_guard() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / "tools/context_epoch.py").write_text(
+            "blocking = []\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "weaken implementer guard")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert any(
+            item.startswith(
+                "MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:"
+            )
+            for item in reasons
+        )
+
+
+def test_workflow_comment_tokens_do_not_preserve_floor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\n"
+            "on:\n"
+            "  pull_request:\n"
+            "# pull_request_target:\n"
+            "# governance-floor:\n"
+            "# github.event_name == 'pull_request_target'\n"
+            "# datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@"
+            + ("b" * 40)
+            + "\n"
+            "# github.event.pull_request.base.sha\n"
+            "# github.event.pull_request.head.sha\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "comment-only floor")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING" in reasons
+
+
 def test_guard_change_requires_policy_epoch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -145,7 +192,7 @@ def test_guard_change_requires_policy_epoch() -> None:
         head = commit(root, "guard drift")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert "GOVERNANCE_HELPER_CHANGED_WITHOUT_POLICY_EPOCH" in reasons
+        assert "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:tools/governance_floor.py" in reasons
 
         write_managed(root, 2)
         helper = root / "tools/governance_floor.py"
@@ -166,7 +213,8 @@ def test_workflow_self_preservation_blocks() -> None:
         head = commit(root, "remove floor")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert any(item.startswith("GOVERNANCE_WORKFLOW_INCOMPLETE:") for item in reasons)
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING" in reasons
+        assert "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:.github/workflows/engineering-system.yml" in reasons
 
 
 def main() -> int:
@@ -174,6 +222,8 @@ def main() -> int:
     test_policy_epoch_regression_blocks()
     test_retired_implementer_and_artifact_block()
     test_old_context_epoch_allowlist_blocks()
+    test_epoch_advance_cannot_remove_chat_only_guard()
+    test_workflow_comment_tokens_do_not_preserve_floor()
     test_guard_change_requires_policy_epoch()
     test_workflow_self_preservation_blocks()
     print("GOVERNANCE_FLOOR_TESTS=PASS")

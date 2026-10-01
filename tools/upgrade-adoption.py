@@ -682,6 +682,14 @@ def main() -> int:
 
     old_version = str(engineering.get("version") or "")
     old_baseline = str(engineering.get("baseline") or "")
+    existing_policy_epoch = engineering.get("policy_epoch", 0)
+    if (
+        isinstance(existing_policy_epoch, bool)
+        or not isinstance(existing_policy_epoch, int)
+        or existing_policy_epoch < 0
+    ):
+        raise SystemExit("FAIL existing adoption has invalid policy_epoch")
+    target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
     current_version = canonical_version()
     new_baseline = canonical_baseline(args.baseline_sha)
     retired_agent_artifacts = existing_retired_agent_artifacts(root)
@@ -714,7 +722,7 @@ def main() -> int:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        policy_epoch_repair = engineering.get("policy_epoch") != POLICY_EPOCH
+        policy_epoch_repair = existing_policy_epoch < POLICY_EPOCH
         if (
             not planned_engineering_context
             and not planned_governance_floor
@@ -739,7 +747,7 @@ def main() -> int:
             if not args.apply:
                 return 0
         if policy_epoch_repair:
-            engineering["policy_epoch"] = POLICY_EPOCH
+            engineering["policy_epoch"] = target_policy_epoch
             project["engineering_system"] = engineering
             write_yaml(project_path, project)
         removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
@@ -869,7 +877,7 @@ def main() -> int:
 
     engineering["version"] = current_version
     engineering["baseline"] = new_baseline
-    engineering["policy_epoch"] = POLICY_EPOCH
+    engineering["policy_epoch"] = target_policy_epoch
     project["engineering_system"] = engineering
     operations["persistent_state"] = persistent_state
     operations["runbook_paths"] = runbook_paths

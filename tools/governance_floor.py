@@ -14,32 +14,21 @@ MANAGED_EXECUTION_SURFACES = (
     "AGENTS.md",
     "tools/context_epoch.py",
     "tools/engineering-context.py",
+)
+PROTECTED_GOVERNANCE_SURFACES = (
+    *MANAGED_EXECUTION_SURFACES,
     "tools/governance_floor.py",
+    ".github/workflows/engineering-system.yml",
 )
 RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
-RETIRED_EXECUTION_PATTERNS = {
-    "AGENTS.md": (
-        "owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`",
-        "Cursor adapter is disabled by default",
-    ),
-    "tools/context_epoch.py": (
-        'implementer not in {"CHATGPT_CHAT", "CURSOR"}',
-        "implementer not in {'CHATGPT_CHAT', 'CURSOR'}",
-    ),
-    "tools/engineering-context.py": (
-        ".cursor/rules/engineering-system.mdc",
-    ),
-}
 GOVERNANCE_HELPER = "tools/governance_floor.py"
 ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
-REQUIRED_WORKFLOW_TOKENS = (
-    "pull_request_target:",
-    "governance-floor:",
-    "github.event_name == 'pull_request_target'",
-    "datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@",
-    "github.event.pull_request.base.sha",
-    "github.event.pull_request.head.sha",
+GOVERNANCE_WORKFLOW_PREFIX = (
+    "datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@"
 )
+EXPECTED_WORKFLOW_CONDITION = "github.event_name == 'pull_request_target'"
+EXPECTED_BASE_INPUT = "${{ github.event.pull_request.base.sha }}"
+EXPECTED_HEAD_INPUT = "${{ github.event.pull_request.head.sha }}"
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -90,6 +79,91 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     return value
 
 
+def _workflow_reasons(text: str | None, profile: dict[str, object]) -> list[str]:
+    if text is None:
+        return [f"MANAGED_GOVERNANCE_PATH_MISSING:{ENGINEERING_WORKFLOW}"]
+    try:
+        payload = yaml.load(text, Loader=yaml.BaseLoader) or {}
+    except yaml.YAMLError:
+        return ["GOVERNANCE_WORKFLOW_INVALID_YAML"]
+    if not isinstance(payload, dict):
+        return ["GOVERNANCE_WORKFLOW_INVALID_ROOT"]
+    triggers = payload.get("on")
+    if not isinstance(triggers, dict) or "pull_request_target" not in triggers:
+        return ["GOVERNANCE_WORKFLOW_TRIGGER_MISSING"]
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return ["GOVERNANCE_WORKFLOW_JOB_MISSING"]
+    job = jobs.get("governance-floor")
+    if not isinstance(job, dict):
+        return ["GOVERNANCE_WORKFLOW_JOB_MISSING"]
+    reasons: list[str] = []
+    if str(job.get("if") or "").strip() != EXPECTED_WORKFLOW_CONDITION:
+        reasons.append("GOVERNANCE_WORKFLOW_CONDITION_INVALID")
+    uses = str(job.get("uses") or "").strip()
+    if not uses.startswith(GOVERNANCE_WORKFLOW_PREFIX):
+        reasons.append("GOVERNANCE_WORKFLOW_USES_INVALID")
+    else:
+        pinned = uses.removeprefix(GOVERNANCE_WORKFLOW_PREFIX)
+        if FULL_SHA_RE.fullmatch(pinned) is None:
+            reasons.append("GOVERNANCE_WORKFLOW_PIN_INVALID")
+        engineering = profile.get("engineering_system") or {}
+        baseline = (
+            str(engineering.get("baseline") or "").strip()
+            if isinstance(engineering, dict)
+            else ""
+        )
+        if baseline and FULL_SHA_RE.fullmatch(baseline) and pinned != baseline:
+            reasons.append("GOVERNANCE_WORKFLOW_BASELINE_MISMATCH")
+    inputs = job.get("with")
+    if not isinstance(inputs, dict):
+        reasons.append("GOVERNANCE_WORKFLOW_INPUTS_INVALID")
+    else:
+        if str(inputs.get("base_sha") or "").strip() != EXPECTED_BASE_INPUT:
+            reasons.append("GOVERNANCE_WORKFLOW_BASE_INPUT_INVALID")
+        if str(inputs.get("head_sha") or "").strip() != EXPECTED_HEAD_INPUT:
+            reasons.append("GOVERNANCE_WORKFLOW_HEAD_INPUT_INVALID")
+    return reasons
+
+
+def _execution_surface_reasons(path: str, content: str) -> list[str]:
+    reasons: list[str] = []
+    if path == "AGENTS.md":
+        if "cursor" in content.lower():
+            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
+        for required in (
+            "ChatGPT Chat is the implementation path.",
+            "Execution authority precedence:",
+            "IMPLEMENTER=CHATGPT_CHAT",
+        ):
+            if required not in content:
+                reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:{required}")
+    elif path == "tools/context_epoch.py":
+        if '"CURSOR"' in content or "'CURSOR'" in content:
+            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+        required = (
+            'if implementer and implementer != "CHATGPT_CHAT":',
+            'blocking.append("IMPLEMENTER_INVALID")',
+        )
+        for token in required:
+            if token not in content:
+                reasons.append(
+                    f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}"
+                )
+    elif path == "tools/engineering-context.py":
+        if ".cursor" in content.lower():
+            reasons.append(
+                "RETIRED_IMPLEMENTER_REINTRODUCED:tools/engineering-context.py"
+            )
+        for required in ("AGENTS.md", ".engineering/project.yaml"):
+            if required not in content:
+                reasons.append(
+                    f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/engineering-context.py:{required}"
+                )
+    return reasons
+
+
+
 def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], int, int]:
     root = root.resolve()
     base = _commit(root, base_ref, "base")
@@ -105,32 +179,39 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
         )
 
-    head_helper = _read_at(root, head, GOVERNANCE_HELPER)
-    base_helper = _read_at(root, base, GOVERNANCE_HELPER)
-    if head_helper is None:
-        reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{GOVERNANCE_HELPER}")
-    elif head_epoch == base_epoch and base_helper is not None and head_helper != base_helper:
-        reasons.append("GOVERNANCE_HELPER_CHANGED_WITHOUT_POLICY_EPOCH")
+    if head_epoch == base_epoch:
+        for path in PROTECTED_GOVERNANCE_SURFACES:
+            base_content = _read_at(root, base, path)
+            head_content = _read_at(root, head, path)
+            if base_content != head_content:
+                reasons.append(
+                    f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}"
+                )
 
     workflow = _read_at(root, head, ENGINEERING_WORKFLOW)
-    if workflow is None:
-        reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{ENGINEERING_WORKFLOW}")
-    else:
-        for token in REQUIRED_WORKFLOW_TOKENS:
-            if token not in workflow:
-                reasons.append(f"GOVERNANCE_WORKFLOW_INCOMPLETE:{token}")
+    reasons.extend(_workflow_reasons(workflow, head_profile))
 
     for path in MANAGED_EXECUTION_SURFACES:
         content = _read_at(root, head, path)
         if content is None:
             reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
             continue
-        for retired in RETIRED_EXECUTION_PATTERNS.get(path, ()):
-            if retired in content:
+        reasons.extend(_execution_surface_reasons(path, content))
+
+    head_helper = _read_at(root, head, GOVERNANCE_HELPER)
+    if head_helper is None:
+        reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{GOVERNANCE_HELPER}")
+    else:
+        for required in (
+            "GOVERNANCE_POLICY_EPOCH_REGRESSION",
+            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH",
+            "RETIRED_IMPLEMENTER_REINTRODUCED",
+            "GOVERNANCE_WORKFLOW_TRIGGER_MISSING",
+        ):
+            if required not in head_helper:
                 reasons.append(
-                    f"RETIRED_IMPLEMENTER_REINTRODUCED:{path}"
+                    f"GOVERNANCE_HELPER_INVARIANT_MISSING:{required}"
                 )
-                break
 
     for path in RETIRED_AGENT_ARTIFACTS:
         if _tree_has_path(root, head, path):
