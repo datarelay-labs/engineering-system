@@ -66,7 +66,8 @@ TRACE_ROOT_CHANGE_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:chroot|pivot_root)\("
 )
 TRACE_MOUNT_TOPOLOGY_RE = re.compile(
-    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:mount|umount2|move_mount|open_tree|mount_setattr)\("
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?"
+    r"(?:mount|umount2|move_mount|open_tree|mount_setattr|fsopen|fsconfig|fsmount|fspick)\("
 )
 TRACE_PATH_TOPOLOGY_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:rename|renameat|renameat2|link|linkat|symlink|symlinkat)\("
@@ -80,8 +81,15 @@ TRACE_SECCOMP_RE = re.compile(
 TRACE_PRCTL_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?prctl\("
 )
+TRACE_SYSCALL_NAME_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?([A-Za-z0-9_]+)\("
+)
+TRACE_UNIX_SOCKET_PATH_RE = re.compile(r'\bsun_path="((?:\\.|[^"\\])*)"')
+TRACE_UNIX_SOCKET_ABSTRACT_RE = re.compile(r"\bsun_path=@")
+TRACE_UNIX_SOCKET_SYSCALLS = frozenset({"connect", "bind", "sendto", "sendmsg", "sendmmsg"})
 TRACE_SYSCALL_FILTER = (
-    "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,seccomp,prctl"
+    "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,"
+    "seccomp,prctl,connect,bind,sendto,sendmsg,sendmmsg"
 )
 TRACE_SETUP_PRIVATE_MOUNT_RE = re.compile(
     r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("none", "/", NULL, MS_REC\|MS_PRIVATE, NULL\) = 0$'
@@ -855,6 +863,32 @@ def _trace_setup_mount_allowed(line: str) -> bool:
     )
 
 
+def _trace_path_dependency_reason(
+    decoded: str,
+    base: str,
+    unsafe: tuple[str, ...],
+) -> str | None:
+    if not decoded or "\x00" in decoded:
+        return None
+    if os.path.isabs(decoded):
+        normalized = _normalize_trace_path(decoded)
+    else:
+        normalized = _normalize_trace_path(os.path.join(base, decoded))
+    if _trace_path_alias_ambiguous(normalized):
+        return "TRACE_AMBIGUOUS"
+    if normalized == base:
+        relative = "."
+    elif normalized.startswith(base + os.sep):
+        relative = os.path.relpath(normalized, base)
+    else:
+        return None
+    relative_posix = Path(relative).as_posix()
+    for blocked in unsafe:
+        if relative_posix == blocked or relative_posix.startswith(blocked + "/"):
+            return "UNSAFE_TREE_DEPENDENCY"
+    return None
+
+
 def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_paths: tuple[str, ...]) -> str | None:
     if isinstance(trace_source, Path):
         try:
@@ -873,6 +907,8 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
     base = _normalize_trace_path(str(work.resolve()))
     unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
     for line in trace.splitlines():
+        syscall_match = TRACE_SYSCALL_NAME_RE.search(line)
+        syscall = syscall_match.group(1) if syscall_match is not None else ""
         # Filesystem-root changes invalidate absolute-path attribution. Runtime
         # evidence never needs to alter the tracee root, so even an attempted
         # chroot/pivot_root is treated as ambiguous rather than reconstructed.
@@ -918,6 +954,22 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         if "chdir(" in line or "fchdir(" in line:
             return "TRACE_AMBIGUOUS"
 
+        if syscall in TRACE_UNIX_SOCKET_SYSCALLS:
+            if "AF_UNIX" not in line:
+                continue
+            if TRACE_UNIX_SOCKET_ABSTRACT_RE.search(line):
+                continue
+            socket_path = TRACE_UNIX_SOCKET_PATH_RE.search(line)
+            if socket_path is None:
+                return "TRACE_AMBIGUOUS"
+            decoded = _decode_trace_string(socket_path.group(1))
+            if decoded is None:
+                return "TRACE_AMBIGUOUS"
+            reason = _trace_path_dependency_reason(decoded, base, unsafe)
+            if reason is not None:
+                return reason
+            continue
+
         for match in TRACE_DIRFD_PATH_RE.finditer(line):
             decoded = _decode_trace_string(match.group(2))
             if decoded is None:
@@ -925,32 +977,18 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
             if decoded and not os.path.isabs(decoded) and match.group(1).strip() != "AT_FDCWD":
                 return "TRACE_AMBIGUOUS"
 
-        for raw in TRACE_QUOTED_RE.findall(line):
-            decoded = _decode_trace_string(raw)
-            if decoded is None:
-                return "TRACE_AMBIGUOUS"
-            if not decoded or "\x00" in decoded:
-                continue
-            if os.path.isabs(decoded):
-                normalized = _normalize_trace_path(decoded)
-            else:
-                # strace reports AT_FDCWD-relative names exactly as supplied.
-                # Resolve them against the fixed subject cwd before deciding
-                # whether they escape. This catches aliases such as
-                # ../tree/optional-config that normalize back into the root.
-                normalized = _normalize_trace_path(os.path.join(base, decoded))
-            if _trace_path_alias_ambiguous(normalized):
-                return "TRACE_AMBIGUOUS"
-            if normalized == base:
-                relative = "."
-            elif normalized.startswith(base + os.sep):
-                relative = os.path.relpath(normalized, base)
-            else:
-                continue
-            relative_posix = Path(relative).as_posix()
-            for blocked in unsafe:
-                if relative_posix == blocked or relative_posix.startswith(blocked + "/"):
-                    return "UNSAFE_TREE_DEPENDENCY"
+        # For traced file/process syscalls that reach this point, the first
+        # quoted field is the pathname position. Later quoted fields can be
+        # argv, xattr names/values, or metadata and are not file accesses.
+        first_path = TRACE_QUOTED_RE.search(line)
+        if first_path is None:
+            continue
+        decoded = _decode_trace_string(first_path.group(1))
+        if decoded is None:
+            return "TRACE_AMBIGUOUS"
+        reason = _trace_path_dependency_reason(decoded, base, unsafe)
+        if reason is not None:
+            return reason
     return None
 
 

@@ -943,6 +943,75 @@ def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
             clear_trust()
 
 
+def test_unix_socket_path_to_unsafe_entry_is_rejected() -> None:
+    import socket
+
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import socket\n"
+        "sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "try:\n"
+        "    sock.connect('optional-sock')\n"
+        "    print('CONNECTED')\n"
+        "except OSError:\n"
+        "    print('FALLBACK')\n"
+        "finally:\n"
+        "    sock.close()\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(outside))
+        server.listen(1)
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-sock").symlink_to(outside)
+        git(repo, "add", "optional-sock")
+        git(repo, "commit", "-m", "unix socket unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+            server.close()
+
+
+def test_nonpath_argv_does_not_block_unrelated_placeholder() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py optional-config"
+    script = "import sys\nprint(sys.argv[1])\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "nonpath argv placeholder")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "optional-config\n"
+        finally:
+            clear_trust()
+
+
 def test_seccomp_filter_install_attempt_is_rejected() -> None:
     supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
@@ -1173,8 +1242,30 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
         assert runtime_evidence.TRACE_SYSCALL_FILTER == (
-            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,seccomp,prctl"
+            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,"
+            "seccomp,prctl,connect,bind,sendto,sendmsg,sendmmsg"
         )
+        trace.write_text(
+            '123 connect(3, {sa_family=AF_UNIX, sun_path="vendor/dependency"}, 110) = -1 ENOENT\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("vendor/dependency",)
+        ) == "UNSAFE_TREE_DEPENDENCY"
+        trace.write_text(
+            '123 connect(3, {sa_family=AF_UNIX, sun_path=@"vendor/dependency"}, 20) = 0\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("vendor/dependency",)
+        ) is None
+        trace.write_text(
+            '123 execve("/usr/bin/python3", ["python3", "health.py", "optional-config"], 0x0) = 0\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("optional-config",)
+        ) is None
         for filter_install in (
             "123 seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, 0x7fff0000) = 3\n",
             "123 prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, 0x7fff0000) = 0\n",
@@ -1910,6 +2001,8 @@ def main() -> int:
     test_procfs_alias_to_unsafe_entry_is_rejected()
     test_linux_alias_variants_to_unsafe_entry_are_rejected()
     test_mount_alias_to_unsafe_entry_is_rejected()
+    test_unix_socket_path_to_unsafe_entry_is_rejected()
+    test_nonpath_argv_does_not_block_unrelated_placeholder()
     test_seccomp_filter_install_attempt_is_rejected()
     test_setup_mount_names_do_not_block_unrelated_placeholders()
     test_ancestor_path_topology_change_is_rejected()
