@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/datarelay-labs/engineering-system/schemas/auto-merge-eligibility-result.schema.json",
+  "title": "Conditional auto-merge eligibility result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision",
+    "reason_class",
+    "reason",
+    "eligible",
+    "target_repo",
+    "workstream",
+    "intent_revision",
+    "pr_number",
+    "subject_head",
+    "authorizes_merge",
+    "external_mutation",
+    "executes_commands",
+    "performs_network_io"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "decision": {"type": "string", "enum": ["ELIGIBLE", "DENY", "BLOCK"]},
+    "reason_class": {"type": "string", "minLength": 1},
+    "reason": {"type": "string", "minLength": 1},
+    "eligible": {"type": "boolean"},
+    "target_repo": {"type": "string"},
+    "workstream": {"type": "string"},
+    "intent_revision": {"type": "integer", "minimum": 0},
+    "pr_number": {"type": "integer", "minimum": 0},
+    "subject_head": {"type": "string"},
+    "authorizes_merge": {"const": false},
+    "external_mutation": {"const": false},
+    "executes_commands": {"const": false},
+    "performs_network_io": {"const": false}
+  }
+}

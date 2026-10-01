@@ -99,6 +99,8 @@ Optional `.engineering/verification.yaml` maps a feature to applicable domains a
 
 Stale HEAD, stale intent, unknown evidence, and unbounded logs fail closed. UNKNOWN stays BLOCK and never PASS.
 
+Conditional auto-merge eligibility is a post-T5 policy gate implemented by `tools/auto_merge_eligibility.py`. The public `evaluate --request-json` CLI accepts bounded facts for validation/denial only and never receives a trust boundary, so caller JSON cannot produce `ELIGIBLE`. Positive in-process evaluation requires the exact `TrustedCoordinatorBoundary` type from `verification-contract.py` and passes the request's bounded verification receipt + manifest through `verification-contract.assess()` for the same repository, workstream, intent revision, and HEAD. Raw dictionaries, JSON round-trips, forged T5 labels, an empty/non-T5 boundary, or a failed assessor result stay `BLOCK`. Only an actual assessor result of `PASS` + `T5` + `AUTOMATION_ELIGIBLE=YES` can enter the remaining repository/profile/task/risk, CI/review/thread, and mutation/replay policy gates. `ELIGIBLE` is evidence-only and always carries `authorizes_merge=false`, `external_mutation=false`, `executes_commands=false`, and `performs_network_io=false`. Missing, unknown, stale, replayed, ambiguous, disallowed, malformed, or failing facts return `BLOCK` or `DENY`. Actual merge execution is outside this contract and requires separately authorized mutation authority.
+
 ## Bounded hardening and audit depth
 
 Security, reliability, quality, and architecture can always be improved further. A quality process therefore needs a stopping rule as well as a defect-finding rule.
