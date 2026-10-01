@@ -99,6 +99,8 @@ Optional `.engineering/verification.yaml` maps a feature to applicable domains a
 
 Stale HEAD, stale intent, unknown evidence, and unbounded logs fail closed. UNKNOWN stays BLOCK and never PASS.
 
+`python3 tools/auto_merge_eligibility.py evaluate --request-json <facts.json>` is the optional post-T5 policy gate for conditional auto-merge eligibility. It consumes bounded current PR identity, exact-head T5/automation eligibility, repository/profile/task/risk policy, CI/review/thread state, and mutation/replay state. Its only positive result is `ELIGIBLE`; that result is evidence-only and always carries `authorizes_merge=false`, `external_mutation=false`, `executes_commands=false`, and `performs_network_io=false`. Missing, unknown, stale, replayed, ambiguous, disallowed, or failing facts return `BLOCK` or `DENY`. Actual merge execution is outside this contract and requires separately authorized mutation authority.
+
 ## Bounded hardening and audit depth
 
 Security, reliability, quality, and architecture can always be improved further. A quality process therefore needs a stopping rule as well as a defect-finding rule.

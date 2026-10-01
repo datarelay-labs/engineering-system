@@ -132,6 +132,10 @@ REQUIRED_METHOD_FILES = (
     "schemas/verification-contract.schema.json",
     "schemas/trust-evidence-receipt.schema.json",
     "schemas/trust-evidence-boundary.schema.json",
+    "tools/auto_merge_eligibility.py",
+    "tools/test_auto_merge_eligibility.py",
+    "schemas/auto-merge-eligibility.schema.json",
+    "schemas/auto-merge-eligibility-result.schema.json",
     "tools/security-profile.py",
     "tools/test_security_profile.py",
     "schemas/security-profile.schema.json",
@@ -1258,6 +1262,44 @@ def validate_verification_contract():
     print("PASS optional verification and trust evidence contract")
 
 
+def validate_auto_merge_eligibility_contract():
+    for rel in (
+        "schemas/auto-merge-eligibility.schema.json",
+        "schemas/auto-merge-eligibility-result.schema.json",
+    ):
+        Draft202012Validator.check_schema(load_json(ROOT / rel))
+    tool = (ROOT / "tools/auto_merge_eligibility.py").read_text(encoding="utf-8")
+    for token in (
+        "ELIGIBLE",
+        "DENY",
+        "BLOCK",
+        "TRUST_BELOW_T5",
+        "STALE_HEAD",
+        "STALE_CI",
+        "STALE_REVIEW",
+        "AUTO_MERGE_DISABLED",
+        '"authorizes_merge": False',
+        '"external_mutation": False',
+        '"executes_commands": False',
+        '"performs_network_io": False',
+    ):
+        if token not in tool:
+            raise SystemExit(f"FAIL auto-merge eligibility tool missing token: {token}")
+    for banned in (
+        "subprocess",
+        "os.system",
+        "urlopen",
+        "requests",
+        "socket",
+        "shell=True",
+        "merge_pull_request",
+        "gh api",
+    ):
+        if banned in tool:
+            raise SystemExit(f"FAIL auto-merge eligibility tool contains banned token: {banned}")
+    print("PASS pure conditional auto-merge eligibility contract")
+
+
 def validate_benchmark_fixtures():
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-fixture.schema.json"))
     Draft202012Validator.check_schema(load_json(ROOT / "schemas/benchmark-execution.schema.json"))
@@ -1441,6 +1483,7 @@ def main():
     validate_runtime_evidence()
     validate_skills_contract()
     validate_verification_contract()
+    validate_auto_merge_eligibility_contract()
     validate_security_profile()
     validate_security_hardening()
     validate_action_pins()
@@ -1516,6 +1559,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_auto_merge_eligibility.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_security_profile.py"], cwd=ROOT)

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/datarelay-labs/engineering-system/schemas/auto-merge-eligibility.schema.json",
+  "title": "Conditional auto-merge eligibility request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "subject", "trust", "policy", "observed"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "subject": {"$ref": "#/$defs/subject"},
+    "trust": {"$ref": "#/$defs/trust"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "observed": {"$ref": "#/$defs/observed"}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+    "workstream": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"},
+    "branch": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[A-Za-z0-9._/-]+$"},
+    "taskKind": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+    "profile": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_repo", "workstream", "intent_revision", "pr_number",
+        "base_branch", "head_branch", "head_sha", "task_kind",
+        "change_risk", "policy_profile"
+      ],
+      "properties": {
+        "target_repo": {"$ref": "#/$defs/repo"},
+        "workstream": {"$ref": "#/$defs/workstream"},
+        "intent_revision": {"type": "integer", "minimum": 1},
+        "pr_number": {"type": "integer", "minimum": 1},
+        "base_branch": {"$ref": "#/$defs/branch"},
+        "head_branch": {"$ref": "#/$defs/branch"},
+        "head_sha": {"$ref": "#/$defs/sha"},
+        "task_kind": {"$ref": "#/$defs/taskKind"},
+        "change_risk": {"$ref": "#/$defs/risk"},
+        "policy_profile": {"$ref": "#/$defs/profile"}
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision", "achieved", "automation_eligible", "target_repo",
+        "workstream", "intent_revision", "subject_head", "external_mutation"
+      ],
+      "properties": {
+        "decision": {"type": "string", "enum": ["PASS", "BLOCK"]},
+        "achieved": {"type": "string", "enum": ["T0", "T1", "T2", "T3", "T4", "T5"]},
+        "automation_eligible": {"type": "string", "enum": ["YES", "NO"]},
+        "target_repo": {"$ref": "#/$defs/repo"},
+        "workstream": {"$ref": "#/$defs/workstream"},
+        "intent_revision": {"type": "integer", "minimum": 1},
+        "subject_head": {"$ref": "#/$defs/sha"},
+        "external_mutation": {"const": "NO"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_repositories", "allowed_profiles", "allowed_task_kinds",
+        "allowed_change_risks", "allowed_base_branches",
+        "auto_merge_enabled", "ruleset_allows"
+      ],
+      "properties": {
+        "allowed_repositories": {
+          "type": "array", "maxItems": 64, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/repo"}
+        },
+        "allowed_profiles": {
+          "type": "array", "maxItems": 32, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/profile"}
+        },
+        "allowed_task_kinds": {
+          "type": "array", "maxItems": 32, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/taskKind"}
+        },
+        "allowed_change_risks": {
+          "type": "array", "maxItems": 4, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/risk"}
+        },
+        "allowed_base_branches": {
+          "type": "array", "maxItems": 32, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/branch"}
+        },
+        "auto_merge_enabled": {"type": "boolean"},
+        "ruleset_allows": {"type": "boolean"}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "head_sha"],
+      "properties": {
+        "status": {"type": "string", "enum": ["PASS", "FAIL", "PENDING", "UNKNOWN"]},
+        "head_sha": {"$ref": "#/$defs/sha"}
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "head_sha", "unresolved_threads"],
+      "properties": {
+        "status": {"type": "string", "enum": ["PASS", "FAIL", "PENDING", "UNKNOWN"]},
+        "head_sha": {"$ref": "#/$defs/sha"},
+        "unresolved_threads": {"type": "integer", "minimum": 0}
+      }
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_repo", "pr_number", "base_branch", "head_branch",
+        "head_sha", "ci", "review", "mutation_state"
+      ],
+      "properties": {
+        "target_repo": {"$ref": "#/$defs/repo"},
+        "pr_number": {"type": "integer", "minimum": 1},
+        "base_branch": {"$ref": "#/$defs/branch"},
+        "head_branch": {"$ref": "#/$defs/branch"},
+        "head_sha": {"$ref": "#/$defs/sha"},
+        "ci": {"$ref": "#/$defs/gate"},
+        "review": {"$ref": "#/$defs/review"},
+        "mutation_state": {
+          "type": "string",
+          "enum": ["CLEAN", "IN_FLIGHT", "AMBIGUOUS", "REPLAY", "UNKNOWN"]
+        }
+      }
+    }
+  }
+}

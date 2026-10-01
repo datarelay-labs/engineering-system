@@ -779,6 +779,22 @@ scenarios:
       - "verification maps reference existing ids only and T5 performs no mutation"
     release_gate: true
 
+  - id: ENG-AUTO-MERGE-ELIGIBILITY-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Conditional auto-merge eligibility
+    level: static
+    domains: [standards, schemas, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_auto_merge_eligibility.py"
+    invariants:
+      - "T5 plus exact-head policy facts can produce eligibility but never merge authority or external mutation"
+    release_gate: true
+
   - id: ENG-SECURITY-PROFILE-001
     cost: cheap
     estimated_seconds: 3
