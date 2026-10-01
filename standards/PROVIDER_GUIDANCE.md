@@ -58,7 +58,7 @@ Do not use provider release notes alone as proof that a guard is obsolete.
 
 The current managed organization profile is ChatGPT-primary. `IMPLEMENTER=CHATGPT_CHAT` remains the runnable Work Packet value enforced by the current tooling. This is profile policy, not a permanent cross-provider core invariant.
 
-Cursor remains retired/prohibited. Moving another provider/runtime into an implementation role requires an explicit profile migration with deterministic regression evidence; historical adapter text or provider availability never activates it.
+Cursor remains retired/prohibited. A continue/resume request that resolves to one runnable `IMPLEMENTER=CHATGPT_CHAT` packet authorizes ChatGPT Chat to continue that implementation directly; no additional magic phrase such as `directly edit` and no alternate-agent handoff is required. Moving another provider/runtime into an implementation role requires an explicit profile migration with deterministic regression evidence; historical adapter text or provider availability never activates it.
 
 Optional fresh Chat, Codex, Claude, or other reviewers may be used when the risk/task contract justifies independent perspective, but provider availability/quota is not a universal completion dependency.
 

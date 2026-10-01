@@ -424,6 +424,11 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "make measurable progress in the same turn" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert "Cursor remains retired/prohibited" in upgraded_agents
+        assert "continue/resume request" in upgraded_agents
+        assert "additional magic phrase" in upgraded_agents
+        assert "ordinary authenticated GitHub Issue/PR coordination" in upgraded_agents
+        assert "high-risk external write" in upgraded_agents
+        assert "Before an external Issue/PR write, run `python3 tools/worker_adapter.py" not in upgraded_agents
         assert "IMPLEMENTER=CURSOR" not in upgraded_agents
         assert "owner explicitly reactivates" not in upgraded_agents
         assert "Cursor adapter is disabled by default" not in upgraded_agents

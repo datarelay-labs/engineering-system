@@ -597,6 +597,43 @@ def validate_worker_adapter_contract():
     ):
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing worker adapter token: {token}")
+
+    project_instruction = (ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt").read_text(encoding="utf-8")
+    custom_instruction = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    provider_guidance = (ROOT / "standards/PROVIDER_GUIDANCE.md").read_text(encoding="utf-8")
+    authority_surfaces = {
+        "AGENTS.md": agents,
+        "templates/AGENTS.md": agents_template,
+        "session continuity": session,
+        "enforcement": enforcement,
+        "project instruction": project_instruction,
+        "custom instruction": custom_instruction,
+        "provider guidance": provider_guidance,
+    }
+    forbidden_universal_gates = (
+        "Before an external Issue/PR write, run `python3 tools/worker_adapter.py",
+        "Immediately before an Issue/PR write or publication effect",
+        "Only authenticated connector authority plus trusted local-binding PASS permits mutation",
+    )
+    for label, text in authority_surfaces.items():
+        for forbidden in forbidden_universal_gates:
+            if forbidden in text:
+                raise SystemExit(f"FAIL {label} retains universal external-write gate: {forbidden}")
+    for label, text in (("AGENTS.md", agents), ("templates/AGENTS.md", agents_template)):
+        for token in (
+            "continue/resume request",
+            "additional magic phrase",
+            "ordinary authenticated GitHub Issue/PR coordination",
+            "high-risk external write",
+        ):
+            if token not in text:
+                raise SystemExit(f"FAIL {label} missing direct ChatGPT authority token: {token}")
+    for label, text in (("session continuity", session), ("enforcement", enforcement)):
+        if "Ordinary authenticated" not in text or "high-risk" not in text or "worker_adapter.py" not in text:
+            raise SystemExit(f"FAIL {label} does not scope trusted external-write machinery to high-risk effects")
+    for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction), ("provider guidance", provider_guidance)):
+        if "directly edit" not in text or "Cursor" not in text:
+            raise SystemExit(f"FAIL {label} missing no-magic-phrase / retired-Cursor execution-profile guard")
     print("PASS trusted worker external-write adapter contract")
 
 
