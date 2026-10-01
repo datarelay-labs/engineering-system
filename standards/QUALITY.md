@@ -63,7 +63,7 @@ A release finding is based on the user's observable mission and outcome. If the 
 
 ## Change risk and verification depth
 
-Change kind describes what is being changed; change risk determines how much independent evidence is required. Risk does **not** determine roadmap priority.
+Change kind describes what is being changed; change risk determines verification depth. Risk does **not** determine roadmap priority, and it does not automatically require a second model/provider actor.
 
 Use `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` as a compact coordinator signal, based on the combination of:
 - production reach/blast radius;
@@ -82,7 +82,7 @@ Default behavior:
 
 These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.
 
-ChatGPT Chat is the default implementer and auditor. The same Chat context may satisfy terminal audit when it re-reads current repository/Work Packet/PR state and bases PASS on exact-HEAD machine-observable evidence rather than its own prior claims. A fresh Chat context, Codex, or `python3 tools/independent_verifier.py verify` remains optional defense-in-depth or escalation. If evidence is explicitly presented as independent verifier evidence, its identity and context must be distinct from the implementer. Independent-review provider availability or quota alone must not block otherwise satisfied completion gates.
+Under the current managed execution profile, ChatGPT Chat is the default implementer and auditor. Provider/runtime selection is profile state rather than a core invariant. The same Chat context may satisfy terminal audit when it re-reads current repository/Work Packet/PR state and bases PASS on exact-HEAD machine-observable evidence rather than its own prior claims. A fresh Chat context, Codex, or `python3 tools/independent_verifier.py verify` remains optional defense-in-depth or escalation. If evidence is explicitly presented as independent verifier evidence, its identity and context must be distinct from the implementer. Independent-review provider availability or quota alone must not block otherwise satisfied completion gates.
 
 ## Trust by evidence
 

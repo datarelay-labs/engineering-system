@@ -22,6 +22,27 @@ Tool-specific behavior is implemented through adapters:
 
 An adapter may translate the core rules into tool-specific instructions but must not weaken them.
 
+## Governance root-of-trust migration
+
+Base-owned governance code must be able to validate a candidate without executing candidate-controlled governance code. A change to a governance root-of-trust surface is therefore a versioned migration, not an ordinary policy edit.
+
+Root-of-trust surfaces currently include:
+- `tools/governance_floor.py`;
+- `.engineering/requirements-engineering-system.txt`;
+- for the canonical repository, `.github/workflows/governance-floor.yml`.
+
+When any of those surfaces changes:
+- increment `engineering_system.policy_epoch` by exactly one;
+- add/update `.engineering/governance-migration.yaml` with `contract_version: 1`;
+- bind `base_sha` to the exact target-base commit and record matching `from_policy_epoch` / `to_policy_epoch`;
+- list the exact changed root surfaces with each candidate Git blob SHA;
+- set `requires_exact_head_validate: true` and `automation_eligible: false`;
+- record a bounded non-empty rationale.
+
+The base-owned governance floor reads the candidate manifest and candidate blobs as data only. It rejects a missing/stale base binding, epoch jump, incomplete/extra surface set, or blob mismatch. Candidate root-of-trust code is not used to authorize itself.
+
+The ordinary PR validation workflow then executes the candidate's deterministic tests on the exact candidate HEAD with its normal read-only CI boundary. A root-of-trust migration is merge-ready only when both the base-owned floor and exact-head validation pass and actionable review findings are dispositioned. Root-of-trust migration evidence never grants merge authority and is not eligible for automatic merge.
+
 ## Context-loading enforcement
 
 Always read:

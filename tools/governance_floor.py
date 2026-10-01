@@ -16,9 +16,9 @@ MANAGED_EXECUTION_SURFACES = (
     "tools/engineering-context.py",
 )
 PROTECTED_GOVERNANCE_SURFACES = (
-    # These helpers carry executable policy semantics and may change only with
-    # an explicit policy-epoch advance. The governance-floor helper itself is
-    # a base-owned root of trust and is handled separately as immutable.
+    # Executable governance semantics may change only with an explicit
+    # policy-epoch advance. The current pull_request_target run remains
+    # base-owned, so candidate copies cannot affect the check evaluating them.
     "tools/context_epoch.py",
     "tools/engineering-context.py",
 )
@@ -26,11 +26,12 @@ RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
 GOVERNANCE_HELPER = "tools/governance_floor.py"
 GOVERNANCE_REUSABLE_WORKFLOW = ".github/workflows/governance-floor.yml"
 GOVERNANCE_DEPENDENCY_MANIFEST = ".engineering/requirements-engineering-system.txt"
-ROOT_OF_TRUST_SURFACES = (
+ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
+EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_HELPER,
     GOVERNANCE_DEPENDENCY_MANIFEST,
 )
-CANONICAL_ROOT_OF_TRUST_SURFACES = (
+CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_REUSABLE_WORKFLOW,
 )
 ADOPTED_ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
@@ -95,6 +96,12 @@ def _read_at(root: Path, ref: str, path: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def _blob_sha(root: Path, ref: str, path: str) -> str | None:
+    result = _git(root, "rev-parse", "--verify", f"{ref}:{path}")
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and FULL_SHA_RE.fullmatch(value) else None
+
+
 def _tree_has_path(root: Path, ref: str, path: str) -> bool:
     result = _git(root, "ls-tree", "-r", "--name-only", ref, "--", path)
     return result.returncode == 0 and bool(result.stdout.strip())
@@ -118,6 +125,69 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{label} engineering_system.policy_epoch is invalid")
     return value
+
+
+def _root_migration_reasons(
+    root: Path,
+    base: str,
+    head: str,
+    base_epoch: int,
+    head_epoch: int,
+    changed_paths: list[str],
+) -> list[str]:
+    if not changed_paths:
+        return []
+    reasons: list[str] = []
+    text = _read_at(root, head, ROOT_MIGRATION_MANIFEST)
+    if text is None:
+        return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING"]
+    try:
+        payload = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_INVALID"]
+    if not isinstance(payload, dict):
+        return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_INVALID"]
+    if payload.get("contract_version") != 1:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_VERSION_INVALID")
+    if payload.get("base_sha") != base:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_BASE_MISMATCH")
+    if payload.get("from_policy_epoch") != base_epoch:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_FROM_EPOCH_MISMATCH")
+    if payload.get("to_policy_epoch") != head_epoch or head_epoch != base_epoch + 1:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_TO_EPOCH_INVALID")
+    if payload.get("requires_exact_head_validate") is not True:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_VALIDATE_REQUIRED")
+    if payload.get("automation_eligible") is not False:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_AUTOMATION_MUST_BE_FALSE")
+    rationale = payload.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip() or len(rationale) > 1000:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_RATIONALE_INVALID")
+
+    entries = payload.get("changed_surfaces")
+    observed: dict[str, str] = {}
+    if not isinstance(entries, list):
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_SURFACES_INVALID")
+        entries = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_SURFACES_INVALID")
+            continue
+        path = entry.get("path")
+        blob = entry.get("head_blob_sha")
+        if not isinstance(path, str) or path in observed:
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_SURFACES_INVALID")
+            continue
+        if not isinstance(blob, str) or FULL_SHA_RE.fullmatch(blob) is None:
+            reasons.append(f"GOVERNANCE_ROOT_MIGRATION_BLOB_INVALID:{path}")
+            continue
+        observed[path] = blob
+    expected = set(changed_paths)
+    if set(observed) != expected:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_SURFACE_SET_MISMATCH")
+    for path in sorted(expected & set(observed)):
+        if _blob_sha(root, head, path) != observed[path]:
+            reasons.append(f"GOVERNANCE_ROOT_MIGRATION_BLOB_MISMATCH:{path}")
+    return reasons
 
 
 def _parse_workflow(text: str | None, missing_path: str) -> tuple[dict[str, object] | None, list[str]]:
@@ -405,15 +475,6 @@ def _execution_surface_reasons(path: str, content: str) -> list[str]:
     if path == "AGENTS.md":
         if RETIRED_AGENTS_RE.search(content):
             reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
-        implementer_formulations = (
-            "ChatGPT Chat is the implementation path.",
-            "ChatGPT Chat is the default implementer",
-        )
-        if not any(formulation in content for formulation in implementer_formulations):
-            reasons.append(
-                "MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:"
-                "CHATGPT_CHAT_IMPLEMENTER_AUTHORITY"
-            )
         for required in (
             "Execution authority precedence:",
             "IMPLEMENTER=CHATGPT_CHAT",
@@ -462,25 +523,38 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
         )
 
-    root_surfaces = ROOT_OF_TRUST_SURFACES + (
-        CANONICAL_ROOT_OF_TRUST_SURFACES if mode == "canonical" else ()
+    epoch_guarded_surfaces = PROTECTED_GOVERNANCE_SURFACES + EPOCH_GUARDED_GOVERNANCE_SURFACES + (
+        CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES if mode == "canonical" else ()
     )
-    for path in root_surfaces:
+    root_migration_surfaces = set(EPOCH_GUARDED_GOVERNANCE_SURFACES)
+    if mode == "canonical":
+        root_migration_surfaces.update(CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES)
+    changed_root_surfaces: list[str] = []
+    for path in epoch_guarded_surfaces:
         base_content = _read_at(root, base, path)
         head_content = _read_at(root, head, path)
         if head_content is None:
             reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
-        elif base_content is not None and head_content != base_content:
-            reasons.append(f"GOVERNANCE_ROOT_OF_TRUST_CHANGED:{path}")
-
-    if head_epoch == base_epoch:
-        for path in PROTECTED_GOVERNANCE_SURFACES:
-            base_content = _read_at(root, base, path)
-            head_content = _read_at(root, head, path)
-            if base_content != head_content:
+            continue
+        if base_content != head_content:
+            if path in root_migration_surfaces:
+                changed_root_surfaces.append(path)
+            if head_epoch == base_epoch:
                 reasons.append(
                     f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}"
                 )
+
+    if changed_root_surfaces and head_epoch > base_epoch:
+        reasons.extend(
+            _root_migration_reasons(
+                root,
+                base,
+                head,
+                base_epoch,
+                head_epoch,
+                changed_root_surfaces,
+            )
+        )
 
     if mode == "adopted":
         workflow = _read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW)

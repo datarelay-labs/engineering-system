@@ -16,7 +16,7 @@ from pathlib import Path
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 1
+POLICY_EPOCH = 2
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -62,8 +62,8 @@ IMPLEMENTATION_PREFLIGHT_MANAGED = (
     "tools/implementation_preflight.py",
 )
 
-# Terminal completion notification is managed because adopted AGENTS.md
-# makes this helper a hard terminal gate.
+# Terminal owner notification is managed so adopted repositories can report
+# bounded COMPLETE/BLOCKED outcomes. Delivery state is separate from engineering truth.
 TERMINAL_COMPLETION_NOTIFY_MANAGED = (
     "tools/terminal_completion_notify.py",
 )
@@ -111,12 +111,23 @@ REQUIRED_MANAGED = (
 )
 
 RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
+RETIRED_AGENT_RULE_RE = re.compile(
+    r"(?i)(?:"
+    r"IMPLEMENTER\s*=\s*CURSOR|"
+    r"cursor[-_ ]?agent|"
+    r"\bagent\s+persist\b|"
+    r"/work-resume\b|"
+    r"\.cursor(?:/|\b)|"
+    r"\bcursor\s+(?:adapter|session|implementation|implementer|worker|execution\s+rule)\b|"
+    r"\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to|reactivate)\s+(?:the\s+)?cursor\b"
+    r")"
+)
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
 EXECUTION_RULES_HEADING = "## Execution rules"
 RETIRED_AGENT_RULE_REPLACEMENTS = (
     (
         "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.",
-        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope.",
+        "",
     ),
     (
         "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.",
@@ -133,7 +144,8 @@ def rewrite_retired_agent_rules(text: str) -> str:
 
 
 def retired_agent_rules_present(text: str) -> bool:
-    return "Cursor" in text or "IMPLEMENTER=CURSOR" in text
+    """Detect runnable/reactivatable retired-agent semantics, not negative policy prose."""
+    return RETIRED_AGENT_RULE_RE.search(text) is not None
 
 
 def canonical_execution_policy_line() -> str:

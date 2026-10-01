@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location(
     "governance_floor", HERE / "governance_floor.py"
@@ -50,7 +52,7 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
         encoding="utf-8",
     )
     (root / "AGENTS.md").write_text(
-        "ChatGPT Chat is the implementation path.\n"
+        "Current execution profile is selected outside core policy prose.\n"
         "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
         "IMPLEMENTER=CHATGPT_CHAT\n",
         encoding="utf-8",
@@ -100,6 +102,34 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
     )
 
 
+def write_root_migration(
+    root: Path,
+    *,
+    base: str,
+    from_epoch: int,
+    to_epoch: int,
+    paths: list[str],
+) -> None:
+    entries = [
+        {"path": path, "head_blob_sha": git(root, "hash-object", path)}
+        for path in sorted(paths)
+    ]
+    payload = {
+        "contract_version": 1,
+        "base_sha": base,
+        "from_policy_epoch": from_epoch,
+        "to_policy_epoch": to_epoch,
+        "requires_exact_head_validate": True,
+        "automation_eligible": False,
+        "rationale": "test root-of-trust migration",
+        "changed_surfaces": entries,
+    }
+    (root / ".engineering/governance-migration.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
 def fixture(root: Path) -> str:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "test@example.invalid")
@@ -131,10 +161,10 @@ def test_policy_epoch_regression_blocks() -> None:
         assert any("GOVERNANCE_POLICY_EPOCH_REGRESSION" in item for item in reasons)
 
 
-def test_real_adopted_default_implementer_formulation_passes() -> None:
+def test_execution_surface_accepts_profile_neutral_prose() -> None:
     content = (
         "Execution authority precedence: current owner, then current ACTIVE Work Packet.\n"
-        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope.\n"
+        "Provider selection is execution-profile state, not a core prose invariant.\n"
         "IMPLEMENTER=CHATGPT_CHAT\n"
     )
     assert floor._execution_surface_reasons("AGENTS.md", content) == []
@@ -270,15 +300,29 @@ def test_guard_change_requires_policy_epoch() -> None:
         head = commit(root, "guard drift")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED:tools/governance_floor.py" in reasons
+        assert (
+            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "tools/governance_floor.py"
+        ) in reasons
 
         write_managed(root, 2)
         helper = root / "tools/governance_floor.py"
         helper.write_text(helper.read_text(encoding="utf-8") + "\n# epoch-2\n", encoding="utf-8")
-        head2 = commit(root, "policy upgrade")
+        head2 = commit(root, "policy upgrade without migration evidence")
         status2, reasons2, _, _ = floor.evaluate(root, base, head2)
         assert status2 == "BLOCK"
-        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED:tools/governance_floor.py" in reasons2
+        assert "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING" in reasons2
+
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=["tools/governance_floor.py"],
+        )
+        head3 = commit(root, "policy upgrade with migration evidence")
+        status3, reasons3, _, _ = floor.evaluate(root, base, head3)
+        assert status3 == "PASS", reasons3
 
 
 def test_workflow_self_preservation_blocks() -> None:
@@ -327,11 +371,10 @@ def test_managed_pr_jobs_cannot_be_removed() -> None:
         assert "GOVERNANCE_MANAGED_JOB_SET_INVALID" in reasons
 
 
-def test_dependency_manifest_is_root_of_trust() -> None:
+def test_dependency_manifest_requires_policy_epoch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         base = fixture(root)
-        write_managed(root, 2)
         (root / ".engineering/requirements-engineering-system.txt").write_text(
             "PyYAML==6.0.3\n",
             encoding="utf-8",
@@ -340,9 +383,71 @@ def test_dependency_manifest_is_root_of_trust() -> None:
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
         assert (
-            "GOVERNANCE_ROOT_OF_TRUST_CHANGED:"
+            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
             ".engineering/requirements-engineering-system.txt"
         ) in reasons
+
+        write_managed(root, 2)
+        (root / ".engineering/requirements-engineering-system.txt").write_text(
+            "PyYAML==6.0.3\n",
+            encoding="utf-8",
+        )
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[".engineering/requirements-engineering-system.txt"],
+        )
+        head2 = commit(root, "change governance dependency with migration evidence")
+        status2, reasons2, _, _ = floor.evaluate(root, base, head2)
+        assert status2 == "PASS", reasons2
+
+
+def test_canonical_floor_change_requires_policy_epoch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["mode"] = "canonical"
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        for rel in (
+            ".github/workflows/governance-floor.yml",
+            ".github/workflows/validate.yml",
+        ):
+            source = HERE.parent / rel
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        base = commit(root, "canonical base")
+
+        floor_workflow = root / ".github/workflows/governance-floor.yml"
+        floor_workflow.write_text(
+            floor_workflow.read_text(encoding="utf-8") + "\n# same-epoch drift\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "canonical floor drift")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert (
+            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            ".github/workflows/governance-floor.yml"
+        ) in reasons
+
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[".github/workflows/governance-floor.yml"],
+        )
+        head2 = commit(root, "canonical floor migration")
+        status2, reasons2, _, _ = floor.evaluate(root, base, head2)
+        assert status2 == "PASS", reasons2
 
 
 def test_canonical_workflows_have_direct_floor() -> None:
@@ -360,7 +465,7 @@ def test_canonical_workflows_have_direct_floor() -> None:
 def main() -> int:
     test_safe_head_passes()
     test_policy_epoch_regression_blocks()
-    test_real_adopted_default_implementer_formulation_passes()
+    test_execution_surface_accepts_profile_neutral_prose()
     test_retired_implementer_and_artifact_block()
     test_old_context_epoch_allowlist_blocks()
     test_epoch_advance_cannot_remove_chat_only_guard()
@@ -370,7 +475,8 @@ def main() -> int:
     test_guard_change_requires_policy_epoch()
     test_workflow_self_preservation_blocks()
     test_managed_pr_jobs_cannot_be_removed()
-    test_dependency_manifest_is_root_of_trust()
+    test_dependency_manifest_requires_policy_epoch()
+    test_canonical_floor_change_requires_policy_epoch()
     test_canonical_workflows_have_direct_floor()
     print("GOVERNANCE_FLOOR_TESTS=PASS")
     return 0
