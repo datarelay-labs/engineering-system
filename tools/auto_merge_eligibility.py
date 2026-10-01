@@ -54,17 +54,26 @@ def _result(
 ) -> dict[str, Any]:
     candidate = request.get("subject") if isinstance(request, dict) else None
     subject = candidate if isinstance(candidate, dict) else {}
+
+    def string_field(key: str) -> str:
+        value = subject.get(key)
+        return value if isinstance(value, str) else ""
+
+    def integer_field(key: str) -> int:
+        value = subject.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
     return {
         "schema_version": 1,
         "decision": decision,
         "reason_class": reason_class,
         "reason": reason,
         "eligible": decision == "ELIGIBLE",
-        "target_repo": subject.get("target_repo", ""),
-        "workstream": subject.get("workstream", ""),
-        "intent_revision": subject.get("intent_revision", 0),
-        "pr_number": subject.get("pr_number", 0),
-        "subject_head": subject.get("head_sha", ""),
+        "target_repo": string_field("target_repo"),
+        "workstream": string_field("workstream"),
+        "intent_revision": integer_field("intent_revision"),
+        "pr_number": integer_field("pr_number"),
+        "subject_head": string_field("head_sha"),
         "authorizes_merge": False,
         "external_mutation": False,
         "executes_commands": False,

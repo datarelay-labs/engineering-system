@@ -361,6 +361,26 @@ def test_malformed_shapes_return_structured_block() -> None:
     assert report["reason_class"] == "MALFORMED"
     assert_no_authority(report)
 
+    malformed_fields = {
+        "target_repo": 123,
+        "workstream": False,
+        "intent_revision": "bad",
+        "pr_number": True,
+        "head_sha": ["bad"],
+    }
+    payload = request()
+    payload["subject"].update(malformed_fields)
+    report = gate.evaluate(payload)
+    assert report["decision"] == "BLOCK"
+    assert report["reason_class"] == "MALFORMED"
+    assert report["target_repo"] == ""
+    assert report["workstream"] == ""
+    assert report["intent_revision"] == 0
+    assert report["pr_number"] == 0
+    assert report["subject_head"] == ""
+    assert not list(RESULT_VALIDATOR.iter_errors(report))
+    assert_no_authority(report)
+
 
 def test_implementation_has_no_execution_or_network_surface() -> None:
     tree = ast.parse(TOOL.read_text(encoding="utf-8"))
