@@ -71,6 +71,10 @@ TRACE_MOUNT_TOPOLOGY_RE = re.compile(
 TRACE_PATH_TOPOLOGY_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:rename|renameat|renameat2|link|linkat|symlink|symlinkat)\("
 )
+TRACE_IO_URING_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?io_uring_(?:setup|enter|register)\("
+)
+TRACE_SYSCALL_FILTER = "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register"
 TRACE_SETUP_PRIVATE_MOUNT_RE = re.compile(
     r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("none", "/", NULL, MS_REC\|MS_PRIVATE, NULL\) = 0$'
 )
@@ -874,6 +878,12 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         # so any such topology mutation is ambiguous while unsafe entries exist.
         if TRACE_PATH_TOPOLOGY_RE.search(line):
             return "TRACE_AMBIGUOUS"
+        # io_uring can perform pathname operations without a pathname-taking
+        # syscall visible to strace %file. Because the tracee inherits no ring
+        # descriptor, observing any io_uring setup/use means path attribution
+        # is no longer complete enough for terminal evidence.
+        if TRACE_IO_URING_RE.search(line):
+            return "TRACE_AMBIGUOUS"
         # Any CLONE_UNTRACED request can create a descendant outside strace -f
         # coverage. Seeing the flag is enough to invalidate terminal evidence.
         if "CLONE_UNTRACED" in line:
@@ -972,7 +982,7 @@ def _execute_once(root: Path, subject_head: str, command: str) -> tuple[str, str
             "-s",
             "4096",
             "-e",
-            "trace=%file,%process",
+            TRACE_SYSCALL_FILTER,
             "-o",
             collector_command,
             "--",

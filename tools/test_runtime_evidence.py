@@ -1113,6 +1113,18 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
+        assert runtime_evidence.TRACE_SYSCALL_FILTER == (
+            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register"
+        )
+        for io_uring_call in (
+            "123 io_uring_setup(8, 0x7fff0000) = 3\n",
+            "123 io_uring_enter(3, 1, 1, 0, NULL, 8) = 1\n",
+            "123 io_uring_register(3, IORING_REGISTER_FILES, 0x0, 0) = 0\n",
+        ):
+            trace.write_text(io_uring_call, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
         for topology_change in (
             '123 mount(".", "/tmp/alias", NULL, MS_BIND, NULL) = 0\n',
             '123 move_mount(3, "", 4, "", MOVE_MOUNT_F_EMPTY_PATH) = 0\n',
