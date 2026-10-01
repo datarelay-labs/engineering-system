@@ -87,6 +87,12 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_engineering_context.py":
     domains: [session-continuity]
+  "tools/governance_floor.py":
+    domains: [enforcement, session-continuity, workflows]
+  "tools/test_governance_floor.py":
+    domains: [enforcement, session-continuity]
+  ".github/workflows/governance-floor.yml":
+    domains: [enforcement, workflows]
   "evals/context-optimization/**":
     domains: [session-continuity, ai]
   "tools/work_admission.py":
@@ -453,6 +459,25 @@ scenarios:
       - "optional file slicing reads exact-HEAD UTF-8 blobs and emits only bounded JSON-encoded relevant line windows"
       - "mandatory context binary symlink unsafe dirty and oversized slice inputs fail closed"
       - "legacy diff/domain routing is unchanged without task orientation"
+    release_gate: true
+
+  - id: ENG-GOVERNANCE-FLOOR-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: static
+    name: Base-owned Engineering System governance floor
+    level: static
+    domains: [enforcement, session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_governance_floor.py"
+    invariants:
+      - "feature and integration branches cannot regress the base policy epoch"
+      - "retired implementation semantics and retired agent artifacts fail closed"
+      - "the governance helper cannot change without a policy epoch increment"
+      - "the pull_request_target governance workflow remains structurally present"
     release_gate: true
 
   - id: ENG-TELEGRAM-COMPLETE-001

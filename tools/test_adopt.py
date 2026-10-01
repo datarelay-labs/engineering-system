@@ -100,6 +100,7 @@ def test_clean_python_bootstrap() -> None:
             ".github/workflows/engineering-release.yml",
             "tools/implementation_preflight.py",
             "tools/terminal_completion_notify.py",
+            "tools/governance_floor.py",
         )
         for rel in required:
             assert (target / rel).is_file(), rel
@@ -107,6 +108,7 @@ def test_clean_python_bootstrap() -> None:
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.7.0"
+        assert engineering["policy_epoch"] == 1
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -124,6 +126,10 @@ def test_clean_python_bootstrap() -> None:
         assert 'setup_command: "python -m pip install -e . && python -m pip install pytest"' in tests_text
 
         workflow_text = (target / ".github/workflows/engineering-system.yml").read_text(encoding="utf-8")
+        assert f"governance-floor.yml@{BASELINE}" in workflow_text
+        assert "pull_request_target" in workflow_text
+        assert f"governance-floor.yml@{BASELINE}" in workflow_text
+        assert "pull_request_target" in workflow_text
         assert f"adoption-compliance.yml@{BASELINE}" in workflow_text
         assert f"enforcement-check.yml@{BASELINE}" in workflow_text
         assert f"affected-tests.yml@{BASELINE}" in workflow_text
@@ -370,6 +376,7 @@ def test_managed_upgrade_to_1_6() -> None:
         project = load_yaml(project_path)
         project["engineering_system"]["version"] = "1.5.0"
         project["engineering_system"]["baseline"] = BASELINE
+        project["engineering_system"]["policy_epoch"] = 3
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
 
         workflow_path = target / ".github/workflows/engineering-system.yml"
@@ -423,8 +430,11 @@ def test_managed_upgrade_to_1_6() -> None:
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.7.0"
+        assert upgraded_project["engineering_system"]["policy_epoch"] == 3
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
+        assert f"governance-floor.yml@{NEW_BASELINE}" in upgraded_workflow
+        assert "pull_request_target" in upgraded_workflow
         assert f"adoption-compliance.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow

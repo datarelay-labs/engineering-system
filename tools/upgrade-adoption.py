@@ -17,8 +17,10 @@ from adopt import (
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
     ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
+    GOVERNANCE_FLOOR_MANAGED,
     IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
+    POLICY_EPOCH,
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
     TERMINAL_COMPLETION_NOTIFY_MANAGED,
@@ -130,6 +132,38 @@ def legacy_engineering_workflow(baseline: str, ci_mode: str) -> str:
         "jobs:",
         "  adoption-compliance:",
         f"    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}",
+    ]
+    if ci_mode == "shared":
+        lines.extend(
+            [
+                "",
+                "  affected-tests:",
+                f"    uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@{baseline}",
+                "    with:",
+                "      manifest_path: .engineering/tests.yaml",
+                "      trigger: pr",
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def pre_governance_floor_engineering_workflow(baseline: str, ci_mode: str) -> str:
+    lines = [
+        "name: Engineering System",
+        "",
+        "on:",
+        "  pull_request:",
+        "",
+        "permissions:",
+        "  contents: read",
+        "",
+        "jobs:",
+        "  adoption-compliance:",
+        f"    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}",
+        "",
+        "  enforcement-reconcile:",
+        f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{baseline}",
     ]
     if ci_mode == "shared":
         lines.extend(
@@ -457,6 +491,23 @@ def apply_engineering_context_install(root: Path, planned: dict[str, str]) -> li
     return installed
 
 
+def plan_governance_floor_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade the managed base-owned governance floor helper."""
+    return plan_managed_file_install(
+        root, GOVERNANCE_FLOOR_MANAGED, label="governance floor", old_baseline=old_baseline
+    )
+
+
+def apply_governance_floor_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_verification_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
@@ -631,6 +682,14 @@ def main() -> int:
 
     old_version = str(engineering.get("version") or "")
     old_baseline = str(engineering.get("baseline") or "")
+    existing_policy_epoch = engineering.get("policy_epoch", 0)
+    if (
+        isinstance(existing_policy_epoch, bool)
+        or not isinstance(existing_policy_epoch, int)
+        or existing_policy_epoch < 0
+    ):
+        raise SystemExit("FAIL existing adoption has invalid policy_epoch")
+    target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
     current_version = canonical_version()
     new_baseline = canonical_baseline(args.baseline_sha)
     retired_agent_artifacts = existing_retired_agent_artifacts(root)
@@ -661,12 +720,24 @@ def main() -> int:
 
     if old_version == current_version and old_baseline == new_baseline:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        if not planned_engineering_context and planned_execution_policy is None and not retired_agent_artifacts:
+        policy_epoch_repair = existing_policy_epoch < POLICY_EPOCH
+        if (
+            not planned_engineering_context
+            and not planned_governance_floor
+            and planned_execution_policy is None
+            and not retired_agent_artifacts
+            and not policy_epoch_repair
+        ):
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
         if planned_engineering_context:
             print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
+        if planned_governance_floor:
+            print("GOVERNANCE_FLOOR_REPAIR=REQUIRED")
+        if policy_epoch_repair:
+            print(f"POLICY_EPOCH_REPAIR={POLICY_EPOCH}")
         if planned_execution_policy is not None:
             print("EXECUTION_POLICY_REPAIR=REQUIRED")
         if retired_agent_artifacts:
@@ -675,12 +746,20 @@ def main() -> int:
             print("ADOPTION_UPGRADE_AUDIT=PASS")
             if not args.apply:
                 return 0
+        if policy_epoch_repair:
+            engineering["policy_epoch"] = target_policy_epoch
+            project["engineering_system"] = engineering
+            write_yaml(project_path, project)
         removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
         print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
         installed_engineering_context = apply_engineering_context_install(
             root, planned_engineering_context
         )
         print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        installed_governance_floor = apply_governance_floor_install(
+            root, planned_governance_floor
+        )
+        print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         checker = CANONICAL / "tools" / "check-adoption.py"
@@ -693,6 +772,7 @@ def main() -> int:
     old_workflow = workflow_path.read_text(encoding="utf-8")
     safe_old_workflows = {
         legacy_engineering_workflow(old_baseline, ci_mode),
+        pre_governance_floor_engineering_workflow(old_baseline, ci_mode),
         engineering_workflow(old_baseline, ci_mode),
     }
     if old_workflow not in safe_old_workflows:
@@ -797,6 +877,7 @@ def main() -> int:
 
     engineering["version"] = current_version
     engineering["baseline"] = new_baseline
+    engineering["policy_epoch"] = target_policy_epoch
     project["engineering_system"] = engineering
     operations["persistent_state"] = persistent_state
     operations["runbook_paths"] = runbook_paths
@@ -865,6 +946,7 @@ def main() -> int:
     )
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+    planned_governance_floor = plan_governance_floor_install(root, old_baseline)
 
     write_yaml(project_path, project)
     write_yaml(release_path, release)
@@ -948,6 +1030,14 @@ def main() -> int:
         print("ENGINEERING_CONTEXT_INSTALLED=" + ",".join(installed_engineering_context))
     else:
         print("ENGINEERING_CONTEXT_INSTALLED=<none>")
+
+    installed_governance_floor = apply_governance_floor_install(
+        root, planned_governance_floor
+    )
+    if installed_governance_floor:
+        print("GOVERNANCE_FLOOR_INSTALLED=" + ",".join(installed_governance_floor))
+    else:
+        print("GOVERNANCE_FLOOR_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:

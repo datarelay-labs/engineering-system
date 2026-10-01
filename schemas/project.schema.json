@@ -19,6 +19,10 @@
           "type": "string",
           "minLength": 1
         },
+        "policy_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
         "mode": {
           "type": "string",
           "enum": ["canonical", "adopted"]

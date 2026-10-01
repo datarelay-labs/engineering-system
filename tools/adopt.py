@@ -16,6 +16,7 @@ from pathlib import Path
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+POLICY_EPOCH = 1
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -77,6 +78,11 @@ ENGINEERING_CONTEXT_MANAGED = (
     "tools/engineering-context.py",
 )
 
+# Base-owned PR governance floor used by pull_request_target.
+GOVERNANCE_FLOOR_MANAGED = (
+    "tools/governance_floor.py",
+)
+
 WORK_PACKET_TEMPLATE_MANAGED = (
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
 )
@@ -101,6 +107,7 @@ REQUIRED_MANAGED = (
     *TERMINAL_COMPLETION_NOTIFY_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
+    *GOVERNANCE_FLOOR_MANAGED,
 )
 
 RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
@@ -685,6 +692,7 @@ def project_yaml(
     lines = [
         "engineering_system:",
         f"  version: {yaml_scalar(version)}",
+        f"  policy_epoch: {POLICY_EPOCH}",
         "  mode: adopted",
         f"  baseline: {yaml_scalar(baseline)}",
         f"  ci_mode: {yaml_scalar(ci_mode)}",
@@ -956,18 +964,28 @@ def engineering_workflow(baseline: str, ci_mode: str) -> str:
         "",
         "on:",
         "  pull_request:",
+        "  pull_request_target:",
         "",
         "permissions:",
         "  contents: read",
         "",
         "jobs:",
+        "  governance-floor:",
+        "    if: github.event_name == 'pull_request_target'",
+        f"    uses: datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@{baseline}",
+        "    with:",
+        "      base_sha: ${{ github.event.pull_request.base.sha }}",
+        "      head_sha: ${{ github.event.pull_request.head.sha }}",
+        "",
         "  adoption-compliance:",
+        "    if: github.event_name == 'pull_request'",
         f"    uses: datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@{baseline}",
     ]
     lines.extend(
         [
             "",
             "  enforcement-reconcile:",
+            "    if: github.event_name == 'pull_request'",
             f"    uses: datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@{baseline}",
         ]
     )
@@ -976,6 +994,7 @@ def engineering_workflow(baseline: str, ci_mode: str) -> str:
             [
                 "",
                 "  affected-tests:",
+                "    if: github.event_name == 'pull_request'",
                 f"    uses: datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@{baseline}",
                 "    with:",
                 "      manifest_path: .engineering/tests.yaml",
@@ -1105,6 +1124,20 @@ def ensure_context_epoch_compatible(root: Path) -> None:
 def ensure_engineering_context_compatible(root: Path) -> None:
     """Reject a custom engineering-context helper before adoption writes any files."""
     for rel in ENGINEERING_CONTEXT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
+def ensure_governance_floor_compatible(root: Path) -> None:
+    """Reject a custom governance-floor helper before adoption writes any files."""
+    for rel in GOVERNANCE_FLOOR_MANAGED:
         path = root / rel
         if not path.exists():
             continue
@@ -1385,6 +1418,7 @@ def main() -> int:
     ensure_terminal_completion_notify_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
+    ensure_governance_floor_compatible(root)
     planned_execution_policy = plan_execution_policy_sync(root)
 
     removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
@@ -1403,6 +1437,7 @@ def main() -> int:
         *TERMINAL_COMPLETION_NOTIFY_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
+        *GOVERNANCE_FLOOR_MANAGED,
         *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     ):
         write_missing(

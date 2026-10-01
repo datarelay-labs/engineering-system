@@ -1,0 +1,370 @@
+#!/usr/bin/env python3
+"""Regression tests for the base-owned governance floor."""
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location(
+    "governance_floor", HERE / "governance_floor.py"
+)
+assert spec and spec.loader
+floor = importlib.util.module_from_spec(spec)
+sys.modules["governance_floor"] = floor
+spec.loader.exec_module(floor)
+
+
+def git(root: Path, *args: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).strip()
+
+
+def commit(root: Path, message: str) -> str:
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", message)
+    return git(root, "rev-parse", "HEAD")
+
+
+def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
+    (root / ".engineering").mkdir(parents=True, exist_ok=True)
+    (root / ".github/workflows").mkdir(parents=True, exist_ok=True)
+    (root / "tools").mkdir(parents=True, exist_ok=True)
+    (root / ".engineering/project.yaml").write_text(
+        f"engineering_system:\n"
+        f"  version: 1.7.0\n"
+        f"  policy_epoch: {epoch}\n"
+        f"  mode: adopted\n"
+        f"  baseline: {baseline}\n"
+        f"  ci_mode: shared\n",
+        encoding="utf-8",
+    )
+    (root / ".engineering/requirements-engineering-system.txt").write_text(
+        "PyYAML==6.0.2\n",
+        encoding="utf-8",
+    )
+    (root / "AGENTS.md").write_text(
+        "ChatGPT Chat is the implementation path.\n"
+        "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
+        "IMPLEMENTER=CHATGPT_CHAT\n",
+        encoding="utf-8",
+    )
+    (root / "tools/context_epoch.py").write_text(
+        'if implementer and implementer != "CHATGPT_CHAT":\n'
+        '    blocking.append("IMPLEMENTER_INVALID")\n',
+        encoding="utf-8",
+    )
+    (root / "tools/engineering-context.py").write_text(
+        'MANDATORY_CONTEXT_PATHS = {"AGENTS.md", ".engineering/project.yaml"}\n',
+        encoding="utf-8",
+    )
+    source = (HERE / "governance_floor.py").read_text(encoding="utf-8")
+    (root / "tools/governance_floor.py").write_text(source, encoding="utf-8")
+    (root / ".github/workflows/engineering-system.yml").write_text(
+        "name: Engineering System\n"
+        "on:\n"
+        "  pull_request:\n"
+        "  pull_request_target:\n"
+        "permissions:\n"
+        "  contents: read\n"
+        "jobs:\n"
+        "  governance-floor:\n"
+        "    if: github.event_name == 'pull_request_target'\n"
+        "    uses: datarelay-labs/engineering-system/.github/workflows/"
+        "governance-floor.yml@" + baseline + "\n"
+        "    with:\n"
+        "      base_sha: ${{ github.event.pull_request.base.sha }}\n"
+        "      head_sha: ${{ github.event.pull_request.head.sha }}\n"
+        "  adoption-compliance:\n"
+        "    if: github.event_name == 'pull_request'\n"
+        "    uses: datarelay-labs/engineering-system/.github/workflows/"
+        "adoption-compliance.yml@" + baseline + "\n"
+        "  enforcement-reconcile:\n"
+        "    if: github.event_name == 'pull_request'\n"
+        "    uses: datarelay-labs/engineering-system/.github/workflows/"
+        "enforcement-check.yml@" + baseline + "\n"
+        "  affected-tests:\n"
+        "    if: github.event_name == 'pull_request'\n"
+        "    uses: datarelay-labs/engineering-system/.github/workflows/"
+        "affected-tests.yml@" + baseline + "\n"
+        "    with:\n"
+        "      manifest_path: .engineering/tests.yaml\n"
+        "      trigger: pr\n",
+        encoding="utf-8",
+    )
+
+
+def fixture(root: Path) -> str:
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "test@example.invalid")
+    git(root, "config", "user.name", "Governance Floor Test")
+    write_managed(root, 1)
+    return commit(root, "base")
+
+
+def test_safe_head_passes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        (root / "README.md").write_text("product change\n", encoding="utf-8")
+        head = commit(root, "product")
+        status, reasons, base_epoch, head_epoch = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+        assert reasons == []
+        assert (base_epoch, head_epoch) == (1, 1)
+
+
+def test_policy_epoch_regression_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 0)
+        head = commit(root, "regress epoch")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert any("GOVERNANCE_POLICY_EPOCH_REGRESSION" in item for item in reasons)
+
+
+def test_retired_implementer_and_artifact_block() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        (root / "AGENTS.md").write_text(
+            "Cursor is disabled by default and the owner explicitly reactivates it "
+            "for the current Work Packet with `IMPLEMENTER=CURSOR`.\n",
+            encoding="utf-8",
+        )
+        (root / ".cursor").mkdir()
+        (root / ".cursor/rule").write_text("retired\n", encoding="utf-8")
+        head = commit(root, "retired")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md" in reasons
+        assert "RETIRED_AGENT_ARTIFACT_REINTRODUCED:.cursor" in reasons
+
+
+def test_old_context_epoch_allowlist_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        (root / "tools/context_epoch.py").write_text(
+            'if implementer and implementer not in {"CHATGPT_CHAT", "CURSOR"}:\n'
+            '    blocking.append("IMPLEMENTER_INVALID")\n',
+            encoding="utf-8",
+        )
+        head = commit(root, "old implementer validator")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py" in reasons
+
+
+def test_epoch_advance_cannot_remove_chat_only_guard() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / "tools/context_epoch.py").write_text(
+            "blocking = []\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "weaken implementer guard")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert any(
+            item.startswith(
+                "MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:"
+            )
+            for item in reasons
+        )
+
+
+def test_workflow_comment_tokens_do_not_preserve_floor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\n"
+            "on:\n"
+            "  pull_request:\n"
+            "# pull_request_target:\n"
+            "# governance-floor:\n"
+            "# github.event_name == 'pull_request_target'\n"
+            "# datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@"
+            + ("b" * 40)
+            + "\n"
+            "# github.event.pull_request.base.sha\n"
+            "# github.event.pull_request.head.sha\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "comment-only floor")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING:pull_request_target" in reasons
+
+
+def test_filtered_pull_request_target_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\n"
+            "on:\n"
+            "  pull_request:\n"
+            "  pull_request_target:\n"
+            "    branches:\n"
+            "      - never-matches\n"
+            "jobs:\n"
+            "  governance-floor:\n"
+            "    if: github.event_name == 'pull_request_target'\n"
+            "    uses: datarelay-labs/engineering-system/.github/workflows/"
+            "governance-floor.yml@" + ("a" * 40) + "\n"
+            "    with:\n"
+            "      base_sha: ${{ github.event.pull_request.base.sha }}\n"
+            "      head_sha: ${{ github.event.pull_request.head.sha }}\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "filtered governance trigger")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_FILTERED:pull_request_target" in reasons
+
+
+def test_unrelated_database_cursor_language_is_allowed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        agents = root / "AGENTS.md"
+        agents.write_text(
+            agents.read_text(encoding="utf-8")
+            + "Use a database cursor for bounded row iteration.\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "database cursor guidance")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+
+
+def test_guard_change_requires_policy_epoch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(helper.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
+        head = commit(root, "guard drift")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED:tools/governance_floor.py" in reasons
+
+        write_managed(root, 2)
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(helper.read_text(encoding="utf-8") + "\n# epoch-2\n", encoding="utf-8")
+        head2 = commit(root, "policy upgrade")
+        status2, reasons2, _, _ = floor.evaluate(root, base, head2)
+        assert status2 == "BLOCK"
+        assert "GOVERNANCE_ROOT_OF_TRUST_CHANGED:tools/governance_floor.py" in reasons2
+
+
+def test_workflow_self_preservation_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\non:\n  pull_request:\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "remove floor")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_WORKFLOW_TRIGGER_MISSING:pull_request_target" in reasons
+
+
+def test_managed_pr_jobs_cannot_be_removed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        baseline = "a" * 40
+        (root / ".github/workflows/engineering-system.yml").write_text(
+            "name: Engineering System\n"
+            "on:\n"
+            "  pull_request:\n"
+            "  pull_request_target:\n"
+            "permissions:\n"
+            "  contents: read\n"
+            "jobs:\n"
+            "  governance-floor:\n"
+            "    if: github.event_name == 'pull_request_target'\n"
+            "    uses: datarelay-labs/engineering-system/.github/workflows/"
+            "governance-floor.yml@" + baseline + "\n"
+            "    with:\n"
+            "      base_sha: ${{ github.event.pull_request.base.sha }}\n"
+            "      head_sha: ${{ github.event.pull_request.head.sha }}\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "remove managed validation jobs")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_MANAGED_JOB_MISSING:adoption-compliance" in reasons
+        assert "GOVERNANCE_MANAGED_JOB_MISSING:enforcement-reconcile" in reasons
+        assert "GOVERNANCE_MANAGED_JOB_MISSING:affected-tests" in reasons
+        assert "GOVERNANCE_MANAGED_JOB_SET_INVALID" in reasons
+
+
+def test_dependency_manifest_is_root_of_trust() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        write_managed(root, 2)
+        (root / ".engineering/requirements-engineering-system.txt").write_text(
+            "PyYAML==6.0.3\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "change governance dependency")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert (
+            "GOVERNANCE_ROOT_OF_TRUST_CHANGED:"
+            ".engineering/requirements-engineering-system.txt"
+        ) in reasons
+
+
+def test_canonical_workflows_have_direct_floor() -> None:
+    root = HERE.parent
+    floor_text = (root / ".github/workflows/governance-floor.yml").read_text(
+        encoding="utf-8"
+    )
+    validate_text = (root / ".github/workflows/validate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert floor._canonical_floor_workflow_reasons(floor_text) == []
+    assert floor._canonical_validate_reasons(validate_text) == []
+
+
+def main() -> int:
+    test_safe_head_passes()
+    test_policy_epoch_regression_blocks()
+    test_retired_implementer_and_artifact_block()
+    test_old_context_epoch_allowlist_blocks()
+    test_epoch_advance_cannot_remove_chat_only_guard()
+    test_workflow_comment_tokens_do_not_preserve_floor()
+    test_filtered_pull_request_target_blocks()
+    test_unrelated_database_cursor_language_is_allowed()
+    test_guard_change_requires_policy_epoch()
+    test_workflow_self_preservation_blocks()
+    test_managed_pr_jobs_cannot_be_removed()
+    test_dependency_manifest_is_root_of_trust()
+    test_canonical_workflows_have_direct_floor()
+    print("GOVERNANCE_FLOOR_TESTS=PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
