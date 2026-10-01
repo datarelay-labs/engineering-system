@@ -955,6 +955,15 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
             ) == "TRACE_AMBIGUOUS"
         trace.write_text('123 clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = 124\n', encoding="utf-8")
         assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        for root_change in (
+            '123 chroot(".") = 0\n',
+            '[pid 123] pivot_root(".", ".old") = 0\n',
+            'chroot("/tmp/elsewhere") = -1 EPERM (Operation not permitted)\n',
+        ):
+            trace.write_text(root_change, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
         assert runtime_evidence._decode_trace_string(r"caf\303\251") == "caf\u00e9"
         assert runtime_evidence._decode_trace_string(r"bad\377") == os.fsdecode(b"bad\xff")
 

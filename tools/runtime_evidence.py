@@ -62,6 +62,9 @@ TRACE_QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 TRACE_DIRFD_RE = re.compile(
     r'\b(?:openat|openat2|newfstatat|faccessat|faccessat2|readlinkat|statx|unlinkat|mkdirat|mknodat|utimensat|execveat)\(([^,]+),\s*"((?:\\.|[^"\\])*)"'
 )
+TRACE_ROOT_CHANGE_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?(?:chroot|pivot_root)\("
+)
 TRACE_DEV_FD_ALIAS_RE = re.compile(r"^/dev/(?:fd(?:/|$)|stdin$|stdout$|stderr$)")
 TRACE_TARGET_LAUNCHER = """import os, resource, sys
 limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -825,6 +828,11 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
     base = os.path.normpath(str(work.resolve()))
     unsafe = tuple(Path(item).as_posix().rstrip("/") for item in unsafe_paths)
     for line in trace.splitlines():
+        # Filesystem-root changes invalidate absolute-path attribution. Runtime
+        # evidence never needs to alter the tracee root, so even an attempted
+        # chroot/pivot_root is treated as ambiguous rather than reconstructed.
+        if TRACE_ROOT_CHANGE_RE.search(line):
+            return "TRACE_AMBIGUOUS"
         # Any CLONE_UNTRACED request can create a descendant outside strace -f
         # coverage. Seeing the flag is enough to invalidate terminal evidence.
         if "CLONE_UNTRACED" in line:
