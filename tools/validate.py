@@ -248,6 +248,21 @@ def validate_chat_primary_contract():
     for token in ("IMPLEMENTATION_LOCAL_BINDING=PASS", "MUTATION_AUTHORITY=NO", "WORKTREE_IDENTITY_MISMATCH"):
         if token not in source:
             raise SystemExit(f"FAIL implementation preflight missing executable invariant: {token}")
+    authority_sources = (
+        ("AGENTS.md", ROOT / "AGENTS.md"),
+        ("templates/AGENTS.md", ROOT / "templates/AGENTS.md"),
+        ("templates/CHATGPT_PROJECT_INSTRUCTION.txt", ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt"),
+    )
+    for rel, path in authority_sources:
+        text = path.read_text(encoding="utf-8")
+        for token in (
+            "current explicit owner instruction",
+            "Historical Issue comments",
+            "evidence only and never execution authority",
+            "do not probe, restore, wait for, or launch any alternate or retired implementation adapter",
+        ):
+            if token not in text:
+                raise SystemExit(f"FAIL {rel} missing execution-authority precedence invariant: {token}")
     print("PASS Chat-primary executable coordination artifacts")
 
 def validate_work_admission_contract():
