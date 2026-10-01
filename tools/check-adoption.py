@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 import ci_policy_audit
-from adopt import canonical_execution_policy_line, retired_agent_rules_present
+from adopt import canonical_execution_policy_line, canonical_managed_policy_lines, retired_agent_rules_present
 
 REQUIRED = (
     "AGENTS.md",
@@ -204,11 +204,18 @@ def main() -> int:
         if mode == "adopted":
             try:
                 execution_policy = canonical_execution_policy_line()
+                managed_policy_lines = canonical_managed_policy_lines()
             except SystemExit as exc:
                 failures.append(str(exc))
             else:
                 if execution_policy not in agents_text:
                     failures.append("AGENTS.md missing managed continuous-execution policy")
+                for managed_policy in managed_policy_lines:
+                    if managed_policy == execution_policy:
+                        continue
+                    if managed_policy not in agents_text:
+                        failures.append("AGENTS.md missing managed execution-authority policy")
+                        break
             if retired_agent_rules_present(agents_text):
                 failures.append("AGENTS.md contains retired agent/Cursor compatibility rules")
         if version_at_least(version, (1, 5, 0)):
