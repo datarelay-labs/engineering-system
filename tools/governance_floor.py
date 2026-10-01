@@ -405,8 +405,16 @@ def _execution_surface_reasons(path: str, content: str) -> list[str]:
     if path == "AGENTS.md":
         if RETIRED_AGENTS_RE.search(content):
             reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
-        for required in (
+        implementer_formulations = (
             "ChatGPT Chat is the implementation path.",
+            "ChatGPT Chat is the default implementer",
+        )
+        if not any(formulation in content for formulation in implementer_formulations):
+            reasons.append(
+                "MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:"
+                "CHATGPT_CHAT_IMPLEMENTER_AUTHORITY"
+            )
+        for required in (
             "Execution authority precedence:",
             "IMPLEMENTER=CHATGPT_CHAT",
         ):

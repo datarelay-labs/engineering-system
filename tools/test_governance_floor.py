@@ -131,6 +131,15 @@ def test_policy_epoch_regression_blocks() -> None:
         assert any("GOVERNANCE_POLICY_EPOCH_REGRESSION" in item for item in reasons)
 
 
+def test_real_adopted_default_implementer_formulation_passes() -> None:
+    content = (
+        "Execution authority precedence: current owner, then current ACTIVE Work Packet.\n"
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope.\n"
+        "IMPLEMENTER=CHATGPT_CHAT\n"
+    )
+    assert floor._execution_surface_reasons("AGENTS.md", content) == []
+
+
 def test_retired_implementer_and_artifact_block() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -351,6 +360,7 @@ def test_canonical_workflows_have_direct_floor() -> None:
 def main() -> int:
     test_safe_head_passes()
     test_policy_epoch_regression_blocks()
+    test_real_adopted_default_implementer_formulation_passes()
     test_retired_implementer_and_artifact_block()
     test_old_context_epoch_allowlist_blocks()
     test_epoch_advance_cannot_remove_chat_only_guard()
