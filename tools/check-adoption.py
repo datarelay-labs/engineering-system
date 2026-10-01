@@ -25,6 +25,7 @@ CONTINUITY_REQUIRED = (
 MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
     ".engineering/requirements-engineering-system.txt",
+    "tools/governance_floor.py",
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
@@ -90,6 +91,7 @@ def main() -> int:
     version = ""
     mode = ""
     baseline = ""
+    policy_epoch = 0
     ci_mode = ""
     native_ci_workflows: list[str] = []
     merge_gate_status = ""
@@ -107,6 +109,7 @@ def main() -> int:
             version = str(engineering.get("version") or "")
             mode = str(engineering.get("mode") or "")
             baseline = str(engineering.get("baseline") or "")
+            policy_epoch = engineering.get("policy_epoch", 0)
             ci_mode = str(engineering.get("ci_mode") or "")
             native_ci_workflows = [str(item) for item in (engineering.get("native_ci_workflows") or [])]
             merge_gate_status = str(engineering.get("merge_gate_status") or "")
@@ -129,6 +132,10 @@ def main() -> int:
                 failures.append("user-facing project requires project.primary_user_surface")
             if not user_facing and primary_user_surface != "none":
                 failures.append("project.primary_user_surface requires project.user_facing=true")
+
+            if version_at_least(version, (1, 7, 0)):
+                if not isinstance(policy_epoch, int) or isinstance(policy_epoch, bool) or policy_epoch < 1:
+                    failures.append("Engineering System >=1.7.0 requires engineering_system.policy_epoch>=1")
 
             if version_at_least(version, (1, 4, 0)):
                 if mode not in {"canonical", "adopted"}:
@@ -416,6 +423,10 @@ def main() -> int:
         workflow_path = root / ".github/workflows/engineering-system.yml"
         if workflow_path.is_file() and FULL_SHA_RE.fullmatch(baseline):
             workflow_text = workflow_path.read_text(encoding="utf-8", errors="replace")
+            if f"governance-floor.yml@{baseline}" not in workflow_text:
+                failures.append("engineering-system.yml governance floor is not pinned to project baseline")
+            if "pull_request_target" not in workflow_text:
+                failures.append("engineering-system.yml missing base-branch governance floor trigger")
             if f"adoption-compliance.yml@{baseline}" not in workflow_text:
                 failures.append("engineering-system.yml compliance workflow is not pinned to project baseline")
             if ci_mode == "shared" and f"affected-tests.yml@{baseline}" not in workflow_text:

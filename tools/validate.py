@@ -38,6 +38,7 @@ REQUIRED_METHOD_FILES = (
     "adapters/README.md",
     ".github/workflows/affected-tests.yml",
     ".github/workflows/enforcement-check.yml",
+    ".github/workflows/governance-floor.yml",
     ".github/workflows/release-preflight.yml",
     ".github/workflows/release-gate.yml",
     ".github/workflows/release-contract.yml",
@@ -67,6 +68,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_context_tool_output.py",
     "tools/engineering-context.py",
     "tools/test_engineering_context.py",
+    "tools/governance_floor.py",
+    "tools/test_governance_floor.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -935,6 +938,41 @@ def validate_adoption_contract():
     print("PASS automated adoption standard/tool contract")
 
 
+def validate_governance_floor_contract():
+    workflow = (ROOT / ".github/workflows/governance-floor.yml").read_text(encoding="utf-8")
+    helper = (ROOT / "tools/governance_floor.py").read_text(encoding="utf-8")
+    adopted = (ROOT / "templates/.github/workflows/engineering-system.yml").read_text(encoding="utf-8")
+    adopt = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
+    check = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    schema = load_json(ROOT / "schemas/project.schema.json")
+    for token in (
+        "GOVERNANCE_POLICY_EPOCH_REGRESSION",
+        "RETIRED_IMPLEMENTER_REINTRODUCED",
+        "RETIRED_AGENT_ARTIFACT_REINTRODUCED",
+        "GOVERNANCE_HELPER_CHANGED_WITHOUT_POLICY_EPOCH",
+        "GOVERNANCE_FLOOR=",
+    ):
+        if token not in helper:
+            raise SystemExit(f"FAIL governance floor helper missing token: {token}")
+    for token in ("tools/governance_floor.py check", "--base-ref", "--head-ref"):
+        if token not in workflow:
+            raise SystemExit(f"FAIL governance floor workflow missing helper invocation token: {token}")
+    for token in ("pull_request_target", "governance-floor.yml@", "base_sha:", "head_sha:"):
+        if token not in adopted:
+            raise SystemExit(f"FAIL adopted workflow missing governance-floor token: {token}")
+    if "POLICY_EPOCH = 1" not in adopt or "policy_epoch" not in check:
+        raise SystemExit("FAIL adoption tooling missing governance-floor policy epoch")
+    policy = (
+        schema.get("properties", {})
+        .get("engineering_system", {})
+        .get("properties", {})
+        .get("policy_epoch", {})
+    )
+    if policy.get("type") != "integer" or policy.get("minimum") != 1:
+        raise SystemExit("FAIL project schema policy_epoch is not a positive integer")
+    print("PASS base-branch governance floor contract")
+
+
 def validate_knowledge_contract():
     schema = load_json(ROOT / "schemas/knowledge-index.schema.json")
     Draft202012Validator.check_schema(schema)
@@ -1500,6 +1538,7 @@ def main():
     validate_session_continuity_templates()
     validate_actionable_review_gate()
     validate_adoption_contract()
+    validate_governance_floor_contract()
     validate_knowledge_contract()
     validate_runtime_contract()
     validate_incident_evidence()
@@ -1591,6 +1630,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_engineering_context.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_governance_floor.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)
