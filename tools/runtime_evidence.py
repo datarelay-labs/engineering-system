@@ -74,7 +74,15 @@ TRACE_PATH_TOPOLOGY_RE = re.compile(
 TRACE_IO_URING_RE = re.compile(
     r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?io_uring_(?:setup|enter|register)\("
 )
-TRACE_SYSCALL_FILTER = "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register"
+TRACE_SECCOMP_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?seccomp\("
+)
+TRACE_PRCTL_RE = re.compile(
+    r"^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?prctl\("
+)
+TRACE_SYSCALL_FILTER = (
+    "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,seccomp,prctl"
+)
 TRACE_SETUP_PRIVATE_MOUNT_RE = re.compile(
     r'^\s*(?:(?:\[pid\s+\d+\]|\d+)\s+)?mount\("none", "/", NULL, MS_REC\|MS_PRIVATE, NULL\) = 0$'
 )
@@ -870,7 +878,12 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         # chroot/pivot_root is treated as ambiguous rather than reconstructed.
         if TRACE_ROOT_CHANGE_RE.search(line):
             return "TRACE_AMBIGUOUS"
-        if TRACE_MOUNT_TOPOLOGY_RE.search(line) and not _trace_setup_mount_allowed(line):
+        if TRACE_MOUNT_TOPOLOGY_RE.search(line):
+            if _trace_setup_mount_allowed(line):
+                # The fixed namespace wrapper emits these records before the
+                # evidence command starts. Their source/filesystem strings are
+                # not subject-tree path arguments, so do not scan them again.
+                continue
             return "TRACE_AMBIGUOUS"
         # Rename/link/symlink mutations can create a new alias for an unsafe
         # path or move an unsafe ancestor so later path attribution no longer
@@ -884,6 +897,18 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
         # is no longer complete enough for terminal evidence.
         if TRACE_IO_URING_RE.search(line):
             return "TRACE_AMBIGUOUS"
+        # seccomp can defer a pathname syscall after ptrace entry and allow
+        # another task to mutate the tracee buffer before kernel resolution.
+        # Reject any seccomp syscall; the trace boundary cannot prove the
+        # pathname bytes remained stable after they were observed.
+        if TRACE_SECCOMP_RE.search(line):
+            return "TRACE_AMBIGUOUS"
+        if TRACE_PRCTL_RE.search(line):
+            if "PR_SET_SECCOMP" in line:
+                return "TRACE_AMBIGUOUS"
+            # Other prctl string arguments (for example PR_SET_NAME) are
+            # process metadata, not subject-tree paths.
+            continue
         # Any CLONE_UNTRACED request can create a descendant outside strace -f
         # coverage. Seeing the flag is enough to invalidate terminal evidence.
         if "CLONE_UNTRACED" in line:

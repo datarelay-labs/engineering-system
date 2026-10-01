@@ -943,6 +943,65 @@ def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
             clear_trust()
 
 
+def test_seccomp_filter_install_attempt_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import ctypes\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "libc.prctl(22, 2, 0, 0, 0)\n"
+        "print('ok')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "seccomp filter attempt")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_setup_mount_names_do_not_block_unrelated_placeholders() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        for name in ("proc", "none"):
+            (repo / name).symlink_to(outside)
+            git(repo, "add", name)
+        git(repo, "commit", "-m", "setup mount names are unrelated placeholders")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "ok\n"
+        finally:
+            clear_trust()
+
+
 def test_ancestor_path_topology_change_is_rejected() -> None:
     supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
@@ -1114,8 +1173,20 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
         assert runtime_evidence.TRACE_SYSCALL_FILTER == (
-            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register"
+            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,seccomp,prctl"
         )
+        for filter_install in (
+            "123 seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, 0x7fff0000) = 3\n",
+            "123 prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, 0x7fff0000) = 0\n",
+        ):
+            trace.write_text(filter_install, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 prctl(PR_SET_NAME, "proc") = 0\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("proc",)
+        ) is None
         for io_uring_call in (
             "123 io_uring_setup(8, 0x7fff0000) = 3\n",
             "123 io_uring_enter(3, 1, 1, 0, NULL, 8) = 1\n",
@@ -1134,13 +1205,16 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
-        for setup_mount in (
-            '123 mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL) = 0\n',
-            '123 mount("proc", "/proc", "proc", MS_NOSUID|MS_NODEV|MS_NOEXEC, NULL) = 0\n',
+        for setup_mount, setup_name in (
+            ('123 mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL) = 0\n', "none"),
+            ('123 mount("proc", "/proc", "proc", MS_NOSUID|MS_NODEV|MS_NOEXEC, NULL) = 0\n', "proc"),
         ):
             trace.write_text(setup_mount, encoding="utf-8")
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
+            ) is None
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, (setup_name,)
             ) is None
         for disguised_mount in (
             '123 mount("none", "/", NULL, MS_BIND, NULL) = 0\n',
@@ -1836,6 +1910,8 @@ def main() -> int:
     test_procfs_alias_to_unsafe_entry_is_rejected()
     test_linux_alias_variants_to_unsafe_entry_are_rejected()
     test_mount_alias_to_unsafe_entry_is_rejected()
+    test_seccomp_filter_install_attempt_is_rejected()
+    test_setup_mount_names_do_not_block_unrelated_placeholders()
     test_ancestor_path_topology_change_is_rejected()
     test_directory_enumeration_preserves_unsafe_entry_name()
     test_non_ascii_unsafe_path_is_rejected()
