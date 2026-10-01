@@ -24,13 +24,41 @@ PROTECTED_GOVERNANCE_SURFACES = (
 )
 RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
 GOVERNANCE_HELPER = "tools/governance_floor.py"
-ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
+GOVERNANCE_REUSABLE_WORKFLOW = ".github/workflows/governance-floor.yml"
+GOVERNANCE_DEPENDENCY_MANIFEST = ".engineering/requirements-engineering-system.txt"
+ROOT_OF_TRUST_SURFACES = (
+    GOVERNANCE_HELPER,
+    GOVERNANCE_DEPENDENCY_MANIFEST,
+)
+CANONICAL_ROOT_OF_TRUST_SURFACES = (
+    GOVERNANCE_REUSABLE_WORKFLOW,
+)
+ADOPTED_ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
+CANONICAL_VALIDATE_WORKFLOW = ".github/workflows/validate.yml"
 GOVERNANCE_WORKFLOW_PREFIX = (
     "datarelay-labs/engineering-system/.github/workflows/governance-floor.yml@"
 )
-EXPECTED_WORKFLOW_CONDITION = "github.event_name == 'pull_request_target'"
+ADOPTION_WORKFLOW_PREFIX = (
+    "datarelay-labs/engineering-system/.github/workflows/adoption-compliance.yml@"
+)
+ENFORCEMENT_WORKFLOW_PREFIX = (
+    "datarelay-labs/engineering-system/.github/workflows/enforcement-check.yml@"
+)
+AFFECTED_WORKFLOW_PREFIX = (
+    "datarelay-labs/engineering-system/.github/workflows/affected-tests.yml@"
+)
+EXPECTED_FLOOR_CONDITION = "github.event_name == 'pull_request_target'"
+EXPECTED_PR_CONDITION = "github.event_name == 'pull_request'"
 EXPECTED_BASE_INPUT = "${{ github.event.pull_request.base.sha }}"
 EXPECTED_HEAD_INPUT = "${{ github.event.pull_request.head.sha }}"
+EXPECTED_CANONICAL_BASE_REF = (
+    "${{ github.event_name == 'pull_request_target' && "
+    "github.event.pull_request.base.sha || inputs.base_sha }}"
+)
+EXPECTED_CANONICAL_HEAD_REF = (
+    "${{ github.event_name == 'pull_request_target' && "
+    "github.event.pull_request.head.sha || inputs.head_sha }}"
+)
 RETIRED_AGENTS_RE = re.compile(
     r"(?i)(?:"
     r"IMPLEMENTER\s*=\s*CURSOR|"
@@ -92,52 +120,283 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     return value
 
 
-def _workflow_reasons(text: str | None, profile: dict[str, object]) -> list[str]:
+def _parse_workflow(text: str | None, missing_path: str) -> tuple[dict[str, object] | None, list[str]]:
     if text is None:
-        return [f"MANAGED_GOVERNANCE_PATH_MISSING:{ENGINEERING_WORKFLOW}"]
+        return None, [f"MANAGED_GOVERNANCE_PATH_MISSING:{missing_path}"]
     try:
         payload = yaml.load(text, Loader=yaml.BaseLoader) or {}
     except yaml.YAMLError:
-        return ["GOVERNANCE_WORKFLOW_INVALID_YAML"]
+        return None, [f"GOVERNANCE_WORKFLOW_INVALID_YAML:{missing_path}"]
     if not isinstance(payload, dict):
-        return ["GOVERNANCE_WORKFLOW_INVALID_ROOT"]
+        return None, [f"GOVERNANCE_WORKFLOW_INVALID_ROOT:{missing_path}"]
+    return payload, []
+
+
+def _event_unfiltered(triggers: object, event: str) -> bool:
+    if not isinstance(triggers, dict) or event not in triggers:
+        return False
+    return triggers.get(event) in (None, "", {})
+
+
+def _profile_engineering(profile: dict[str, object]) -> dict[str, object]:
+    engineering = profile.get("engineering_system") or {}
+    return engineering if isinstance(engineering, dict) else {}
+
+
+def _baseline(profile: dict[str, object]) -> str:
+    return str(_profile_engineering(profile).get("baseline") or "").strip()
+
+
+def _uses_pin_reasons(
+    job: object,
+    *,
+    job_name: str,
+    prefix: str,
+    baseline: str,
+    condition: str,
+) -> list[str]:
+    if not isinstance(job, dict):
+        return [f"GOVERNANCE_MANAGED_JOB_MISSING:{job_name}"]
+    reasons: list[str] = []
+    if str(job.get("if") or "").strip() != condition:
+        reasons.append(f"GOVERNANCE_MANAGED_JOB_CONDITION_INVALID:{job_name}")
+    uses = str(job.get("uses") or "").strip()
+    if not uses.startswith(prefix):
+        reasons.append(f"GOVERNANCE_MANAGED_JOB_USES_INVALID:{job_name}")
+        return reasons
+    pinned = uses.removeprefix(prefix)
+    if FULL_SHA_RE.fullmatch(pinned) is None:
+        reasons.append(f"GOVERNANCE_MANAGED_JOB_PIN_INVALID:{job_name}")
+    elif baseline and pinned != baseline:
+        reasons.append(f"GOVERNANCE_MANAGED_JOB_BASELINE_MISMATCH:{job_name}")
+    return reasons
+
+
+def _adopted_workflow_reasons(
+    text: str | None, profile: dict[str, object]
+) -> list[str]:
+    payload, reasons = _parse_workflow(text, ADOPTED_ENGINEERING_WORKFLOW)
+    if payload is None:
+        return reasons
     triggers = payload.get("on")
     if not isinstance(triggers, dict) or "pull_request_target" not in triggers:
-        return ["GOVERNANCE_WORKFLOW_TRIGGER_MISSING"]
-    if triggers.get("pull_request_target") not in (None, ""):
-        return ["GOVERNANCE_WORKFLOW_TRIGGER_FILTERED"]
+        reasons.append("GOVERNANCE_WORKFLOW_TRIGGER_MISSING:pull_request_target")
+    elif not _event_unfiltered(triggers, "pull_request_target"):
+        reasons.append("GOVERNANCE_WORKFLOW_TRIGGER_FILTERED:pull_request_target")
+    if not isinstance(triggers, dict) or "pull_request" not in triggers:
+        reasons.append("GOVERNANCE_WORKFLOW_TRIGGER_MISSING:pull_request")
+    elif not _event_unfiltered(triggers, "pull_request"):
+        reasons.append("GOVERNANCE_WORKFLOW_TRIGGER_FILTERED:pull_request")
+
+    permissions = payload.get("permissions")
+    if permissions != {"contents": "read"}:
+        reasons.append("GOVERNANCE_WORKFLOW_PERMISSIONS_INVALID")
+
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict):
-        return ["GOVERNANCE_WORKFLOW_JOB_MISSING"]
-    job = jobs.get("governance-floor")
-    if not isinstance(job, dict):
-        return ["GOVERNANCE_WORKFLOW_JOB_MISSING"]
-    reasons: list[str] = []
-    if str(job.get("if") or "").strip() != EXPECTED_WORKFLOW_CONDITION:
-        reasons.append("GOVERNANCE_WORKFLOW_CONDITION_INVALID")
-    uses = str(job.get("uses") or "").strip()
-    if not uses.startswith(GOVERNANCE_WORKFLOW_PREFIX):
-        reasons.append("GOVERNANCE_WORKFLOW_USES_INVALID")
-    else:
-        pinned = uses.removeprefix(GOVERNANCE_WORKFLOW_PREFIX)
-        if FULL_SHA_RE.fullmatch(pinned) is None:
-            reasons.append("GOVERNANCE_WORKFLOW_PIN_INVALID")
-        engineering = profile.get("engineering_system") or {}
-        baseline = (
-            str(engineering.get("baseline") or "").strip()
-            if isinstance(engineering, dict)
-            else ""
+        reasons.append("GOVERNANCE_WORKFLOW_JOB_MISSING")
+        return reasons
+
+    baseline = _baseline(profile)
+    if FULL_SHA_RE.fullmatch(baseline) is None:
+        reasons.append("GOVERNANCE_WORKFLOW_BASELINE_INVALID")
+
+    floor_job = jobs.get("governance-floor")
+    reasons.extend(
+        _uses_pin_reasons(
+            floor_job,
+            job_name="governance-floor",
+            prefix=GOVERNANCE_WORKFLOW_PREFIX,
+            baseline=baseline,
+            condition=EXPECTED_FLOOR_CONDITION,
         )
-        if baseline and FULL_SHA_RE.fullmatch(baseline) and pinned != baseline:
-            reasons.append("GOVERNANCE_WORKFLOW_BASELINE_MISMATCH")
-    inputs = job.get("with")
-    if not isinstance(inputs, dict):
-        reasons.append("GOVERNANCE_WORKFLOW_INPUTS_INVALID")
+    )
+    if isinstance(floor_job, dict):
+        inputs = floor_job.get("with")
+        if not isinstance(inputs, dict):
+            reasons.append("GOVERNANCE_WORKFLOW_INPUTS_INVALID:governance-floor")
+        else:
+            if str(inputs.get("base_sha") or "").strip() != EXPECTED_BASE_INPUT:
+                reasons.append("GOVERNANCE_WORKFLOW_BASE_INPUT_INVALID")
+            if str(inputs.get("head_sha") or "").strip() != EXPECTED_HEAD_INPUT:
+                reasons.append("GOVERNANCE_WORKFLOW_HEAD_INPUT_INVALID")
+
+    reasons.extend(
+        _uses_pin_reasons(
+            jobs.get("adoption-compliance"),
+            job_name="adoption-compliance",
+            prefix=ADOPTION_WORKFLOW_PREFIX,
+            baseline=baseline,
+            condition=EXPECTED_PR_CONDITION,
+        )
+    )
+    reasons.extend(
+        _uses_pin_reasons(
+            jobs.get("enforcement-reconcile"),
+            job_name="enforcement-reconcile",
+            prefix=ENFORCEMENT_WORKFLOW_PREFIX,
+            baseline=baseline,
+            condition=EXPECTED_PR_CONDITION,
+        )
+    )
+
+    ci_mode = str(_profile_engineering(profile).get("ci_mode") or "")
+    expected_jobs = {"governance-floor", "adoption-compliance", "enforcement-reconcile"}
+    if ci_mode == "shared":
+        expected_jobs.add("affected-tests")
+        affected = jobs.get("affected-tests")
+        reasons.extend(
+            _uses_pin_reasons(
+                affected,
+                job_name="affected-tests",
+                prefix=AFFECTED_WORKFLOW_PREFIX,
+                baseline=baseline,
+                condition=EXPECTED_PR_CONDITION,
+            )
+        )
+        if isinstance(affected, dict):
+            inputs = affected.get("with")
+            if not isinstance(inputs, dict):
+                reasons.append("GOVERNANCE_WORKFLOW_INPUTS_INVALID:affected-tests")
+            else:
+                if str(inputs.get("manifest_path") or "").strip() != ".engineering/tests.yaml":
+                    reasons.append("GOVERNANCE_AFFECTED_MANIFEST_INVALID")
+                if str(inputs.get("trigger") or "").strip() != "pr":
+                    reasons.append("GOVERNANCE_AFFECTED_TRIGGER_INVALID")
+    elif ci_mode == "native":
+        if "affected-tests" in jobs:
+            reasons.append("GOVERNANCE_NATIVE_DUPLICATE_AFFECTED_TESTS")
     else:
-        if str(inputs.get("base_sha") or "").strip() != EXPECTED_BASE_INPUT:
-            reasons.append("GOVERNANCE_WORKFLOW_BASE_INPUT_INVALID")
-        if str(inputs.get("head_sha") or "").strip() != EXPECTED_HEAD_INPUT:
-            reasons.append("GOVERNANCE_WORKFLOW_HEAD_INPUT_INVALID")
+        reasons.append("GOVERNANCE_CI_MODE_INVALID")
+
+    if set(jobs) != expected_jobs:
+        reasons.append("GOVERNANCE_MANAGED_JOB_SET_INVALID")
+    return reasons
+
+
+def _canonical_floor_workflow_reasons(text: str | None) -> list[str]:
+    payload, reasons = _parse_workflow(text, GOVERNANCE_REUSABLE_WORKFLOW)
+    if payload is None:
+        return reasons
+    triggers = payload.get("on")
+    if not isinstance(triggers, dict) or "workflow_call" not in triggers:
+        reasons.append("GOVERNANCE_CANONICAL_WORKFLOW_CALL_MISSING")
+    if not isinstance(triggers, dict) or "pull_request_target" not in triggers:
+        reasons.append("GOVERNANCE_CANONICAL_TRIGGER_MISSING")
+    elif not _event_unfiltered(triggers, "pull_request_target"):
+        reasons.append("GOVERNANCE_CANONICAL_TRIGGER_FILTERED")
+
+    permissions = payload.get("permissions")
+    if not isinstance(permissions, dict) or str(permissions.get("contents") or "") != "read":
+        reasons.append("GOVERNANCE_CANONICAL_PERMISSIONS_INVALID")
+
+    jobs = payload.get("jobs")
+    job = jobs.get("governance-floor") if isinstance(jobs, dict) else None
+    if not isinstance(job, dict):
+        reasons.append("GOVERNANCE_CANONICAL_JOB_MISSING")
+        return reasons
+    if not str(job.get("runs-on") or "").strip():
+        reasons.append("GOVERNANCE_CANONICAL_RUNNER_MISSING")
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        reasons.append("GOVERNANCE_CANONICAL_STEPS_MISSING")
+        return reasons
+
+    checkout = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("uses") or "").startswith("actions/checkout@")
+        ),
+        None,
+    )
+    if not isinstance(checkout, dict):
+        reasons.append("GOVERNANCE_CANONICAL_CHECKOUT_MISSING")
+    else:
+        uses = str(checkout.get("uses") or "")
+        pin = uses.rsplit("@", 1)[-1]
+        if FULL_SHA_RE.fullmatch(pin) is None:
+            reasons.append("GOVERNANCE_CANONICAL_CHECKOUT_PIN_INVALID")
+        checkout_with = checkout.get("with")
+        if not isinstance(checkout_with, dict):
+            reasons.append("GOVERNANCE_CANONICAL_CHECKOUT_INPUTS_INVALID")
+        else:
+            if str(checkout_with.get("ref") or "").strip() != EXPECTED_CANONICAL_BASE_REF:
+                reasons.append("GOVERNANCE_CANONICAL_CHECKOUT_REF_INVALID")
+            if str(checkout_with.get("fetch-depth") or "").strip() != "0":
+                reasons.append("GOVERNANCE_CANONICAL_CHECKOUT_DEPTH_INVALID")
+
+    fetch_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("name") or "") == "Fetch candidate commit as data only"
+        ),
+        None,
+    )
+    if not isinstance(fetch_step, dict):
+        reasons.append("GOVERNANCE_CANONICAL_FETCH_STEP_MISSING")
+    else:
+        fetch_env = fetch_step.get("env")
+        if (
+            not isinstance(fetch_env, dict)
+            or str(fetch_env.get("HEAD_SHA") or "").strip()
+            != EXPECTED_CANONICAL_HEAD_REF
+        ):
+            reasons.append("GOVERNANCE_CANONICAL_FETCH_HEAD_INVALID")
+
+    enforce_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("name") or "") == "Enforce base-branch governance floor"
+        ),
+        None,
+    )
+    if not isinstance(enforce_step, dict):
+        reasons.append("GOVERNANCE_CANONICAL_ENFORCE_STEP_MISSING")
+    else:
+        enforce_env = enforce_step.get("env")
+        if not isinstance(enforce_env, dict):
+            reasons.append("GOVERNANCE_CANONICAL_ENFORCE_ENV_INVALID")
+        else:
+            if str(enforce_env.get("BASE_SHA") or "").strip() != EXPECTED_CANONICAL_BASE_REF:
+                reasons.append("GOVERNANCE_CANONICAL_ENFORCE_BASE_INVALID")
+            if str(enforce_env.get("HEAD_SHA") or "").strip() != EXPECTED_CANONICAL_HEAD_REF:
+                reasons.append("GOVERNANCE_CANONICAL_ENFORCE_HEAD_INVALID")
+
+    run_text = "\n".join(
+        str(step.get("run") or "")
+        for step in steps
+        if isinstance(step, dict)
+    )
+    for token, reason in (
+        (".engineering/requirements-engineering-system.txt", "GOVERNANCE_CANONICAL_DEPENDENCIES_INVALID"),
+        ('git fetch --no-tags --depth=1 origin "$HEAD_SHA"', "GOVERNANCE_CANONICAL_FETCH_INVALID"),
+        ("python3 tools/governance_floor.py check", "GOVERNANCE_CANONICAL_HELPER_INVOCATION_INVALID"),
+        ('--base-ref "$BASE_SHA"', "GOVERNANCE_CANONICAL_BASE_REF_INVALID"),
+        ('--head-ref "$HEAD_SHA"', "GOVERNANCE_CANONICAL_HEAD_REF_INVALID"),
+    ):
+        if token not in run_text:
+            reasons.append(reason)
+    return reasons
+
+
+def _canonical_validate_reasons(text: str | None) -> list[str]:
+    payload, reasons = _parse_workflow(text, CANONICAL_VALIDATE_WORKFLOW)
+    if payload is None:
+        return reasons
+    triggers = payload.get("on")
+    if not isinstance(triggers, dict) or "pull_request" not in triggers:
+        reasons.append("GOVERNANCE_CANONICAL_VALIDATE_PR_MISSING")
+    elif not _event_unfiltered(triggers, "pull_request"):
+        reasons.append("GOVERNANCE_CANONICAL_VALIDATE_PR_FILTERED")
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict) or not isinstance(jobs.get("validate"), dict):
+        reasons.append("GOVERNANCE_CANONICAL_VALIDATE_JOB_MISSING")
     return reasons
 
 
@@ -187,6 +446,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     head_profile = _profile(_read_at(root, head, ".engineering/project.yaml"), "head")
     base_epoch = _policy_epoch(base_profile, "base")
     head_epoch = _policy_epoch(head_profile, "head")
+    mode = str(_profile_engineering(head_profile).get("mode") or "")
     reasons: list[str] = []
 
     if head_epoch < base_epoch:
@@ -194,10 +454,16 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
         )
 
-    base_helper = _read_at(root, base, GOVERNANCE_HELPER)
-    head_helper = _read_at(root, head, GOVERNANCE_HELPER)
-    if base_helper is not None and head_helper != base_helper:
-        reasons.append("GOVERNANCE_ROOT_OF_TRUST_CHANGED")
+    root_surfaces = ROOT_OF_TRUST_SURFACES + (
+        CANONICAL_ROOT_OF_TRUST_SURFACES if mode == "canonical" else ()
+    )
+    for path in root_surfaces:
+        base_content = _read_at(root, base, path)
+        head_content = _read_at(root, head, path)
+        if head_content is None:
+            reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
+        elif base_content is not None and head_content != base_content:
+            reasons.append(f"GOVERNANCE_ROOT_OF_TRUST_CHANGED:{path}")
 
     if head_epoch == base_epoch:
         for path in PROTECTED_GOVERNANCE_SURFACES:
@@ -208,8 +474,16 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
                     f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}"
                 )
 
-    workflow = _read_at(root, head, ENGINEERING_WORKFLOW)
-    reasons.extend(_workflow_reasons(workflow, head_profile))
+    if mode == "adopted":
+        workflow = _read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW)
+        reasons.extend(_adopted_workflow_reasons(workflow, head_profile))
+    elif mode == "canonical":
+        floor_workflow = _read_at(root, head, GOVERNANCE_REUSABLE_WORKFLOW)
+        reasons.extend(_canonical_floor_workflow_reasons(floor_workflow))
+        validate_workflow = _read_at(root, head, CANONICAL_VALIDATE_WORKFLOW)
+        reasons.extend(_canonical_validate_reasons(validate_workflow))
+    else:
+        reasons.append("GOVERNANCE_PROJECT_MODE_INVALID")
 
     for path in MANAGED_EXECUTION_SURFACES:
         content = _read_at(root, head, path)
@@ -217,20 +491,6 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
             continue
         reasons.extend(_execution_surface_reasons(path, content))
-
-    if head_helper is None:
-        reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{GOVERNANCE_HELPER}")
-    else:
-        for required in (
-            "GOVERNANCE_POLICY_EPOCH_REGRESSION",
-            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH",
-            "RETIRED_IMPLEMENTER_REINTRODUCED",
-            "GOVERNANCE_WORKFLOW_TRIGGER_MISSING",
-        ):
-            if required not in head_helper:
-                reasons.append(
-                    f"GOVERNANCE_HELPER_INVARIANT_MISSING:{required}"
-                )
 
     for path in RETIRED_AGENT_ARTIFACTS:
         if _tree_has_path(root, head, path):
