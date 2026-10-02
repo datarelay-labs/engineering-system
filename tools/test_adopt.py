@@ -22,6 +22,7 @@ BASELINE = "a" * 40
 NEW_BASELINE = "b" * 40
 CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
 TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
+PROVIDER_NEUTRAL_BASELINE = "6bf89e1fc716eff242a10eeb84dd25b5186ccc71"
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -639,6 +640,7 @@ def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
     cases = (
         ("1.6.5-cdc54b3.sha256", CONTEXT_EPOCH_BASELINE),
         ("1.6.5-dfe9b2c.sha256", TRUST_HELPER_BASELINE),
+        ("1.7.0-6bf89e1.sha256", PROVIDER_NEUTRAL_BASELINE),
     )
     history = ROOT / "tools" / "managed_adapter_history" / "file_hashes"
     for name, revision in cases:
@@ -654,6 +656,85 @@ def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
                 name,
                 rel,
             )
+
+
+def test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp() -> None:
+    """Interrupted rollout repairs trusted prior canonical bytes after baseline stamp."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-prior-managed-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/prior-managed-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt target baseline")
+
+        stale_paths = (
+            ".github/ISSUE_TEMPLATE/ai-work-packet.md",
+            "tools/implementation_preflight.py",
+            "tools/context_epoch.py",
+            "tools/governance_floor.py",
+        )
+        for rel in stale_paths:
+            historical = run(
+                "git",
+                "show",
+                f"{PROVIDER_NEUTRAL_BASELINE}:{rel}",
+                cwd=ROOT,
+            ).stdout
+            assert historical != (ROOT / rel).read_text(encoding="utf-8"), rel
+            (target / rel).write_text(historical, encoding="utf-8")
+        commit_all(target, "simulate stamped baseline with prior managed bytes")
+        damaged_base = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        for marker in (
+            "WORK_PACKET_TEMPLATE_REPAIR=REQUIRED",
+            "IMPLEMENTATION_PREFLIGHT_REPAIR=REQUIRED",
+            "CONTEXT_EPOCH_REPAIR=REQUIRED",
+            "GOVERNANCE_FLOOR_REPAIR=REQUIRED",
+            "GOVERNANCE_ROOT_MIGRATION=REQUIRED",
+            "ADOPTION_UPGRADE=PASS",
+        ):
+            assert marker in repaired.stdout, (marker, repaired.stdout)
+        for rel in stale_paths:
+            assert (target / rel).read_bytes() == (ROOT / rel).read_bytes(), rel
+
+        commit_all(target, "repair prior managed bytes")
+        repaired_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        floor_check = run(
+            sys.executable,
+            str(target / "tools/governance_floor.py"),
+            "check",
+            "--root",
+            str(target),
+            "--base-ref",
+            damaged_base,
+            "--head-ref",
+            repaired_head,
+        )
+        assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
 
 
 def test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom() -> None:
@@ -2785,6 +2866,7 @@ def main() -> int:
     test_same_baseline_repairs_managed_execution_policy()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
+    test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp()
     test_managed_file_hash_history_upgrades_known_bytes_and_rejects_custom()
     test_managed_file_old_baseline_is_trusted_without_manifest()
     test_grant_style_baseline_declarations_upgraded()
