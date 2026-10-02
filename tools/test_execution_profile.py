@@ -110,6 +110,24 @@ def test_transition_and_disabled_primary() -> None:
 
 
 
+def test_raw_packet_metadata_rejects_duplicates() -> None:
+    profile = ep.load_profile(ROOT)
+    profile_id, revision = ep.profile_identity(profile)
+    values = {
+        "PACKET_VERSION": "3",
+        "EXECUTION_PROFILE": profile_id,
+        "EXECUTION_PROFILE_REVISION": str(revision),
+    }
+    base = "\n".join(f"{key}={value}" for key, value in values.items()) + "\n"
+    for key, value in values.items():
+        try:
+            ep.parse_packet_metadata(base + f"{key}={value}\n")
+        except ep.ProfileError as exc:
+            assert str(exc) == f"PACKET_METADATA_DUPLICATE:{key}"
+        else:
+            raise AssertionError(f"duplicate packet metadata accepted: {key}")
+
+
 def test_disabled_runtime_cannot_be_legacy_compatible() -> None:
     raw = synthetic_profile()
     raw["packet_compatibility"]["legacy_v2_implementers"] = {
@@ -126,6 +144,7 @@ def main() -> int:
     test_current_profile()
     test_synthetic_profile_is_core_neutral()
     test_transition_and_disabled_primary()
+    test_raw_packet_metadata_rejects_duplicates()
     test_disabled_runtime_cannot_be_legacy_compatible()
     print("EXECUTION_PROFILE_TESTS=PASS")
     return 0

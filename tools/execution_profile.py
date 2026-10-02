@@ -242,8 +242,12 @@ def parse_packet_metadata(text: str) -> dict[str, str]:
         if line.startswith("## "):
             break
         match = META_RE.match(line)
-        if match and match.group(1) not in metadata:
-            metadata[match.group(1)] = match.group(2).strip()
+        if not match:
+            continue
+        key, value = match.group(1), match.group(2).strip()
+        if key in metadata:
+            raise ProfileError(f"PACKET_METADATA_DUPLICATE:{key}")
+        metadata[key] = value
     return metadata
 
 

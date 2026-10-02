@@ -153,6 +153,7 @@ def parse_packet(text: str) -> Packet:
 def analyze_packet(
     packet: Packet,
     *,
+    profile_root: Path | str | None = None,
     warn_chars: int | None = None,
     warn_lines: int | None = None,
 ) -> dict[str, Any]:
@@ -194,8 +195,13 @@ def analyze_packet(
     change_risk = packet.metadata.get("CHANGE_RISK")
     if change_risk and change_risk not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
         blocking.append("CHANGE_RISK_INVALID")
+    root = (
+        Path(profile_root)
+        if profile_root is not None
+        else Path(__file__).resolve().parents[1]
+    )
     try:
-        execution_profile = load_profile(Path.cwd())
+        execution_profile = load_profile(root)
     except ProfileError:
         blocking.append("EXECUTION_PROFILE_UNAVAILABLE")
     else:
@@ -536,6 +542,7 @@ def main() -> int:
 
     lint = sub.add_parser("packet-lint")
     lint.add_argument("--body-file", required=True)
+    lint.add_argument("--root")
     lint.add_argument("--warn-chars", type=int)
     lint.add_argument("--warn-lines", type=int)
 
@@ -577,6 +584,7 @@ def main() -> int:
         elif args.command == "packet-lint":
             result = analyze_packet(
                 parse_packet(_read_text(args.body_file)),
+                profile_root=args.root,
                 warn_chars=args.warn_chars,
                 warn_lines=args.warn_lines,
             )
