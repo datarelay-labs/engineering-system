@@ -1009,8 +1009,17 @@ def _trace_unsafe_access_reason(trace_source: str | Path, work: Path, unsafe_pat
             decoded = _decode_trace_string(match.group(2))
             if decoded is None:
                 return "TRACE_AMBIGUOUS"
-            if decoded and not os.path.isabs(decoded) and match.group(1).strip() != "AT_FDCWD":
-                return "TRACE_AMBIGUOUS"
+            dirfd = match.group(1).strip()
+            if decoded and dirfd != "AT_FDCWD":
+                # A non-AT_FDCWD dirfd changes pathname resolution semantics.
+                # Relative paths are dirfd-relative, while openat2 with
+                # RESOLVE_IN_ROOT also treats an absolute pathname as rooted
+                # beneath dirfd. The trace does not maintain trusted fd->path
+                # state, so either form is ambiguous for unsafe-tree evidence.
+                if not os.path.isabs(decoded) or (
+                    syscall == "openat2" and "RESOLVE_IN_ROOT" in line
+                ):
+                    return "TRACE_AMBIGUOUS"
 
         # For traced file/process syscalls that reach this point, the first
         # quoted field is the pathname position. Later quoted fields can be

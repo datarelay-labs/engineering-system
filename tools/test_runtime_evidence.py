@@ -1264,6 +1264,21 @@ def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
             assert runtime_evidence._trace_unsafe_access_reason(
                 trace, work, ("vendor/dependency",)
             ) == "TRACE_AMBIGUOUS"
+        for in_root_absolute_dirfd in (
+            '123 openat2(3<subject-root>, "/optional-config", {flags=O_RDONLY, resolve=RESOLVE_IN_ROOT}, 24) = -1 ENOENT\n',
+            '123 openat2(7, "/vendor/dependency/config", {flags=O_RDONLY|O_CLOEXEC, resolve=RESOLVE_BENEATH|RESOLVE_IN_ROOT}, 24) = -1 EINVAL\n',
+        ):
+            trace.write_text(in_root_absolute_dirfd, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("optional-config", "vendor/dependency")
+            ) == "TRACE_AMBIGUOUS"
+        trace.write_text(
+            '123 openat2(3<subject-root>, "/optional-config", {flags=O_RDONLY, resolve=0}, 24) = -1 ENOENT\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("optional-config",)
+        ) is None
         for path_topology_change in (
             '123 renameat2(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
             '123 linkat(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
