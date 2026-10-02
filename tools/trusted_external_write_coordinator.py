@@ -12,7 +12,12 @@ from typing import Any
 
 import yaml
 
-from execution_profile import ProfileError, load_profile_text, packet_authority
+from execution_profile import (
+    ProfileError,
+    load_profile_text,
+    packet_authority,
+    parse_packet_metadata,
+)
 
 TRUSTED_GH=Path("/usr/bin/gh")
 TRUSTED_SIGNER=Path("/usr/lib/engineering-system/trusted-external-write-signer")
@@ -60,14 +65,10 @@ def _run_json(gh:Path,args:list[str])->Any:
     except json.JSONDecodeError as e:raise CoordinatorError("authenticated GitHub read returned invalid JSON") from e
 
 def _fields(body:str)->dict[str,str]:
-    out={}
-    for line in body.splitlines():
-        if "=" not in line:continue
-        k,v=line.split("=",1); k=k.strip()
-        if re.fullmatch(r"[A-Z][A-Z0-9_]*",k):
-            if k in out:raise CoordinatorError(f"duplicate packet field {k}")
-            out[k]=v.strip()
-    return out
+    try:
+        return parse_packet_metadata(body)
+    except ProfileError as exc:
+        raise CoordinatorError(str(exc)) from exc
 
 def _effect(path:Path)->dict[str,Any]:
     try:x=json.loads(path.read_text())

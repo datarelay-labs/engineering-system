@@ -11,11 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from execution_profile import ProfileError, load_profile, packet_authority
-
-META_RE = re.compile(r"^([A-Z][A-Z0-9_]+)=(.*)$")
-HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
-FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+from execution_profile import (
+    FENCE_RE,
+    HEADING_RE,
+    META_RE,
+    ProfileError,
+    load_profile,
+    packet_authority,
+    scan_packet_metadata,
+)
 ALLOWED_STATUSES = {"ACTIVE", "PAUSED", "BLOCKED", "COMPLETE"}
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -93,13 +97,11 @@ def _read_text(path: str) -> str:
 
 
 def parse_packet(text: str) -> Packet:
-    metadata: dict[str, str] = {}
+    metadata, duplicate_metadata = scan_packet_metadata(text)
     sections: dict[str, list[str]] = {}
-    duplicate_metadata: list[str] = []
     duplicates: list[str] = []
     headings: list[str] = []
     current: str | None = None
-    before_heading = True
     fence: tuple[str, int] | None = None
     for raw in text.splitlines():
         fence_match = FENCE_RE.match(raw)
@@ -120,21 +122,12 @@ def parse_packet(text: str) -> Packet:
             continue
         heading = HEADING_RE.match(raw)
         if heading:
-            before_heading = False
             current = heading.group(1).strip()
             headings.append(current)
             if current in sections:
                 duplicates.append(current)
             sections.setdefault(current, [])
             continue
-        if before_heading:
-            match = META_RE.match(raw)
-            if match:
-                key = match.group(1)
-                if key in metadata:
-                    duplicate_metadata.append(key)
-                else:
-                    metadata[key] = match.group(2).strip()
         if current is not None:
             sections[current].append(raw)
     rendered = {name: "\n".join(lines).strip() for name, lines in sections.items()}

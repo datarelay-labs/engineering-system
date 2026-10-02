@@ -50,7 +50,19 @@ def test_profile_authority_is_read_from_exact_subject(base:Path):
     else:
         raise AssertionError("subject without committed profile was authorized")
 
+def test_fields_ignore_nonstructural_examples():
+    body=packet()+"""```text
+EXECUTION_PROFILE=example-only
+```
+## Current State
+EXECUTION_PROFILE=section-example
+"""
+    fields=coordinator._fields(body)
+    assert fields["IMPLEMENTER"]=="CHATGPT_CHAT"
+    assert "EXECUTION_PROFILE" not in fields
+
 def main():
+    test_fields_ignore_nonstructural_examples()
     with tempfile.TemporaryDirectory() as td:
         base=Path(td);priv,pub=fixtures.generate_keypair(base)
         test_profile_authority_is_read_from_exact_subject(base)

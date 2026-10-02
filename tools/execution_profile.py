@@ -14,6 +14,8 @@ PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 EFFECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 META_RE = re.compile(r"^([A-Z][A-Z0-9_]+)=(.*)$")
+HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
+FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
 
 class ProfileError(ValueError):
@@ -238,18 +240,41 @@ def requires_trusted_boundary(effect_class: str, profile: dict[str, Any]) -> boo
     return effect_class in set(profile["effect_policy"]["trusted_boundary_required"])
 
 
-def parse_packet_metadata(text: str) -> dict[str, str]:
+def scan_packet_metadata(text: str) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Return only structural pre-heading, non-fenced Work Packet metadata."""
     metadata: dict[str, str] = {}
+    duplicates: list[str] = []
+    fence: tuple[str, int] | None = None
     for line in text.splitlines():
-        if line.startswith("## "):
+        fence_match = FENCE_RE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            family = marker[0]
+            length = len(marker)
+            if fence is None:
+                fence = (family, length)
+            elif fence[0] == family and length >= fence[1]:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        if HEADING_RE.match(line):
             break
         match = META_RE.match(line)
         if not match:
             continue
         key, value = match.group(1), match.group(2).strip()
         if key in metadata:
-            raise ProfileError(f"PACKET_METADATA_DUPLICATE:{key}")
-        metadata[key] = value
+            duplicates.append(key)
+        else:
+            metadata[key] = value
+    return metadata, tuple(duplicates)
+
+
+def parse_packet_metadata(text: str) -> dict[str, str]:
+    metadata, duplicates = scan_packet_metadata(text)
+    if duplicates:
+        raise ProfileError(f"PACKET_METADATA_DUPLICATE:{duplicates[0]}")
     return metadata
 
 

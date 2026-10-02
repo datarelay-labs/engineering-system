@@ -155,6 +155,21 @@ def test_raw_packet_metadata_rejects_duplicates() -> None:
             raise AssertionError(f"duplicate packet metadata accepted: {key}")
 
 
+def test_raw_packet_metadata_ignores_nonstructural_examples() -> None:
+    body = """PACKET_VERSION=3
+EXECUTION_PROFILE=datarelay-managed
+EXECUTION_PROFILE_REVISION=2
+```text
+EXECUTION_PROFILE=example-only
+```
+## Current State
+EXECUTION_PROFILE=section-example
+"""
+    metadata = ep.parse_packet_metadata(body)
+    assert metadata["EXECUTION_PROFILE"] == "datarelay-managed"
+    assert metadata["EXECUTION_PROFILE_REVISION"] == "2"
+
+
 def test_disabled_runtime_cannot_be_legacy_compatible() -> None:
     raw = synthetic_profile()
     raw["packet_compatibility"]["legacy_v2_implementers"] = {
@@ -172,6 +187,7 @@ def main() -> int:
     test_synthetic_profile_is_core_neutral()
     test_transition_and_disabled_primary()
     test_raw_packet_metadata_rejects_duplicates()
+    test_raw_packet_metadata_ignores_nonstructural_examples()
     test_disabled_runtime_cannot_be_legacy_compatible()
     print("EXECUTION_PROFILE_TESTS=PASS")
     return 0

@@ -462,7 +462,7 @@ def test_managed_upgrade_to_1_6() -> None:
 
         upgraded_project = load_yaml(project_path)
         assert upgraded_project["engineering_system"]["version"] == "1.7.0"
-        assert upgraded_project["engineering_system"]["policy_epoch"] == 4
+        assert upgraded_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
         assert upgraded_project["engineering_system"]["baseline"] == NEW_BASELINE
         upgraded_workflow = workflow_path.read_text(encoding="utf-8")
         assert f"governance-floor.yml@{NEW_BASELINE}" in upgraded_workflow
