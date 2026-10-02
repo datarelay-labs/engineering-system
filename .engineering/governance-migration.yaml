@@ -1,14 +1,12 @@
 contract_version: 1
-base_sha: ef0b5560eb0880c232f3b360a5dea1f8f31b99c5
-from_policy_epoch: 4
-to_policy_epoch: 5
+base_sha: 1d483c95474a57a1082109c2f393306af64bd576
+from_policy_epoch: 5
+to_policy_epoch: 6
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Structural Work Packet authority parsing correction so only pre-heading, non-fenced metadata can influence execution-profile authorization and trusted external writes.
+rationale: Allow deterministic reconciliation of unrelated target-base advances for root migrations only when governance authority state is byte-identical.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: ba5575cf9058cecc04cb701f8dee6151625c2fed
-- path: tools/context_epoch.py
-  head_blob_sha: 76c6a511b63e45fba5672c62df4161cf8d584081
-- path: tools/execution_profile.py
-  head_blob_sha: fcfd1bfb398080f464ecd50bf820287987eff6ab
+  head_blob_sha: 34a5c8ca218453a37d1142cc5b2babe2319440a3
+- path: tools/governance_floor.py
+  head_blob_sha: 70fc525315b3bfed893035de1824f0a4ed37fd26

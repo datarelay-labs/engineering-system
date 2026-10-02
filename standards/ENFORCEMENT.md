@@ -39,7 +39,7 @@ When any of those surfaces changes:
 - set `requires_exact_head_validate: true` and `automation_eligible: false`;
 - record a bounded non-empty rationale.
 
-The base-owned governance floor reads the candidate manifest and candidate blobs as data only. It rejects a missing/stale base binding, epoch jump, incomplete/extra surface set, or blob mismatch. Candidate root-of-trust code is not used to authorize itself.
+The base-owned governance floor reads the candidate manifest and candidate blobs as data only. The manifest normally binds the exact target-base SHA. If that target base advances after the manifest was created, the recorded base may be reconciled only when it is an ancestor of the current target base and the engineering_system authority state plus every epoch-guarded governance surface have identical Git blobs at both base commits. Any policy-epoch or governed-surface change keeps the stale base binding blocked. The floor also rejects an invalid base lineage, epoch jump, incomplete/extra surface set, or candidate blob mismatch. Candidate root-of-trust code is not used to authorize itself.
 
 The migration manifest is evidence, not authority. A root-of-trust migration additionally requires explicit current owner approval recorded in the trusted ACTIVE Work Packet for that migration. Root-of-trust migration evidence never grants merge authority and is never eligible for automatic merge.
 

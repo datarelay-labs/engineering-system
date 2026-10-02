@@ -391,6 +391,109 @@ def test_guard_change_requires_policy_epoch() -> None:
         assert status3 == "PASS", reasons3
 
 
+def _make_root_migration_candidate(root: Path, base: str) -> str:
+    git(root, "checkout", "-qb", "candidate")
+    write_managed(root, 2)
+    helper = root / "tools/governance_floor.py"
+    helper.write_text(
+        helper.read_text(encoding="utf-8") + "\n# candidate root migration\n",
+        encoding="utf-8",
+    )
+    write_root_migration(
+        root,
+        base=base,
+        from_epoch=1,
+        to_epoch=2,
+        paths=["tools/governance_floor.py"],
+    )
+    return commit(root, "candidate root migration")
+
+
+def test_root_migration_reconciles_unrelated_base_advance() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_base = fixture(root)
+        candidate = _make_root_migration_candidate(root, original_base)
+
+        git(root, "checkout", "-q", "main")
+        (root / "README.md").write_text("unrelated base advance\n", encoding="utf-8")
+        advanced_base = commit(root, "unrelated base advance")
+        git(root, "merge", "--no-ff", "-qm", "merge candidate", candidate)
+        merged = git(root, "rev-parse", "HEAD")
+
+        status, reasons, base_epoch, head_epoch = floor.evaluate(
+            root, advanced_base, merged
+        )
+        assert status == "PASS", reasons
+        assert reasons == []
+        assert (base_epoch, head_epoch) == (1, 2)
+
+
+def test_root_migration_base_advance_with_governance_change_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_base = fixture(root)
+        candidate = _make_root_migration_candidate(root, original_base)
+
+        git(root, "checkout", "-q", "main")
+        dependency = root / ".engineering/requirements-engineering-system.txt"
+        dependency.write_text("PyYAML==6.0.3\n", encoding="utf-8")
+        advanced_base = commit(root, "governance-changing base advance")
+        git(root, "merge", "--no-ff", "-qm", "merge candidate", candidate)
+        merged = git(root, "rev-parse", "HEAD")
+
+        status, reasons, _, _ = floor.evaluate(root, advanced_base, merged)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_ROOT_MIGRATION_BASE_MISMATCH" in reasons
+
+
+def test_root_migration_base_reconciliation_rejects_nonancestor() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        common = fixture(root)
+        git(root, "checkout", "-qb", "recorded")
+        (root / "recorded.txt").write_text("recorded\n", encoding="utf-8")
+        recorded = commit(root, "recorded sibling")
+
+        git(root, "checkout", "-q", "main")
+        assert git(root, "rev-parse", "HEAD") == common
+        (root / "actual.txt").write_text("actual\n", encoding="utf-8")
+        actual = commit(root, "actual sibling")
+
+        assert not floor._root_migration_base_reconciles(
+            root,
+            recorded,
+            actual,
+            tuple(floor.EPOCH_GUARDED_GOVERNANCE_SURFACES),
+        )
+
+
+def test_root_migration_base_advance_with_epoch_change_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_base = fixture(root)
+        candidate = _make_root_migration_candidate(root, original_base)
+
+        git(root, "checkout", "-q", "main")
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        advanced_base = commit(root, "epoch-changing base advance")
+        git(root, "merge", "--no-ff", "-qm", "merge candidate", candidate)
+        merged = git(root, "rev-parse", "HEAD")
+
+        status, reasons, base_epoch, head_epoch = floor.evaluate(
+            root, advanced_base, merged
+        )
+        assert status == "BLOCK"
+        assert (base_epoch, head_epoch) == (2, 2)
+        assert (
+            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "tools/governance_floor.py"
+        ) in reasons
+
+
 def test_workflow_self_preservation_blocks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -688,6 +791,10 @@ def main() -> int:
     test_filtered_pull_request_target_blocks()
     test_unrelated_database_cursor_language_is_allowed()
     test_guard_change_requires_policy_epoch()
+    test_root_migration_reconciles_unrelated_base_advance()
+    test_root_migration_base_advance_with_governance_change_blocks()
+    test_root_migration_base_reconciliation_rejects_nonancestor()
+    test_root_migration_base_advance_with_epoch_change_blocks()
     test_workflow_self_preservation_blocks()
     test_managed_pr_jobs_cannot_be_removed()
     test_dependency_manifest_requires_policy_epoch()

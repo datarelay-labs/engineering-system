@@ -525,6 +525,38 @@ def _has_durable_profile_v3_snapshot(
     return False
 
 
+def _root_migration_base_reconciles(
+    root: Path,
+    recorded_base: object,
+    actual_base: str,
+    governed_paths: tuple[str, ...],
+) -> bool:
+    """Prove an advanced target base has identical governance authority state."""
+    if not isinstance(recorded_base, str) or FULL_SHA_RE.fullmatch(recorded_base) is None:
+        return False
+    if recorded_base == actual_base:
+        return True
+    if _git(root, "merge-base", "--is-ancestor", recorded_base, actual_base).returncode != 0:
+        return False
+    try:
+        recorded_profile = _profile(
+            _read_at(root, recorded_base, ".engineering/project.yaml"),
+            "recorded migration base",
+        )
+        actual_profile = _profile(
+            _read_at(root, actual_base, ".engineering/project.yaml"),
+            "current migration base",
+        )
+    except ValueError:
+        return False
+    if _profile_engineering(recorded_profile) != _profile_engineering(actual_profile):
+        return False
+    return all(
+        _blob_sha(root, recorded_base, path) == _blob_sha(root, actual_base, path)
+        for path in governed_paths
+    )
+
+
 def _root_migration_reasons(
     root: Path,
     base: str,
@@ -532,6 +564,7 @@ def _root_migration_reasons(
     base_epoch: int,
     head_epoch: int,
     changed_paths: list[str],
+    base_equivalence_paths: tuple[str, ...],
 ) -> list[str]:
     if not changed_paths:
         return []
@@ -547,7 +580,12 @@ def _root_migration_reasons(
         return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_INVALID"]
     if payload.get("contract_version") != 1:
         reasons.append("GOVERNANCE_ROOT_MIGRATION_VERSION_INVALID")
-    if payload.get("base_sha") != base:
+    if not _root_migration_base_reconciles(
+        root,
+        payload.get("base_sha"),
+        base,
+        base_equivalence_paths,
+    ):
         reasons.append("GOVERNANCE_ROOT_MIGRATION_BASE_MISMATCH")
     if payload.get("from_policy_epoch") != base_epoch:
         reasons.append("GOVERNANCE_ROOT_MIGRATION_FROM_EPOCH_MISMATCH")
@@ -1018,7 +1056,17 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
                 reasons.append(f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}")
 
     if changed_root_surfaces and head_epoch > base_epoch:
-        reasons.extend(_root_migration_reasons(root, base, head, base_epoch, head_epoch, changed_root_surfaces))
+        reasons.extend(
+            _root_migration_reasons(
+                root,
+                base,
+                head,
+                base_epoch,
+                head_epoch,
+                changed_root_surfaces,
+                tuple(sorted(set(epoch_guarded_surfaces))),
+            )
+        )
 
     if mode == "adopted":
         reasons.extend(_adopted_workflow_reasons(_read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW), head_profile))
