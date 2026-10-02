@@ -68,6 +68,14 @@ TERMINAL_COMPLETION_NOTIFY_MANAGED = (
     "tools/terminal_completion_notify.py",
 )
 
+# Execution-profile root is managed with its validator/schema so adopted repos
+# can execute the profile-aware governance floor introduced by policy epoch 3.
+EXECUTION_PROFILE_MANAGED = (
+    ".engineering/execution-profile.yaml",
+    "tools/execution_profile.py",
+    "schemas/execution-profile.schema.json",
+)
+
 # Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
@@ -105,6 +113,7 @@ REQUIRED_MANAGED = (
     *VERIFICATION_CONTRACT_MANAGED,
     *IMPLEMENTATION_PREFLIGHT_MANAGED,
     *TERMINAL_COMPLETION_NOTIFY_MANAGED,
+    *EXECUTION_PROFILE_MANAGED,
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
     *GOVERNANCE_FLOOR_MANAGED,
@@ -1160,6 +1169,20 @@ def ensure_terminal_completion_notify_compatible(root: Path) -> None:
         )
 
 
+def ensure_execution_profile_compatible(root: Path) -> None:
+    """Reject local/custom execution-profile root artifacts before adoption writes."""
+    for rel in EXECUTION_PROFILE_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_context_epoch_compatible(root: Path) -> None:
     """Reject a custom context-epoch helper before adoption writes any files."""
     for rel in CONTEXT_EPOCH_MANAGED:
@@ -1469,6 +1492,7 @@ def main() -> int:
     ensure_verification_contract_compatible(root)
     ensure_implementation_preflight_compatible(root)
     ensure_terminal_completion_notify_compatible(root)
+    ensure_execution_profile_compatible(root)
     ensure_context_epoch_compatible(root)
     ensure_engineering_context_compatible(root)
     ensure_governance_floor_compatible(root)
@@ -1488,6 +1512,7 @@ def main() -> int:
         *VERIFICATION_CONTRACT_MANAGED,
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
         *TERMINAL_COMPLETION_NOTIFY_MANAGED,
+        *EXECUTION_PROFILE_MANAGED,
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
         *GOVERNANCE_FLOOR_MANAGED,
