@@ -8,4 +8,4 @@ rationale: Introduce the provider-neutral execution-profile root bridge while pr
   the current legacy-v2 runtime contract for the subsequent profile-v3 cutover.
 changed_surfaces:
 - path: tools/governance_floor.py
-  head_blob_sha: 064ec63909feb6a5be31c7a4a48d65e9e7c0cf3d
+  head_blob_sha: 7f33da3ef3acb8865cf95517097c7bd23b2b6e38

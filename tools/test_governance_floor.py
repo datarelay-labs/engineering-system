@@ -493,6 +493,52 @@ def test_execution_profile_bootstrap_requires_legacy_contract() -> None:
         assert status == "PASS", reasons
 
 
+def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fixture(root)
+        write_managed(root, 2)
+        install_execution_profile_fixture(root, authority_contract="legacy-v2")
+        commit(root, "bridge base")
+        (root / "tools/execution_profile.py").unlink()
+        damaged_base = commit(root, "simulate missing execution profile helper")
+
+        (root / "tools/execution_profile.py").write_text(
+            (HERE / "execution_profile.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        write_managed(root, 3)
+        write_root_migration(
+            root,
+            base=damaged_base,
+            from_epoch=2,
+            to_epoch=3,
+            paths=["tools/execution_profile.py"],
+        )
+        repaired_head = commit(root, "repair execution profile helper")
+        git(root, "checkout", "-q", damaged_base)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(root / "tools/governance_floor.py"),
+                "check",
+                "--root",
+                str(root),
+                "--base-ref",
+                damaged_base,
+                "--head-ref",
+                repaired_head,
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert "GOVERNANCE_FLOOR=PASS" in result.stdout
+
+
 def test_execution_profile_bootstrap_rejects_direct_profile_v3() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -524,6 +570,7 @@ def main() -> int:
     test_canonical_floor_change_requires_policy_epoch()
     test_canonical_workflows_have_direct_floor()
     test_execution_profile_bootstrap_requires_legacy_contract()
+    test_missing_execution_profile_helper_repair_uses_fallback()
     test_execution_profile_bootstrap_rejects_direct_profile_v3()
     print("GOVERNANCE_FLOOR_TESTS=PASS")
     return 0

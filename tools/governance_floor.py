@@ -9,13 +9,269 @@ from pathlib import Path
 
 import yaml
 
-from execution_profile import (
-    ProfileError,
-    load_profile_text,
-    profile_transition_reasons,
-    retired_artifact_paths,
-    retired_rule_present,
-)
+try:
+    from execution_profile import (
+        ProfileError,
+        load_profile_text,
+        profile_transition_reasons,
+        retired_artifact_paths,
+        retired_rule_present,
+    )
+    PROFILE_HELPER_FALLBACK_ACTIVE = False
+except ModuleNotFoundError as exc:
+    if exc.name != "execution_profile":
+        raise
+
+    PROFILE_HELPER_FALLBACK_ACTIVE = True
+    _PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    _EFFECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+    class ProfileError(ValueError):
+        pass
+
+    def _fallback_mapping(value: object, label: str) -> dict[str, object]:
+        if not isinstance(value, dict):
+            raise ProfileError(f"{label}_INVALID")
+        return value
+
+    def _fallback_string_list(
+        value: object, label: str, pattern: re.Pattern[str]
+    ) -> tuple[str, ...]:
+        if not isinstance(value, list):
+            raise ProfileError(f"{label}_INVALID")
+        out: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or pattern.fullmatch(item) is None:
+                raise ProfileError(f"{label}_INVALID")
+            if item in out:
+                raise ProfileError(f"{label}_DUPLICATE")
+            out.append(item)
+        return tuple(out)
+
+    def load_profile_text(text: str) -> dict[str, object]:
+        try:
+            raw = yaml.safe_load(text) or {}
+        except yaml.YAMLError as yaml_exc:
+            raise ProfileError("PROFILE_YAML_INVALID") from yaml_exc
+        data = _fallback_mapping(raw, "PROFILE")
+        allowed = {
+            "contract_version",
+            "profile_id",
+            "revision",
+            "authority_contract",
+            "runtime",
+            "packet_compatibility",
+            "retired_surface",
+            "effect_policy",
+            "policy_migration",
+        }
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            raise ProfileError("PROFILE_UNKNOWN_KEY:" + unknown[0])
+        if data.get("contract_version") != 1:
+            raise ProfileError("PROFILE_CONTRACT_VERSION_INVALID")
+
+        profile_id = data.get("profile_id")
+        if (
+            not isinstance(profile_id, str)
+            or _PROFILE_ID_RE.fullmatch(profile_id) is None
+        ):
+            raise ProfileError("PROFILE_ID_INVALID")
+        revision = data.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            raise ProfileError("PROFILE_REVISION_INVALID")
+        authority_contract = data.get("authority_contract")
+        if authority_contract not in {"legacy-v2", "profile-v3"}:
+            raise ProfileError("PROFILE_AUTHORITY_CONTRACT_INVALID")
+
+        runtime = _fallback_mapping(data.get("runtime"), "PROFILE_RUNTIME")
+        if set(runtime) != {"primary", "optional_reviewers", "disabled"}:
+            raise ProfileError("PROFILE_RUNTIME_KEYS_INVALID")
+        primary = runtime.get("primary")
+        if (
+            not isinstance(primary, str)
+            or _RUNTIME_ID_RE.fullmatch(primary) is None
+        ):
+            raise ProfileError("PROFILE_PRIMARY_RUNTIME_INVALID")
+        reviewers = _fallback_string_list(
+            runtime.get("optional_reviewers"),
+            "PROFILE_OPTIONAL_REVIEWERS",
+            _RUNTIME_ID_RE,
+        )
+        disabled = _fallback_string_list(
+            runtime.get("disabled"),
+            "PROFILE_DISABLED_RUNTIMES",
+            _RUNTIME_ID_RE,
+        )
+        if primary in disabled:
+            raise ProfileError("PROFILE_PRIMARY_RUNTIME_DISABLED")
+
+        compatibility = _fallback_mapping(
+            data.get("packet_compatibility"),
+            "PROFILE_PACKET_COMPATIBILITY",
+        )
+        if set(compatibility) != {"legacy_v2_implementers"}:
+            raise ProfileError("PROFILE_PACKET_COMPATIBILITY_KEYS_INVALID")
+        legacy = compatibility.get("legacy_v2_implementers")
+        if not isinstance(legacy, dict):
+            raise ProfileError("PROFILE_LEGACY_IMPLEMENTERS_INVALID")
+        normalized_legacy: dict[str, str] = {}
+        for key, target in legacy.items():
+            if (
+                not isinstance(key, str)
+                or _RUNTIME_ID_RE.fullmatch(key) is None
+                or not isinstance(target, str)
+                or _PROFILE_ID_RE.fullmatch(target) is None
+            ):
+                raise ProfileError("PROFILE_LEGACY_IMPLEMENTERS_INVALID")
+            if target != profile_id:
+                raise ProfileError("PROFILE_LEGACY_IMPLEMENTER_TARGET_INVALID")
+            if key in disabled:
+                raise ProfileError("PROFILE_LEGACY_IMPLEMENTER_DISABLED")
+            normalized_legacy[key] = target
+
+        retired = _fallback_mapping(
+            data.get("retired_surface"), "PROFILE_RETIRED_SURFACE"
+        )
+        if set(retired) != {
+            "artifact_paths",
+            "text_patterns",
+            "remove_exact_text",
+        }:
+            raise ProfileError("PROFILE_RETIRED_SURFACE_KEYS_INVALID")
+        artifacts = retired.get("artifact_paths")
+        patterns = retired.get("text_patterns")
+        removals = retired.get("remove_exact_text")
+        if (
+            not isinstance(artifacts, list)
+            or any(
+                not isinstance(item, str)
+                or not item
+                or Path(item).is_absolute()
+                or ".." in Path(item).parts
+                for item in artifacts
+            )
+        ):
+            raise ProfileError("PROFILE_RETIRED_ARTIFACTS_INVALID")
+        if len(artifacts) != len(set(artifacts)):
+            raise ProfileError("PROFILE_RETIRED_ARTIFACTS_DUPLICATE")
+        if (
+            not isinstance(patterns, list)
+            or any(not isinstance(item, str) or not item for item in patterns)
+        ):
+            raise ProfileError("PROFILE_RETIRED_PATTERNS_INVALID")
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as regex_exc:
+                raise ProfileError("PROFILE_RETIRED_PATTERN_INVALID") from regex_exc
+        if (
+            not isinstance(removals, list)
+            or any(not isinstance(item, str) or not item for item in removals)
+        ):
+            raise ProfileError("PROFILE_RETIRED_REMOVALS_INVALID")
+
+        migration = _fallback_mapping(
+            data.get("policy_migration"), "PROFILE_POLICY_MIGRATION"
+        )
+        if set(migration) != {
+            "legacy_execution_profile_markers",
+            "legacy_external_write_markers",
+        }:
+            raise ProfileError("PROFILE_POLICY_MIGRATION_KEYS_INVALID")
+        legacy_profile_markers = migration.get(
+            "legacy_execution_profile_markers"
+        )
+        legacy_write_markers = migration.get("legacy_external_write_markers")
+        if (
+            not isinstance(legacy_profile_markers, list)
+            or any(
+                not isinstance(item, str) or not item
+                for item in legacy_profile_markers
+            )
+        ):
+            raise ProfileError("PROFILE_LEGACY_EXECUTION_MARKERS_INVALID")
+        if (
+            not isinstance(legacy_write_markers, list)
+            or any(
+                not isinstance(item, str) or not item
+                for item in legacy_write_markers
+            )
+        ):
+            raise ProfileError("PROFILE_LEGACY_WRITE_MARKERS_INVALID")
+
+        effect_policy = _fallback_mapping(
+            data.get("effect_policy"), "PROFILE_EFFECT_POLICY"
+        )
+        if set(effect_policy) != {"trusted_boundary_required"}:
+            raise ProfileError("PROFILE_EFFECT_POLICY_KEYS_INVALID")
+        high_risk = _fallback_string_list(
+            effect_policy.get("trusted_boundary_required"),
+            "PROFILE_TRUSTED_BOUNDARY_EFFECTS",
+            _EFFECT_ID_RE,
+        )
+        return {
+            "contract_version": 1,
+            "profile_id": profile_id,
+            "revision": revision,
+            "authority_contract": authority_contract,
+            "runtime": {
+                "primary": primary,
+                "optional_reviewers": reviewers,
+                "disabled": disabled,
+            },
+            "packet_compatibility": {
+                "legacy_v2_implementers": normalized_legacy
+            },
+            "retired_surface": {
+                "artifact_paths": tuple(artifacts),
+                "text_patterns": tuple(patterns),
+                "remove_exact_text": tuple(removals),
+            },
+            "effect_policy": {"trusted_boundary_required": high_risk},
+            "policy_migration": {
+                "legacy_execution_profile_markers": tuple(
+                    legacy_profile_markers
+                ),
+                "legacy_external_write_markers": tuple(
+                    legacy_write_markers
+                ),
+            },
+        }
+
+    def profile_transition_reasons(
+        base_text: str, head_text: str
+    ) -> list[str]:
+        try:
+            base = load_profile_text(base_text)
+            head = load_profile_text(head_text)
+        except ProfileError as profile_exc:
+            return [str(profile_exc)]
+        if base_text == head_text:
+            return []
+        if head["revision"] != base["revision"] + 1:
+            return ["EXECUTION_PROFILE_REVISION_NOT_INCREMENTED"]
+        return []
+
+    def retired_artifact_paths(
+        profile: dict[str, object]
+    ) -> tuple[str, ...]:
+        retired = profile.get("retired_surface") or {}
+        if not isinstance(retired, dict):
+            return ()
+        return tuple(str(item) for item in retired.get("artifact_paths", ()))
+
+    def retired_rule_present(
+        text: str, profile: dict[str, object]
+    ) -> bool:
+        retired = profile.get("retired_surface") or {}
+        if not isinstance(retired, dict):
+            return False
+        return any(
+            re.search(str(pattern), text) is not None
+            for pattern in retired.get("text_patterns", ())
+        )
 
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MANAGED_EXECUTION_SURFACES = (
