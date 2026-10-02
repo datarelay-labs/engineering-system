@@ -733,6 +733,9 @@ def main() -> int:
     if run_git(root, "status", "--porcelain") and not args.allow_dirty:
         raise SystemExit("FAIL target worktree is dirty; preserve unrelated work before upgrade")
     base_head = run_git(root, "rev-parse", "HEAD")
+    base_has_execution_profile = bool(
+        run_git(root, "show", f"{base_head}:.engineering/execution-profile.yaml")
+    )
     if not re.fullmatch(r"[0-9a-f]{40}", base_head):
         raise SystemExit("FAIL target base HEAD is unavailable")
 
@@ -794,7 +797,11 @@ def main() -> int:
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_profile = plan_execution_profile_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+        planned_root_surfaces = {
+            **planned_dependencies,
+            **planned_governance_floor,
+            **(planned_execution_profile if base_has_execution_profile else {}),
+        }
         target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
         if planned_root_surfaces or planned_execution_profile:
             target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
@@ -1050,7 +1057,11 @@ def main() -> int:
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)
-    planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+    planned_root_surfaces = {
+        **planned_dependencies,
+        **planned_governance_floor,
+        **(planned_execution_profile if base_has_execution_profile else {}),
+    }
     if planned_root_surfaces:
         target_policy_epoch = max(POLICY_EPOCH, existing_policy_epoch + 1)
         engineering["policy_epoch"] = target_policy_epoch

@@ -592,6 +592,62 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
         ):
             assert (target / rel).is_file(), rel
 
+
+def test_same_baseline_partial_execution_profile_repair_records_manifest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-profile-partial-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/profile-partial-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        (target / "tools/execution_profile.py").unlink()
+        commit_all(target, "remove managed execution profile helper only")
+        base_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        surfaces = {entry["path"] for entry in migration["changed_surfaces"]}
+        assert "tools/execution_profile.py" in surfaces
+        assert migration["base_sha"] == base_head
+        helper_blob = run(
+            "git", "hash-object", "tools/execution_profile.py", cwd=target
+        ).stdout.strip()
+        entry = next(
+            item for item in migration["changed_surfaces"]
+            if item["path"] == "tools/execution_profile.py"
+        )
+        assert entry["head_blob_sha"] == helper_blob
+        assert load_yaml(project_path)["engineering_system"]["policy_epoch"] == before_epoch + 1
+
 def test_same_baseline_repairs_managed_execution_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-policy-repair"
@@ -2636,6 +2692,7 @@ def main() -> int:
     test_managed_upgrade_to_1_6()
     test_same_baseline_governance_floor_repair_emits_root_migration()
     test_same_baseline_execution_profile_repair_advances_epoch()
+    test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
