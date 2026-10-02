@@ -55,7 +55,7 @@ Within a release closure, do not parallelize downstream stages against an upstre
 - final CI may fan out independent platform/regression jobs for the same frozen HEAD;
 - integrity work may fan out hashes/SBOM/provenance/manifest/attestation only after final CI green on the frozen HEAD.
 
-ChatGPT may still use idle capacity for unrelated roadmap work whose worktree, owned paths, runtime, release candidate, and dependencies do not overlap this release closure. The external-wait work-conservation rule never authorizes running a downstream release stage early.
+The selected implementation runtime may still use idle capacity for unrelated roadmap work whose worktree, owned paths, runtime, release candidate, and dependencies do not overlap this release closure. The external-wait work-conservation rule never authorizes running a downstream release stage early.
 
 A blocking or non-blocking finding during PASS1 is collected according to safe-continuation rules. A blocking PASS2 or later-stage failure prevents downstream progression; remediate in a bounded batch, create the new candidate if source changes, and restart from the earliest invalidated stage.
 

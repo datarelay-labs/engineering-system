@@ -16,7 +16,7 @@ def fail(message: str) -> None:
 
 
 def packet(extra: str = "", *, current: str = "- current fact") -> str:
-    return f"""PACKET_VERSION=2
+    return f"""PACKET_VERSION=3
 TARGET_REPO=datarelay-labs/engineering-system
 WORKSTREAM=context-epoch-packet-projection
 STATUS=ACTIVE
@@ -26,7 +26,8 @@ OWNER_INTENT=Reduce startup context.
 LAST_VERIFIED_HEAD={'a' * 40}
 INTENT_REVISION=1
 CHANGE_RISK=MEDIUM
-IMPLEMENTER=CHATGPT_CHAT
+EXECUTION_PROFILE=datarelay-managed
+EXECUTION_PROFILE_REVISION=2
 
 ## Goal
 
@@ -105,7 +106,7 @@ def test_refetched_projection_identity_binding() -> None:
         path.write_text(packet(), encoding="utf-8")
         original = ce.parse_packet(packet())
         expected = [
-            "--expect-packet-version", "2",
+            "--expect-packet-version", "3",
             "--expect-target-repo", "datarelay-labs/engineering-system",
             "--expect-workstream", "context-epoch-packet-projection",
             "--expect-status", "ACTIVE",
@@ -113,7 +114,8 @@ def test_refetched_projection_identity_binding() -> None:
             "--expect-task-kind", "IMPLEMENTATION",
             "--expect-intent-revision", "1",
             "--expect-change-risk", "MEDIUM",
-            "--expect-implementer", "CHATGPT_CHAT",
+            "--expect-execution-profile", "datarelay-managed",
+            "--expect-execution-profile-revision", "2",
             "--expect-body-sha256", original.body_sha256,
         ]
         matched = subprocess.run(
@@ -136,16 +138,49 @@ def test_refetched_projection_identity_binding() -> None:
             fail(f"packet v2 no longer blocks missing intent revision: {audit}")
 
 
-def test_packet_v2_requires_authority_metadata() -> None:
+def test_packet_v3_requires_authority_metadata() -> None:
     for key, line in (
         ("INTENT_REVISION", "INTENT_REVISION=1\n"),
         ("CHANGE_RISK", "CHANGE_RISK=MEDIUM\n"),
-        ("IMPLEMENTER", "IMPLEMENTER=CHATGPT_CHAT\n"),
+        ("EXECUTION_PROFILE", "EXECUTION_PROFILE=datarelay-managed\n"),
+        ("EXECUTION_PROFILE_REVISION", "EXECUTION_PROFILE_REVISION=2\n"),
     ):
         parsed = ce.parse_packet(packet().replace(line, ""))
         audit = ce.analyze_packet(parsed)
         if f"MISSING_META:{key}" not in audit["blocking"]:
-            fail(f"packet v2 accepted missing {key}: {audit}")
+            fail(f"packet v3 accepted missing {key}: {audit}")
+
+
+
+def test_packet_v2_legacy_profile_compatibility() -> None:
+    body = packet().replace("PACKET_VERSION=3", "PACKET_VERSION=2", 1).replace(
+        "EXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=2\n",
+        "IMPLEMENTER=CHATGPT_CHAT\n",
+        1,
+    )
+    audit = ce.analyze_packet(ce.parse_packet(body))
+    if audit["status"] != "PASS" or "LEGACY_EXECUTION_PROFILE_COMPAT" not in audit["compatibility"]:
+        fail(f"legacy v2 packet did not use runnable profile compatibility: {audit}")
+    bad = body.replace("IMPLEMENTER=CHATGPT_CHAT", "IMPLEMENTER=OTHER_RUNTIME")
+    audit = ce.analyze_packet(ce.parse_packet(bad))
+    if "LEGACY_PACKET_IMPLEMENTER_MISMATCH" not in audit["blocking"]:
+        fail(f"unknown legacy implementer did not block: {audit}")
+
+
+def test_packet_v1_and_versionless_are_not_runnable() -> None:
+    v1 = packet().replace("PACKET_VERSION=3", "PACKET_VERSION=1", 1)
+    audit = ce.analyze_packet(ce.parse_packet(v1))
+    if "PACKET_VERSION_INVALID" not in audit["blocking"]:
+        fail(f"packet v1 remained runnable: {audit}")
+    if "PACKET_PROFILE_AUTHORITY_UNSUPPORTED" not in audit["blocking"]:
+        fail(f"packet v1 bypassed profile authority: {audit}")
+
+    versionless = packet().replace("PACKET_VERSION=3\n", "", 1)
+    audit = ce.analyze_packet(ce.parse_packet(versionless))
+    if "MISSING_META:PACKET_VERSION" not in audit["blocking"]:
+        fail(f"versionless packet did not block missing version: {audit}")
+    if "PACKET_PROFILE_AUTHORITY_UNSUPPORTED" not in audit["blocking"]:
+        fail(f"versionless packet bypassed profile authority: {audit}")
 
 
 def test_identity_file_binding_and_fenced_examples() -> None:
@@ -373,31 +408,30 @@ def test_hook_sanitizer_is_content_free() -> None:
 def test_adoption_compliance_carries_context_helper_baseline() -> None:
     workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
     for token in (
+        "tools/check-adoption.py",
+        "tools/adopt.py",
+        "tools/execution_profile.py",
+        ".engineering/execution-profile.yaml",
         "tools/context_epoch.py",
-        'canonical_helper = Path(".engineering-system-runtime") / rel',
-        "Chat-primary adoption missing required helper",
-        'f"{rel} differs from canonical managed helper"',
+        '--expected-baseline "$CALLED_WORKFLOW_SHA"',
     ):
         if token not in workflow:
-            fail(f"adoption compliance missing context helper contract: {token}")
+            fail(f"adoption compliance missing shared checker contract: {token}")
+    if 'if "Cursor" in text' in workflow or "canonical_helper = Path" in workflow:
+        fail("adoption compliance still duplicates execution-policy implementation inline")
 
 
 def test_adoption_compliance_carries_implementation_preflight_baseline() -> None:
     workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
     for token in (
+        "tools/check-adoption.py",
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
-        'canonical_helper = Path(".engineering-system-runtime") / rel',
-        "Chat-primary adoption missing required helper",
-        'f"{rel} differs from canonical managed helper"',
-        "version_tuple >= (1, 6, 5)",
+        "tools/terminal_completion_notify.py",
+        "schemas/execution-profile.schema.json",
     ):
         if token not in workflow:
-            fail(f"adoption compliance missing implementation preflight contract: {token}")
-    if 'if "tools/implementation_preflight.py" in text:' in workflow:
-        fail("adoption compliance still gates Chat-primary helper parity on AGENTS text")
-
-
+            fail(f"adoption compliance missing managed helper checkout: {token}")
 
 
 def test_cli_lint_and_identity() -> None:
@@ -425,7 +459,9 @@ def main() -> None:
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
         test_refetched_projection_identity_binding,
-        test_packet_v2_requires_authority_metadata,
+        test_packet_v3_requires_authority_metadata,
+        test_packet_v2_legacy_profile_compatibility,
+        test_packet_v1_and_versionless_are_not_runnable,
         test_identity_file_binding_and_fenced_examples,
         test_duplicate_metadata_and_unsafe_identity_block,
         test_duplicate_canonical_section_blocks,

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from execution_profile import ProfileError, load_profile, packet_authority
+
 META_RE = re.compile(r"^([A-Z][A-Z0-9_]+)=(.*)$")
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
 FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -20,14 +22,15 @@ SAFE_WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
 SAFE_TASK_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_-]{0,63}$")
 SAFE_HOOK_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
-REQUIRED_META_V2 = (
+REQUIRED_META_COMMON = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
-    "TASK_KIND", "OWNER_INTENT", "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
+    "TASK_KIND", "OWNER_INTENT", "INTENT_REVISION", "CHANGE_RISK",
 )
 META_ORDER = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
     "TASK_KIND", "OWNER_INTENT", "LAST_VERIFIED_HEAD", "PRIORITY",
-    "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
+    "INTENT_REVISION", "CHANGE_RISK", "EXECUTION_PROFILE",
+    "EXECUTION_PROFILE_REVISION", "IMPLEMENTER",
 )
 CANONICAL_SECTIONS = (
     "Goal",
@@ -49,7 +52,8 @@ PROJECT_SECTIONS = (
 )
 IDENTITY_KEYS = (
     "PACKET_VERSION", "TARGET_REPO", "WORKSTREAM", "STATUS", "BRANCH",
-    "TASK_KIND", "INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER",
+    "TASK_KIND", "INTENT_REVISION", "CHANGE_RISK", "EXECUTION_PROFILE",
+    "EXECUTION_PROFILE_REVISION", "IMPLEMENTER",
 )
 MISSING_IDENTITY_VALUE = "<missing>"
 IDENTITY_BINDING_KEYS = IDENTITY_KEYS + ("PACKET_BODY_SHA256",)
@@ -154,13 +158,17 @@ def analyze_packet(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     blocking: list[str] = []
-    if packet.metadata.get("PACKET_VERSION") == "2":
-        missing = [key for key in REQUIRED_META_V2 if not packet.metadata.get(key)]
+    compatibility: list[str] = []
+    version = packet.metadata.get("PACKET_VERSION")
+    if version in {"2", "3"}:
+        required = REQUIRED_META_COMMON + (("IMPLEMENTER",) if version == "2" else ("EXECUTION_PROFILE", "EXECUTION_PROFILE_REVISION"))
+        missing = [key for key in required if not packet.metadata.get(key)]
         blocking.extend(f"MISSING_META:{key}" for key in missing)
+    elif not version:
+        blocking.append("MISSING_META:PACKET_VERSION")
     for key in packet.duplicate_metadata:
         blocking.append(f"DUPLICATE_META:{key}")
-    version = packet.metadata.get("PACKET_VERSION")
-    if version and version not in {"1", "2"}:
+    if version and version not in {"2", "3"}:
         blocking.append("PACKET_VERSION_INVALID")
     repository = packet.metadata.get("TARGET_REPO")
     if repository and (
@@ -186,9 +194,14 @@ def analyze_packet(
     change_risk = packet.metadata.get("CHANGE_RISK")
     if change_risk and change_risk not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
         blocking.append("CHANGE_RISK_INVALID")
-    implementer = packet.metadata.get("IMPLEMENTER")
-    if implementer and implementer != "CHATGPT_CHAT":
-        blocking.append("IMPLEMENTER_INVALID")
+    try:
+        execution_profile = load_profile(Path.cwd())
+    except ProfileError:
+        blocking.append("EXECUTION_PROFILE_UNAVAILABLE")
+    else:
+        profile_blocking, profile_warnings = packet_authority(execution_profile, packet.metadata)
+        blocking.extend(profile_blocking)
+        compatibility.extend(profile_warnings)
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
         blocking.append("STATUS_INVALID")
@@ -210,6 +223,7 @@ def analyze_packet(
         "status": state,
         "blocking": sorted(set(blocking)),
         "warnings": sorted(set(reasons)),
+        "compatibility": sorted(set(compatibility)),
         "metrics": {
             "chars": packet.char_count,
             "lines": packet.line_count,
@@ -260,6 +274,8 @@ def project_packet(
         + audit["status"]
         + ";warnings="
         + (",".join(audit["warnings"]) or "NONE")
+        + ";compatibility="
+        + (",".join(audit["compatibility"]) or "NONE")
     )
     chunks.append(
         "PACKET_CONTEXT_METRICS="

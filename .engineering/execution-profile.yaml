@@ -1,6 +1,6 @@
 contract_version: 1
 profile_id: datarelay-managed
-revision: 1
+revision: 2
 runtime:
   primary: CHATGPT_CHAT
   optional_reviewers:
@@ -46,4 +46,4 @@ policy_migration:
   - '- ChatGPT Chat is the implementation path.'
   legacy_external_write_markers:
   - '- Before an external Issue/PR write,'
-authority_contract: legacy-v2
+authority_contract: profile-v3

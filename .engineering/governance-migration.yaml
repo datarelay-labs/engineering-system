@@ -1,11 +1,23 @@
 contract_version: 1
-base_sha: 6bf89e1fc716eff242a10eeb84dd25b5186ccc71
-from_policy_epoch: 2
-to_policy_epoch: 3
+base_sha: 04ea5080440371e895d9a57570ba70e6a3318781
+from_policy_epoch: 3
+to_policy_epoch: 4
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Introduce the provider-neutral execution-profile root bridge while preserving
-  the current legacy-v2 runtime contract for the subsequent profile-v3 cutover.
+rationale: Provider-neutral profile-v3 execution authority cutover while preserving
+  the Stage-A root bridge and managed adoption recovery path.
 changed_surfaces:
+- path: .engineering/execution-profile.yaml
+  head_blob_sha: 0a36da58caa3f1c0e1dca04af3837cc6a39b1f15
+- path: .github/workflows/adoption-compliance.yml
+  head_blob_sha: 7b7dfa64c72306ec2fa8d01d296d5b4a9b4480aa
+- path: tools/adopt.py
+  head_blob_sha: 9067202195a340a4c55f709260748f222a3e3497
+- path: tools/check-adoption.py
+  head_blob_sha: 9297dfc62a2d1439442522da80cec837727834c8
+- path: tools/context_epoch.py
+  head_blob_sha: 47299cfafc31abbe07442689db134027eca6e252
 - path: tools/governance_floor.py
-  head_blob_sha: 7f33da3ef3acb8865cf95517097c7bd23b2b6e38
+  head_blob_sha: 49b8d88b57cea2e7e79ff6cc6eb815f582ffeaa1
+- path: tools/upgrade-adoption.py
+  head_blob_sha: 87d73bf5a5ff90bb6a04811bfa435df6f272f350

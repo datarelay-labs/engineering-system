@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import importlib.util,json,subprocess,sys,tempfile
+import base64,importlib.util,json,subprocess,sys,tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 TOOL=ROOT/"tools/trusted_external_write_coordinator.py"
@@ -15,10 +15,13 @@ def effect():
 def packet(implementer="CHATGPT_CHAT"):
     return "\n".join(["PACKET_VERSION=2","TARGET_REPO=datarelay-labs/engineering-system","WORKSTREAM=chatgpt-only-bootstrap","STATUS=ACTIVE",f"BRANCH={BR}","TASK_KIND=IMPLEMENTATION","OWNER_INTENT=bootstrap","LAST_VERIFIED_HEAD="+HEAD,"INTENT_REVISION=2","CHANGE_RISK=HIGH",f"IMPLEMENTER={implementer}",""])
 def fakegh(path,permission="admin",implementer="CHATGPT_CHAT",head=HEAD):
+    profile_bytes=(ROOT/".engineering/execution-profile.yaml").read_bytes()
     responses={
       "repos/datarelay-labs/engineering-system/issues/777":{"number":777,"state":"open","title":"[AI Work] Test packet","body":packet(implementer),"user":{"login":"RickLee-kr"}},
       "repos/datarelay-labs/engineering-system/collaborators/RickLee-kr/permission":{"permission":permission},
       f"repos/datarelay-labs/engineering-system/commits/{BR}":{"sha":head},
+      "repos/datarelay-labs/engineering-system/commits/main":{"sha":HEAD},
+      f"repos/datarelay-labs/engineering-system/contents/.engineering/execution-profile.yaml?ref={HEAD}":{"encoding":"base64","content":base64.b64encode(profile_bytes).decode("ascii")},
     }
     code="#!/usr/bin/env python3\nimport json,sys\nr="+repr(responses)+"\na=sys.argv[1:]\nkey=a[1] if len(a)>1 and a[0]==\"api\" else \"\"\nif key not in r: sys.exit(2)\nprint(json.dumps(r[key]))\n"
     path.write_text(code);path.chmod(0o755)
@@ -33,7 +36,7 @@ def main():
           ("ok","admin","CHATGPT_CHAT",HEAD,True,""),
           ("permission","read","CHATGPT_CHAT",HEAD,False,"permission is insufficient"),
           ("head","admin","CHATGPT_CHAT","0"*40,False,"branch HEAD mismatch"),
-          ("implementer","admin","OTHER",HEAD,False,"does not authorize canonical ChatGPT"),
+          ("implementer","admin","OTHER",HEAD,False,"execution profile is not authorized"),
         ]:
             t=base/name;t.mkdir();gh=t/"gh";fakegh(gh,perm,impl,head)
             cp,b,d=run(t,gh,priv,pub)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed local Git binding logic for Chat-primary implementation.
+"""Fail-closed local Git binding logic for an authorized implementation runtime.
 
 This repository copy is parity/reference/test material and is not self-authenticating.
 Authoritative pre-mutation use requires source fetched from an immutable canonical
@@ -33,7 +33,6 @@ REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
 CHANGE_RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
 WORKTREE_IDENTITY_RE = re.compile(r"^[0-9]+:[0-9]+(?:,[0-9]+:[0-9]+)*$")
-DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"
 AUTHORITY_BOUNDARY = "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED"
 TRUSTED_GIT_CANDIDATES = (
     Path("/usr/bin/git"),
@@ -483,7 +482,7 @@ def check(args: argparse.Namespace) -> int:
     print(f"HEAD={head}")
     print(f"INTENT_REVISION={args.expected_intent_revision}")
     print(f"CHANGE_RISK={args.expected_change_risk}")
-    print(f"IMPLEMENTER={DIRECT_CHAT_IMPLEMENTER}")
+    print("IMPLEMENTATION_RUNTIME_AUTHORITY=EXTERNAL_EXECUTION_PROFILE")
     print(f"PACKET_ISSUE={args.issue_number}")
     return 0
 

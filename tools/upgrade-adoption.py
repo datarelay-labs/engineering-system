@@ -31,6 +31,7 @@ from adopt import (
     canonical_baseline,
     canonical_version,
     plan_execution_policy_sync,
+    retired_agent_artifact_paths,
     engineering_workflow,
     release_workflow,
 )
@@ -310,17 +311,18 @@ def plan_managed_file_install(
     return planned
 
 
-RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
-
-
 def existing_retired_agent_artifacts(root: Path) -> list[str]:
-    return [rel for rel in RETIRED_AGENT_ARTIFACT_PATHS if (root / rel).exists() or (root / rel).is_symlink()]
+    return [
+        rel
+        for rel in retired_agent_artifact_paths()
+        if (root / rel).exists() or (root / rel).is_symlink()
+    ]
 
 
 def remove_retired_agent_artifacts(root: Path) -> list[str]:
-    """Remove all repository-local retired agent compatibility artifacts without following symlinks."""
+    """Remove profile-declared retired runtime artifacts without following symlinks."""
     removed: list[str] = []
-    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
+    for rel in retired_agent_artifact_paths():
         path = root / rel
         if path.is_symlink() or path.is_file():
             path.unlink()

@@ -749,7 +749,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
 
     if path == "AGENTS.md":
         if retired_rule_present(content, profile):
-            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
+            reasons.append("RETIRED_RUNTIME_REINTRODUCED:AGENTS.md")
         if "Execution authority precedence:" not in content:
             reasons.append("MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:Execution authority precedence:")
         if contract == "legacy-v2":
@@ -765,7 +765,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
     elif path == "tools/context_epoch.py":
         if contract == "legacy-v2":
             if any(name and name in content for name in disabled):
-                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+                reasons.append("RETIRED_RUNTIME_REINTRODUCED:tools/context_epoch.py")
             required = (
                 f'if implementer and implementer != "{primary}":',
                 'blocking.append("IMPLEMENTER_INVALID")',
@@ -776,7 +776,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
         elif contract == "profile-v3":
             runtime_names = {primary, *disabled, *reviewers}
             if any(name and name in content for name in runtime_names) or "IMPLEMENTER_INVALID" in content:
-                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+                reasons.append("PROVIDER_RUNTIME_COUPLING:tools/context_epoch.py")
             for token in ("load_profile", "packet_authority", "EXECUTION_PROFILE_REVISION"):
                 if token not in content:
                     reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}")
@@ -784,7 +784,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
             reasons.append("EXECUTION_PROFILE_AUTHORITY_CONTRACT_INVALID")
     elif path == "tools/engineering-context.py":
         if retired_rule_present(content, profile):
-            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/engineering-context.py")
+            reasons.append("RETIRED_RUNTIME_REINTRODUCED:tools/engineering-context.py")
         for required in ("AGENTS.md", ".engineering/project.yaml"):
             if required not in content:
                 reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/engineering-context.py:{required}")
@@ -893,7 +893,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.extend(_execution_surface_reasons(path, content, active_execution_profile))
         for path in retired_artifact_paths(active_execution_profile):
             if _tree_has_path(root, head, path):
-                reasons.append(f"RETIRED_AGENT_ARTIFACT_REINTRODUCED:{path}")
+                reasons.append(f"RETIRED_RUNTIME_ARTIFACT_REINTRODUCED:{path}")
 
     reasons = sorted(set(reasons))
     return ("BLOCK" if reasons else "PASS"), reasons, base_epoch, head_epoch

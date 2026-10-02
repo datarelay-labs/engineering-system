@@ -272,7 +272,7 @@ def main() -> int:
             f"HEAD={head}",
             "INTENT_REVISION=3",
             "CHANGE_RISK=HIGH",
-            "IMPLEMENTER=CHATGPT_CHAT",
+            "IMPLEMENTATION_RUNTIME_AUTHORITY=EXTERNAL_EXECUTION_PROFILE",
             "PACKET_ISSUE=143",
         ):
             assert token in passed.stdout, token
@@ -616,7 +616,7 @@ def main() -> int:
     ):
         assert forbidden not in source, forbidden
     for required in (
-        'DIRECT_CHAT_IMPLEMENTER = "CHATGPT_CHAT"',
+        'IMPLEMENTATION_RUNTIME_AUTHORITY=EXTERNAL_EXECUTION_PROFILE',
         'AUTHORITY_BOUNDARY = "EXTERNAL_AUTHENTICATED_GITHUB_COORDINATOR_REQUIRED"',
         'Path("/usr/bin/git")',
         "st.st_uid != 0",

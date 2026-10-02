@@ -38,6 +38,7 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
     (root / ".engineering").mkdir(parents=True, exist_ok=True)
     (root / ".github/workflows").mkdir(parents=True, exist_ok=True)
     (root / "tools").mkdir(parents=True, exist_ok=True)
+    (root / "schemas").mkdir(parents=True, exist_ok=True)
     (root / ".engineering/project.yaml").write_text(
         f"engineering_system:\n"
         f"  version: 1.7.0\n"
@@ -52,14 +53,26 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
         encoding="utf-8",
     )
     (root / "AGENTS.md").write_text(
-        "Current execution profile is selected outside core policy prose.\n"
-        "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
-        "IMPLEMENTER=CHATGPT_CHAT\n",
+        "Execution profile authority: runtime selection comes from "
+        ".engineering/execution-profile.yaml.\n"
+        "Execution authority precedence: current owner and ACTIVE Work Packet.\n",
+        encoding="utf-8",
+    )
+    (root / ".engineering/execution-profile.yaml").write_text(
+        (HERE.parent / ".engineering/execution-profile.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (root / "tools/execution_profile.py").write_text(
+        (HERE / "execution_profile.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (root / "schemas/execution-profile.schema.json").write_text(
+        (HERE.parent / "schemas/execution-profile.schema.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     (root / "tools/context_epoch.py").write_text(
-        'if implementer and implementer != "CHATGPT_CHAT":\n'
-        '    blocking.append("IMPLEMENTER_INVALID")\n',
+        "from execution_profile import load_profile, packet_authority\n"
+        "EXECUTION_PROFILE_REVISION = True\n",
         encoding="utf-8",
     )
     (root / "tools/engineering-context.py").write_text(
@@ -68,6 +81,12 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
     )
     source = (HERE / "governance_floor.py").read_text(encoding="utf-8")
     (root / "tools/governance_floor.py").write_text(source, encoding="utf-8")
+    for rel in ("tools/adopt.py", "tools/check-adoption.py", "tools/upgrade-adoption.py"):
+        (root / rel).write_text((HERE.parent / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    (root / ".github/workflows/adoption-compliance.yml").write_text(
+        (HERE.parent / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     (root / ".github/workflows/engineering-system.yml").write_text(
         "name: Engineering System\n"
         "on:\n"
@@ -138,6 +157,23 @@ def fixture(root: Path) -> str:
     return commit(root, "base")
 
 
+def prebridge_fixture(root: Path) -> str:
+    fixture(root)
+    for rel in floor.EXECUTION_PROFILE_SURFACES:
+        (root / rel).unlink()
+    (root / "AGENTS.md").write_text(
+        "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
+        "IMPLEMENTER=CHATGPT_CHAT\n",
+        encoding="utf-8",
+    )
+    (root / "tools/context_epoch.py").write_text(
+        'if implementer and implementer != "CHATGPT_CHAT":\n'
+        '    blocking.append("IMPLEMENTER_INVALID")\n',
+        encoding="utf-8",
+    )
+    return commit(root, "pre-bridge base")
+
+
 def test_safe_head_passes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -162,12 +198,15 @@ def test_policy_epoch_regression_blocks() -> None:
 
 
 def test_execution_surface_accepts_profile_neutral_prose() -> None:
-    content = (
-        "Execution authority precedence: current owner, then current ACTIVE Work Packet.\n"
-        "Provider selection is execution-profile state, not a core prose invariant.\n"
-        "IMPLEMENTER=CHATGPT_CHAT\n"
+    profile = floor.load_profile_text(
+        (HERE.parent / ".engineering/execution-profile.yaml").read_text(encoding="utf-8")
     )
-    assert floor._execution_surface_reasons("AGENTS.md", content) == []
+    content = (
+        "Execution profile authority: runtime selection comes from "
+        ".engineering/execution-profile.yaml.\n"
+        "Execution authority precedence: current owner, then current ACTIVE Work Packet.\n"
+    )
+    assert floor._execution_surface_reasons("AGENTS.md", content, profile) == []
 
 
 def test_retired_implementer_and_artifact_block() -> None:
@@ -184,8 +223,8 @@ def test_retired_implementer_and_artifact_block() -> None:
         head = commit(root, "retired")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert "RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md" in reasons
-        assert "RETIRED_AGENT_ARTIFACT_REINTRODUCED:.cursor" in reasons
+        assert "RETIRED_RUNTIME_REINTRODUCED:AGENTS.md" in reasons
+        assert "RETIRED_RUNTIME_ARTIFACT_REINTRODUCED:.cursor" in reasons
 
 
 def test_old_context_epoch_allowlist_blocks() -> None:
@@ -200,10 +239,10 @@ def test_old_context_epoch_allowlist_blocks() -> None:
         head = commit(root, "old implementer validator")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
-        assert "RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py" in reasons
+        assert "PROVIDER_RUNTIME_COUPLING:tools/context_epoch.py" in reasons
 
 
-def test_epoch_advance_cannot_remove_chat_only_guard() -> None:
+def test_epoch_advance_cannot_remove_profile_authority_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         base = fixture(root)
@@ -476,13 +515,14 @@ def install_execution_profile_fixture(root: Path, *, authority_contract: str) ->
     profile_path = root / ".engineering/execution-profile.yaml"
     profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
     profile["authority_contract"] = authority_contract
+    profile["revision"] = 1 if authority_contract == "legacy-v2" else 2
     profile_path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
 
 
 def test_execution_profile_bootstrap_requires_legacy_contract() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        base = fixture(root)
+        base = prebridge_fixture(root)
         project_path = root / ".engineering/project.yaml"
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
         project["engineering_system"]["policy_epoch"] = 2
@@ -496,8 +536,11 @@ def test_execution_profile_bootstrap_requires_legacy_contract() -> None:
 def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        fixture(root)
-        write_managed(root, 2)
+        prebridge_fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         install_execution_profile_fixture(root, authority_contract="legacy-v2")
         commit(root, "bridge base")
         (root / "tools/execution_profile.py").unlink()
@@ -507,7 +550,9 @@ def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
             (HERE / "execution_profile.py").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
-        write_managed(root, 3)
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 3
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         write_root_migration(
             root,
             base=damaged_base,
@@ -542,7 +587,7 @@ def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
 def test_execution_profile_bootstrap_rejects_direct_profile_v3() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        base = fixture(root)
+        base = prebridge_fixture(root)
         project_path = root / ".engineering/project.yaml"
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
         project["engineering_system"]["policy_epoch"] = 2
@@ -559,7 +604,7 @@ def main() -> int:
     test_execution_surface_accepts_profile_neutral_prose()
     test_retired_implementer_and_artifact_block()
     test_old_context_epoch_allowlist_blocks()
-    test_epoch_advance_cannot_remove_chat_only_guard()
+    test_epoch_advance_cannot_remove_profile_authority_guard()
     test_workflow_comment_tokens_do_not_preserve_floor()
     test_filtered_pull_request_target_blocks()
     test_unrelated_database_cursor_language_is_allowed()

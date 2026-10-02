@@ -77,12 +77,12 @@ Default behavior:
 
 - `LOW` — targeted deterministic validation and normal diff/review.
 - `MEDIUM` — affected regression plus normal independent review where configured.
-- `HIGH` — ChatGPT exact-HEAD self-audit plus wider affected qualification and explicit rollback/compatibility/security evidence as applicable. Current deterministic tests, CI/review state when applicable, and actionable-finding disposition are required; self-report alone is not evidence.
+- `HIGH` — selected-runtime exact-HEAD self-audit plus wider affected qualification and explicit rollback/compatibility/security evidence as applicable. Current deterministic tests, CI/review state when applicable, and actionable-finding disposition are required; self-report alone is not evidence.
 - `CRITICAL` — HIGH requirements plus explicit human approval for destructive/external/prod execution when required by the security/release contract and release/operational evidence appropriate to the change.
 
 These are verification-depth defaults, not a replacement for task-specific mandatory gates. A seemingly small diff may be HIGH/CRITICAL if its blast radius or irreversibility is large.
 
-Under the current managed execution profile, ChatGPT Chat is the default implementer and auditor. Provider/runtime selection is profile state rather than a core invariant. The same Chat context may satisfy terminal audit when it re-reads current repository/Work Packet/PR state and bases PASS on exact-HEAD machine-observable evidence rather than its own prior claims. A fresh Chat context, Codex, or `python3 tools/independent_verifier.py verify` remains optional defense-in-depth or escalation. If evidence is explicitly presented as independent verifier evidence, its identity and context must be distinct from the implementer. Independent-review provider availability or quota alone must not block otherwise satisfied completion gates.
+Under the selected execution profile, the selected implementation runtime may also perform terminal audit when it re-reads current repository/Work Packet/PR state and bases PASS on exact-HEAD machine-observable evidence rather than its own prior claims. Provider/runtime selection is profile data, not a core invariant. A distinct reviewer/runtime or `python3 tools/independent_verifier.py verify` remains optional defense-in-depth or escalation. If evidence is explicitly presented as independent verifier evidence, its identity and context must be distinct from the implementer. Independent-review runtime availability or quota alone must not block otherwise satisfied completion gates.
 
 ## Trust by evidence
 

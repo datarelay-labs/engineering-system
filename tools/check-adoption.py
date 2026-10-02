@@ -9,7 +9,13 @@ from pathlib import Path
 import yaml
 
 import ci_policy_audit
-from adopt import canonical_execution_policy_line, canonical_managed_policy_lines, retired_agent_rules_present
+from adopt import (
+    EXECUTION_PROFILE_MANAGED,
+    canonical_execution_policy_line,
+    canonical_managed_policy_lines,
+    retired_agent_artifact_paths,
+    retired_agent_rules_present,
+)
 
 REQUIRED = (
     "AGENTS.md",
@@ -26,9 +32,7 @@ MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
     ".engineering/requirements-engineering-system.txt",
     "tools/governance_floor.py",
-    ".engineering/execution-profile.yaml",
-    "tools/execution_profile.py",
-    "schemas/execution-profile.schema.json",
+    *EXECUTION_PROFILE_MANAGED,
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
@@ -79,6 +83,8 @@ def version_at_least(version: str, minimum: tuple[int, int, int]) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
+    parser.add_argument("--expected-baseline", default="")
+    parser.add_argument("--expected-mode", choices=("canonical", "adopted"), default="")
     args = parser.parse_args()
     root = Path(args.root).resolve()
 
@@ -100,7 +106,7 @@ def main() -> int:
     merge_gate_status = ""
     project_domains: set[str] = set()
     checker_version = canonical_checker_version()
-    checker_chat_primary = version_at_least(checker_version, (1, 6, 5))
+    checker_managed_profile = version_at_least(checker_version, (1, 6, 5))
 
     project_path = root / ".engineering/project.yaml"
     if project_path.is_file():
@@ -112,6 +118,15 @@ def main() -> int:
             version = str(engineering.get("version") or "")
             mode = str(engineering.get("mode") or "")
             baseline = str(engineering.get("baseline") or "")
+            if args.expected_mode and mode != args.expected_mode:
+                failures.append(
+                    f"engineering_system.mode does not match expected mode: {args.expected_mode}"
+                )
+            if args.expected_baseline:
+                if FULL_SHA_RE.fullmatch(args.expected_baseline) is None:
+                    failures.append("expected baseline is not an immutable SHA")
+                elif baseline != args.expected_baseline:
+                    failures.append("engineering_system.baseline does not match expected baseline")
             policy_epoch = engineering.get("policy_epoch", 0)
             ci_mode = str(engineering.get("ci_mode") or "")
             native_ci_workflows = [str(item) for item in (engineering.get("native_ci_workflows") or [])]
@@ -220,13 +235,13 @@ def main() -> int:
                         failures.append("AGENTS.md missing managed execution-authority policy")
                         break
             if retired_agent_rules_present(agents_text):
-                failures.append("AGENTS.md contains retired agent/Cursor compatibility rules")
+                failures.append("AGENTS.md contains retired runtime compatibility rules")
         if version_at_least(version, (1, 5, 0)):
             if "standards/DESIGN.md" not in agents_text:
                 failures.append("AGENTS.md missing minimal design-gate routing")
             if "standards/OPERATIONS.md" not in agents_text:
                 failures.append("AGENTS.md missing incident/operations routing")
-        if checker_chat_primary:
+        if checker_managed_profile:
             if mode == "adopted" and version != checker_version:
                 failures.append(
                     "engineering_system.version does not match canonical checker version"
@@ -234,10 +249,10 @@ def main() -> int:
             packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
             if packet_template.is_file():
                 packet_text = packet_template.read_text(encoding="utf-8", errors="replace")
-                for key in ("INTENT_REVISION", "CHANGE_RISK", "IMPLEMENTER"):
+                for key in ("INTENT_REVISION", "CHANGE_RISK", "EXECUTION_PROFILE", "EXECUTION_PROFILE_REVISION"):
                     if re.search(rf"(?m)^{key}=", packet_text) is None:
                         failures.append(
-                            f"managed Work Packet template missing required packet-v2 metadata {key}"
+                            f"managed Work Packet template missing required packet-v3 metadata {key}"
                         )
             for rel in (
                 "tools/implementation_preflight.py",
@@ -254,7 +269,7 @@ def main() -> int:
                 target = root / rel
                 canonical = Path(__file__).resolve().parents[1] / rel
                 if not target.is_file():
-                    failures.append(f"Chat-primary adoption missing required helper {rel}")
+                    failures.append(f"managed-profile adoption missing required helper {rel}")
                 elif not canonical.is_file():
                     failures.append(f"canonical adoption checker is missing {rel}")
                 elif target.read_bytes() != canonical.read_bytes():
@@ -299,10 +314,10 @@ def main() -> int:
                     failures.append(
                         f"AGENTS.md references verification contract but missing {rel}"
                     )
-    for rel in (".cursor", ".cursorignore", ".cursorrules"):
+    for rel in retired_agent_artifact_paths():
         path = root / rel
         if path.exists() or path.is_symlink():
-            failures.append(f"retired agent artifact must be removed: {rel}")
+            failures.append(f"retired runtime artifact must be removed: {rel}")
 
     tests_path = root / ".engineering/tests.yaml"
     if tests_path.is_file():

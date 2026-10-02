@@ -6,12 +6,18 @@ GitHub CLI, compares them with one exact worker-adapter effect, then invokes the
 fixed root signer. It never performs the GitHub mutation itself.
 """
 from __future__ import annotations
-import argparse, json, os, pwd, re, stat, subprocess, sys, tempfile
+import argparse, base64, json, os, pwd, re, stat, subprocess, sys, tempfile
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from execution_profile import ProfileError, load_profile_text, packet_authority
+
 TRUSTED_GH=Path("/usr/bin/gh")
 TRUSTED_SIGNER=Path("/usr/lib/engineering-system/trusted-external-write-signer")
+CANONICAL_REPOSITORY="datarelay-labs/engineering-system"
+EXECUTION_PROFILE_PATH=".engineering/execution-profile.yaml"
 REPO_RE=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 ISSUE_RE=re.compile(r"^[0-9]+$")
 SHA_RE=re.compile(r"^[0-9a-f]{40}$")
@@ -69,6 +75,44 @@ def _effect(path:Path)->dict[str,Any]:
     if not isinstance(x,dict):raise CoordinatorError("effect must be object")
     return x
 
+def _canonical_execution_profile(gh:Path,root:Path,repository:str)->dict[str,Any]:
+    try:
+        project=yaml.safe_load((root/".engineering/project.yaml").read_text(encoding="utf-8")) or {}
+    except (OSError,yaml.YAMLError) as exc:
+        raise CoordinatorError("target Engineering System profile is unavailable") from exc
+    engineering=project.get("engineering_system") if isinstance(project,dict) else None
+    if not isinstance(engineering,dict):
+        raise CoordinatorError("target Engineering System profile is invalid")
+    mode=str(engineering.get("mode") or "")
+    if mode=="adopted":
+        baseline=str(engineering.get("baseline") or "").lower()
+        if SHA_RE.fullmatch(baseline) is None:
+            raise CoordinatorError("target Engineering System baseline is invalid")
+    elif mode=="canonical" and repository==CANONICAL_REPOSITORY:
+        main_doc=_run_json(gh,["api",f"repos/{CANONICAL_REPOSITORY}/commits/main"])
+        baseline=str(main_doc.get("sha") or "").lower() if isinstance(main_doc,dict) else ""
+        if SHA_RE.fullmatch(baseline) is None:
+            raise CoordinatorError("canonical execution-profile baseline is unavailable")
+    else:
+        raise CoordinatorError("target Engineering System mode is unsupported")
+    profile_doc=_run_json(gh,["api",f"repos/{CANONICAL_REPOSITORY}/contents/{EXECUTION_PROFILE_PATH}?ref={baseline}"])
+    if not isinstance(profile_doc,dict) or profile_doc.get("encoding")!="base64" or not isinstance(profile_doc.get("content"),str):
+        raise CoordinatorError("canonical execution profile is unavailable")
+    try:
+        canonical_bytes=base64.b64decode(profile_doc["content"],validate=False)
+        canonical_text=canonical_bytes.decode("utf-8")
+        profile=load_profile_text(canonical_text)
+    except (ValueError,UnicodeError,ProfileError) as exc:
+        raise CoordinatorError("canonical execution profile is invalid") from exc
+    try:
+        local_bytes=(root/EXECUTION_PROFILE_PATH).read_bytes()
+    except OSError as exc:
+        raise CoordinatorError("target execution profile is unavailable") from exc
+    if local_bytes!=canonical_bytes:
+        raise CoordinatorError("target execution profile differs from immutable canonical baseline")
+    return profile
+
+
 def authorize(args:argparse.Namespace)->int:
     repo=args.repository
     if REPO_RE.fullmatch(repo) is None or ISSUE_RE.fullmatch(args.issue_id) is None:raise CoordinatorError("invalid repository/issue identity")
@@ -88,7 +132,9 @@ def authorize(args:argparse.Namespace)->int:
     required={"TARGET_REPO":repo,"WORKSTREAM":str(effect.get("workstream") or ""),"STATUS":"ACTIVE","BRANCH":str(effect.get("branch") or ""),"INTENT_REVISION":str(effect.get("intent_revision") or "")}
     for k,v in required.items():
         if f.get(k)!=v:raise CoordinatorError(f"authoritative Work Packet mismatch: {k}")
-    if f.get("IMPLEMENTER") != "CHATGPT_CHAT":raise CoordinatorError("Work Packet does not authorize canonical ChatGPT implementation")
+    execution_profile=_canonical_execution_profile(gh,args.root,repo)
+    profile_blocking,_=packet_authority(execution_profile,f)
+    if profile_blocking:raise CoordinatorError("Work Packet execution profile is not authorized: "+profile_blocking[0])
     if f.get("LAST_VERIFIED_HEAD") != effect.get("subject_head"):raise CoordinatorError("authoritative Work Packet mismatch: LAST_VERIFIED_HEAD")
     if f.get("CHANGE_RISK") not in {"LOW","MEDIUM","HIGH"}:raise CoordinatorError("Work Packet CHANGE_RISK is missing or invalid")
     branch_doc=_run_json(gh,["api",f"repos/{repo}/commits/{effect.get('branch','')}"])

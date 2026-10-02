@@ -95,7 +95,7 @@ These values are calibration defaults, not universal constants. P0/P1 efficiency
 Every packet body begins with:
 
 ```text
-PACKET_VERSION=2
+PACKET_VERSION=3
 TARGET_REPO=owner/repository
 WORKSTREAM=<stable-slug>
 STATUS=ACTIVE|PAUSED|BLOCKED|COMPLETE
@@ -103,6 +103,10 @@ BRANCH=<branch-name|N/A>
 TASK_KIND=DESIGN|DEVELOPMENT|TEST|REVIEW|RELEASE|OPERATIONS|ADOPTION|DOCUMENTATION|CLEANUP|MIXED
 OWNER_INTENT=<one concise line describing the owner's current explicit request>
 LAST_VERIFIED_HEAD=<40-char-sha|UNKNOWN>
+INTENT_REVISION=1
+CHANGE_RISK=MEDIUM
+EXECUTION_PROFILE=<selected-profile-id>
+EXECUTION_PROFILE_REVISION=<selected-profile-revision>
 ```
 
 `LAST_VERIFIED_HEAD` is evidence of the last observed state, not authority. The current repository state must be re-verified on resume.
@@ -112,19 +116,18 @@ LAST_VERIFIED_HEAD=<40-char-sha|UNKNOWN>
 
 ### Optional coordinator fields
 
-New or actively coordinated packets should record these compact fields when the coordinator/orchestrator uses them:
+`PRIORITY` is optional scheduling metadata:
 
 ```text
 PRIORITY=NORMAL
-INTENT_REVISION=1
-CHANGE_RISK=MEDIUM
 ```
 
 - `PRIORITY=URGENT|HIGH|NORMAL|LOW` controls scheduling order only. It is not a security/risk rating.
+- Packet v3 requires `INTENT_REVISION`, `CHANGE_RISK`, `EXECUTION_PROFILE`, and `EXECUTION_PROFILE_REVISION` in the required identity block above.
 - `INTENT_REVISION` is a monotonically increasing integer for material handoff changes.
 - `CHANGE_RISK=LOW|MEDIUM|HIGH|CRITICAL` controls verification/approval depth, not scheduling priority.
 
-Legacy packets without these fields remain valid. A coordinator may conservatively treat missing `PRIORITY` as `NORMAL`, missing `CHANGE_RISK` as `MEDIUM`, and establish `INTENT_REVISION=1` at the next material handoff update.
+Legacy v2 packets remain bounded compatibility inputs when accepted by the current execution profile. Packet v1 or versionless packets are not runnable under profile-v3. Do not create new v1/v2 packets. Migrate an accepted legacy v2 packet to v3 profile identity/revision on the next meaningful packet update; missing `PRIORITY` may still be treated as `NORMAL`.
 
 ## Required sections
 
@@ -234,7 +237,7 @@ Before handing work to an implementation agent, the coordinating agent must sync
 
 "Ready for implementation" is represented by `STATUS=ACTIVE` plus a valid `Next Action`, not by a new status value.
 
-Packet version 1 is legacy-compatible. Agents may resume a valid v1 packet, but should migrate it to v2 fields on the next meaningful packet update rather than blocking solely because `TASK_KIND` or `OWNER_INTENT` is absent.
+Packet version 2 is legacy-compatible only through the current execution profile. Packet v1 and versionless packets are non-runnable and must be migrated before execution. Agents may resume a valid v2 packet only when profile compatibility accepts it, and must migrate it to packet v3 profile identity/revision on the next meaningful packet update. New packets use v3; legacy compatibility is not a template or steady-state authoring path.
 
 ## What must not be copied into a Work Packet
 
@@ -343,11 +346,12 @@ When resuming work:
 5. Require exact `TARGET_REPO` match.
 6. Prefer an exact `BRANCH` match when branch context exists.
 7. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
-8. For packet v2, require `TASK_KIND` and `OWNER_INTENT`, and verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
-9. For legacy packet v1, use `Goal` + `Next Action` conservatively and migrate the packet to v2 on the next meaningful update.
-10. Zero matches: report no active packet; do not reconstruct state from guesses.
-11. Multiple matches: fail closed and ask which workstream to use.
-12. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
+8. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
+9. For legacy packet v2, require its v2 identity/intent fields, require current execution-profile compatibility, and migrate it to v3 on the next meaningful update.
+10. Reject packet v1 and versionless packets as non-runnable; migrate them to v3 before implementation.
+11. Zero matches: report no active packet; do not reconstruct state from guesses.
+12. Multiple matches: fail closed and ask which workstream to use.
+13. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
 
 Never treat a stale packet HEAD as current truth.
 
@@ -368,7 +372,7 @@ After resolving Git identity and before ordinary work:
 11. When task-local files are not already obvious and the worktree is clean, use `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>"` before broad repo-wide grep/read. The orientation is bound to exact `HEAD`, ranks only Git-tracked relative paths plus declared canonical knowledge metadata, emits no file content, and is a JIT read hint rather than authority. `ORIENTATION_DECISION=NO_MATCH` or insufficient evidence permits bounded expansion; dirty worktrees fail closed rather than presenting a stale HEAD map.
 12. For a large optional text candidate, prefer `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>" --slice-path <relative-path>` before a full read. Slice mode reads the exact-HEAD tracked UTF-8 blob and emits bounded JSON-encoded task-relevant line windows in source order. It is a context-reduction hint only: `SLICE_DECISION=NO_MATCH`, truncation, or insufficient evidence permits a bounded full read. Never use slicing as a substitute for mandatory `AGENTS.md`, `.engineering/project.yaml`, managed rules, protected Work Packet state, acceptance criteria, or a canonical reference the task requires in full.
 13. Bound tool output: retain verbose logs outside model context and surface exit status plus focused grep/tail evidence; expand only on failure or ambiguity. For explicitly eligible line-oriented output that must remain available during the same task, `tools/context_tool_output.py` may emit deterministic bounded head/tail + task/diagnostic line records while storing the exact original only through the existing private `context_fold.py` store. The recovery marker is a retrieval handle, not evidence authority. Protected/authority output must not be reduced; bypass must be store-free; truncation never implies semantic equivalence or provider token/cost savings.
-14. Durable authority stays in the Work Packet; stale conversation is not authority. ChatGPT Chat may resume from durable GitHub packet/repository facts without the prior transcript. Verify the actual repository/branch/HEAD before mutation and use stronger approval boundaries only where the action risk requires them.
+14. Durable authority stays in the Work Packet; stale conversation is not authority. The selected implementation runtime may resume from durable GitHub packet/repository facts without the prior transcript. Verify the actual repository/branch/HEAD before mutation and use stronger approval boundaries only where the action risk requires them.
 
 Never-adopted repositories may continue under the canonical default. Incomplete adopted repositories must not silently continue ordinary work without mandatory project context.
 
@@ -474,7 +478,7 @@ Prefer subject/version identity or exact revision over arbitrary time-to-live. H
 
 ## Coordinator / worker execution model
 
-The Work Packet/objective is durable. Conversational context is disposable. ChatGPT Chat may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity.
+The Work Packet/objective is durable. Conversational context is disposable. The selected implementation runtime may roll over to a fresh context and resume from authenticated durable state; it must not depend on transcript continuity.
 
 A coordinator or equivalent outer loop should, when automation exists:
 
@@ -486,7 +490,7 @@ A coordinator or equivalent outer loop should, when automation exists:
 - restart or replace a crashed/stalled worker without inventing new scope;
 - preserve terminal evidence and hand human-required decisions to the owner.
 
-Do not encode a brittle micro-step state machine that requires one Chat conversation to survive the whole workstream. The same outcome may span multiple fresh Chat contexts because GitHub Work Packet and repository state are durable authority.
+Do not encode a brittle micro-step state machine that requires one implementation context to survive the whole workstream. The same outcome may span multiple fresh implementation contexts because GitHub Work Packet and repository state are durable authority.
 
 ## Pure coordinator planner
 
@@ -591,7 +595,7 @@ A revision, target, or head mismatch returns `STALE_WORKER` and authorizes zero 
 
 Human attention is a constrained engineering resource.
 
-**Engineering completion vs owner notification:** engineering truth is determined by the Work Packet completion contract and exact-HEAD deterministic/review/release evidence. Record that separately as `ENGINEERING_COMPLETE=PASS|BLOCK`. For a bounded COMPLETE outcome, attempt one verified Telegram delivery bound to exact repository/workstream/terminal HEAD with `tools/terminal_completion_notify.py` and record `OWNER_NOTIFICATION=PASS|RETRY_PENDING`. `TERMINAL_TELEGRAM=PASS` proves delivery only; failed, unavailable, ambiguous, or stale delivery is a notification-transport obligation and must not rewrite a valid engineering PASS into a code/quality failure. Do not notify for micro-steps or individual test invocations; coalesce one notification around the bounded completed outcome. If ChatGPT must stop because a genuine owner action, credential/permission, infrastructure failure, or irreconcilable external dependency prevents further progress, send one verified BLOCKED notification when possible before returning control. Normal CI waiting, bounded retry/backoff, or work ChatGPT can perform directly is not BLOCKED and must not notify.
+**Engineering completion vs owner notification:** engineering truth is determined by the Work Packet completion contract and exact-HEAD deterministic/review/release evidence. Record that separately as `ENGINEERING_COMPLETE=PASS|BLOCK`. For a bounded COMPLETE outcome, attempt one verified Telegram delivery bound to exact repository/workstream/terminal HEAD with `tools/terminal_completion_notify.py` and record `OWNER_NOTIFICATION=PASS|RETRY_PENDING`. `TERMINAL_TELEGRAM=PASS` proves delivery only; failed, unavailable, ambiguous, or stale delivery is a notification-transport obligation and must not rewrite a valid engineering PASS into a code/quality failure. Do not notify for micro-steps or individual test invocations; coalesce one notification around the bounded completed outcome. If the selected implementation runtime must stop because a genuine owner action, credential/permission, infrastructure failure, or irreconcilable external dependency prevents further progress, send one verified BLOCKED notification when possible before returning control. Normal CI waiting, bounded retry/backoff, or work the selected implementation runtime can perform directly is not BLOCKED and must not notify.
 
 - Notify on meaningful Work Packet transitions, terminal outcomes, or a decision/action that actually requires the owner.
 - Do not notify for every micro-edit, test invocation, short agent session, or intermediate subtask completion.
@@ -628,7 +632,7 @@ If authenticated packet access is unavailable, stop with `WORK_PACKET_PROVENANCE
 
 ## Current managed execution profile
 
-Provider/runtime choice is replaceable execution-profile state, not a permanent core invariant. The current managed profile authorizes ChatGPT Chat as the default implementer when the owner has authorized the work through a trusted repository-scoped Work Packet, and keeps Cursor retired/prohibited. Conversation history is never mutation authority. For ordinary repository engineering, the conjunction of current explicit owner intent, a freshly authenticated open ACTIVE `[AI Work]` packet with write/maintain/admin provenance, matching `TARGET_REPO` / `WORKSTREAM` / branch / HEAD / intent revision, `IMPLEMENTER=CHATGPT_CHAT`, `packet-lint=PASS`, and current repository/worktree identity is sufficient for ChatGPT Chat to implement, test, audit, commit/push, and perform ordinary authenticated GitHub Issue/PR coordination directly. Do not require another magic phrase such as `directly edit`, an alternate implementation adapter, Cursor, a host trust anchor, or `worker_adapter.py` for those normal actions. Re-read mutable packet/branch/HEAD facts immediately before ordinary GitHub writes and reject stale state.
+Provider/runtime choice is replaceable execution-profile state, not a permanent core invariant. The selected profile is the only runtime-selection authority; conversation history and provider names in prose are never mutation authority. For ordinary repository engineering, the conjunction of current explicit owner intent, a freshly authenticated open ACTIVE `[AI Work]` packet with write/maintain/admin provenance, matching `TARGET_REPO` / `WORKSTREAM` / branch / HEAD / intent revision, execution-profile identity/revision, `packet-lint=PASS`, and current repository/worktree identity is sufficient for the selected runtime to implement, test, audit, commit/push, and perform ordinary authenticated GitHub Issue/PR coordination directly. Do not require another magic phrase, an alternate implementation adapter, a host trust anchor, or `worker_adapter.py` for those normal actions. Re-read mutable packet/profile/branch/HEAD facts immediately before ordinary GitHub writes and reject stale state.
 
 For an effect explicitly classified as high-risk by the core or a stricter project contract—production mutation, destructive action, credential/permission-boundary change, irreversible publication, or equivalent—use the stronger external authenticated coordinator / trusted local-binding / signed-dispatch boundary. In that high-risk path, the worker-writable target copy of `python3 tools/implementation_preflight.py check` is never authority; use the immutable canonical helper or an equivalent host-administered copy, require local binding to the authorized worktree, and require `worker_adapter.py` `APPLIED` for the exact external effect. If that high-risk trust boundary is unavailable, block the high-risk effect only; do not convert its absence into a blocker for unrelated ordinary development or GitHub coordination.
 
@@ -637,16 +641,16 @@ When the user asks to continue/resume an existing engineering workstream:
 - resolve the target repository
 - load its active Work Packet
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
-- lint the exact fresh authoritative packet body and require `packet-lint=PASS`; `IMPLEMENTER=CURSOR` or any other non-`CHATGPT_CHAT` implementer is `IMPLEMENTER_INVALID`
+- lint the exact fresh authoritative packet body and require `packet-lint=PASS`; a stale/mismatched execution-profile identity or revision is non-runnable
 - immediately before any implementation adapter/session/process start or resume, re-read the authoritative packet and lint it again; do not start or resume on WARN/BLOCK ambiguity and never treat a handoff comment as authority
-- verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence when packet v2 is used
+- verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence for packet v2/v3, and require exact profile identity/revision binding for v3
 - verify current GitHub/repository facts
 - continue from `Next Action` only when it still matches the current owner intent
 - do not ask the user to paste prior chat unless the required durable state genuinely does not exist
 
-After preflight PASS, Chat may implement directly through the authorized SSH/remote path, run affected validation, and perform packet-authorized Git/GitHub writes. Before later external writes or terminal actions, re-read authoritative packet/HEAD facts and reject stale intent. Fresh Chat rollover resumes from GitHub durable state plus repository facts and must not require the prior conversation transcript.
+After preflight PASS, the selected implementation runtime may implement directly through the authorized remote path, run affected validation, and perform packet-authorized Git/GitHub writes. Before later external writes or terminal actions, re-read authoritative packet/profile/HEAD facts and reject stale intent. A fresh implementation context resumes from GitHub durable state plus repository facts and must not require the prior conversation transcript.
 
-The implementing Chat context also owns terminal audit by default. It must re-read current Work Packet, exact HEAD, PR/CI, tests, and actionable review state instead of treating its own implementation narrative as evidence. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require deeper exact-HEAD machine evidence and any applicable human approval, but do not require a separate model/provider actor. Codex, a fresh Chat context, or the provider-neutral independent verifier remains optional defense-in-depth/escalation and must not become a quota-dependent default blocker.
+The selected implementation runtime also owns terminal audit by default. It must re-read current Work Packet, selected execution profile, exact HEAD, PR/CI, tests, and actionable review state instead of treating its own implementation narrative as evidence. HIGH/CRITICAL, security, production, release-authority, permission, credential-boundary, or destructive changes require deeper exact-HEAD machine evidence and any applicable human approval, but do not require a separate model/provider actor. A distinct reviewer, a fresh independent implementation context, or the provider-neutral independent verifier remains optional defense-in-depth/escalation and must not become a provider- or quota-dependent default blocker.
 
 ## Execution loop, CI, and parallel work
 
@@ -662,14 +666,14 @@ Guidance:
 - Batch related corrective findings before the next expensive qualification run.
 - When a workstream is waiting on CI/review/deploy or another machine-observable condition, persist the named wait and yield that workstream back to repository-level scheduling. Select the highest-priority dependency-eligible independent ACTIVE Work Packet/worktree when safe rather than polling or stopping. The single matching ACTIVE packet rule is scoped to the current branch/workstream and must not be interpreted as repository-wide serialization behind a waiting packet.
 - Parallel work is allowed when dependencies are satisfied and worktrees, owned paths, shared mutable runtimes, and irreversible external effects do not conflict. Use a separate worktree/state owner for concurrent mutation.
-- Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-Chat work.
+- Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-runtime work.
 - Stop only for a genuine owner decision/credential, an irreconcilable blocker, an explicit status-only request, or a completed bounded outcome.
 
 Release qualification follows `standards/RELEASE.md` and the target repository release profile. Product-specific choreography belongs in that repository, not in this continuity standard.
 
 ## Optional independent verifier for additional terminal evidence
 
-Normal terminal audit is owned by ChatGPT Chat and can complete in the implementing context when exact-HEAD deterministic evidence and current mutable gates support PASS. The implementer's self-report is never the completion oracle by itself. A coordinator may additionally evaluate structured evidence with the provider-neutral independent verifier when defense-in-depth, escalation, or an explicitly requested independent check is useful.
+Normal terminal audit is owned by the selected implementation runtime and can complete in the implementing context when exact-HEAD deterministic evidence and current mutable gates support PASS. The implementer's self-report is never the completion oracle by itself. A coordinator may additionally evaluate structured evidence with the provider-neutral independent verifier when defense-in-depth, escalation, or an explicitly requested independent check is useful.
 
 ```bash
 python3 tools/independent_verifier.py verify --request-json <evidence.json>
@@ -742,6 +746,6 @@ For repositories using session continuity:
 
 - add the AI Work Packet Issue template
 - preserve the canonical `[AI Work]` title prefix
-- ensure ChatGPT resolves the repository and current durable state first
+- ensure the selected implementation runtime resolves the repository and current durable state first
 - never store secrets in Work Packets
 - never use a Work Packet update as release evidence
