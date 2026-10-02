@@ -92,6 +92,8 @@ def load_profile_text(text: str) -> dict[str, Any]:
             raise ProfileError("PROFILE_LEGACY_IMPLEMENTERS_INVALID")
         if target != profile_id:
             raise ProfileError("PROFILE_LEGACY_IMPLEMENTER_TARGET_INVALID")
+        if key in disabled:
+            raise ProfileError("PROFILE_LEGACY_IMPLEMENTER_DISABLED")
         normalized_legacy[key] = target
 
     retired = _mapping(data.get("retired_surface"), "PROFILE_RETIRED_SURFACE")

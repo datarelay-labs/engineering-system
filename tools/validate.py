@@ -980,6 +980,20 @@ def validate_adoption_contract():
     print("PASS automated adoption standard/tool contract")
 
 
+def validate_adoption_workflow_profile_bundle():
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for rel in (
+        ".engineering/execution-profile.yaml",
+        "tools/execution_profile.py",
+        "schemas/execution-profile.schema.json",
+    ):
+        if workflow.count(rel) < 2:
+            raise SystemExit(
+                f"FAIL reusable adoption compliance does not fetch and validate execution-profile bundle: {rel}"
+            )
+    print("PASS reusable adoption execution-profile bundle contract")
+
+
 def validate_governance_floor_contract():
     workflow = (ROOT / ".github/workflows/governance-floor.yml").read_text(encoding="utf-8")
     helper = (ROOT / "tools/governance_floor.py").read_text(encoding="utf-8")
@@ -1586,6 +1600,7 @@ def main():
     validate_session_continuity_templates()
     validate_actionable_review_gate()
     validate_adoption_contract()
+    validate_adoption_workflow_profile_bundle()
     validate_governance_floor_contract()
     validate_knowledge_contract()
     validate_runtime_contract()

@@ -109,10 +109,24 @@ def test_transition_and_disabled_primary() -> None:
     assert "EXECUTION_PROFILE_REVISION_NOT_INCREMENTED" in reasons
 
 
+
+def test_disabled_runtime_cannot_be_legacy_compatible() -> None:
+    raw = synthetic_profile()
+    raw["packet_compatibility"]["legacy_v2_implementers"] = {
+        "OLD_RUNTIME": "synthetic-profile"
+    }
+    try:
+        ep.load_profile_text(yaml.safe_dump(raw, sort_keys=False))
+    except ep.ProfileError as exc:
+        assert str(exc) == "PROFILE_LEGACY_IMPLEMENTER_DISABLED"
+    else:
+        raise AssertionError("disabled runtime accepted by legacy compatibility")
+
 def main() -> int:
     test_current_profile()
     test_synthetic_profile_is_core_neutral()
     test_transition_and_disabled_primary()
+    test_disabled_runtime_cannot_be_legacy_compatible()
     print("EXECUTION_PROFILE_TESTS=PASS")
     return 0
 
