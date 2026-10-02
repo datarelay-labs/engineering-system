@@ -825,7 +825,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
         authority_contract = head_execution_profile.get("authority_contract")
         if authority_contract == "legacy-v2":
             legacy_profile_bootstrap = True
-        elif authority_contract != "profile-v3":
+        elif authority_contract != "profile-v3" or base_epoch < 3:
             reasons.append("EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID")
     elif base_execution_profile is not None and head_execution_profile is not None:
         reasons.extend(profile_transition_reasons(base_execution_profile_text, head_execution_profile_text))
