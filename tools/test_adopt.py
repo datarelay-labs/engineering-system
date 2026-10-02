@@ -537,6 +537,61 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
 
 
+
+def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-profile-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/profile-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        for rel in (
+            ".engineering/execution-profile.yaml",
+            "tools/execution_profile.py",
+            "schemas/execution-profile.schema.json",
+        ):
+            (target / rel).unlink()
+        commit_all(target, "remove managed execution profile bundle")
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        after_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        assert after_epoch == before_epoch + 1
+        for rel in (
+            ".engineering/execution-profile.yaml",
+            "tools/execution_profile.py",
+            "schemas/execution-profile.schema.json",
+        ):
+            assert (target / rel).is_file(), rel
+
 def test_same_baseline_repairs_managed_execution_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-policy-repair"
@@ -2580,6 +2635,7 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_same_baseline_governance_floor_repair_emits_root_migration()
+    test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_repairs_managed_execution_policy()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()

@@ -796,7 +796,7 @@ def main() -> int:
         planned_execution_policy = plan_execution_policy_sync(root)
         planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
         target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
-        if planned_root_surfaces:
+        if planned_root_surfaces or planned_execution_profile:
             target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
         policy_epoch_repair = target_policy_epoch != existing_policy_epoch
         root_migration = build_root_migration_manifest(
