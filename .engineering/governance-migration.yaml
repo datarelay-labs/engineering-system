@@ -14,10 +14,10 @@ changed_surfaces:
 - path: tools/adopt.py
   head_blob_sha: 9067202195a340a4c55f709260748f222a3e3497
 - path: tools/check-adoption.py
-  head_blob_sha: 9297dfc62a2d1439442522da80cec837727834c8
+  head_blob_sha: d42db70cbd2d231e793ba10f9f981a5db296e776
 - path: tools/context_epoch.py
   head_blob_sha: 47299cfafc31abbe07442689db134027eca6e252
 - path: tools/governance_floor.py
   head_blob_sha: 1dd6ebb9ae8bc7350e50dfbeb65013b86e8cae88
 - path: tools/upgrade-adoption.py
-  head_blob_sha: 712d65a7787514d0a31661beeec1fd5e1d0fa7ed
+  head_blob_sha: bce42f61fe99bfe00367766dfa6579668da280b5

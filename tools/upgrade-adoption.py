@@ -38,6 +38,8 @@ from adopt import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
+PROFILE_RELEASE_EXECUTOR = "EXECUTION_PROFILE"
+LEGACY_MANAGED_RELEASE_EXECUTORS = {"CHATGPT_CHAT"}
 
 # Known managed version/baseline declaration forms. Only these are rewritten;
 # surrounding project-specific text is preserved. Ambiguous/custom forms fail closed.
@@ -112,6 +114,38 @@ def write_yaml(path: Path, data: dict) -> None:
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+
+
+def plan_release_executor_migration(release: dict) -> bool:
+    """Migrate only the known managed provider-bound release executor."""
+    user_tests = release.get("human_equivalent_user_tests")
+    if user_tests is None:
+        return False
+    if not isinstance(user_tests, dict):
+        raise SystemExit(
+            "FAIL release human_equivalent_user_tests contains local/custom changes; "
+            "review manually before upgrade"
+        )
+    executor = str(user_tests.get("executor") or "").strip()
+    if executor == PROFILE_RELEASE_EXECUTOR:
+        return False
+    if executor in LEGACY_MANAGED_RELEASE_EXECUTORS:
+        return True
+    raise SystemExit(
+        "FAIL release human-equivalent executor contains local/custom changes; "
+        "review manually before upgrade"
+    )
+
+
+def apply_release_executor_migration(release: dict, planned: bool) -> bool:
+    if not planned:
+        return False
+    user_tests = release.get("human_equivalent_user_tests")
+    if not isinstance(user_tests, dict):
+        raise SystemExit("FAIL release human_equivalent_user_tests became invalid during upgrade")
+    user_tests["executor"] = PROFILE_RELEASE_EXECUTOR
+    release["human_equivalent_user_tests"] = user_tests
+    return True
 
 
 def semver_tuple(value: str) -> tuple[int, int, int]:
@@ -780,6 +814,8 @@ def main() -> int:
     ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
+    planned_release_executor = plan_release_executor_migration(release)
+
     if semver_tuple(old_version) > semver_tuple(current_version):
         raise SystemExit(
             f"FAIL target adoption {old_version} is newer than canonical {current_version}"
@@ -806,6 +842,7 @@ def main() -> int:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
+        planned_release_executor = plan_release_executor_migration(release)
         planned_root_surfaces = {
             **planned_dependencies,
             **planned_governance_floor,
@@ -838,6 +875,7 @@ def main() -> int:
             and not planned_engineering_context
             and not planned_governance_floor
             and planned_execution_policy is None
+            and not planned_release_executor
             and not retired_agent_artifacts
             and not policy_epoch_repair
         ):
@@ -873,6 +911,8 @@ def main() -> int:
             print("GOVERNANCE_ROOT_MIGRATION=REQUIRED")
         if planned_execution_policy is not None:
             print("EXECUTION_POLICY_REPAIR=REQUIRED")
+        if planned_release_executor:
+            print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
         if retired_agent_artifacts:
             print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
@@ -929,6 +969,15 @@ def main() -> int:
         print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
+        release_executor_synced = apply_release_executor_migration(
+            release, planned_release_executor
+        )
+        if release_executor_synced:
+            write_yaml(release_path, release)
+        print(
+            "RELEASE_EXECUTOR_SYNCED="
+            + ("YES" if release_executor_synced else "NO")
+        )
         checker = CANONICAL / "tools" / "check-adoption.py"
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
@@ -1036,6 +1085,8 @@ def main() -> int:
         print(f"{key.upper()}={value}")
     if retired_agent_artifacts:
         print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
+    if planned_release_executor:
+        print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
 
     if args.audit or not args.apply:
         print("ADOPTION_UPGRADE_AUDIT=PASS")
@@ -1055,6 +1106,7 @@ def main() -> int:
     operations["rollback_command"] = rollback_command
     project["operations"] = operations
 
+    apply_release_executor_migration(release, planned_release_executor)
     release["execution_context"] = release_execution_context
     release["setup_command"] = setup_command
     release["preflight_command"] = preflight_command

@@ -1071,6 +1071,8 @@ def validate_adoption_workflow_profile_bundle():
         "EXECUTION_PROFILE_MANAGED",
         "EXECUTION_PROFILE_REVISION",
         "managed Work Packet template missing required packet-v3 metadata",
+        "tools/governance_floor.py",
+        "human-equivalent user tests executor must be EXECUTION_PROFILE",
     ):
         if token not in checker:
             raise SystemExit(f"FAIL adoption checker missing shared-policy invariant: {token}")

@@ -414,6 +414,24 @@ def test_current_baseline_with_managed_byte_drift_is_repairable() -> None:
         assert helper_result.action == "UPGRADE", helper_result
         assert "managed repair required" in helper_result.detail
 
+        governance_repo = base / "governance-floor-drift"
+        governance_repo.mkdir()
+        init_repo(governance_repo)
+        adopt_python(governance_repo, BASELINE)
+        governance_path = governance_repo / "tools/governance_floor.py"
+        governance_path.write_text(
+            governance_path.read_text(encoding="utf-8") + "\n# stale managed byte\n",
+            encoding="utf-8",
+        )
+        governance_result = org_rollout.classify_checkout(
+            governance_repo, "1.7.0", BASELINE
+        )
+        assert governance_result.state == "OUTDATED", governance_result
+        assert governance_result.action == "UPGRADE", governance_result
+        assert "tools/governance_floor.py differs from canonical managed helper" in (
+            governance_result.detail
+        )
+
 
 def test_repair_markers_match_checker_diagnostics() -> None:
     assert "retired runtime artifact must be removed:" in (
@@ -428,6 +446,9 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert "differs from canonical managed helper" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
+    assert "human-equivalent user tests executor must be EXECUTION_PROFILE" in (
+        org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
     assert org_rollout.repairable_structural_failure(
         "FAIL retired runtime artifact must be removed: .cursor"
     )
@@ -439,6 +460,9 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     )
     assert org_rollout.repairable_structural_failure(
         "FAIL tools/context_epoch.py differs from canonical managed helper"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
     )
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"

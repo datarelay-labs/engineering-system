@@ -2699,6 +2699,114 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         assert "browser user-facing project requires actual_browser_process_required=true" in blocked.stdout
 
 
+def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-release-executor-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "tests").mkdir()
+        (target / "tests/test_demo.py").write_text(
+            "def test_demo():\n    assert True\n",
+            encoding="utf-8",
+        )
+        (target / "docs").mkdir()
+        (target / "docs/SURFACE_RECONCILIATION.md").write_text(
+            "# Surface Reconciliation\n",
+            encoding="utf-8",
+        )
+        (target / "docs/FULL_USER_E2E.md").write_text(
+            "# Full User E2E\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface",
+            "browser",
+            "--surface-reconciliation-contract",
+            "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract",
+            "docs/FULL_USER_E2E.md",
+        )
+        commit_all(target, "adopt user-facing target")
+
+        release_path = target / ".engineering/release.yaml"
+        release = load_yaml(release_path)
+        release["human_equivalent_user_tests"]["executor"] = "CHATGPT_CHAT"
+        release_path.write_text(
+            yaml.safe_dump(release, sort_keys=False),
+            encoding="utf-8",
+        )
+        commit_all(target, "legacy managed release executor")
+
+        checker = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checker.returncode != 0
+        assert (
+            "human-equivalent user tests executor must be EXECUTION_PROFILE"
+            in checker.stdout
+        )
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in repaired.stdout
+        assert "RELEASE_EXECUTOR_SYNCED=YES" in repaired.stdout
+        repaired_release = load_yaml(release_path)
+        assert (
+            repaired_release["human_equivalent_user_tests"]["executor"]
+            == "EXECUTION_PROFILE"
+        )
+        assert run(
+            sys.executable, str(CHECK), "--root", str(target)
+        ).returncode == 0
+        commit_all(target, "migrate release executor")
+
+        custom_release = load_yaml(release_path)
+        custom_release["human_equivalent_user_tests"]["executor"] = "CUSTOM_RUNNER"
+        release_path.write_text(
+            yaml.safe_dump(custom_release, sort_keys=False),
+            encoding="utf-8",
+        )
+        commit_all(target, "custom release executor")
+        before = release_path.read_bytes()
+        blocked = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert "release human-equivalent executor contains local/custom changes" in (
+            blocked.stdout
+        )
+        assert release_path.read_bytes() == before
+
+
 def test_user_facing_adoption_fails_without_contracts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-missing-user-contracts"
@@ -2973,6 +3081,7 @@ def main() -> int:
     test_adoption_checker_expected_mode_is_fail_closed()
     test_managed_work_packet_template_requires_v3_profile_metadata()
     test_user_facing_browser_release_requires_human_equivalent_contracts()
+    test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom()
     test_user_facing_adoption_fails_without_contracts()
     test_user_facing_contract_paths_are_repository_bounded()
     test_adoption_compliance_workflow_enforces_user_facing_release_gates()

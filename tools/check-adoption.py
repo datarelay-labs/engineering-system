@@ -262,6 +262,7 @@ def main() -> int:
                 "schemas/execution-profile.schema.json",
                 "tools/context_epoch.py",
                 "tools/engineering-context.py",
+                "tools/governance_floor.py",
                 "tools/work_packet_authority.py",
                 ".github/ISSUE_TEMPLATE/ai-work-packet.md",
                 ".engineering/requirements-engineering-system.txt",
@@ -382,8 +383,13 @@ def main() -> int:
                 if not isinstance(user_tests, dict):
                     failures.append("user-facing project requires release.human_equivalent_user_tests mapping")
                 else:
-                    if not str(user_tests.get("executor") or "").strip():
+                    executor = str(user_tests.get("executor") or "").strip()
+                    if not executor:
                         failures.append("human-equivalent user tests require an executor")
+                    elif checker_managed_profile and executor != "EXECUTION_PROFILE":
+                        failures.append(
+                            "human-equivalent user tests executor must be EXECUTION_PROFILE"
+                        )
                     if user_tests.get("actual_user_surface_required") is not True:
                         failures.append("human-equivalent user tests require actual_user_surface_required=true")
                     if str(user_tests.get("primary_user_surface") or "") != primary_user_surface:

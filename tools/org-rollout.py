@@ -292,6 +292,7 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
     "managed-profile adoption missing required helper",
     "managed Work Packet template missing required packet-v3 metadata",
     "differs from canonical managed helper",
+    "human-equivalent user tests executor must be EXECUTION_PROFILE",
 )
 
 
