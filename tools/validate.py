@@ -49,6 +49,9 @@ REQUIRED_METHOD_FILES = (
     "tools/upgrade-adoption.py",
     "tools/org-rollout.py",
     "tools/work_packet_authority.py",
+    "tools/execution_profile.py",
+    "tools/test_execution_profile.py",
+    "schemas/execution-profile.schema.json",
     "tools/context_epoch.py",
     "tools/test_context_epoch.py",
     "tools/context_compiler.py",
@@ -1003,7 +1006,9 @@ def validate_governance_floor_contract():
     for token in ("pull_request_target", "governance-floor.yml@", "base_sha:", "head_sha:"):
         if token not in adopted:
             raise SystemExit(f"FAIL adopted workflow missing governance-floor token: {token}")
-    if "POLICY_EPOCH = 2" not in adopt or "policy_epoch" not in check:
+    canonical_project = load_yaml(ROOT / ".engineering/project.yaml")
+    expected_epoch = int((canonical_project.get("engineering_system") or {}).get("policy_epoch") or 0)
+    if f"POLICY_EPOCH = {expected_epoch}" not in adopt or "policy_epoch" not in check:
         raise SystemExit("FAIL adoption tooling missing governance-floor policy epoch")
     policy = (
         schema.get("properties", {})
@@ -1594,6 +1599,7 @@ def main():
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
+    validate(".engineering/execution-profile.yaml", "schemas/execution-profile.schema.json")
     validate(".engineering/tests.yaml", "schemas/tests.schema.json")
     validate(".engineering/release.yaml", "schemas/release.schema.json")
     validate("templates/PROJECT.yaml", "schemas/project.schema.json")
@@ -1604,6 +1610,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_execution_profile.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)

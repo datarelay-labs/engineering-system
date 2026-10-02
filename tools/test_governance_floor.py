@@ -462,6 +462,51 @@ def test_canonical_workflows_have_direct_floor() -> None:
     assert floor._canonical_validate_reasons(validate_text) == []
 
 
+
+def install_execution_profile_fixture(root: Path, *, authority_contract: str) -> None:
+    source_root = HERE.parent
+    for rel in (
+        ".engineering/execution-profile.yaml",
+        "tools/execution_profile.py",
+        "schemas/execution-profile.schema.json",
+    ):
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((source_root / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    profile_path = root / ".engineering/execution-profile.yaml"
+    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    profile["authority_contract"] = authority_contract
+    profile_path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+
+
+def test_execution_profile_bootstrap_requires_legacy_contract() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        install_execution_profile_fixture(root, authority_contract="legacy-v2")
+        head = commit(root, "bootstrap legacy execution profile")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+
+
+def test_execution_profile_bootstrap_rejects_direct_profile_v3() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        install_execution_profile_fixture(root, authority_contract="profile-v3")
+        head = commit(root, "invalid direct profile-v3 bootstrap")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID" in reasons
+
 def main() -> int:
     test_safe_head_passes()
     test_policy_epoch_regression_blocks()
@@ -478,6 +523,8 @@ def main() -> int:
     test_dependency_manifest_requires_policy_epoch()
     test_canonical_floor_change_requires_policy_epoch()
     test_canonical_workflows_have_direct_floor()
+    test_execution_profile_bootstrap_requires_legacy_contract()
+    test_execution_profile_bootstrap_rejects_direct_profile_v3()
     print("GOVERNANCE_FLOOR_TESTS=PASS")
     return 0
 

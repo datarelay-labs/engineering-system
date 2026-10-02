@@ -20,6 +20,7 @@ BASELINE = "a" * 40
 NEW_BASELINE = "b" * 40
 CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
 TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
+CANONICAL_POLICY_EPOCH = int((yaml.safe_load((ROOT / ".engineering/project.yaml").read_text(encoding="utf-8")) or {})["engineering_system"]["policy_epoch"])
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -108,7 +109,7 @@ def test_clean_python_bootstrap() -> None:
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.7.0"
-        assert engineering["policy_epoch"] == 2
+        assert engineering["policy_epoch"] == CANONICAL_POLICY_EPOCH
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -493,7 +494,7 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         project_path = target / ".engineering/project.yaml"
         before_project = load_yaml(project_path)
         before_epoch = before_project["engineering_system"]["policy_epoch"]
-        assert before_epoch == 2
+        assert before_epoch == 3
 
         (target / "tools/governance_floor.py").unlink()
         commit_all(target, "remove managed governance helper")
@@ -595,13 +596,13 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         )
         assert "EXECUTION_POLICY_REPAIR=REQUIRED" in repaired.stdout
         assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
-        assert "POLICY_EPOCH_REPAIR=2" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={CANONICAL_POLICY_EPOCH}" in repaired.stdout
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         repaired_agents = agents_path.read_text(encoding="utf-8")
         assert repaired_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-same-baseline-rule" in repaired_agents
         repaired_project = load_yaml(project_path)
-        assert repaired_project["engineering_system"]["policy_epoch"] == 2
+        assert repaired_project["engineering_system"]["policy_epoch"] == CANONICAL_POLICY_EPOCH
 
 
 def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:

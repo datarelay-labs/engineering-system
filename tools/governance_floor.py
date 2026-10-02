@@ -9,6 +9,14 @@ from pathlib import Path
 
 import yaml
 
+from execution_profile import (
+    ProfileError,
+    load_profile_text,
+    profile_transition_reasons,
+    retired_artifact_paths,
+    retired_rule_present,
+)
+
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MANAGED_EXECUTION_SURFACES = (
     "AGENTS.md",
@@ -16,23 +24,34 @@ MANAGED_EXECUTION_SURFACES = (
     "tools/engineering-context.py",
 )
 PROTECTED_GOVERNANCE_SURFACES = (
-    # Executable governance semantics may change only with an explicit
-    # policy-epoch advance. The current pull_request_target run remains
-    # base-owned, so candidate copies cannot affect the check evaluating them.
-    "tools/context_epoch.py",
+    # Read-only orientation remains protected by policy epoch, but does not
+    # itself define provider/runtime selection.
     "tools/engineering-context.py",
 )
-RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
 GOVERNANCE_HELPER = "tools/governance_floor.py"
 GOVERNANCE_REUSABLE_WORKFLOW = ".github/workflows/governance-floor.yml"
 GOVERNANCE_DEPENDENCY_MANIFEST = ".engineering/requirements-engineering-system.txt"
 ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
+EXECUTION_PROFILE_SURFACES = (
+    ".engineering/execution-profile.yaml",
+    "tools/execution_profile.py",
+    "schemas/execution-profile.schema.json",
+)
 EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_HELPER,
     GOVERNANCE_DEPENDENCY_MANIFEST,
+    "tools/context_epoch.py",
+    *EXECUTION_PROFILE_SURFACES,
+)
+POST_BRIDGE_CANONICAL_SURFACES = (
+    ".github/workflows/adoption-compliance.yml",
+    "tools/check-adoption.py",
+    "tools/adopt.py",
+    "tools/upgrade-adoption.py",
 )
 CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_REUSABLE_WORKFLOW,
+    *POST_BRIDGE_CANONICAL_SURFACES,
 )
 ADOPTED_ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
 CANONICAL_VALIDATE_WORKFLOW = ".github/workflows/validate.yml"
@@ -59,17 +78,6 @@ EXPECTED_CANONICAL_BASE_REF = (
 EXPECTED_CANONICAL_HEAD_REF = (
     "${{ github.event_name == 'pull_request_target' && "
     "github.event.pull_request.head.sha || inputs.head_sha }}"
-)
-RETIRED_AGENTS_RE = re.compile(
-    r"(?i)(?:"
-    r"IMPLEMENTER\s*=\s*CURSOR|"
-    r"cursor[-_ ]?agent|"
-    r"\bagent\s+persist\b|"
-    r"/work-resume\b|"
-    r"\.cursor(?:/|\b)|"
-    r"\bcursor\s+(?:adapter|session|implementation|implementer|worker)\b|"
-    r"\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to)\s+(?:the\s+)?cursor\b"
-    r")"
 )
 
 
@@ -470,39 +478,60 @@ def _canonical_validate_reasons(text: str | None) -> list[str]:
     return reasons
 
 
-def _execution_surface_reasons(path: str, content: str) -> list[str]:
+def _execution_surface_reasons(path: str, content: str, profile: dict[str, object] | None = None) -> list[str]:
     reasons: list[str] = []
+    if profile is None:
+        try:
+            profile = load_profile_text((Path(__file__).resolve().parents[1] / ".engineering/execution-profile.yaml").read_text(encoding="utf-8"))
+        except (OSError, ProfileError) as exc:
+            return [f"EXECUTION_PROFILE_FALLBACK_INVALID:{exc}"]
+    contract = str(profile.get("authority_contract") or "")
+    runtime = profile.get("runtime") or {}
+    primary = str(runtime.get("primary") or "") if isinstance(runtime, dict) else ""
+    disabled = [str(item) for item in (runtime.get("disabled") or [])] if isinstance(runtime, dict) else []
+    reviewers = [str(item) for item in (runtime.get("optional_reviewers") or [])] if isinstance(runtime, dict) else []
+
     if path == "AGENTS.md":
-        if RETIRED_AGENTS_RE.search(content):
+        if retired_rule_present(content, profile):
             reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
-        for required in (
-            "Execution authority precedence:",
-            "IMPLEMENTER=CHATGPT_CHAT",
-        ):
-            if required not in content:
-                reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:{required}")
+        if "Execution authority precedence:" not in content:
+            reasons.append("MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:Execution authority precedence:")
+        if contract == "legacy-v2":
+            marker = f"IMPLEMENTER={primary}"
+            if not primary or marker not in content:
+                reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:{marker}")
+        elif contract == "profile-v3":
+            for required in ("Execution profile authority:", ".engineering/execution-profile.yaml"):
+                if required not in content:
+                    reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:{required}")
+        else:
+            reasons.append("EXECUTION_PROFILE_AUTHORITY_CONTRACT_INVALID")
     elif path == "tools/context_epoch.py":
-        if '"CURSOR"' in content or "'CURSOR'" in content:
-            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
-        required = (
-            'if implementer and implementer != "CHATGPT_CHAT":',
-            'blocking.append("IMPLEMENTER_INVALID")',
-        )
-        for token in required:
-            if token not in content:
-                reasons.append(
-                    f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}"
-                )
-    elif path == "tools/engineering-context.py":
-        if ".cursor" in content.lower():
-            reasons.append(
-                "RETIRED_IMPLEMENTER_REINTRODUCED:tools/engineering-context.py"
+        if contract == "legacy-v2":
+            if any(name and name in content for name in disabled):
+                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+            required = (
+                f'if implementer and implementer != "{primary}":',
+                'blocking.append("IMPLEMENTER_INVALID")',
             )
+            for token in required:
+                if token not in content:
+                    reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}")
+        elif contract == "profile-v3":
+            runtime_names = {primary, *disabled, *reviewers}
+            if any(name and name in content for name in runtime_names) or "IMPLEMENTER_INVALID" in content:
+                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+            for token in ("load_profile", "packet_authority", "EXECUTION_PROFILE_REVISION"):
+                if token not in content:
+                    reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}")
+        else:
+            reasons.append("EXECUTION_PROFILE_AUTHORITY_CONTRACT_INVALID")
+    elif path == "tools/engineering-context.py":
+        if retired_rule_present(content, profile):
+            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/engineering-context.py")
         for required in ("AGENTS.md", ".engineering/project.yaml"):
             if required not in content:
-                reasons.append(
-                    f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/engineering-context.py:{required}"
-                )
+                reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/engineering-context.py:{required}")
     return reasons
 
 
@@ -518,10 +547,46 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     mode = str(_profile_engineering(head_profile).get("mode") or "")
     reasons: list[str] = []
 
+    base_execution_profile_text = _read_at(root, base, ".engineering/execution-profile.yaml")
+    head_execution_profile_text = _read_at(root, head, ".engineering/execution-profile.yaml")
+    base_execution_profile = None
+    head_execution_profile = None
+    profile_bootstrap = False
+    legacy_profile_absent = False
+
+    if base_execution_profile_text is not None:
+        try:
+            base_execution_profile = load_profile_text(base_execution_profile_text)
+        except ProfileError as exc:
+            reasons.append(f"EXECUTION_PROFILE_BASE_INVALID:{exc}")
+    if head_execution_profile_text is not None:
+        try:
+            head_execution_profile = load_profile_text(head_execution_profile_text)
+        except ProfileError as exc:
+            reasons.append(f"EXECUTION_PROFILE_HEAD_INVALID:{exc}")
+
+    if base_execution_profile_text is None and head_execution_profile is not None:
+        profile_bootstrap = True
+        if head_execution_profile.get("authority_contract") != "legacy-v2":
+            reasons.append("EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID")
+    elif base_execution_profile is not None and head_execution_profile is not None:
+        reasons.extend(profile_transition_reasons(base_execution_profile_text, head_execution_profile_text))
+    elif base_execution_profile_text is not None and head_execution_profile_text is None:
+        reasons.append("EXECUTION_PROFILE_HEAD_MISSING")
+    elif base_execution_profile_text is None and head_execution_profile_text is None:
+        # Backward-compatible fixture/pre-bridge evaluation only. Once a base owns
+        # a profile, deleting it is covered by the branch above and fails closed.
+        legacy_profile_absent = True
+        try:
+            canonical_text = (Path(__file__).resolve().parents[1] / ".engineering/execution-profile.yaml").read_text(encoding="utf-8")
+            head_execution_profile = load_profile_text(canonical_text)
+        except (OSError, ProfileError) as exc:
+            reasons.append(f"EXECUTION_PROFILE_FALLBACK_INVALID:{exc}")
+
+    active_execution_profile = head_execution_profile or base_execution_profile
+
     if head_epoch < base_epoch:
-        reasons.append(
-            f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
-        )
+        reasons.append(f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}")
 
     epoch_guarded_surfaces = PROTECTED_GOVERNANCE_SURFACES + EPOCH_GUARDED_GOVERNANCE_SURFACES + (
         CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES if mode == "canonical" else ()
@@ -529,6 +594,16 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     root_migration_surfaces = set(EPOCH_GUARDED_GOVERNANCE_SURFACES)
     if mode == "canonical":
         root_migration_surfaces.update(CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES)
+    if profile_bootstrap:
+        # The old base helper cannot name newly introduced profile/adoption
+        # surfaces. They become root-protected immediately after this bridge merges.
+        bootstrap_new_surfaces = set(EXECUTION_PROFILE_SURFACES) | set(POST_BRIDGE_CANONICAL_SURFACES)
+        root_migration_surfaces.difference_update(bootstrap_new_surfaces)
+    if legacy_profile_absent:
+        pre_bridge_only = set(EXECUTION_PROFILE_SURFACES) | set(POST_BRIDGE_CANONICAL_SURFACES)
+        epoch_guarded_surfaces = tuple(path for path in epoch_guarded_surfaces if path not in pre_bridge_only)
+        root_migration_surfaces.difference_update(pre_bridge_only)
+
     changed_root_surfaces: list[str] = []
     for path in epoch_guarded_surfaces:
         base_content = _read_at(root, base, path)
@@ -540,46 +615,33 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             if path in root_migration_surfaces:
                 changed_root_surfaces.append(path)
             if head_epoch == base_epoch:
-                reasons.append(
-                    f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}"
-                )
+                reasons.append(f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}")
 
     if changed_root_surfaces and head_epoch > base_epoch:
-        reasons.extend(
-            _root_migration_reasons(
-                root,
-                base,
-                head,
-                base_epoch,
-                head_epoch,
-                changed_root_surfaces,
-            )
-        )
+        reasons.extend(_root_migration_reasons(root, base, head, base_epoch, head_epoch, changed_root_surfaces))
 
     if mode == "adopted":
-        workflow = _read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW)
-        reasons.extend(_adopted_workflow_reasons(workflow, head_profile))
+        reasons.extend(_adopted_workflow_reasons(_read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW), head_profile))
     elif mode == "canonical":
-        floor_workflow = _read_at(root, head, GOVERNANCE_REUSABLE_WORKFLOW)
-        reasons.extend(_canonical_floor_workflow_reasons(floor_workflow))
-        validate_workflow = _read_at(root, head, CANONICAL_VALIDATE_WORKFLOW)
-        reasons.extend(_canonical_validate_reasons(validate_workflow))
+        reasons.extend(_canonical_floor_workflow_reasons(_read_at(root, head, GOVERNANCE_REUSABLE_WORKFLOW)))
+        reasons.extend(_canonical_validate_reasons(_read_at(root, head, CANONICAL_VALIDATE_WORKFLOW)))
     else:
         reasons.append("GOVERNANCE_PROJECT_MODE_INVALID")
 
-    for path in MANAGED_EXECUTION_SURFACES:
-        content = _read_at(root, head, path)
-        if content is None:
-            reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
-            continue
-        reasons.extend(_execution_surface_reasons(path, content))
-
-    for path in RETIRED_AGENT_ARTIFACTS:
-        if _tree_has_path(root, head, path):
-            reasons.append(f"RETIRED_AGENT_ARTIFACT_REINTRODUCED:{path}")
+    if active_execution_profile is not None:
+        for path in MANAGED_EXECUTION_SURFACES:
+            content = _read_at(root, head, path)
+            if content is None:
+                reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
+                continue
+            reasons.extend(_execution_surface_reasons(path, content, active_execution_profile))
+        for path in retired_artifact_paths(active_execution_profile):
+            if _tree_has_path(root, head, path):
+                reasons.append(f"RETIRED_AGENT_ARTIFACT_REINTRODUCED:{path}")
 
     reasons = sorted(set(reasons))
     return ("BLOCK" if reasons else "PASS"), reasons, base_epoch, head_epoch
+
 
 
 def main() -> int:

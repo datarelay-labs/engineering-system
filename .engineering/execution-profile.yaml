@@ -1,0 +1,49 @@
+contract_version: 1
+profile_id: datarelay-managed
+revision: 1
+runtime:
+  primary: CHATGPT_CHAT
+  optional_reviewers:
+  - CODEX
+  disabled:
+  - CURSOR
+packet_compatibility:
+  legacy_v2_implementers:
+    CHATGPT_CHAT: datarelay-managed
+retired_surface:
+  artifact_paths:
+  - .cursor
+  - .cursorignore
+  - .cursorrules
+  text_patterns:
+  - (?i)IMPLEMENTER\s*=\s*CURSOR
+  - (?i)cursor[-_ ]?agent
+  - (?i)\bagent\s+persist\b
+  - (?i)/work-resume\b
+  - (?i)\.cursor(?:/|\b)
+  - (?i)\bcursor\s+(?:adapter|session|implementation|implementer|worker|execution\s+rule)\b
+  - (?i)\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to|reactivate)\s+(?:the\s+)?cursor\b
+  remove_exact_text:
+  - ChatGPT Chat is the default implementer for this repository when the authenticated
+    active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor
+    is disabled by default and must not be started, resumed, or waited on unless the
+    owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.
+  - 15. Cursor adapter is disabled by default and must not be started, resumed, attached
+    to, waited on, or used for implementation unless the owner explicitly reactivates
+    it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session
+    state must never block normal Atlas development.
+effect_policy:
+  trusted_boundary_required:
+  - production
+  - destructive
+  - credential
+  - permission_boundary
+  - irreversible_publication
+  - release_authority
+policy_migration:
+  legacy_execution_profile_markers:
+  - '- The current managed execution profile authorizes'
+  - '- ChatGPT Chat is the implementation path.'
+  legacy_external_write_markers:
+  - '- Before an external Issue/PR write,'
+authority_contract: legacy-v2
