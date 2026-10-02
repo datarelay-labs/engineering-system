@@ -472,6 +472,58 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
 
 
+def test_general_upgrade_requires_stage_a_bridge_before_profile_v3() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-prebridge-upgrade"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/prebridge-upgrade\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.5"
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        for rel in (
+            ".engineering/execution-profile.yaml",
+            "tools/execution_profile.py",
+            "schemas/execution-profile.schema.json",
+        ):
+            (target / rel).unlink()
+        commit_all(target, "simulate supported pre-bridge adoption")
+        before = run("git", "status", "--porcelain", cwd=target).stdout
+        blocked = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert "requires the Stage-A legacy-v2 execution-profile bridge" in blocked.stdout
+        assert run("git", "status", "--porcelain", cwd=target).stdout == before
+
+
 def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-governance-repair"
@@ -3050,6 +3102,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()

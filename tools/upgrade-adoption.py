@@ -1164,6 +1164,13 @@ def main() -> int:
         root, old_baseline
     )
     planned_execution_profile = plan_execution_profile_install(root, old_baseline)
+    if planned_execution_profile and not run_git(
+        root, "show", f"{base_head}:.engineering/execution-profile.yaml"
+    ):
+        raise SystemExit(
+            "FAIL managed upgrade requires the Stage-A legacy-v2 execution-profile "
+            "bridge before profile-v3 cutover"
+        )
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)

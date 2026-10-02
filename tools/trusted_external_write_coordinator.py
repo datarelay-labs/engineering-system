@@ -75,6 +75,23 @@ def _effect(path:Path)->dict[str,Any]:
     if not isinstance(x,dict):raise CoordinatorError("effect must be object")
     return x
 
+def _require_profile_inputs_match_subject(root:Path,subject_head:str)->None:
+    if SHA_RE.fullmatch(subject_head) is None:
+        raise CoordinatorError("external write subject HEAD is invalid")
+    local_head=subprocess.run(
+        ["git","-C",str(root),"rev-parse","HEAD"],
+        stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,check=False,
+    )
+    if local_head.returncode or local_head.stdout.strip().lower()!=subject_head:
+        raise CoordinatorError("target worktree HEAD does not match external write subject")
+    diff=subprocess.run(
+        ["git","-C",str(root),"diff","--quiet",subject_head,"--",
+         ".engineering/project.yaml",EXECUTION_PROFILE_PATH],
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,
+    )
+    if diff.returncode!=0:
+        raise CoordinatorError("target execution-profile authority inputs differ from committed subject")
+
 def _canonical_execution_profile(gh:Path,root:Path,repository:str)->dict[str,Any]:
     try:
         project=yaml.safe_load((root/".engineering/project.yaml").read_text(encoding="utf-8")) or {}
@@ -132,6 +149,8 @@ def authorize(args:argparse.Namespace)->int:
     required={"TARGET_REPO":repo,"WORKSTREAM":str(effect.get("workstream") or ""),"STATUS":"ACTIVE","BRANCH":str(effect.get("branch") or ""),"INTENT_REVISION":str(effect.get("intent_revision") or "")}
     for k,v in required.items():
         if f.get(k)!=v:raise CoordinatorError(f"authoritative Work Packet mismatch: {k}")
+    subject_head=str(effect.get("subject_head") or "").lower()
+    _require_profile_inputs_match_subject(args.root,subject_head)
     execution_profile=_canonical_execution_profile(gh,args.root,repo)
     profile_blocking,_=packet_authority(execution_profile,f)
     if profile_blocking:raise CoordinatorError("Work Packet execution profile is not authorized: "+profile_blocking[0])

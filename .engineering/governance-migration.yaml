@@ -20,4 +20,4 @@ changed_surfaces:
 - path: tools/governance_floor.py
   head_blob_sha: 1dd6ebb9ae8bc7350e50dfbeb65013b86e8cae88
 - path: tools/upgrade-adoption.py
-  head_blob_sha: bce42f61fe99bfe00367766dfa6579668da280b5
+  head_blob_sha: 94a3f276c7d9fa2f839bd91ba3a542e505713c02

@@ -8,6 +8,7 @@ SIGNER=ROOT/"tools/trusted_external_write_signer.py"
 def load(name,path):
     s=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(s);sys.modules[name]=m;s.loader.exec_module(m);return m
 fixtures=load("coord_fixtures",ROOT/"tools/skills_contract_fixtures.py")
+coordinator=load("trusted_external_write_coordinator",TOOL)
 HEAD=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
 BR=subprocess.check_output(["git","branch","--show-current"],cwd=ROOT,text=True).strip() or "ci/detached-head"
 def effect():
@@ -29,9 +30,33 @@ def run(t,gh,priv,pub):
     e=t/"effect.json";e.write_text(json.dumps(effect()));b=t/"binding.json";d=t/"dispatch.json"
     cp=subprocess.run([sys.executable,str(TOOL),"authorize","--repository","datarelay-labs/engineering-system","--issue-id","777","--root",str(ROOT),"--effect-json",str(e),"--binding-out",str(b),"--dispatch-out",str(d),"--session-id","chatgpt-bootstrap-1","--dispatch-id","bootstrap-dispatch-1","--ttl-seconds","120","--test-mode","--private-key",str(priv),"--public-key",str(pub),"--test-gh",str(gh),"--test-signer",str(SIGNER)],cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     return cp,b,d
+def test_profile_authority_inputs_are_bound_to_committed_subject(base:Path):
+    repo=base/"subject-binding";repo.mkdir()
+    subprocess.run(["git","init","-q",str(repo)],check=True)
+    subprocess.run(["git","-C",str(repo),"config","user.email","test@example.invalid"],check=True)
+    subprocess.run(["git","-C",str(repo),"config","user.name","Coordinator Test"],check=True)
+    (repo/".engineering").mkdir()
+    (repo/".engineering/project.yaml").write_text("engineering_system:\n  mode: canonical\n")
+    (repo/".engineering/execution-profile.yaml").write_text(
+        (ROOT/".engineering/execution-profile.yaml").read_text()
+    )
+    subprocess.run(["git","-C",str(repo),"add","."],check=True)
+    subprocess.run(["git","-C",str(repo),"commit","-qm","subject"],check=True)
+    head=subprocess.check_output(["git","-C",str(repo),"rev-parse","HEAD"],text=True).strip()
+    coordinator._require_profile_inputs_match_subject(repo,head)
+    profile=repo/".engineering/execution-profile.yaml"
+    profile.write_text(profile.read_text()+"\n# worker-local downgrade/tamper\n")
+    try:
+        coordinator._require_profile_inputs_match_subject(repo,head)
+    except coordinator.CoordinatorError as exc:
+        assert "differ from committed subject" in str(exc),str(exc)
+    else:
+        raise AssertionError("worker-writable profile input was accepted")
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         base=Path(td);priv,pub=fixtures.generate_keypair(base)
+        test_profile_authority_inputs_are_bound_to_committed_subject(base)
         for name,perm,impl,head,ok,needle in [
           ("ok","admin","CHATGPT_CHAT",HEAD,True,""),
           ("permission","read","CHATGPT_CHAT",HEAD,False,"permission is insufficient"),
