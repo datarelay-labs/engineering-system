@@ -195,7 +195,7 @@ def packet_authority(
     version = metadata.get("PACKET_VERSION", "")
     selected_id, selected_revision = profile_identity(profile)
     if version == "3":
-        if metadata.get("IMPLEMENTER"):
+        if "IMPLEMENTER" in metadata:
             blocking.append("EXECUTION_AUTHORITY_AMBIGUOUS")
         if metadata.get("EXECUTION_PROFILE") != selected_id:
             blocking.append("EXECUTION_PROFILE_ID_MISMATCH")
@@ -205,11 +205,13 @@ def packet_authority(
         elif int(revision) != selected_revision:
             blocking.append("EXECUTION_PROFILE_REVISION_MISMATCH")
     elif version == "2":
+        if "EXECUTION_PROFILE" in metadata or "EXECUTION_PROFILE_REVISION" in metadata:
+            blocking.append("EXECUTION_AUTHORITY_AMBIGUOUS")
         legacy = metadata.get("IMPLEMENTER", "")
         mapped = profile["packet_compatibility"]["legacy_v2_implementers"].get(legacy)
         if mapped != selected_id:
             blocking.append("LEGACY_PACKET_IMPLEMENTER_MISMATCH")
-        else:
+        elif not blocking:
             warnings.append("LEGACY_EXECUTION_PROFILE_COMPAT")
     else:
         blocking.append("PACKET_PROFILE_AUTHORITY_UNSUPPORTED")

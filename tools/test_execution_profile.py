@@ -53,6 +53,33 @@ def test_current_profile() -> None:
     )
     assert blocking == []
     assert warnings == ["LEGACY_EXECUTION_PROFILE_COMPAT"]
+
+    for extra in (
+        {"EXECUTION_PROFILE": profile_id},
+        {"EXECUTION_PROFILE_REVISION": str(revision)},
+        {
+            "EXECUTION_PROFILE": profile_id,
+            "EXECUTION_PROFILE_REVISION": str(revision),
+        },
+    ):
+        ambiguous, ambiguous_warnings = ep.packet_authority(
+            profile,
+            {"PACKET_VERSION": "2", "IMPLEMENTER": legacy_key, **extra},
+        )
+        assert "EXECUTION_AUTHORITY_AMBIGUOUS" in ambiguous
+        assert ambiguous_warnings == []
+
+    v3_with_legacy, _ = ep.packet_authority(
+        profile,
+        {
+            "PACKET_VERSION": "3",
+            "EXECUTION_PROFILE": profile_id,
+            "EXECUTION_PROFILE_REVISION": str(revision),
+            "IMPLEMENTER": "",
+        },
+    )
+    assert "EXECUTION_AUTHORITY_AMBIGUOUS" in v3_with_legacy
+
     assert ep.requires_trusted_boundary("production", profile)
     assert not ep.requires_trusted_boundary("ordinary_repo_write", profile)
 def test_synthetic_profile_is_core_neutral() -> None:
