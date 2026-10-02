@@ -18,6 +18,6 @@ changed_surfaces:
 - path: tools/context_epoch.py
   head_blob_sha: 47299cfafc31abbe07442689db134027eca6e252
 - path: tools/governance_floor.py
-  head_blob_sha: 49b8d88b57cea2e7e79ff6cc6eb815f582ffeaa1
+  head_blob_sha: 7e5d5ec5695f41b8621770cb2ea4c84948044d21
 - path: tools/upgrade-adoption.py
-  head_blob_sha: 87d73bf5a5ff90bb6a04811bfa435df6f272f350
+  head_blob_sha: 712d65a7787514d0a31661beeec1fd5e1d0fa7ed

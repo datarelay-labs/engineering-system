@@ -807,7 +807,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     head_execution_profile_text = _read_at(root, head, ".engineering/execution-profile.yaml")
     base_execution_profile = None
     head_execution_profile = None
-    profile_bootstrap = False
+    legacy_profile_bootstrap = False
     legacy_profile_absent = False
 
     if base_execution_profile_text is not None:
@@ -822,8 +822,10 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.append(f"EXECUTION_PROFILE_HEAD_INVALID:{exc}")
 
     if base_execution_profile_text is None and head_execution_profile is not None:
-        profile_bootstrap = True
-        if head_execution_profile.get("authority_contract") != "legacy-v2":
+        authority_contract = head_execution_profile.get("authority_contract")
+        if authority_contract == "legacy-v2":
+            legacy_profile_bootstrap = True
+        elif authority_contract != "profile-v3":
             reasons.append("EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID")
     elif base_execution_profile is not None and head_execution_profile is not None:
         reasons.extend(profile_transition_reasons(base_execution_profile_text, head_execution_profile_text))
@@ -850,9 +852,10 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     root_migration_surfaces = set(EPOCH_GUARDED_GOVERNANCE_SURFACES)
     if mode == "canonical":
         root_migration_surfaces.update(CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES)
-    if profile_bootstrap:
-        # The old base helper cannot name newly introduced profile/adoption
-        # surfaces. They become root-protected immediately after this bridge merges.
+    if legacy_profile_bootstrap:
+        # Stage-A's one-time legacy-v2 bridge predates these managed surfaces, so
+        # the old base helper cannot bind them. A direct profile-v3 restoration is
+        # different: it must stay root-migration-bound and is never exempt here.
         bootstrap_new_surfaces = set(EXECUTION_PROFILE_SURFACES) | set(POST_BRIDGE_CANONICAL_SURFACES)
         root_migration_surfaces.difference_update(bootstrap_new_surfaces)
     if legacy_profile_absent:

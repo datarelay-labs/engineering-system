@@ -1823,6 +1823,36 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         ).read_bytes()
         checked = run(sys.executable, str(CHECK), "--root", str(target))
         assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
+
+        packet_template = target / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
+        helper.unlink()
+        packet_template.unlink()
+        commit_all(target, "interrupt current-baseline managed surface writes")
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+        )
+        assert "CONTEXT_EPOCH_REPAIR=REQUIRED" in repaired.stdout
+        assert "WORK_PACKET_TEMPLATE_REPAIR=REQUIRED" in repaired.stdout
+        assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in repaired.stdout
+        assert (
+            "WORK_PACKET_TEMPLATE_SYNCED=.github/ISSUE_TEMPLATE/ai-work-packet.md"
+            in repaired.stdout
+        )
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        assert "ADOPTION_UPGRADE=NO_CHANGE" not in repaired.stdout
+        assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert packet_template.read_bytes() == (
+            ROOT / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
+        ).read_bytes()
+        checked = run(sys.executable, str(CHECK), "--root", str(target))
+        assert "ENGINEERING_SYSTEM_ADOPTION=PASS" in checked.stdout
+
         helper.write_text("#!/usr/bin/env python3\nprint('divergent')\n", encoding="utf-8")
         divergent = run(
             sys.executable,
@@ -2642,6 +2672,7 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
         ):
             (target / rel).unlink()
         commit_all(target, "remove managed execution profile bundle")
+        damaged_base = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
 
         repaired = run(
             sys.executable,
@@ -2657,12 +2688,31 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         after_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
         assert after_epoch == before_epoch + 1
-        for rel in (
+        expected_profile_surfaces = {
             ".engineering/execution-profile.yaml",
             "tools/execution_profile.py",
             "schemas/execution-profile.schema.json",
-        ):
+        }
+        for rel in expected_profile_surfaces:
             assert (target / rel).is_file(), rel
+        migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        assert expected_profile_surfaces.issubset(
+            {entry["path"] for entry in migration["changed_surfaces"]}
+        )
+        commit_all(target, "repair managed execution profile bundle")
+        repaired_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        floor_check = run(
+            sys.executable,
+            str(target / "tools/governance_floor.py"),
+            "check",
+            "--root",
+            str(target),
+            "--base-ref",
+            damaged_base,
+            "--head-ref",
+            repaired_head,
+        )
+        assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
 
 
 def test_same_baseline_partial_execution_profile_repair_records_manifest() -> None:

@@ -584,19 +584,41 @@ def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
         assert "GOVERNANCE_FLOOR=PASS" in result.stdout
 
 
-def test_execution_profile_bootstrap_rejects_direct_profile_v3() -> None:
+def test_execution_profile_v3_restore_requires_exact_root_migration() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        base = prebridge_fixture(root)
+        fixture(root)
+        write_managed(root, 4)
+        commit(root, "post-bridge profile-v3 base")
+        for rel in floor.EXECUTION_PROFILE_SURFACES:
+            (root / rel).unlink()
+        damaged_base = commit(root, "simulate missing execution profile bundle")
+
         project_path = root / ".engineering/project.yaml"
-        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = 2
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         install_execution_profile_fixture(root, authority_contract="profile-v3")
-        head = commit(root, "invalid direct profile-v3 bootstrap")
-        status, reasons, _, _ = floor.evaluate(root, base, head)
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 5
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        unmanifested_head = commit(root, "restore profile-v3 without migration evidence")
+        status, reasons, _, _ = floor.evaluate(root, damaged_base, unmanifested_head)
         assert status == "BLOCK"
-        assert "EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID" in reasons
+        assert "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING" in reasons
+
+        git(root, "reset", "--hard", damaged_base)
+        install_execution_profile_fixture(root, authority_contract="profile-v3")
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 5
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        write_root_migration(
+            root,
+            base=damaged_base,
+            from_epoch=4,
+            to_epoch=5,
+            paths=list(floor.EXECUTION_PROFILE_SURFACES),
+        )
+        manifested_head = commit(root, "restore profile-v3 with migration evidence")
+        status, reasons, _, _ = floor.evaluate(root, damaged_base, manifested_head)
+        assert status == "PASS", reasons
 
 def main() -> int:
     test_safe_head_passes()
@@ -616,7 +638,7 @@ def main() -> int:
     test_canonical_workflows_have_direct_floor()
     test_execution_profile_bootstrap_requires_legacy_contract()
     test_missing_execution_profile_helper_repair_uses_fallback()
-    test_execution_profile_bootstrap_rejects_direct_profile_v3()
+    test_execution_profile_v3_restore_requires_exact_root_migration()
     print("GOVERNANCE_FLOOR_TESTS=PASS")
     return 0
 

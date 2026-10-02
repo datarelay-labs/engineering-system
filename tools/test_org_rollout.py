@@ -379,6 +379,15 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert "managed-profile adoption missing required helper" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL retired runtime artifact must be removed: .cursor"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL managed-profile adoption missing required helper tools/context_epoch.py"
+    )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL project-specific custom rule requires owner input"
+    )
 
 
 def test_checkout_failure_continues_inventory() -> None:
