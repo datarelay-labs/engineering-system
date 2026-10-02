@@ -391,6 +391,140 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     return value
 
 
+def _has_durable_stage_a_bridge(
+    root: Path, base: str, expected_profile_id: str
+) -> bool:
+    """Prove the base descends from a governance-valid legacy-v2 bridge.
+
+    A policy epoch number is not durable bridge evidence by itself: a pre-bridge
+    branch can copy that number. For direct profile-v3 recovery after the managed
+    profile bundle is lost, require an ancestor that actually carried the legacy-v2
+    profile and whose own root migration still validates against its recorded base.
+    """
+    history = _git(
+        root,
+        "rev-list",
+        "--max-count=128",
+        base,
+        "--",
+        EXECUTION_PROFILE_SURFACES[0],
+    )
+    if history.returncode != 0:
+        return False
+    for candidate in history.stdout.splitlines():
+        if FULL_SHA_RE.fullmatch(candidate) is None:
+            continue
+        profile_text = _read_at(root, candidate, EXECUTION_PROFILE_SURFACES[0])
+        if profile_text is None:
+            continue
+        try:
+            profile = load_profile_text(profile_text)
+        except ProfileError:
+            continue
+        if (
+            profile.get("authority_contract") != "legacy-v2"
+            or profile.get("profile_id") != expected_profile_id
+        ):
+            continue
+
+        manifest_text = _read_at(root, candidate, ROOT_MIGRATION_MANIFEST)
+        if manifest_text is None:
+            continue
+        try:
+            manifest = yaml.safe_load(manifest_text) or {}
+        except yaml.YAMLError:
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        stage_base = manifest.get("base_sha")
+        if not isinstance(stage_base, str) or FULL_SHA_RE.fullmatch(stage_base) is None:
+            continue
+        if _git(
+            root, "merge-base", "--is-ancestor", stage_base, candidate
+        ).returncode != 0:
+            continue
+        if _git(
+            root, "merge-base", "--is-ancestor", candidate, base
+        ).returncode != 0:
+            continue
+        try:
+            status, _reasons, from_epoch, to_epoch = evaluate(
+                root, stage_base, candidate
+            )
+        except ValueError:
+            continue
+        if status == "PASS" and from_epoch < 3 <= to_epoch:
+            return True
+    return False
+
+
+def _has_durable_profile_v3_snapshot(
+    root: Path, base: str, expected_profile_id: str
+) -> bool:
+    """Accept a committed post-bridge profile-v3 state already owned by the base.
+
+    Repositories first adopted after the profile-v3 cutover legitimately have no
+    legacy-v2 bridge in their own history. A prior committed profile-v3 snapshot at
+    the post-bridge policy epoch is durable evidence because the current candidate
+    cannot manufacture it in the immutable base ancestry.
+    """
+    history = _git(
+        root,
+        "rev-list",
+        "--max-count=128",
+        base,
+        "--",
+        EXECUTION_PROFILE_SURFACES[0],
+    )
+    if history.returncode != 0:
+        return False
+    for candidate in history.stdout.splitlines():
+        if FULL_SHA_RE.fullmatch(candidate) is None:
+            continue
+        profile_text = _read_at(root, candidate, EXECUTION_PROFILE_SURFACES[0])
+        if profile_text is None:
+            continue
+        try:
+            profile = load_profile_text(profile_text)
+            project = _profile(
+                _read_at(root, candidate, ".engineering/project.yaml"),
+                "post-bridge",
+            )
+            epoch = _policy_epoch(project, "post-bridge")
+        except (ProfileError, ValueError):
+            continue
+        if (
+            profile.get("authority_contract") != "profile-v3"
+            or profile.get("profile_id") != expected_profile_id
+            or epoch < 4
+        ):
+            continue
+        engineering = project.get("engineering_system") or {}
+        if not isinstance(engineering, dict):
+            continue
+        mode = str(engineering.get("mode") or "")
+        if mode == "adopted":
+            baseline = str(engineering.get("baseline") or "")
+            if FULL_SHA_RE.fullmatch(baseline) is None:
+                continue
+        elif mode != "canonical":
+            continue
+        if any(
+            _read_at(root, candidate, rel) is None
+            for rel in EXECUTION_PROFILE_SURFACES
+        ):
+            continue
+        execution_invalid = False
+        for rel in MANAGED_EXECUTION_SURFACES:
+            content = _read_at(root, candidate, rel)
+            if content is None or _execution_surface_reasons(rel, content, profile):
+                execution_invalid = True
+                break
+        if not execution_invalid:
+            return True
+    return False
+
+
 def _root_migration_reasons(
     root: Path,
     base: str,
@@ -825,7 +959,14 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
         authority_contract = head_execution_profile.get("authority_contract")
         if authority_contract == "legacy-v2":
             legacy_profile_bootstrap = True
-        elif authority_contract != "profile-v3" or base_epoch < 3:
+        elif authority_contract == "profile-v3":
+            profile_id = str(head_execution_profile.get("profile_id") or "")
+            durable_post_bridge = _has_durable_stage_a_bridge(
+                root, base, profile_id
+            ) or _has_durable_profile_v3_snapshot(root, base, profile_id)
+            if base_epoch < 3 or not durable_post_bridge:
+                reasons.append("EXECUTION_PROFILE_STAGE_A_EVIDENCE_MISSING")
+        else:
             reasons.append("EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID")
     elif base_execution_profile is not None and head_execution_profile is not None:
         reasons.extend(profile_transition_reasons(base_execution_profile_text, head_execution_profile_text))

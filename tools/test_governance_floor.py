@@ -174,6 +174,33 @@ def prebridge_fixture(root: Path) -> str:
     return commit(root, "pre-bridge base")
 
 
+def stage_a_bridge_fixture(root: Path) -> str:
+    prebridge_fixture(root)
+    project_path = root / ".engineering/project.yaml"
+    project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+    project["engineering_system"]["policy_epoch"] = 2
+    project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+    stage_base = commit(root, "stage-a pre-bridge epoch-2 base")
+
+    install_execution_profile_fixture(root, authority_contract="legacy-v2")
+    project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+    project["engineering_system"]["policy_epoch"] = 3
+    project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+    helper = root / floor.GOVERNANCE_HELPER
+    helper.write_text(
+        helper.read_text(encoding="utf-8") + "\n# stage-a bridge fixture\n",
+        encoding="utf-8",
+    )
+    write_root_migration(
+        root,
+        base=stage_base,
+        from_epoch=2,
+        to_epoch=3,
+        paths=[floor.GOVERNANCE_HELPER],
+    )
+    return commit(root, "stage-a legacy-v2 bridge")
+
+
 def test_safe_head_passes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -584,41 +611,71 @@ def test_missing_execution_profile_helper_repair_uses_fallback() -> None:
         assert "GOVERNANCE_FLOOR=PASS" in result.stdout
 
 
-def test_execution_profile_v3_restore_requires_exact_root_migration() -> None:
+def test_execution_profile_v3_restore_requires_stage_a_and_exact_root_migration() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        fixture(root)
-        write_managed(root, 4)
-        commit(root, "post-bridge profile-v3 base")
+        stage_a_bridge_fixture(root)
         for rel in floor.EXECUTION_PROFILE_SURFACES:
             (root / rel).unlink()
-        damaged_base = commit(root, "simulate missing execution profile bundle")
+        damaged_base = commit(root, "simulate missing post-bridge execution profile bundle")
 
-        project_path = root / ".engineering/project.yaml"
-        install_execution_profile_fixture(root, authority_contract="profile-v3")
-        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = 5
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        write_managed(root, 4)
+        (root / floor.ROOT_MIGRATION_MANIFEST).unlink()
         unmanifested_head = commit(root, "restore profile-v3 without migration evidence")
         status, reasons, _, _ = floor.evaluate(root, damaged_base, unmanifested_head)
         assert status == "BLOCK"
         assert "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING" in reasons
 
         git(root, "reset", "--hard", damaged_base)
-        install_execution_profile_fixture(root, authority_contract="profile-v3")
-        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = 5
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        write_managed(root, 4)
+        changed_paths: list[str] = []
+        for rel in floor.EPOCH_GUARDED_GOVERNANCE_SURFACES:
+            before = floor._read_at(root, damaged_base, rel)
+            target = root / rel
+            after = target.read_text(encoding="utf-8") if target.is_file() else None
+            if before != after:
+                changed_paths.append(rel)
         write_root_migration(
             root,
             base=damaged_base,
-            from_epoch=4,
-            to_epoch=5,
-            paths=list(floor.EXECUTION_PROFILE_SURFACES),
+            from_epoch=3,
+            to_epoch=4,
+            paths=changed_paths,
         )
         manifested_head = commit(root, "restore profile-v3 with migration evidence")
         status, reasons, _, _ = floor.evaluate(root, damaged_base, manifested_head)
         assert status == "PASS", reasons
+
+
+def test_execution_profile_v3_restore_rejects_epoch_only_prebridge_base() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        prebridge_fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 3
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        fake_epoch_base = commit(root, "pre-bridge base with copied epoch number")
+
+        write_managed(root, 4)
+        changed_paths: list[str] = []
+        for rel in floor.EPOCH_GUARDED_GOVERNANCE_SURFACES:
+            before = floor._read_at(root, fake_epoch_base, rel)
+            target = root / rel
+            after = target.read_text(encoding="utf-8") if target.is_file() else None
+            if before != after:
+                changed_paths.append(rel)
+        write_root_migration(
+            root,
+            base=fake_epoch_base,
+            from_epoch=3,
+            to_epoch=4,
+            paths=changed_paths,
+        )
+        direct_v3_head = commit(root, "attempt direct profile-v3 without stage-a bridge")
+        status, reasons, _, _ = floor.evaluate(root, fake_epoch_base, direct_v3_head)
+        assert status == "BLOCK"
+        assert "EXECUTION_PROFILE_STAGE_A_EVIDENCE_MISSING" in reasons
 
 def main() -> int:
     test_safe_head_passes()
@@ -638,7 +695,8 @@ def main() -> int:
     test_canonical_workflows_have_direct_floor()
     test_execution_profile_bootstrap_requires_legacy_contract()
     test_missing_execution_profile_helper_repair_uses_fallback()
-    test_execution_profile_v3_restore_requires_exact_root_migration()
+    test_execution_profile_v3_restore_requires_stage_a_and_exact_root_migration()
+    test_execution_profile_v3_restore_rejects_epoch_only_prebridge_base()
     print("GOVERNANCE_FLOOR_TESTS=PASS")
     return 0
 

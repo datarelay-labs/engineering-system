@@ -372,6 +372,49 @@ def test_current_baseline_with_stale_execution_policy_is_repairable() -> None:
 
 
 
+def test_current_baseline_with_managed_byte_drift_is_repairable() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        packet_repo = base / "packet-drift"
+        packet_repo.mkdir()
+        init_repo(packet_repo)
+        adopt_python(packet_repo, BASELINE)
+        packet_path = packet_repo / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
+        packet = packet_path.read_text(encoding="utf-8")
+        packet_path.write_text(
+            "\n".join(
+                line
+                for line in packet.splitlines()
+                if not line.startswith("EXECUTION_PROFILE_REVISION=")
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        packet_result = org_rollout.classify_checkout(
+            packet_repo, "1.7.0", BASELINE
+        )
+        assert packet_result.state == "OUTDATED", packet_result
+        assert packet_result.action == "UPGRADE", packet_result
+        assert "managed repair required" in packet_result.detail
+
+        helper_repo = base / "helper-drift"
+        helper_repo.mkdir()
+        init_repo(helper_repo)
+        adopt_python(helper_repo, BASELINE)
+        helper_path = helper_repo / "tools/context_epoch.py"
+        helper_path.write_text(
+            helper_path.read_text(encoding="utf-8") + "\n# stale managed byte\n",
+            encoding="utf-8",
+        )
+        helper_result = org_rollout.classify_checkout(
+            helper_repo, "1.7.0", BASELINE
+        )
+        assert helper_result.state == "OUTDATED", helper_result
+        assert helper_result.action == "UPGRADE", helper_result
+        assert "managed repair required" in helper_result.detail
+
+
 def test_repair_markers_match_checker_diagnostics() -> None:
     assert "retired runtime artifact must be removed:" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
@@ -379,11 +422,23 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert "managed-profile adoption missing required helper" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
+    assert "managed Work Packet template missing required packet-v3 metadata" in (
+        org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
+    assert "differs from canonical managed helper" in (
+        org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
     assert org_rollout.repairable_structural_failure(
         "FAIL retired runtime artifact must be removed: .cursor"
     )
     assert org_rollout.repairable_structural_failure(
         "FAIL managed-profile adoption missing required helper tools/context_epoch.py"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL managed Work Packet template missing required packet-v3 metadata EXECUTION_PROFILE_REVISION"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL tools/context_epoch.py differs from canonical managed helper"
     )
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"
@@ -507,6 +562,7 @@ def main() -> int:
     test_same_version_different_baseline_is_outdated()
     test_incomplete_surfaces_not_reported_current()
     test_current_baseline_with_stale_execution_policy_is_repairable()
+    test_current_baseline_with_managed_byte_drift_is_repairable()
     test_repair_markers_match_checker_diagnostics()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()

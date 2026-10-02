@@ -1096,6 +1096,9 @@ def validate_governance_floor_contract():
         "automation_eligible",
         "GOVERNANCE_FLOOR=",
         "base_epoch < 3",
+        "_has_durable_stage_a_bridge",
+        "_has_durable_profile_v3_snapshot",
+        "EXECUTION_PROFILE_STAGE_A_EVIDENCE_MISSING",
     ):
         if token not in helper:
             raise SystemExit(f"FAIL governance floor helper missing token: {token}")

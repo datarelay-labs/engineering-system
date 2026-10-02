@@ -290,6 +290,8 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
     "AGENTS.md contains retired runtime compatibility rules",
     "retired runtime artifact must be removed:",
     "managed-profile adoption missing required helper",
+    "managed Work Packet template missing required packet-v3 metadata",
+    "differs from canonical managed helper",
 )
 
 
