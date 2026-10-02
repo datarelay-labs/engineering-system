@@ -166,6 +166,39 @@ def test_packet_v2_legacy_profile_compatibility() -> None:
     if "LEGACY_PACKET_IMPLEMENTER_MISMATCH" not in audit["blocking"]:
         fail(f"unknown legacy implementer did not block: {audit}")
 
+    ambiguous = body.replace(
+        "IMPLEMENTER=CHATGPT_CHAT\n",
+        "IMPLEMENTER=CHATGPT_CHAT\nEXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=2\n",
+        1,
+    )
+    parsed = ce.parse_packet(ambiguous)
+    audit = ce.analyze_packet(parsed)
+    if "EXECUTION_AUTHORITY_AMBIGUOUS" not in audit["blocking"]:
+        fail(f"legacy v2 profile fields did not block: {audit}")
+    if audit["compatibility"]:
+        fail(f"ambiguous v2 packet reported compatibility: {audit}")
+    try:
+        ce.project_packet(parsed)
+    except ce.ContextError as exc:
+        if "EXECUTION_AUTHORITY_AMBIGUOUS" not in str(exc):
+            fail(f"ambiguous v2 projection blocked for wrong reason: {exc}")
+    else:
+        fail("ambiguous v2 packet projection did not block")
+
+
+def test_nonstructural_authority_examples_do_not_change_metadata() -> None:
+    body = packet().replace(
+        "## Goal",
+        "```text\nEXECUTION_PROFILE=example-only\n```\n\n## Goal",
+        1,
+    )
+    parsed = ce.parse_packet(body)
+    audit = ce.analyze_packet(parsed)
+    if audit["status"] != "PASS":
+        fail(f"nonstructural authority example changed packet metadata: {audit}")
+    if parsed.metadata.get("EXECUTION_PROFILE") != "datarelay-managed":
+        fail(f"structural authority metadata was replaced: {parsed.metadata}")
+
 
 def test_packet_v1_and_versionless_are_not_runnable() -> None:
     v1 = packet().replace("PACKET_VERSION=3", "PACKET_VERSION=1", 1)
@@ -520,6 +553,7 @@ def main() -> None:
         test_refetched_projection_identity_binding,
         test_packet_v3_requires_authority_metadata,
         test_packet_v2_legacy_profile_compatibility,
+        test_nonstructural_authority_examples_do_not_change_metadata,
         test_packet_v1_and_versionless_are_not_runnable,
         test_identity_file_binding_and_fenced_examples,
         test_duplicate_metadata_and_unsafe_identity_block,

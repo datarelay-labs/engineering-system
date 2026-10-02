@@ -1,23 +1,14 @@
 contract_version: 1
-base_sha: 04ea5080440371e895d9a57570ba70e6a3318781
-from_policy_epoch: 3
-to_policy_epoch: 4
+base_sha: ef0b5560eb0880c232f3b360a5dea1f8f31b99c5
+from_policy_epoch: 4
+to_policy_epoch: 5
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Provider-neutral profile-v3 execution authority cutover while preserving
-  the Stage-A root bridge and managed adoption recovery path.
+rationale: Structural Work Packet authority parsing correction so only pre-heading, non-fenced metadata can influence execution-profile authorization and trusted external writes.
 changed_surfaces:
-- path: .engineering/execution-profile.yaml
-  head_blob_sha: 0a36da58caa3f1c0e1dca04af3837cc6a39b1f15
-- path: .github/workflows/adoption-compliance.yml
-  head_blob_sha: afd639c8d3e9493ec2449a6d43f02f00573876ac
 - path: tools/adopt.py
-  head_blob_sha: 9067202195a340a4c55f709260748f222a3e3497
-- path: tools/check-adoption.py
-  head_blob_sha: d42db70cbd2d231e793ba10f9f981a5db296e776
+  head_blob_sha: ba5575cf9058cecc04cb701f8dee6151625c2fed
 - path: tools/context_epoch.py
-  head_blob_sha: 47299cfafc31abbe07442689db134027eca6e252
-- path: tools/governance_floor.py
-  head_blob_sha: 1dd6ebb9ae8bc7350e50dfbeb65013b86e8cae88
-- path: tools/upgrade-adoption.py
-  head_blob_sha: 94a3f276c7d9fa2f839bd91ba3a542e505713c02
+  head_blob_sha: 76c6a511b63e45fba5672c62df4161cf8d584081
+- path: tools/execution_profile.py
+  head_blob_sha: fcfd1bfb398080f464ecd50bf820287987eff6ab

@@ -53,6 +53,33 @@ def test_current_profile() -> None:
     )
     assert blocking == []
     assert warnings == ["LEGACY_EXECUTION_PROFILE_COMPAT"]
+
+    for extra in (
+        {"EXECUTION_PROFILE": profile_id},
+        {"EXECUTION_PROFILE_REVISION": str(revision)},
+        {
+            "EXECUTION_PROFILE": profile_id,
+            "EXECUTION_PROFILE_REVISION": str(revision),
+        },
+    ):
+        ambiguous, ambiguous_warnings = ep.packet_authority(
+            profile,
+            {"PACKET_VERSION": "2", "IMPLEMENTER": legacy_key, **extra},
+        )
+        assert "EXECUTION_AUTHORITY_AMBIGUOUS" in ambiguous
+        assert ambiguous_warnings == []
+
+    v3_with_legacy, _ = ep.packet_authority(
+        profile,
+        {
+            "PACKET_VERSION": "3",
+            "EXECUTION_PROFILE": profile_id,
+            "EXECUTION_PROFILE_REVISION": str(revision),
+            "IMPLEMENTER": "",
+        },
+    )
+    assert "EXECUTION_AUTHORITY_AMBIGUOUS" in v3_with_legacy
+
     assert ep.requires_trusted_boundary("production", profile)
     assert not ep.requires_trusted_boundary("ordinary_repo_write", profile)
 def test_synthetic_profile_is_core_neutral() -> None:
@@ -128,6 +155,21 @@ def test_raw_packet_metadata_rejects_duplicates() -> None:
             raise AssertionError(f"duplicate packet metadata accepted: {key}")
 
 
+def test_raw_packet_metadata_ignores_nonstructural_examples() -> None:
+    body = """PACKET_VERSION=3
+EXECUTION_PROFILE=datarelay-managed
+EXECUTION_PROFILE_REVISION=2
+```text
+EXECUTION_PROFILE=example-only
+```
+## Current State
+EXECUTION_PROFILE=section-example
+"""
+    metadata = ep.parse_packet_metadata(body)
+    assert metadata["EXECUTION_PROFILE"] == "datarelay-managed"
+    assert metadata["EXECUTION_PROFILE_REVISION"] == "2"
+
+
 def test_disabled_runtime_cannot_be_legacy_compatible() -> None:
     raw = synthetic_profile()
     raw["packet_compatibility"]["legacy_v2_implementers"] = {
@@ -145,6 +187,7 @@ def main() -> int:
     test_synthetic_profile_is_core_neutral()
     test_transition_and_disabled_primary()
     test_raw_packet_metadata_rejects_duplicates()
+    test_raw_packet_metadata_ignores_nonstructural_examples()
     test_disabled_runtime_cannot_be_legacy_compatible()
     print("EXECUTION_PROFILE_TESTS=PASS")
     return 0
