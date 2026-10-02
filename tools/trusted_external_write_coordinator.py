@@ -75,27 +75,28 @@ def _effect(path:Path)->dict[str,Any]:
     if not isinstance(x,dict):raise CoordinatorError("effect must be object")
     return x
 
-def _require_profile_inputs_match_subject(root:Path,subject_head:str)->None:
-    if SHA_RE.fullmatch(subject_head) is None:
-        raise CoordinatorError("external write subject HEAD is invalid")
-    local_head=subprocess.run(
-        ["git","-C",str(root),"rev-parse","HEAD"],
-        stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,check=False,
-    )
-    if local_head.returncode or local_head.stdout.strip().lower()!=subject_head:
-        raise CoordinatorError("target worktree HEAD does not match external write subject")
-    diff=subprocess.run(
-        ["git","-C",str(root),"diff","--quiet",subject_head,"--",
-         ".engineering/project.yaml",EXECUTION_PROFILE_PATH],
-        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,
-    )
-    if diff.returncode!=0:
-        raise CoordinatorError("target execution-profile authority inputs differ from committed subject")
-
-def _canonical_execution_profile(gh:Path,root:Path,repository:str)->dict[str,Any]:
+def _github_blob(gh:Path,repository:str,path:str,ref:str,label:str)->bytes:
+    if SHA_RE.fullmatch(ref) is None:
+        raise CoordinatorError(f"{label} ref is invalid")
     try:
-        project=yaml.safe_load((root/".engineering/project.yaml").read_text(encoding="utf-8")) or {}
-    except (OSError,yaml.YAMLError) as exc:
+        doc=_run_json(gh,["api",f"repos/{repository}/contents/{path}?ref={ref}"])
+    except CoordinatorError as exc:
+        raise CoordinatorError(f"{label} is unavailable") from exc
+    if not isinstance(doc,dict) or doc.get("encoding")!="base64" or not isinstance(doc.get("content"),str):
+        raise CoordinatorError(f"{label} is unavailable")
+    try:
+        return base64.b64decode(doc["content"],validate=False)
+    except ValueError as exc:
+        raise CoordinatorError(f"{label} is invalid") from exc
+
+def _canonical_execution_profile(gh:Path,repository:str,subject_head:str)->dict[str,Any]:
+    try:
+        project_bytes=_github_blob(
+            gh,repository,".engineering/project.yaml",subject_head,
+            "target Engineering System profile",
+        )
+        project=yaml.safe_load(project_bytes.decode("utf-8")) or {}
+    except (UnicodeError,yaml.YAMLError) as exc:
         raise CoordinatorError("target Engineering System profile is unavailable") from exc
     engineering=project.get("engineering_system") if isinstance(project,dict) else None
     if not isinstance(engineering,dict):
@@ -106,26 +107,23 @@ def _canonical_execution_profile(gh:Path,root:Path,repository:str)->dict[str,Any
         if SHA_RE.fullmatch(baseline) is None:
             raise CoordinatorError("target Engineering System baseline is invalid")
     elif mode=="canonical" and repository==CANONICAL_REPOSITORY:
-        main_doc=_run_json(gh,["api",f"repos/{CANONICAL_REPOSITORY}/commits/main"])
-        baseline=str(main_doc.get("sha") or "").lower() if isinstance(main_doc,dict) else ""
-        if SHA_RE.fullmatch(baseline) is None:
-            raise CoordinatorError("canonical execution-profile baseline is unavailable")
+        baseline=subject_head
     else:
         raise CoordinatorError("target Engineering System mode is unsupported")
-    profile_doc=_run_json(gh,["api",f"repos/{CANONICAL_REPOSITORY}/contents/{EXECUTION_PROFILE_PATH}?ref={baseline}"])
-    if not isinstance(profile_doc,dict) or profile_doc.get("encoding")!="base64" or not isinstance(profile_doc.get("content"),str):
-        raise CoordinatorError("canonical execution profile is unavailable")
+    canonical_bytes=_github_blob(
+        gh,CANONICAL_REPOSITORY,EXECUTION_PROFILE_PATH,baseline,
+        "canonical execution profile",
+    )
+    target_bytes=_github_blob(
+        gh,repository,EXECUTION_PROFILE_PATH,subject_head,
+        "target execution profile",
+    )
     try:
-        canonical_bytes=base64.b64decode(profile_doc["content"],validate=False)
         canonical_text=canonical_bytes.decode("utf-8")
         profile=load_profile_text(canonical_text)
-    except (ValueError,UnicodeError,ProfileError) as exc:
+    except (UnicodeError,ProfileError) as exc:
         raise CoordinatorError("canonical execution profile is invalid") from exc
-    try:
-        local_bytes=(root/EXECUTION_PROFILE_PATH).read_bytes()
-    except OSError as exc:
-        raise CoordinatorError("target execution profile is unavailable") from exc
-    if local_bytes!=canonical_bytes:
+    if target_bytes!=canonical_bytes:
         raise CoordinatorError("target execution profile differs from immutable canonical baseline")
     return profile
 
@@ -150,15 +148,16 @@ def authorize(args:argparse.Namespace)->int:
     for k,v in required.items():
         if f.get(k)!=v:raise CoordinatorError(f"authoritative Work Packet mismatch: {k}")
     subject_head=str(effect.get("subject_head") or "").lower()
-    _require_profile_inputs_match_subject(args.root,subject_head)
-    execution_profile=_canonical_execution_profile(gh,args.root,repo)
-    profile_blocking,_=packet_authority(execution_profile,f)
-    if profile_blocking:raise CoordinatorError("Work Packet execution profile is not authorized: "+profile_blocking[0])
-    if f.get("LAST_VERIFIED_HEAD") != effect.get("subject_head"):raise CoordinatorError("authoritative Work Packet mismatch: LAST_VERIFIED_HEAD")
+    if SHA_RE.fullmatch(subject_head) is None:
+        raise CoordinatorError("external write subject HEAD is invalid")
+    if f.get("LAST_VERIFIED_HEAD") != subject_head:raise CoordinatorError("authoritative Work Packet mismatch: LAST_VERIFIED_HEAD")
     if f.get("CHANGE_RISK") not in {"LOW","MEDIUM","HIGH"}:raise CoordinatorError("Work Packet CHANGE_RISK is missing or invalid")
     branch_doc=_run_json(gh,["api",f"repos/{repo}/commits/{effect.get('branch','')}"])
     head=str(branch_doc.get("sha") or "").lower() if isinstance(branch_doc,dict) else ""
-    if SHA_RE.fullmatch(head) is None or head!=effect.get("subject_head"):raise CoordinatorError("authoritative branch HEAD mismatch")
+    if SHA_RE.fullmatch(head) is None or head!=subject_head:raise CoordinatorError("authoritative branch HEAD mismatch")
+    execution_profile=_canonical_execution_profile(gh,repo,subject_head)
+    profile_blocking,_=packet_authority(execution_profile,f)
+    if profile_blocking:raise CoordinatorError("Work Packet execution profile is not authorized: "+profile_blocking[0])
     snapshot_dir=Path(tempfile.mkdtemp(prefix="engineering-effect-",dir="/tmp"))
     snapshot=snapshot_dir/"effect.json"
     fd=os.open(snapshot,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
