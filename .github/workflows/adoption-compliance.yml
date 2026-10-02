@@ -35,6 +35,7 @@ jobs:
             tools/execution_profile.py
             tools/context_epoch.py
             tools/engineering-context.py
+            tools/governance_floor.py
             tools/implementation_preflight.py
             tools/terminal_completion_notify.py
             tools/work_packet_authority.py

@@ -10,7 +10,7 @@ changed_surfaces:
 - path: .engineering/execution-profile.yaml
   head_blob_sha: 0a36da58caa3f1c0e1dca04af3837cc6a39b1f15
 - path: .github/workflows/adoption-compliance.yml
-  head_blob_sha: 7b7dfa64c72306ec2fa8d01d296d5b4a9b4480aa
+  head_blob_sha: afd639c8d3e9493ec2449a6d43f02f00573876ac
 - path: tools/adopt.py
   head_blob_sha: 9067202195a340a4c55f709260748f222a3e3497
 - path: tools/check-adoption.py

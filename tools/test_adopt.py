@@ -2193,6 +2193,7 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
         "tools/adopt.py",
         "tools/execution_profile.py",
         "tools/engineering-context.py",
+        "tools/governance_floor.py",
         "tools/implementation_preflight.py",
         "tools/work_packet_authority.py",
         "tools/terminal_completion_notify.py",

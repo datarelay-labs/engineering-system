@@ -1056,6 +1056,7 @@ def validate_adoption_workflow_profile_bundle():
         ".engineering/execution-profile.yaml",
         "tools/execution_profile.py",
         "schemas/execution-profile.schema.json",
+        "tools/governance_floor.py",
         '--expected-baseline "$CALLED_WORKFLOW_SHA"',
         "--expected-mode adopted",
     ):
