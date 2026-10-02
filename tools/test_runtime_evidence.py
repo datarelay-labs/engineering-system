@@ -147,6 +147,15 @@ def private_record(repo: Path, capture: str = CAPTURE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def trace_runtime_or_failclosed(report: dict[str, str], supported: bool) -> bool:
+    if supported:
+        return True
+    assert report["RESULT"] == "EXECUTION_FAILED", report
+    assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+    assert report["EXECUTED"] == "NO", report
+    return False
+
+
 def test_exact_head_health_executes_once() -> None:
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
@@ -585,6 +594,7 @@ def test_symlink_subject_tree_does_not_execute() -> None:
 
 
 def test_unrelated_symlink_does_not_block_subject_tree() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -600,6 +610,8 @@ def test_unrelated_symlink_does_not_block_subject_tree() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "CAPTURED", report
             assert report["EXECUTED"] == "YES"
             assert private_record(repo)["raw_output"] == "ok\n"
@@ -608,6 +620,7 @@ def test_unrelated_symlink_does_not_block_subject_tree() -> None:
 
 
 def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
     command = "python3 health.py"
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -620,11 +633,772 @@ def test_unrelated_gitlink_does_not_block_subject_tree() -> None:
         trust(pub)
         try:
             report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
             assert report["RESULT"] == "CAPTURED", report
             assert report["EXECUTED"] == "YES"
             assert private_record(repo)["raw_output"] == "ok\n"
         finally:
             clear_trust()
+
+
+def test_indirect_symlink_fallback_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "indirect symlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["result"] == "EXECUTION_FAILED"
+            assert "raw_output" not in private_record(repo)
+        finally:
+            clear_trust()
+
+
+def test_trace_path_replacement_cannot_forge_captured_evidence() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-config')\n"
+        "_ = path.exists()\n"
+        "trace = Path('../file-access.trace')\n"
+        "try:\n"
+        "    trace.unlink()\n"
+        "except FileNotFoundError:\n"
+        "    pass\n"
+        "trace.write_text('')\n"
+        "print('FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "trace replacement regression")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+            assert "raw_output" not in private_record(repo)
+        finally:
+            clear_trust()
+
+
+def test_trace_observer_is_hidden_from_tracee_proc() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "parent = os.getppid()\n"
+        "visible = Path(f'/proc/{parent}/fd').exists()\n"
+        "print(f'PPID={parent} PARENT_FDS={\"VISIBLE\" if visible else \"HIDDEN\"}')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "trace observer namespace isolation")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+            assert "raw_output" not in private_record(repo)
+        finally:
+            clear_trust()
+
+
+def test_parent_relative_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('../tree/optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "parent relative unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_indirect_gitlink_fallback_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('vendor/dependency/config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"health.py": script})
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "indirect gitlink")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_unavailable_trace_isolation_blocks_before_execution() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "trace isolation unavailable")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        original = runtime_evidence._trace_isolation_supported
+        runtime_evidence._trace_isolation_supported = lambda: False
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+            assert report["EXECUTED"] == "NO", report
+            assert runs(repo) == 0
+        finally:
+            runtime_evidence._trace_isolation_supported = original
+            clear_trust()
+
+
+def test_procfs_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('/proc/self/cwd/optional-config')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "procfs unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_linux_alias_variants_to_unsafe_entry_are_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    scripts = {
+        "double-root": (
+            "from pathlib import Path\n"
+            "path = Path('//proc/self/cwd/optional-config')\n"
+            "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+        ),
+        "standard-stream": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "os.close(0)\n"
+            "fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY)\n"
+            "assert fd == 0\n"
+            "path = Path('/dev/stdin/optional-config')\n"
+            "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+        ),
+    }
+    for label, script in scripts.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            outside = base / "outside.conf"
+            outside.write_text("REAL\n", encoding="utf-8")
+            head = init_repo(repo, command, extra={"health.py": script})
+            (repo / "optional-config").symlink_to(outside)
+            git(repo, "add", "optional-config")
+            git(repo, "commit", "-m", f"{label} unsafe alias")
+            head = git(repo, "rev-parse", "HEAD")
+            request, pub = signed(repo, base, effect(head, command))
+            trust(pub)
+            try:
+                report = collect(repo, request)
+                if not trace_runtime_or_failclosed(report, supported):
+                    continue
+                assert report["RESULT"] == "EXECUTION_FAILED", (label, report)
+                assert report["REASON"] == "TRACE_AMBIGUOUS", (label, report)
+                assert report["EXECUTED"] == "YES"
+            finally:
+                clear_trust()
+
+
+def test_mount_alias_to_unsafe_entry_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import ctypes, os\n"
+        "from pathlib import Path\n"
+        "Path('alias').mkdir()\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "rc = libc.mount(b'.', b'alias', None, 4096, None)\n"
+        "path = Path('alias/optional-config')\n"
+        "print(path.read_text() if rc == 0 and path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "mount unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_symlink_component_before_dotdot_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "from pathlib import Path\n"
+        "path = Path('optional-dir/../status')\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside_dir = base / "outside-dir"
+        outside_dir.mkdir()
+        (base / "status").write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-dir").symlink_to(outside_dir, target_is_directory=True)
+        git(repo, "add", "optional-dir")
+        git(repo, "commit", "-m", "symlink component before dotdot")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_unix_socket_path_to_unsafe_entry_is_rejected() -> None:
+    import socket
+
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import socket\n"
+        "sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "try:\n"
+        "    sock.connect('optional-sock')\n"
+        "    print('CONNECTED')\n"
+        "except OSError:\n"
+        "    print('FALLBACK')\n"
+        "finally:\n"
+        "    sock.close()\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(outside))
+        server.listen(1)
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-sock").symlink_to(outside)
+        git(repo, "add", "optional-sock")
+        git(repo, "commit", "-m", "unix socket unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+            server.close()
+
+
+def test_nonpath_argv_does_not_block_unrelated_placeholder() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py optional-config"
+    script = "import sys\nprint(sys.argv[1])\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "nonpath argv placeholder")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "optional-config\n"
+        finally:
+            clear_trust()
+
+
+def test_seccomp_filter_install_attempt_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import ctypes\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "libc.prctl(22, 2, 0, 0, 0)\n"
+        "print('ok')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "seccomp filter attempt")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_setup_mount_names_do_not_block_unrelated_placeholders() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        for name in ("proc", "none"):
+            (repo / name).symlink_to(outside)
+            git(repo, "add", name)
+        git(repo, "commit", "-m", "setup mount names are unrelated placeholders")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "ok\n"
+        finally:
+            clear_trust()
+
+
+def test_ancestor_path_topology_change_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "os.rename('vendor', 'alias')\n"
+        "print('FOUND' if Path('alias/dependency').exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        head = init_repo(repo, command, extra={"health.py": script})
+        git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/dependency")
+        git(repo, "commit", "-m", "ancestor rename unsafe alias")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_AMBIGUOUS", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_directory_enumeration_preserves_unsafe_entry_name() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    script = (
+        "import os\n"
+        "print('FOUND' if 'optional-config' in os.listdir('.') else 'MISSING')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / "optional-config").symlink_to(outside)
+        git(repo, "add", "optional-config")
+        git(repo, "commit", "-m", "directory enumeration placeholder fidelity")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "CAPTURED", report
+            assert report["EXECUTED"] == "YES"
+            assert private_record(repo)["raw_output"] == "FOUND\n"
+        finally:
+            clear_trust()
+
+
+def test_non_ascii_unsafe_path_is_rejected() -> None:
+    supported = runtime_evidence._trace_isolation_supported()
+    command = "python3 health.py"
+    name = "caf\u00e9"
+    script = (
+        "from pathlib import Path\n"
+        f"path = Path({name!r})\n"
+        "print(path.read_text() if path.exists() else 'FALLBACK')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.conf"
+        outside.write_text("REAL\n", encoding="utf-8")
+        head = init_repo(repo, command, extra={"health.py": script})
+        (repo / name).symlink_to(outside)
+        git(repo, "add", name)
+        git(repo, "commit", "-m", "non ascii unsafe path")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            if not trace_runtime_or_failclosed(report, supported):
+                return
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "UNSAFE_TREE_DEPENDENCY", report
+            assert report["EXECUTED"] == "YES"
+        finally:
+            clear_trust()
+
+
+def test_unsafe_tree_requires_tracer_before_execution() -> None:
+    command = "python3 health.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        repo = base / "repo"
+        outside = base / "outside.txt"
+        outside.write_text("UNRELATED\n", encoding="utf-8")
+        head = init_repo(repo, command)
+        (repo / "unrelated-link").symlink_to(outside)
+        git(repo, "add", "unrelated-link")
+        git(repo, "commit", "-m", "tracer required")
+        head = git(repo, "rev-parse", "HEAD")
+        request, pub = signed(repo, base, effect(head, command))
+        original = runtime_evidence._trusted_trace_argv
+        runtime_evidence._trusted_trace_argv = lambda: None
+        trust(pub)
+        try:
+            report = collect(repo, request)
+            assert report["RESULT"] == "EXECUTION_FAILED", report
+            assert report["REASON"] == "TRACE_SETUP_UNAVAILABLE", report
+            assert report["EXECUTED"] == "NO"
+            assert runs(repo) == 0
+        finally:
+            runtime_evidence._trusted_trace_argv = original
+            clear_trust()
+
+
+def test_trace_parser_fails_closed_on_ambiguous_relative_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        work = base / "tree"
+        work.mkdir()
+        trace = base / "trace"
+        trace.write_text('123 chdir("vendor") = 0\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(3, "dependency", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(AT_FDCWD, "../tree/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "UNSAFE_TREE_DEPENDENCY"
+        trace.write_text('123 newfstatat(AT_FDCWD, "/proc/self/cwd/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 newfstatat(AT_FDCWD, "/proc/self/fd/7/vendor/dependency/config", 0x0, 0) = -1 ENOENT\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        for alias in (
+            "/proc/./self/cwd/vendor/dependency/config",
+            "/proc//self/cwd/vendor/dependency/config",
+            "//proc/self/cwd/vendor/dependency/config",
+            "/proc/self/task/123/fd/7/vendor/dependency/config",
+            "/dev/./fd/7/vendor/dependency/config",
+            "//dev/fd/7/vendor/dependency/config",
+            "/dev/stdin/vendor/dependency/config",
+            "/dev/stdout/vendor/dependency/config",
+            "/dev/stderr/vendor/dependency/config",
+        ):
+            trace.write_text(
+                f'123 newfstatat(AT_FDCWD, "{alias}", 0x0, 0) = -1 ENOENT\n',
+                encoding="utf-8",
+            )
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for non_cwd_dirfd in (
+            '123 renameat2(3</tmp/vendor>, "dependency", AT_FDCWD, "moved", 0) = -1 ENOENT\n',
+            '123 linkat(3</tmp/vendor>, "dependency", AT_FDCWD, "linked", 0) = -1 ENOENT\n',
+            '123 name_to_handle_at(3</tmp/vendor>, "dependency", 0x0, 0x0, 0) = -1 ENOENT\n',
+        ):
+            trace.write_text(non_cwd_dirfd, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for in_root_absolute_dirfd in (
+            '123 openat2(3<subject-root>, "/optional-config", {flags=O_RDONLY, resolve=RESOLVE_IN_ROOT}, 24) = -1 ENOENT\n',
+            '123 openat2(7, "/vendor/dependency/config", {flags=O_RDONLY|O_CLOEXEC, resolve=RESOLVE_BENEATH|RESOLVE_IN_ROOT}, 24) = -1 EINVAL\n',
+        ):
+            trace.write_text(in_root_absolute_dirfd, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("optional-config", "vendor/dependency")
+            ) == "TRACE_AMBIGUOUS"
+        trace.write_text(
+            '123 openat2(3<subject-root>, "/optional-config", {flags=O_RDONLY, resolve=0}, 24) = -1 ENOENT\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("optional-config",)
+        ) is None
+        for path_topology_change in (
+            '123 renameat2(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
+            '123 linkat(AT_FDCWD, "vendor", AT_FDCWD, "alias", 0) = 0\n',
+            '123 symlink("vendor", "alias") = 0\n',
+        ):
+            trace.write_text(path_topology_change, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        assert runtime_evidence.TRACE_SYSCALL_FILTER == (
+            "trace=%file,%process,io_uring_setup,io_uring_enter,io_uring_register,"
+            "seccomp,prctl,connect,bind,sendto,sendmsg,sendmmsg"
+        )
+        trace.write_text(
+            '123 connect(3, {sa_family=AF_UNIX, sun_path="vendor/dependency"}, 110) = -1 ENOENT\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("vendor/dependency",)
+        ) == "UNSAFE_TREE_DEPENDENCY"
+        trace.write_text(
+            '123 connect(3, {sa_family=AF_UNIX, sun_path=@"vendor/dependency"}, 20) = 0\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("vendor/dependency",)
+        ) is None
+        for multi_socket in (
+            '123 sendmmsg(3, [{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="safe.sock"}}}, '
+            '{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="vendor/dependency"}}}], 2, 0) = 2\n',
+            '123 sendmmsg(3, [{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path=@"abstract"}}}, '
+            '{msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="vendor/dependency"}}}], 2, 0) = 2\n',
+        ):
+            trace.write_text(multi_socket, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "UNSAFE_TREE_DEPENDENCY"
+        trace.write_text(
+            '123 execve("/usr/bin/python3", ["python3", "health.py", "optional-config"], 0x0) = 0\n',
+            encoding="utf-8",
+        )
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("optional-config",)
+        ) is None
+        for unresolved_path in (
+            "optional-dir/../status",
+            "vendor/dependency/../safe",
+            "vendor/./dependency/../safe",
+            f"{work}/optional-dir/../status",
+            f"//{str(work).lstrip('/')}/optional-dir/../status",
+            f"../{work.name}/optional-dir/../status",
+        ):
+            assert runtime_evidence._trace_path_dependency_reason(
+                unresolved_path, str(work), ("optional-dir", "vendor/dependency")
+            ) == "UNSAFE_TREE_DEPENDENCY"
+        assert runtime_evidence._trace_path_dependency_reason(
+            "safe/../vendor/dependency", str(work), ("vendor/dependency",)
+        ) == "UNSAFE_TREE_DEPENDENCY"
+        for filter_install in (
+            "123 seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, 0x7fff0000) = 3\n",
+            "123 prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, 0x7fff0000) = 0\n",
+        ):
+            trace.write_text(filter_install, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 prctl(PR_SET_NAME, "proc") = 0\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(
+            trace, work, ("proc",)
+        ) is None
+        for io_uring_call in (
+            "123 io_uring_setup(8, 0x7fff0000) = 3\n",
+            "123 io_uring_enter(3, 1, 1, 0, NULL, 8) = 1\n",
+            "123 io_uring_register(3, IORING_REGISTER_FILES, 0x0, 0) = 0\n",
+        ):
+            trace.write_text(io_uring_call, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for topology_change in (
+            '123 mount(".", "/tmp/alias", NULL, MS_BIND, NULL) = 0\n',
+            '123 move_mount(3, "", 4, "", MOVE_MOUNT_F_EMPTY_PATH) = 0\n',
+            '123 open_tree(AT_FDCWD, ".", OPEN_TREE_CLONE) = 5\n',
+        ):
+            trace.write_text(topology_change, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        for setup_mount, setup_name in (
+            ('123 mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL) = 0\n', "none"),
+            ('123 mount("proc", "/proc", "proc", MS_NOSUID|MS_NODEV|MS_NOEXEC, NULL) = 0\n', "proc"),
+        ):
+            trace.write_text(setup_mount, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) is None
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, (setup_name,)
+            ) is None
+        for disguised_mount in (
+            '123 mount("none", "/", NULL, MS_BIND, NULL) = 0\n',
+            '123 mount("proc", "/proc", "proc", MS_BIND, NULL) = 0\n',
+        ):
+            trace.write_text(disguised_mount, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        trace.write_text('123 clone(child_stack=NULL, flags=CLONE_UNTRACED|SIGCHLD) = 124\n', encoding="utf-8")
+        assert runtime_evidence._trace_unsafe_access_reason(trace, work, ("vendor/dependency",)) == "TRACE_AMBIGUOUS"
+        for root_change in (
+            '123 chroot(".") = 0\n',
+            '[pid 123] pivot_root(".", ".old") = 0\n',
+            'chroot("/tmp/elsewhere") = -1 EPERM (Operation not permitted)\n',
+        ):
+            trace.write_text(root_change, encoding="utf-8")
+            assert runtime_evidence._trace_unsafe_access_reason(
+                trace, work, ("vendor/dependency",)
+            ) == "TRACE_AMBIGUOUS"
+        assert runtime_evidence._decode_trace_string(r"caf\303\251") == "caf\u00e9"
+        assert runtime_evidence._decode_trace_string(r"bad\377") == os.fsdecode(b"bad\xff")
 
 
 def test_referenced_gitlink_does_not_execute() -> None:
@@ -1289,6 +2063,25 @@ def main() -> int:
     test_symlink_subject_tree_does_not_execute()
     test_unrelated_symlink_does_not_block_subject_tree()
     test_unrelated_gitlink_does_not_block_subject_tree()
+    test_indirect_symlink_fallback_is_rejected()
+    test_trace_path_replacement_cannot_forge_captured_evidence()
+    test_trace_observer_is_hidden_from_tracee_proc()
+    test_parent_relative_alias_to_unsafe_entry_is_rejected()
+    test_indirect_gitlink_fallback_is_rejected()
+    test_unavailable_trace_isolation_blocks_before_execution()
+    test_procfs_alias_to_unsafe_entry_is_rejected()
+    test_linux_alias_variants_to_unsafe_entry_are_rejected()
+    test_mount_alias_to_unsafe_entry_is_rejected()
+    test_symlink_component_before_dotdot_is_rejected()
+    test_unix_socket_path_to_unsafe_entry_is_rejected()
+    test_nonpath_argv_does_not_block_unrelated_placeholder()
+    test_seccomp_filter_install_attempt_is_rejected()
+    test_setup_mount_names_do_not_block_unrelated_placeholders()
+    test_ancestor_path_topology_change_is_rejected()
+    test_directory_enumeration_preserves_unsafe_entry_name()
+    test_non_ascii_unsafe_path_is_rejected()
+    test_unsafe_tree_requires_tracer_before_execution()
+    test_trace_parser_fails_closed_on_ambiguous_relative_state()
     test_referenced_gitlink_does_not_execute()
     test_replace_ref_cannot_rewrite_subject_head()
     test_caller_environment_cannot_inject_execution()
