@@ -440,18 +440,77 @@ def test_cli_lint_and_identity() -> None:
         path.write_text(packet(), encoding="utf-8")
         lint = subprocess.run(
             ["python3", str(ROOT / "tools/context_epoch.py"), "packet-lint", "--body-file", str(path)],
-            cwd=ROOT, text=True, capture_output=True, check=False,
+            cwd=Path(tmp), text=True, capture_output=True, check=False,
         )
         if lint.returncode != 0 or json.loads(lint.stdout)["status"] != "PASS":
             fail(f"packet lint failed: {lint.stdout} {lint.stderr}")
         identity = subprocess.run(
             ["python3", str(ROOT / "tools/context_epoch.py"), "packet-identity", "--body-file", str(path)],
-            cwd=ROOT, text=True, capture_output=True, check=False,
+            cwd=Path(tmp), text=True, capture_output=True, check=False,
         )
         if identity.returncode != 0 or "PACKET_IDENTITY=PASS" not in identity.stdout:
             fail(f"packet identity failed: {identity.stdout} {identity.stderr}")
         if "## Current State" in identity.stdout:
             fail("identity command leaked body sections")
+
+
+def test_cli_lint_explicit_profile_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        temp = Path(tmp)
+        profile_root = temp / "profile-root"
+        (profile_root / ".engineering").mkdir(parents=True)
+        profile_text = (ROOT / ".engineering/execution-profile.yaml").read_text(
+            encoding="utf-8"
+        )
+        profile_text = profile_text.replace("datarelay-managed", "secondary-profile")
+        profile_text = profile_text.replace("revision: 2", "revision: 9", 1)
+        (profile_root / ".engineering/execution-profile.yaml").write_text(
+            profile_text,
+            encoding="utf-8",
+        )
+        path = temp / "secondary-packet.md"
+        path.write_text(
+            packet()
+            .replace(
+                "EXECUTION_PROFILE=datarelay-managed",
+                "EXECUTION_PROFILE=secondary-profile",
+            )
+            .replace("EXECUTION_PROFILE_REVISION=2", "EXECUTION_PROFILE_REVISION=9"),
+            encoding="utf-8",
+        )
+        explicit = subprocess.run(
+            [
+                "python3",
+                str(ROOT / "tools/context_epoch.py"),
+                "packet-lint",
+                "--root",
+                str(profile_root),
+                "--body-file",
+                str(path),
+            ],
+            cwd=temp,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if explicit.returncode != 0 or json.loads(explicit.stdout)["status"] != "PASS":
+            fail(f"explicit profile root lint failed: {explicit.stdout} {explicit.stderr}")
+        default = subprocess.run(
+            [
+                "python3",
+                str(ROOT / "tools/context_epoch.py"),
+                "packet-lint",
+                "--body-file",
+                str(path),
+            ],
+            cwd=temp,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        blocking = json.loads(default.stdout).get("blocking", [])
+        if default.returncode != 2 or "EXECUTION_PROFILE_ID_MISMATCH" not in blocking:
+            fail(f"default profile root not enforced: {default.stdout} {default.stderr}")
 
 
 def main() -> None:
@@ -474,6 +533,7 @@ def main() -> None:
         test_adoption_compliance_carries_context_helper_baseline,
         test_adoption_compliance_carries_implementation_preflight_baseline,
         test_cli_lint_and_identity,
+        test_cli_lint_explicit_profile_root,
     ]
     for test in tests:
         test()
