@@ -288,8 +288,8 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
 REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
     "AGENTS.md missing managed continuous-execution policy",
     "AGENTS.md contains retired runtime compatibility rules",
-    "retired agent artifact must be removed:",
-    "Chat-primary adoption missing required helper tools/engineering-context.py",
+    "retired runtime artifact must be removed:",
+    "managed-profile adoption missing required helper",
 )
 
 
