@@ -20,6 +20,7 @@ BASELINE = "a" * 40
 NEW_BASELINE = "b" * 40
 CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
 TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
+CANONICAL_POLICY_EPOCH = int((yaml.safe_load((ROOT / ".engineering/project.yaml").read_text(encoding="utf-8")) or {})["engineering_system"]["policy_epoch"])
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -108,7 +109,7 @@ def test_clean_python_bootstrap() -> None:
         project = load_yaml(target / ".engineering/project.yaml")
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.7.0"
-        assert engineering["policy_epoch"] == 2
+        assert engineering["policy_epoch"] == CANONICAL_POLICY_EPOCH
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -493,7 +494,7 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         project_path = target / ".engineering/project.yaml"
         before_project = load_yaml(project_path)
         before_epoch = before_project["engineering_system"]["policy_epoch"]
-        assert before_epoch == 2
+        assert before_epoch == 3
 
         (target / "tools/governance_floor.py").unlink()
         commit_all(target, "remove managed governance helper")
@@ -535,6 +536,117 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         ).stdout.strip()
         assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
 
+
+
+def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-profile-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/profile-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        for rel in (
+            ".engineering/execution-profile.yaml",
+            "tools/execution_profile.py",
+            "schemas/execution-profile.schema.json",
+        ):
+            (target / rel).unlink()
+        commit_all(target, "remove managed execution profile bundle")
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        after_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        assert after_epoch == before_epoch + 1
+        for rel in (
+            ".engineering/execution-profile.yaml",
+            "tools/execution_profile.py",
+            "schemas/execution-profile.schema.json",
+        ):
+            assert (target / rel).is_file(), rel
+
+
+def test_same_baseline_partial_execution_profile_repair_records_manifest() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-profile-partial-repair"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/profile-partial-repair\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        (target / "tools/execution_profile.py").unlink()
+        commit_all(target, "remove managed execution profile helper only")
+        base_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        surfaces = {entry["path"] for entry in migration["changed_surfaces"]}
+        assert "tools/execution_profile.py" in surfaces
+        assert migration["base_sha"] == base_head
+        helper_blob = run(
+            "git", "hash-object", "tools/execution_profile.py", cwd=target
+        ).stdout.strip()
+        entry = next(
+            item for item in migration["changed_surfaces"]
+            if item["path"] == "tools/execution_profile.py"
+        )
+        assert entry["head_blob_sha"] == helper_blob
+        assert load_yaml(project_path)["engineering_system"]["policy_epoch"] == before_epoch + 1
 
 def test_same_baseline_repairs_managed_execution_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -595,13 +707,13 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         )
         assert "EXECUTION_POLICY_REPAIR=REQUIRED" in repaired.stdout
         assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
-        assert "POLICY_EPOCH_REPAIR=2" in repaired.stdout
+        assert f"POLICY_EPOCH_REPAIR={CANONICAL_POLICY_EPOCH}" in repaired.stdout
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         repaired_agents = agents_path.read_text(encoding="utf-8")
         assert repaired_agents.count("- **Execute useful work continuously.**") == 1
         assert "- preserve-same-baseline-rule" in repaired_agents
         repaired_project = load_yaml(project_path)
-        assert repaired_project["engineering_system"]["policy_epoch"] == 2
+        assert repaired_project["engineering_system"]["policy_epoch"] == CANONICAL_POLICY_EPOCH
 
 
 def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:
@@ -2579,6 +2691,8 @@ def main() -> int:
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
     test_same_baseline_governance_floor_repair_emits_root_migration()
+    test_same_baseline_execution_profile_repair_advances_epoch()
+    test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()

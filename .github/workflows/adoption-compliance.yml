@@ -33,8 +33,11 @@ jobs:
             tools/context_epoch.py
             tools/engineering-context.py
             tools/implementation_preflight.py
+            tools/execution_profile.py
+            schemas/execution-profile.schema.json
             tools/work_packet_authority.py
             .engineering/project.yaml
+            .engineering/execution-profile.yaml
             .engineering/requirements-engineering-system.txt
             .github/ISSUE_TEMPLATE/ai-work-packet.md
             templates/AGENTS.md
@@ -245,6 +248,9 @@ jobs:
               if canonical_version_tuple >= (1, 6, 5):
                   for rel in (
                       "tools/implementation_preflight.py",
+                      "tools/execution_profile.py",
+                      "schemas/execution-profile.schema.json",
+                      ".engineering/execution-profile.yaml",
                       "tools/context_epoch.py",
                       "tools/engineering-context.py",
                       "tools/work_packet_authority.py",

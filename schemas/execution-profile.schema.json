@@ -1,0 +1,162 @@
+{
+  "$id": "https://engineering.datarelay.run/schemas/execution-profile.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority_contract": {
+      "enum": [
+        "legacy-v2",
+        "profile-v3"
+      ],
+      "type": "string"
+    },
+    "contract_version": {
+      "const": 1
+    },
+    "effect_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "trusted_boundary_required": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "trusted_boundary_required"
+      ],
+      "type": "object"
+    },
+    "packet_compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "legacy_v2_implementers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "legacy_v2_implementers"
+      ],
+      "type": "object"
+    },
+    "policy_migration": {
+      "additionalProperties": false,
+      "properties": {
+        "legacy_execution_profile_markers": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "legacy_external_write_markers": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "legacy_execution_profile_markers",
+        "legacy_external_write_markers"
+      ],
+      "type": "object"
+    },
+    "profile_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "type": "string"
+    },
+    "retired_surface": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_paths": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "remove_exact_text": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "text_patterns": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "artifact_paths",
+        "text_patterns",
+        "remove_exact_text"
+      ],
+      "type": "object"
+    },
+    "revision": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "runtime": {
+      "additionalProperties": false,
+      "properties": {
+        "disabled": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "optional_reviewers": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "primary": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "primary",
+        "optional_reviewers",
+        "disabled"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "contract_version",
+    "profile_id",
+    "revision",
+    "runtime",
+    "packet_compatibility",
+    "retired_surface",
+    "effect_policy",
+    "policy_migration",
+    "authority_contract"
+  ],
+  "title": "Engineering System execution profile",
+  "type": "object"
+}

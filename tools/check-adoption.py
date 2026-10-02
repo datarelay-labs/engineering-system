@@ -26,6 +26,9 @@ MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
     ".engineering/requirements-engineering-system.txt",
     "tools/governance_floor.py",
+    ".engineering/execution-profile.yaml",
+    "tools/execution_profile.py",
+    "schemas/execution-profile.schema.json",
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
@@ -239,6 +242,9 @@ def main() -> int:
             for rel in (
                 "tools/implementation_preflight.py",
                 "tools/terminal_completion_notify.py",
+                "tools/execution_profile.py",
+                ".engineering/execution-profile.yaml",
+                "schemas/execution-profile.schema.json",
                 "tools/context_epoch.py",
                 "tools/engineering-context.py",
                 "tools/work_packet_authority.py",

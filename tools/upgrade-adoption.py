@@ -17,6 +17,7 @@ from adopt import (
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
     ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
+    EXECUTION_PROFILE_MANAGED,
     GOVERNANCE_FLOOR_MANAGED,
     IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
@@ -458,6 +459,23 @@ def apply_terminal_completion_notify_install(
     return installed
 
 
+def plan_execution_profile_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade the managed execution-profile root artifacts."""
+    return plan_managed_file_install(
+        root, EXECUTION_PROFILE_MANAGED, label="execution profile", old_baseline=old_baseline
+    )
+
+
+def apply_execution_profile_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_context_epoch_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed context-epoch bytes."""
     return plan_managed_file_install(
@@ -715,6 +733,9 @@ def main() -> int:
     if run_git(root, "status", "--porcelain") and not args.allow_dirty:
         raise SystemExit("FAIL target worktree is dirty; preserve unrelated work before upgrade")
     base_head = run_git(root, "rev-parse", "HEAD")
+    base_has_execution_profile = bool(
+        run_git(root, "show", f"{base_head}:.engineering/execution-profile.yaml")
+    )
     if not re.fullmatch(r"[0-9a-f]{40}", base_head):
         raise SystemExit("FAIL target base HEAD is unavailable")
 
@@ -774,10 +795,15 @@ def main() -> int:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
         planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
+        planned_execution_profile = plan_execution_profile_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+        planned_root_surfaces = {
+            **planned_dependencies,
+            **planned_governance_floor,
+            **(planned_execution_profile if base_has_execution_profile else {}),
+        }
         target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
-        if planned_root_surfaces:
+        if planned_root_surfaces or planned_execution_profile:
             target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
         policy_epoch_repair = target_policy_epoch != existing_policy_epoch
         root_migration = build_root_migration_manifest(
@@ -792,6 +818,7 @@ def main() -> int:
             not planned_engineering_context
             and not planned_dependencies
             and not planned_governance_floor
+            and not planned_execution_profile
             and planned_execution_policy is None
             and not retired_agent_artifacts
             and not policy_epoch_repair
@@ -804,6 +831,8 @@ def main() -> int:
             print("ENGINEERING_SYSTEM_DEPENDENCIES_REPAIR=REQUIRED")
         if planned_governance_floor:
             print("GOVERNANCE_FLOOR_REPAIR=REQUIRED")
+        if planned_execution_profile:
+            print("EXECUTION_PROFILE_REPAIR=REQUIRED")
         if policy_epoch_repair:
             print(f"POLICY_EPOCH_REPAIR={target_policy_epoch}")
         if root_migration is not None:
@@ -836,6 +865,10 @@ def main() -> int:
             root, planned_governance_floor
         )
         print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
+        installed_execution_profile = apply_execution_profile_install(
+            root, planned_execution_profile
+        )
+        print("EXECUTION_PROFILE_INSTALLED=" + (",".join(installed_execution_profile) if installed_execution_profile else "<none>"))
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         checker = CANONICAL / "tools" / "check-adoption.py"
@@ -1020,10 +1053,15 @@ def main() -> int:
     planned_terminal_completion_notify = plan_terminal_completion_notify_install(
         root, old_baseline
     )
+    planned_execution_profile = plan_execution_profile_install(root, old_baseline)
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)
-    planned_root_surfaces = {**planned_dependencies, **planned_governance_floor}
+    planned_root_surfaces = {
+        **planned_dependencies,
+        **planned_governance_floor,
+        **(planned_execution_profile if base_has_execution_profile else {}),
+    }
     if planned_root_surfaces:
         target_policy_epoch = max(POLICY_EPOCH, existing_policy_epoch + 1)
         engineering["policy_epoch"] = target_policy_epoch
@@ -1107,6 +1145,14 @@ def main() -> int:
         )
     else:
         print("TERMINAL_COMPLETION_NOTIFY_INSTALLED=<none>")
+
+    installed_execution_profile = apply_execution_profile_install(
+        root, planned_execution_profile
+    )
+    if installed_execution_profile:
+        print("EXECUTION_PROFILE_INSTALLED=" + ",".join(installed_execution_profile))
+    else:
+        print("EXECUTION_PROFILE_INSTALLED=<none>")
 
     installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
     if installed_context_epoch:

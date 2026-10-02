@@ -49,6 +49,9 @@ REQUIRED_METHOD_FILES = (
     "tools/upgrade-adoption.py",
     "tools/org-rollout.py",
     "tools/work_packet_authority.py",
+    "tools/execution_profile.py",
+    "tools/test_execution_profile.py",
+    "schemas/execution-profile.schema.json",
     "tools/context_epoch.py",
     "tools/test_context_epoch.py",
     "tools/context_compiler.py",
@@ -977,6 +980,20 @@ def validate_adoption_contract():
     print("PASS automated adoption standard/tool contract")
 
 
+def validate_adoption_workflow_profile_bundle():
+    workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
+    for rel in (
+        ".engineering/execution-profile.yaml",
+        "tools/execution_profile.py",
+        "schemas/execution-profile.schema.json",
+    ):
+        if workflow.count(rel) < 2:
+            raise SystemExit(
+                f"FAIL reusable adoption compliance does not fetch and validate execution-profile bundle: {rel}"
+            )
+    print("PASS reusable adoption execution-profile bundle contract")
+
+
 def validate_governance_floor_contract():
     workflow = (ROOT / ".github/workflows/governance-floor.yml").read_text(encoding="utf-8")
     helper = (ROOT / "tools/governance_floor.py").read_text(encoding="utf-8")
@@ -1003,7 +1020,9 @@ def validate_governance_floor_contract():
     for token in ("pull_request_target", "governance-floor.yml@", "base_sha:", "head_sha:"):
         if token not in adopted:
             raise SystemExit(f"FAIL adopted workflow missing governance-floor token: {token}")
-    if "POLICY_EPOCH = 2" not in adopt or "policy_epoch" not in check:
+    canonical_project = load_yaml(ROOT / ".engineering/project.yaml")
+    expected_epoch = int((canonical_project.get("engineering_system") or {}).get("policy_epoch") or 0)
+    if f"POLICY_EPOCH = {expected_epoch}" not in adopt or "policy_epoch" not in check:
         raise SystemExit("FAIL adoption tooling missing governance-floor policy epoch")
     policy = (
         schema.get("properties", {})
@@ -1581,6 +1600,7 @@ def main():
     validate_session_continuity_templates()
     validate_actionable_review_gate()
     validate_adoption_contract()
+    validate_adoption_workflow_profile_bundle()
     validate_governance_floor_contract()
     validate_knowledge_contract()
     validate_runtime_contract()
@@ -1594,6 +1614,7 @@ def main():
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
+    validate(".engineering/execution-profile.yaml", "schemas/execution-profile.schema.json")
     validate(".engineering/tests.yaml", "schemas/tests.schema.json")
     validate(".engineering/release.yaml", "schemas/release.schema.json")
     validate("templates/PROJECT.yaml", "schemas/project.schema.json")
@@ -1604,6 +1625,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_work_packet_authority.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_execution_profile.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)
