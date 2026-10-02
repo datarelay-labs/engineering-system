@@ -247,15 +247,35 @@ def validate_work_packet_author_authority():
     print("PASS trusted Work Packet author authority contract")
 
 
-def validate_chat_primary_contract():
-    preflight = ROOT / "tools/implementation_preflight.py"
-    issue = ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md"
-    if not preflight.is_file() or not issue.is_file():
-        raise SystemExit("FAIL Chat-primary executable coordination artifacts missing")
-    source = preflight.read_text(encoding="utf-8")
-    for token in ("IMPLEMENTATION_LOCAL_BINDING=PASS", "MUTATION_AUTHORITY=NO", "WORKTREE_IDENTITY_MISMATCH"):
-        if token not in source:
-            raise SystemExit(f"FAIL implementation preflight missing executable invariant: {token}")
+def validate_execution_profile_contract():
+    profile = ROOT / ".engineering/execution-profile.yaml"
+    helper = ROOT / "tools/execution_profile.py"
+    tests = ROOT / "tools/test_execution_profile.py"
+    schema = ROOT / "schemas/execution-profile.schema.json"
+    for path in (profile, helper, tests, schema):
+        if not path.is_file():
+            raise SystemExit(f"FAIL execution-profile artifact missing: {path.relative_to(ROOT)}")
+    payload = yaml.safe_load(profile.read_text(encoding="utf-8")) or {}
+    runtime = payload.get("runtime") or {}
+    primary = str(runtime.get("primary") or "")
+    disabled = {str(item) for item in (runtime.get("disabled") or [])}
+    reviewers = {str(item) for item in (runtime.get("optional_reviewers") or [])}
+    if not primary or primary in disabled:
+        raise SystemExit("FAIL execution profile has invalid primary runtime")
+    if payload.get("revision") != 2:
+        raise SystemExit("FAIL canonical execution profile revision must be 2")
+    if payload.get("authority_contract") != "profile-v3":
+        raise SystemExit("FAIL canonical execution profile authority_contract must be profile-v3")
+    helper_text = helper.read_text(encoding="utf-8")
+    for token in (
+        "profile_transition_reasons",
+        "packet_authority",
+        "retired_rule_present",
+        "requires_trusted_boundary",
+        "LEGACY_EXECUTION_PROFILE_COMPAT",
+    ):
+        if token not in helper_text:
+            raise SystemExit(f"FAIL execution-profile helper missing invariant: {token}")
     authority_sources = (
         ("AGENTS.md", ROOT / "AGENTS.md"),
         ("templates/AGENTS.md", ROOT / "templates/AGENTS.md"),
@@ -267,11 +287,25 @@ def validate_chat_primary_contract():
             "current explicit owner instruction",
             "Historical Issue comments",
             "evidence only and never execution authority",
-            "do not probe, restore, wait for, or launch any alternate or retired implementation adapter",
+            "execution profile",
         ):
-            if token not in text:
-                raise SystemExit(f"FAIL {rel} missing execution-authority precedence invariant: {token}")
-    print("PASS Chat-primary executable coordination artifacts")
+            if token.lower() not in text.lower():
+                raise SystemExit(f"FAIL {rel} missing provider-neutral authority invariant: {token}")
+    for rel in (
+        "AGENTS.md",
+        "templates/AGENTS.md",
+        "standards/CORE.md",
+        "standards/SESSION_CONTINUITY.md",
+        "standards/PROVIDER_GUIDANCE.md",
+        "tools/context_epoch.py",
+        "tools/governance_floor.py",
+        "tools/check-adoption.py",
+    ):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for runtime_name in {primary, *disabled, *reviewers}:
+            if runtime_name and runtime_name in text:
+                raise SystemExit(f"FAIL {rel} hard-codes execution runtime {runtime_name}")
+    print("PASS provider-neutral execution-profile authority contract")
 
 def validate_work_admission_contract():
     tool = (ROOT / "tools/work_admission.py").read_text(encoding="utf-8")
@@ -624,21 +658,25 @@ def validate_worker_adapter_contract():
                 raise SystemExit(f"FAIL {label} retains universal external-write gate: {forbidden}")
     for label, text in (("AGENTS.md", agents), ("templates/AGENTS.md", agents_template)):
         for token in (
-            "continue/resume request",
+            "continue/resume",
             "additional magic phrase",
             "ordinary authenticated GitHub Issue/PR coordination",
             "high-risk external write",
         ):
             if token not in text:
-                raise SystemExit(f"FAIL {label} missing direct ChatGPT authority token: {token}")
+                raise SystemExit(f"FAIL {label} missing profile-bound execution authority token: {token}")
     for label, text in (("session continuity", session), ("enforcement", enforcement)):
         if "Ordinary authenticated" not in text or "high-risk" not in text or "worker_adapter.py" not in text:
             raise SystemExit(f"FAIL {label} does not scope trusted external-write machinery to high-risk effects")
     for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction), ("provider guidance", provider_guidance)):
-        if "directly edit" not in text or "Cursor" not in text:
-            raise SystemExit(f"FAIL {label} missing no-magic-phrase / retired-Cursor execution-profile guard")
+        if (
+            "execution profile" not in text.lower()
+            or ("magic phrase" not in text.lower() and "directly edit" not in text)
+        ):
+            raise SystemExit(f"FAIL {label} missing profile-bound no-magic-phrase guard")
+    if "every runnable packet v2/v3" not in custom_instruction:
+        raise SystemExit("FAIL custom instruction does not synchronize owner intent for packet v3")
     print("PASS trusted worker external-write adapter contract")
-
 
 def validate_context_fold_contract():
     tool = (ROOT / "tools/context_fold.py").read_text(encoding="utf-8")
@@ -866,17 +904,47 @@ def validate_issue_template_parity():
 def validate_session_continuity_templates():
     issue_text = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(encoding="utf-8")
     issue_tokens = (
-        "PACKET_VERSION=2", "TARGET_REPO=", "WORKSTREAM=", "STATUS=ACTIVE",
+        "PACKET_VERSION=3", "TARGET_REPO=", "WORKSTREAM=", "STATUS=ACTIVE",
         "BRANCH=", "TASK_KIND=", "OWNER_INTENT=", "LAST_VERIFIED_HEAD=",
-        "IMPLEMENTER=CHATGPT_CHAT", "## Next Action", "## Canonical References",
+        "EXECUTION_PROFILE=", "EXECUTION_PROFILE_REVISION=", "## Next Action", "## Canonical References",
         "## Latest Evidence", "## Blockers",
     )
     for token in issue_tokens:
         if token not in issue_text:
             raise SystemExit(f"FAIL AI Work Packet template missing token: {token}")
+    profile = load_yaml(ROOT / ".engineering/execution-profile.yaml")
+    expected_profile = str(profile.get("profile_id") or "")
+    expected_revision = str(profile.get("revision") or "")
+    for token in (
+        f"EXECUTION_PROFILE={expected_profile}",
+        f"EXECUTION_PROFILE_REVISION={expected_revision}",
+    ):
+        if token not in issue_text:
+            raise SystemExit(
+                f"FAIL AI Work Packet template does not match current execution profile: {token}"
+            )
     if "STATUS=DONE" in issue_text:
         raise SystemExit("FAIL AI Work Packet template contains a non-canonical status")
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    for token in (
+        "PACKET_VERSION=3",
+        "Legacy v2 packets remain bounded compatibility inputs",
+        "Packet version 2 is legacy-compatible only through the current execution profile.",
+        "Packet v1 and versionless packets are non-runnable",
+        "8. For packet v3",
+        "migrate it to v3",
+    ):
+        if token not in session:
+            raise SystemExit(f"FAIL session continuity missing packet-v3 normative token: {token}")
+    for forbidden in (
+        "PACKET_VERSION=2\nTARGET_REPO=owner/repository",
+        "migrate it to v2",
+        "8. For packet v2, require",
+        "implementing Chat context also owns terminal audit",
+        "Chat may implement directly through the authorized",
+    ):
+        if forbidden in session:
+            raise SystemExit(f"FAIL session continuity retains legacy packet authoring procedure: {forbidden}")
     for token in (
         "WORK_PACKET_SCOPE_MISMATCH", "WORK_PACKET_PROVENANCE_UNTRUSTED",
         "WORK_PACKET_AUTHOR_UNTRUSTED", "MUST NOT authorize", "actionable review",
@@ -884,7 +952,6 @@ def validate_session_continuity_templates():
         if token not in session:
             raise SystemExit(f"FAIL session continuity missing contract token: {token}")
     print("PASS AI Work Packet and provider-neutral session continuity contract")
-
 
 def validate_actionable_review_gate():
     required_paths = (
@@ -982,38 +1049,64 @@ def validate_adoption_contract():
 
 def validate_adoption_workflow_profile_bundle():
     workflow = (ROOT / ".github/workflows/adoption-compliance.yml").read_text(encoding="utf-8")
-    for rel in (
+    checker = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
+    for token in (
+        "tools/check-adoption.py",
+        "tools/adopt.py",
         ".engineering/execution-profile.yaml",
         "tools/execution_profile.py",
         "schemas/execution-profile.schema.json",
+        "tools/governance_floor.py",
+        '--expected-baseline "$CALLED_WORKFLOW_SHA"',
+        "--expected-mode adopted",
     ):
-        if workflow.count(rel) < 2:
+        if token not in workflow:
             raise SystemExit(
-                f"FAIL reusable adoption compliance does not fetch and validate execution-profile bundle: {rel}"
+                f"FAIL reusable adoption compliance missing shared-policy token: {token}"
             )
-    print("PASS reusable adoption execution-profile bundle contract")
+    if "python - <<'PY'" in workflow:
+        raise SystemExit("FAIL reusable adoption compliance reimplements checker policy inline")
+    for token in (
+        "--expected-baseline",
+        "--expected-mode",
+        "EXECUTION_PROFILE_MANAGED",
+        "EXECUTION_PROFILE_REVISION",
+        "managed Work Packet template missing required packet-v3 metadata",
+        "tools/governance_floor.py",
+        "human-equivalent user tests executor must be EXECUTION_PROFILE",
+    ):
+        if token not in checker:
+            raise SystemExit(f"FAIL adoption checker missing shared-policy invariant: {token}")
+    print("PASS reusable adoption shared canonical policy contract")
 
 
 def validate_governance_floor_contract():
     workflow = (ROOT / ".github/workflows/governance-floor.yml").read_text(encoding="utf-8")
     helper = (ROOT / "tools/governance_floor.py").read_text(encoding="utf-8")
+    profile_helper = (ROOT / "tools/execution_profile.py").read_text(encoding="utf-8")
     adopted = (ROOT / "templates/.github/workflows/engineering-system.yml").read_text(encoding="utf-8")
     adopt = (ROOT / "tools/adopt.py").read_text(encoding="utf-8")
     check = (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8")
     schema = load_json(ROOT / "schemas/project.schema.json")
     for token in (
         "GOVERNANCE_POLICY_EPOCH_REGRESSION",
-        "RETIRED_IMPLEMENTER_REINTRODUCED",
-        "RETIRED_AGENT_ARTIFACT_REINTRODUCED",
+        "RETIRED_RUNTIME_REINTRODUCED",
+        "RETIRED_RUNTIME_ARTIFACT_REINTRODUCED",
         "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH",
         "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING",
         "ROOT_MIGRATION_MANIFEST",
         "requires_exact_head_validate",
         "automation_eligible",
         "GOVERNANCE_FLOOR=",
+        "base_epoch < 3",
+        "_has_durable_stage_a_bridge",
+        "_has_durable_profile_v3_snapshot",
+        "EXECUTION_PROFILE_STAGE_A_EVIDENCE_MISSING",
     ):
         if token not in helper:
             raise SystemExit(f"FAIL governance floor helper missing token: {token}")
+    if "EXECUTION_PROFILE_REVISION_NOT_INCREMENTED" not in profile_helper or "profile_transition_reasons" not in helper:
+        raise SystemExit("FAIL governance/profile helpers missing execution-profile transition guard")
     for token in ("tools/governance_floor.py check", "--base-ref", "--head-ref"):
         if token not in workflow:
             raise SystemExit(f"FAIL governance floor workflow missing helper invocation token: {token}")
@@ -1023,7 +1116,7 @@ def validate_governance_floor_contract():
     canonical_project = load_yaml(ROOT / ".engineering/project.yaml")
     expected_epoch = int((canonical_project.get("engineering_system") or {}).get("policy_epoch") or 0)
     if f"POLICY_EPOCH = {expected_epoch}" not in adopt or "policy_epoch" not in check:
-        raise SystemExit("FAIL adoption tooling missing governance-floor policy epoch")
+        raise SystemExit("FAIL adoption tooling missing current governance-floor policy epoch")
     policy = (
         schema.get("properties", {})
         .get("engineering_system", {})
@@ -1033,7 +1126,6 @@ def validate_governance_floor_contract():
     if policy.get("type") != "integer" or policy.get("minimum") != 1:
         raise SystemExit("FAIL project schema policy_epoch is not a positive integer")
     print("PASS base-branch governance floor contract")
-
 
 def validate_knowledge_contract():
     schema = load_json(ROOT / "schemas/knowledge-index.schema.json")
@@ -1583,7 +1675,7 @@ def main():
     validate_baseline_declarations()
     validate_bun_discovery()
     validate_work_packet_author_authority()
-    validate_chat_primary_contract()
+    validate_execution_profile_contract()
     validate_work_admission_contract()
     validate_independent_verifier_contract()
     validate_coordinator_contract()

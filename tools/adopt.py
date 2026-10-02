@@ -14,9 +14,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from execution_profile import (
+    load_profile,
+    retired_artifact_paths,
+    retired_rule_present,
+    rewrite_retired_text,
+)
+
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 3
+POLICY_EPOCH = 4
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -68,8 +75,7 @@ TERMINAL_COMPLETION_NOTIFY_MANAGED = (
     "tools/terminal_completion_notify.py",
 )
 
-# Execution-profile root is managed with its validator/schema so adopted repos
-# can execute the profile-aware governance floor introduced by policy epoch 3.
+# Selected execution profile and its provider-neutral validator are managed together.
 EXECUTION_PROFILE_MANAGED = (
     ".engineering/execution-profile.yaml",
     "tools/execution_profile.py",
@@ -119,46 +125,26 @@ REQUIRED_MANAGED = (
     *GOVERNANCE_FLOOR_MANAGED,
 )
 
-RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
-RETIRED_AGENT_RULE_RE = re.compile(
-    r"(?i)(?:"
-    r"IMPLEMENTER\s*=\s*CURSOR|"
-    r"cursor[-_ ]?agent|"
-    r"\bagent\s+persist\b|"
-    r"/work-resume\b|"
-    r"\.cursor(?:/|\b)|"
-    r"\bcursor\s+(?:adapter|session|implementation|implementer|worker|execution\s+rule)\b|"
-    r"\b(?:start|resume|launch|wait\s+for|hand\s+off\s+to|reactivate)\s+(?:the\s+)?cursor\b"
-    r")"
-)
-EXECUTION_PROFILE_MARKER = "- The current managed execution profile authorizes"
-LEGACY_EXECUTION_PROFILE_MARKERS = ("- ChatGPT Chat is the implementation path.",)
+EXECUTION_PROFILE_MARKER = "- **Execution profile authority:**"
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
 EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
-LEGACY_EXTERNAL_WRITE_POLICY_MARKERS = ("- Before an external Issue/PR write,",)
 EXECUTION_RULES_HEADING = "## Execution rules"
-RETIRED_AGENT_RULE_REPLACEMENTS = (
-    (
-        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet authorizes the exact repository/worktree/branch/scope. Cursor is disabled by default and must not be started, resumed, or waited on unless the owner explicitly reactivates it for the current Work Packet with `IMPLEMENTER=CURSOR`.",
-        "",
-    ),
-    (
-        "15. Cursor adapter is disabled by default and must not be started, resumed, attached to, waited on, or used for implementation unless the owner explicitly reactivates it for the current Work Packet and records `IMPLEMENTER=CURSOR`. Cursor quota/session state must never block normal Atlas development.",
-        "",
-    ),
-)
+
+
+def _selected_profile() -> dict[str, object]:
+    return load_profile(CANONICAL)
 
 
 def rewrite_retired_agent_rules(text: str) -> str:
-    updated = text
-    for old, new in RETIRED_AGENT_RULE_REPLACEMENTS:
-        updated = updated.replace(old, new)
-    return updated
+    return rewrite_retired_text(text, _selected_profile())
 
 
 def retired_agent_rules_present(text: str) -> bool:
-    """Detect runnable/reactivatable retired-agent semantics, not negative policy prose."""
-    return RETIRED_AGENT_RULE_RE.search(text) is not None
+    return retired_rule_present(text, _selected_profile())
+
+
+def retired_agent_artifact_paths() -> tuple[str, ...]:
+    return retired_artifact_paths(_selected_profile())
 
 
 def _canonical_policy_line(marker: str, label: str) -> str:
@@ -190,7 +176,7 @@ def canonical_managed_policy_lines() -> tuple[str, str, str]:
 def plan_execution_policy_sync(root: Path) -> str | None:
     """Synchronize canonical execution policy and remove known retired agent rules.
 
-    Product-specific rules remain untouched. Unknown Cursor-specific text fails
+    Product-specific rules remain untouched. Unknown retired-runtime text fails
     closed rather than being guessed away.
     """
     path = root / "AGENTS.md"
@@ -200,16 +186,19 @@ def plan_execution_policy_sync(root: Path) -> str | None:
     cleaned = rewrite_retired_agent_rules(original)
     if retired_agent_rules_present(cleaned):
         raise SystemExit(
-            "FAIL AGENTS.md contains unrecognized retired agent/Cursor rules; review manually"
+            "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"
         )
 
     canonical_profile, canonical_execution, canonical_external_write = canonical_managed_policy_lines()
+    selected_profile = _selected_profile()
+    legacy_profile_markers = tuple(selected_profile["policy_migration"]["legacy_execution_profile_markers"])
+    legacy_write_markers = tuple(selected_profile["policy_migration"]["legacy_external_write_markers"])
     lines = cleaned.splitlines()
     specs = (
         (
             "execution-profile",
             canonical_profile,
-            (EXECUTION_PROFILE_MARKER,) + LEGACY_EXECUTION_PROFILE_MARKERS,
+            (EXECUTION_PROFILE_MARKER,) + legacy_profile_markers,
         ),
         (
             "continuous-execution",
@@ -219,7 +208,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         (
             "external-write-scope",
             canonical_external_write,
-            (EXTERNAL_WRITE_POLICY_MARKER,) + LEGACY_EXTERNAL_WRITE_POLICY_MARKERS,
+            (EXTERNAL_WRITE_POLICY_MARKER,) + legacy_write_markers,
         ),
     )
     missing: list[str] = []
@@ -263,7 +252,7 @@ def apply_execution_policy_sync(root: Path, planned_text: str | None) -> bool:
 
 def remove_retired_agent_artifacts(root: Path) -> list[str]:
     removed: list[str] = []
-    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
+    for rel in retired_artifact_paths(_selected_profile()):
         path = root / rel
         if path.is_symlink() or path.is_file():
             path.unlink()
@@ -995,7 +984,7 @@ def release_yaml(
         browser_required = primary_user_surface in {"browser", "mixed"}
         lines.extend([
             "human_equivalent_user_tests:",
-            "  executor: CHATGPT_CHAT",
+            "  executor: EXECUTION_PROFILE",
             "  actual_user_surface_required: true",
             f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
             f"  actual_browser_process_required: {'true' if browser_required else 'false'}",
@@ -1170,7 +1159,7 @@ def ensure_terminal_completion_notify_compatible(root: Path) -> None:
 
 
 def ensure_execution_profile_compatible(root: Path) -> None:
-    """Reject local/custom execution-profile root artifacts before adoption writes."""
+    """Reject custom execution-profile managed surfaces before adoption writes."""
     for rel in EXECUTION_PROFILE_MANAGED:
         path = root / rel
         if not path.exists():

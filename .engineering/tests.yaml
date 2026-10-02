@@ -486,14 +486,14 @@ scenarios:
     timeout_seconds: 30
     agent_default: true
     scope: static
-    name: Mandatory ChatGPT terminal Telegram completion gate
+    name: Mandatory terminal Telegram completion gate
     level: static
     domains: [session-continuity, enforcement]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
     command: "python3 tools/test_terminal_completion_notify.py"
     invariants:
-      - "ChatGPT terminal implementation test audit release and migration outcomes require verified Telegram COMPLETE before owner-facing COMPLETE/PASS"
+      - "Terminal implementation test audit release and migration outcomes require verified Telegram COMPLETE before owner-facing COMPLETE/PASS"
       - "micro-steps and individual test invocations do not notify"
       - "missing trusted helper or unverified delivery fails closed"
     release_gate: true
@@ -504,7 +504,7 @@ scenarios:
     timeout_seconds: 60
     agent_default: true
     scope: static
-    name: Trusted ChatGPT external-write coordinator and signer
+    name: Trusted external-write coordinator and signer
     level: static
     domains: [session-continuity, enforcement]
     triggers: [affected, pr, preflight, release]

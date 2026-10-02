@@ -31,12 +31,15 @@ from adopt import (
     canonical_baseline,
     canonical_version,
     plan_execution_policy_sync,
+    retired_agent_artifact_paths,
     engineering_workflow,
     release_workflow,
 )
 
 CANONICAL = Path(__file__).resolve().parents[1]
 ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
+PROFILE_RELEASE_EXECUTOR = "EXECUTION_PROFILE"
+LEGACY_MANAGED_RELEASE_EXECUTORS = {"CHATGPT_CHAT"}
 
 # Known managed version/baseline declaration forms. Only these are rewritten;
 # surrounding project-specific text is preserved. Ambiguous/custom forms fail closed.
@@ -111,6 +114,38 @@ def write_yaml(path: Path, data: dict) -> None:
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+
+
+def plan_release_executor_migration(release: dict) -> bool:
+    """Migrate only the known managed provider-bound release executor."""
+    user_tests = release.get("human_equivalent_user_tests")
+    if user_tests is None:
+        return False
+    if not isinstance(user_tests, dict):
+        raise SystemExit(
+            "FAIL release human_equivalent_user_tests contains local/custom changes; "
+            "review manually before upgrade"
+        )
+    executor = str(user_tests.get("executor") or "").strip()
+    if executor == PROFILE_RELEASE_EXECUTOR:
+        return False
+    if executor in LEGACY_MANAGED_RELEASE_EXECUTORS:
+        return True
+    raise SystemExit(
+        "FAIL release human-equivalent executor contains local/custom changes; "
+        "review manually before upgrade"
+    )
+
+
+def apply_release_executor_migration(release: dict, planned: bool) -> bool:
+    if not planned:
+        return False
+    user_tests = release.get("human_equivalent_user_tests")
+    if not isinstance(user_tests, dict):
+        raise SystemExit("FAIL release human_equivalent_user_tests became invalid during upgrade")
+    user_tests["executor"] = PROFILE_RELEASE_EXECUTOR
+    release["human_equivalent_user_tests"] = user_tests
+    return True
 
 
 def semver_tuple(value: str) -> tuple[int, int, int]:
@@ -310,17 +345,18 @@ def plan_managed_file_install(
     return planned
 
 
-RETIRED_AGENT_ARTIFACT_PATHS = (".cursor", ".cursorignore", ".cursorrules")
-
-
 def existing_retired_agent_artifacts(root: Path) -> list[str]:
-    return [rel for rel in RETIRED_AGENT_ARTIFACT_PATHS if (root / rel).exists() or (root / rel).is_symlink()]
+    return [
+        rel
+        for rel in retired_agent_artifact_paths()
+        if (root / rel).exists() or (root / rel).is_symlink()
+    ]
 
 
 def remove_retired_agent_artifacts(root: Path) -> list[str]:
-    """Remove all repository-local retired agent compatibility artifacts without following symlinks."""
+    """Remove profile-declared retired runtime artifacts without following symlinks."""
     removed: list[str] = []
-    for rel in RETIRED_AGENT_ARTIFACT_PATHS:
+    for rel in retired_agent_artifact_paths():
         path = root / rel
         if path.is_symlink() or path.is_file():
             path.unlink()
@@ -733,9 +769,6 @@ def main() -> int:
     if run_git(root, "status", "--porcelain") and not args.allow_dirty:
         raise SystemExit("FAIL target worktree is dirty; preserve unrelated work before upgrade")
     base_head = run_git(root, "rev-parse", "HEAD")
-    base_has_execution_profile = bool(
-        run_git(root, "show", f"{base_head}:.engineering/execution-profile.yaml")
-    )
     if not re.fullmatch(r"[0-9a-f]{40}", base_head):
         raise SystemExit("FAIL target base HEAD is unavailable")
 
@@ -781,6 +814,8 @@ def main() -> int:
     ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
+    planned_release_executor = plan_release_executor_migration(release)
+
     if semver_tuple(old_version) > semver_tuple(current_version):
         raise SystemExit(
             f"FAIL target adoption {old_version} is newer than canonical {current_version}"
@@ -792,18 +827,30 @@ def main() -> int:
         )
 
     if old_version == current_version and old_baseline == new_baseline:
-        planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_work_packet_template = plan_work_packet_template_install(root, old_baseline)
         planned_dependencies = plan_engineering_system_dependencies_install(root, old_baseline)
-        planned_governance_floor = plan_governance_floor_install(root, old_baseline)
+        planned_knowledge_contract = plan_knowledge_contract_install(root, old_baseline)
+        planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
+        planned_skills_contract = plan_skills_contract_install(root, old_baseline)
+        planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+        planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
+        planned_terminal_completion_notify = plan_terminal_completion_notify_install(
+            root, old_baseline
+        )
         planned_execution_profile = plan_execution_profile_install(root, old_baseline)
+        planned_context_epoch = plan_context_epoch_install(root, old_baseline)
+        planned_engineering_context = plan_engineering_context_install(root, old_baseline)
+        planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
+        planned_release_executor = plan_release_executor_migration(release)
         planned_root_surfaces = {
             **planned_dependencies,
             **planned_governance_floor,
-            **(planned_execution_profile if base_has_execution_profile else {}),
+            **planned_execution_profile,
+            **planned_context_epoch,
         }
         target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
-        if planned_root_surfaces or planned_execution_profile:
+        if planned_root_surfaces:
             target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
         policy_epoch_repair = target_policy_epoch != existing_policy_epoch
         root_migration = build_root_migration_manifest(
@@ -815,16 +862,41 @@ def main() -> int:
             new_baseline=new_baseline,
         )
         if (
-            not planned_engineering_context
+            not planned_work_packet_template
             and not planned_dependencies
-            and not planned_governance_floor
+            and not planned_knowledge_contract
+            and not planned_runtime_contract
+            and not planned_skills_contract
+            and not planned_verification_contract
+            and not planned_implementation_preflight
+            and not planned_terminal_completion_notify
             and not planned_execution_profile
+            and not planned_context_epoch
+            and not planned_engineering_context
+            and not planned_governance_floor
             and planned_execution_policy is None
+            and not planned_release_executor
             and not retired_agent_artifacts
             and not policy_epoch_repair
         ):
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
+        if planned_work_packet_template:
+            print("WORK_PACKET_TEMPLATE_REPAIR=REQUIRED")
+        if planned_knowledge_contract:
+            print("KNOWLEDGE_CONTRACT_REPAIR=REQUIRED")
+        if planned_runtime_contract:
+            print("RUNTIME_CONTRACT_REPAIR=REQUIRED")
+        if planned_skills_contract:
+            print("SKILLS_CONTRACT_REPAIR=REQUIRED")
+        if planned_verification_contract:
+            print("VERIFICATION_CONTRACT_REPAIR=REQUIRED")
+        if planned_implementation_preflight:
+            print("IMPLEMENTATION_PREFLIGHT_REPAIR=REQUIRED")
+        if planned_terminal_completion_notify:
+            print("TERMINAL_COMPLETION_NOTIFY_REPAIR=REQUIRED")
+        if planned_context_epoch:
+            print("CONTEXT_EPOCH_REPAIR=REQUIRED")
         if planned_engineering_context:
             print("ENGINEERING_CONTEXT_REPAIR=REQUIRED")
         if planned_dependencies:
@@ -839,6 +911,8 @@ def main() -> int:
             print("GOVERNANCE_ROOT_MIGRATION=REQUIRED")
         if planned_execution_policy is not None:
             print("EXECUTION_POLICY_REPAIR=REQUIRED")
+        if planned_release_executor:
+            print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
         if retired_agent_artifacts:
             print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
@@ -853,24 +927,57 @@ def main() -> int:
             print("GOVERNANCE_ROOT_MIGRATION_WRITTEN=YES")
         removed_retired_agent_artifacts = remove_retired_agent_artifacts(root)
         print("RETIRED_AGENT_ARTIFACTS_REMOVED=" + (",".join(removed_retired_agent_artifacts) if removed_retired_agent_artifacts else "<none>"))
-        installed_engineering_context = apply_engineering_context_install(
-            root, planned_engineering_context
+        installed_work_packet_template = apply_work_packet_template_install(
+            root, planned_work_packet_template
         )
-        print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        print("WORK_PACKET_TEMPLATE_SYNCED=" + (",".join(installed_work_packet_template) if installed_work_packet_template else "<none>"))
         installed_dependencies = apply_engineering_system_dependencies_install(
             root, planned_dependencies
         )
         print("ENGINEERING_SYSTEM_DEPENDENCIES_SYNCED=" + (",".join(installed_dependencies) if installed_dependencies else "<none>"))
-        installed_governance_floor = apply_governance_floor_install(
-            root, planned_governance_floor
+        installed_knowledge = apply_knowledge_contract_install(root, planned_knowledge_contract)
+        print("KNOWLEDGE_CONTRACT_INSTALLED=" + (",".join(installed_knowledge) if installed_knowledge else "<none>"))
+        installed_runtime = apply_runtime_contract_install(root, planned_runtime_contract)
+        print("RUNTIME_CONTRACT_INSTALLED=" + (",".join(installed_runtime) if installed_runtime else "<none>"))
+        installed_skills = apply_skills_contract_install(root, planned_skills_contract)
+        print("SKILLS_CONTRACT_INSTALLED=" + (",".join(installed_skills) if installed_skills else "<none>"))
+        installed_verification = apply_verification_contract_install(
+            root, planned_verification_contract
         )
-        print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
+        print("VERIFICATION_CONTRACT_INSTALLED=" + (",".join(installed_verification) if installed_verification else "<none>"))
+        installed_preflight = apply_implementation_preflight_install(
+            root, planned_implementation_preflight
+        )
+        print("IMPLEMENTATION_PREFLIGHT_INSTALLED=" + (",".join(installed_preflight) if installed_preflight else "<none>"))
+        installed_terminal_completion_notify = apply_terminal_completion_notify_install(
+            root, planned_terminal_completion_notify
+        )
+        print("TERMINAL_COMPLETION_NOTIFY_INSTALLED=" + (",".join(installed_terminal_completion_notify) if installed_terminal_completion_notify else "<none>"))
         installed_execution_profile = apply_execution_profile_install(
             root, planned_execution_profile
         )
         print("EXECUTION_PROFILE_INSTALLED=" + (",".join(installed_execution_profile) if installed_execution_profile else "<none>"))
+        installed_context_epoch = apply_context_epoch_install(root, planned_context_epoch)
+        print("CONTEXT_EPOCH_INSTALLED=" + (",".join(installed_context_epoch) if installed_context_epoch else "<none>"))
+        installed_engineering_context = apply_engineering_context_install(
+            root, planned_engineering_context
+        )
+        print("ENGINEERING_CONTEXT_INSTALLED=" + (",".join(installed_engineering_context) if installed_engineering_context else "<none>"))
+        installed_governance_floor = apply_governance_floor_install(
+            root, planned_governance_floor
+        )
+        print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
+        release_executor_synced = apply_release_executor_migration(
+            release, planned_release_executor
+        )
+        if release_executor_synced:
+            write_yaml(release_path, release)
+        print(
+            "RELEASE_EXECUTOR_SYNCED="
+            + ("YES" if release_executor_synced else "NO")
+        )
         checker = CANONICAL / "tools" / "check-adoption.py"
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
@@ -978,6 +1085,8 @@ def main() -> int:
         print(f"{key.upper()}={value}")
     if retired_agent_artifacts:
         print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
+    if planned_release_executor:
+        print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
 
     if args.audit or not args.apply:
         print("ADOPTION_UPGRADE_AUDIT=PASS")
@@ -997,6 +1106,7 @@ def main() -> int:
     operations["rollback_command"] = rollback_command
     project["operations"] = operations
 
+    apply_release_executor_migration(release, planned_release_executor)
     release["execution_context"] = release_execution_context
     release["setup_command"] = setup_command
     release["preflight_command"] = preflight_command
@@ -1054,13 +1164,21 @@ def main() -> int:
         root, old_baseline
     )
     planned_execution_profile = plan_execution_profile_install(root, old_baseline)
+    if planned_execution_profile and not run_git(
+        root, "show", f"{base_head}:.engineering/execution-profile.yaml"
+    ):
+        raise SystemExit(
+            "FAIL managed upgrade requires the Stage-A legacy-v2 execution-profile "
+            "bridge before profile-v3 cutover"
+        )
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)
     planned_root_surfaces = {
         **planned_dependencies,
         **planned_governance_floor,
-        **(planned_execution_profile if base_has_execution_profile else {}),
+        **planned_execution_profile,
+        **planned_context_epoch,
     }
     if planned_root_surfaces:
         target_policy_epoch = max(POLICY_EPOCH, existing_policy_epoch + 1)

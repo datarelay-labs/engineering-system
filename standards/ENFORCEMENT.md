@@ -17,7 +17,7 @@ The Engineering System core is agent-agnostic:
 - evidence and release rules
 
 Tool-specific behavior is implemented through adapters:
-- ChatGPT Custom/Project Instruction
+- runtime-specific Custom/Project Instruction adapter
 - future AI-tool adapters
 
 An adapter may translate the core rules into tool-specific instructions but must not weaken them.

@@ -391,6 +391,140 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     return value
 
 
+def _has_durable_stage_a_bridge(
+    root: Path, base: str, expected_profile_id: str
+) -> bool:
+    """Prove the base descends from a governance-valid legacy-v2 bridge.
+
+    A policy epoch number is not durable bridge evidence by itself: a pre-bridge
+    branch can copy that number. For direct profile-v3 recovery after the managed
+    profile bundle is lost, require an ancestor that actually carried the legacy-v2
+    profile and whose own root migration still validates against its recorded base.
+    """
+    history = _git(
+        root,
+        "rev-list",
+        "--max-count=128",
+        base,
+        "--",
+        EXECUTION_PROFILE_SURFACES[0],
+    )
+    if history.returncode != 0:
+        return False
+    for candidate in history.stdout.splitlines():
+        if FULL_SHA_RE.fullmatch(candidate) is None:
+            continue
+        profile_text = _read_at(root, candidate, EXECUTION_PROFILE_SURFACES[0])
+        if profile_text is None:
+            continue
+        try:
+            profile = load_profile_text(profile_text)
+        except ProfileError:
+            continue
+        if (
+            profile.get("authority_contract") != "legacy-v2"
+            or profile.get("profile_id") != expected_profile_id
+        ):
+            continue
+
+        manifest_text = _read_at(root, candidate, ROOT_MIGRATION_MANIFEST)
+        if manifest_text is None:
+            continue
+        try:
+            manifest = yaml.safe_load(manifest_text) or {}
+        except yaml.YAMLError:
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        stage_base = manifest.get("base_sha")
+        if not isinstance(stage_base, str) or FULL_SHA_RE.fullmatch(stage_base) is None:
+            continue
+        if _git(
+            root, "merge-base", "--is-ancestor", stage_base, candidate
+        ).returncode != 0:
+            continue
+        if _git(
+            root, "merge-base", "--is-ancestor", candidate, base
+        ).returncode != 0:
+            continue
+        try:
+            status, _reasons, from_epoch, to_epoch = evaluate(
+                root, stage_base, candidate
+            )
+        except ValueError:
+            continue
+        if status == "PASS" and from_epoch < 3 <= to_epoch:
+            return True
+    return False
+
+
+def _has_durable_profile_v3_snapshot(
+    root: Path, base: str, expected_profile_id: str
+) -> bool:
+    """Accept a committed post-bridge profile-v3 state already owned by the base.
+
+    Repositories first adopted after the profile-v3 cutover legitimately have no
+    legacy-v2 bridge in their own history. A prior committed profile-v3 snapshot at
+    the post-bridge policy epoch is durable evidence because the current candidate
+    cannot manufacture it in the immutable base ancestry.
+    """
+    history = _git(
+        root,
+        "rev-list",
+        "--max-count=128",
+        base,
+        "--",
+        EXECUTION_PROFILE_SURFACES[0],
+    )
+    if history.returncode != 0:
+        return False
+    for candidate in history.stdout.splitlines():
+        if FULL_SHA_RE.fullmatch(candidate) is None:
+            continue
+        profile_text = _read_at(root, candidate, EXECUTION_PROFILE_SURFACES[0])
+        if profile_text is None:
+            continue
+        try:
+            profile = load_profile_text(profile_text)
+            project = _profile(
+                _read_at(root, candidate, ".engineering/project.yaml"),
+                "post-bridge",
+            )
+            epoch = _policy_epoch(project, "post-bridge")
+        except (ProfileError, ValueError):
+            continue
+        if (
+            profile.get("authority_contract") != "profile-v3"
+            or profile.get("profile_id") != expected_profile_id
+            or epoch < 4
+        ):
+            continue
+        engineering = project.get("engineering_system") or {}
+        if not isinstance(engineering, dict):
+            continue
+        mode = str(engineering.get("mode") or "")
+        if mode == "adopted":
+            baseline = str(engineering.get("baseline") or "")
+            if FULL_SHA_RE.fullmatch(baseline) is None:
+                continue
+        elif mode != "canonical":
+            continue
+        if any(
+            _read_at(root, candidate, rel) is None
+            for rel in EXECUTION_PROFILE_SURFACES
+        ):
+            continue
+        execution_invalid = False
+        for rel in MANAGED_EXECUTION_SURFACES:
+            content = _read_at(root, candidate, rel)
+            if content is None or _execution_surface_reasons(rel, content, profile):
+                execution_invalid = True
+                break
+        if not execution_invalid:
+            return True
+    return False
+
+
 def _root_migration_reasons(
     root: Path,
     base: str,
@@ -749,7 +883,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
 
     if path == "AGENTS.md":
         if retired_rule_present(content, profile):
-            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
+            reasons.append("RETIRED_RUNTIME_REINTRODUCED:AGENTS.md")
         if "Execution authority precedence:" not in content:
             reasons.append("MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:Execution authority precedence:")
         if contract == "legacy-v2":
@@ -765,7 +899,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
     elif path == "tools/context_epoch.py":
         if contract == "legacy-v2":
             if any(name and name in content for name in disabled):
-                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+                reasons.append("RETIRED_RUNTIME_REINTRODUCED:tools/context_epoch.py")
             required = (
                 f'if implementer and implementer != "{primary}":',
                 'blocking.append("IMPLEMENTER_INVALID")',
@@ -776,7 +910,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
         elif contract == "profile-v3":
             runtime_names = {primary, *disabled, *reviewers}
             if any(name and name in content for name in runtime_names) or "IMPLEMENTER_INVALID" in content:
-                reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/context_epoch.py")
+                reasons.append("PROVIDER_RUNTIME_COUPLING:tools/context_epoch.py")
             for token in ("load_profile", "packet_authority", "EXECUTION_PROFILE_REVISION"):
                 if token not in content:
                     reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/context_epoch.py:{token}")
@@ -784,7 +918,7 @@ def _execution_surface_reasons(path: str, content: str, profile: dict[str, objec
             reasons.append("EXECUTION_PROFILE_AUTHORITY_CONTRACT_INVALID")
     elif path == "tools/engineering-context.py":
         if retired_rule_present(content, profile):
-            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:tools/engineering-context.py")
+            reasons.append("RETIRED_RUNTIME_REINTRODUCED:tools/engineering-context.py")
         for required in ("AGENTS.md", ".engineering/project.yaml"):
             if required not in content:
                 reasons.append(f"MANAGED_EXECUTION_INVARIANT_MISSING:tools/engineering-context.py:{required}")
@@ -807,7 +941,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     head_execution_profile_text = _read_at(root, head, ".engineering/execution-profile.yaml")
     base_execution_profile = None
     head_execution_profile = None
-    profile_bootstrap = False
+    legacy_profile_bootstrap = False
     legacy_profile_absent = False
 
     if base_execution_profile_text is not None:
@@ -822,8 +956,17 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.append(f"EXECUTION_PROFILE_HEAD_INVALID:{exc}")
 
     if base_execution_profile_text is None and head_execution_profile is not None:
-        profile_bootstrap = True
-        if head_execution_profile.get("authority_contract") != "legacy-v2":
+        authority_contract = head_execution_profile.get("authority_contract")
+        if authority_contract == "legacy-v2":
+            legacy_profile_bootstrap = True
+        elif authority_contract == "profile-v3":
+            profile_id = str(head_execution_profile.get("profile_id") or "")
+            durable_post_bridge = _has_durable_stage_a_bridge(
+                root, base, profile_id
+            ) or _has_durable_profile_v3_snapshot(root, base, profile_id)
+            if base_epoch < 3 or not durable_post_bridge:
+                reasons.append("EXECUTION_PROFILE_STAGE_A_EVIDENCE_MISSING")
+        else:
             reasons.append("EXECUTION_PROFILE_BOOTSTRAP_CONTRACT_INVALID")
     elif base_execution_profile is not None and head_execution_profile is not None:
         reasons.extend(profile_transition_reasons(base_execution_profile_text, head_execution_profile_text))
@@ -850,9 +993,10 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     root_migration_surfaces = set(EPOCH_GUARDED_GOVERNANCE_SURFACES)
     if mode == "canonical":
         root_migration_surfaces.update(CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES)
-    if profile_bootstrap:
-        # The old base helper cannot name newly introduced profile/adoption
-        # surfaces. They become root-protected immediately after this bridge merges.
+    if legacy_profile_bootstrap:
+        # Stage-A's one-time legacy-v2 bridge predates these managed surfaces, so
+        # the old base helper cannot bind them. A direct profile-v3 restoration is
+        # different: it must stay root-migration-bound and is never exempt here.
         bootstrap_new_surfaces = set(EXECUTION_PROFILE_SURFACES) | set(POST_BRIDGE_CANONICAL_SURFACES)
         root_migration_surfaces.difference_update(bootstrap_new_surfaces)
     if legacy_profile_absent:
@@ -893,7 +1037,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.extend(_execution_surface_reasons(path, content, active_execution_profile))
         for path in retired_artifact_paths(active_execution_profile):
             if _tree_has_path(root, head, path):
-                reasons.append(f"RETIRED_AGENT_ARTIFACT_REINTRODUCED:{path}")
+                reasons.append(f"RETIRED_RUNTIME_ARTIFACT_REINTRODUCED:{path}")
 
     reasons = sorted(set(reasons))
     return ("BLOCK" if reasons else "PASS"), reasons, base_epoch, head_epoch
