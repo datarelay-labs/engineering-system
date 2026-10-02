@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,127 @@ def write_root_migration(
         yaml.safe_dump(payload, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def write_bootstrap_profile(
+    root: Path,
+    *,
+    primary: str = "SYNTH_RUNTIME",
+    include_agents_binding: bool = True,
+    replace_floor: bool = True,
+    profile_aware_floor: bool = True,
+) -> None:
+    profile = {
+        "contract_version": 1,
+        "profile_id": "synthetic-managed",
+        "revision": 1,
+        "runtime": {
+            "primary": primary,
+            "optional_reviewers": ["REVIEW_RUNTIME"],
+            "disabled": ["RETIRED_RUNTIME"],
+        },
+        "packet_compatibility": {
+            "legacy_v2_implementers": {primary: "synthetic-managed"},
+        },
+        "retired_surface": {
+            "artifact_paths": [".retired-runtime"],
+            "text_patterns": [r"(?i)\bold-runtime\b"],
+            "remove_exact_text": ["legacy runtime prose"],
+        },
+        "effect_policy": {
+            "trusted_boundary_required": [
+                "production",
+                "destructive",
+                "credential",
+                "permission_boundary",
+                "irreversible_publication",
+                "release_authority",
+            ],
+        },
+        "policy_migration": {
+            "legacy_execution_profile_markers": [
+                "- Legacy execution profile marker",
+            ],
+            "legacy_external_write_markers": [
+                "- Legacy external write marker",
+            ],
+        },
+    }
+    (root / ".engineering/execution-profile.yaml").write_text(
+        yaml.safe_dump(profile, sort_keys=False),
+        encoding="utf-8",
+    )
+    (root / "schemas").mkdir(parents=True, exist_ok=True)
+    required = [
+        "contract_version",
+        "profile_id",
+        "revision",
+        "runtime",
+        "packet_compatibility",
+        "retired_surface",
+        "effect_policy",
+        "policy_migration",
+    ]
+    (root / "schemas/execution-profile.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": required,
+                "properties": {key: {} for key in required},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (root / "tools/execution_profile.py").write_text(
+        'PROFILE_PATH = ".engineering/execution-profile.yaml"\n'
+        "def load_profile_text(text): return {}\n"
+        "def packet_authority(profile, metadata): return [], []\n"
+        "def profile_transition_reasons(base, head): return []\n"
+        "def requires_trusted_boundary(effect, profile): return False\n",
+        encoding="utf-8",
+    )
+    agents = (
+        "Execution authority precedence: current owner and ACTIVE Work Packet.\n"
+    )
+    if include_agents_binding:
+        agents = (
+            "Execution profile authority: runtime selection is bound to "
+            ".engineering/execution-profile.yaml.\n"
+            + agents
+        )
+    (root / "AGENTS.md").write_text(agents, encoding="utf-8")
+    (root / "tools/context_epoch.py").write_text(
+        "from execution_profile import load_profile, packet_authority\n"
+        "EXECUTION_PROFILE_REVISION = True\n",
+        encoding="utf-8",
+    )
+    if replace_floor:
+        floor_path = root / "tools/governance_floor.py"
+        if profile_aware_floor:
+            floor_path.write_text(
+                "from execution_profile import (load_profile_text, "
+                "profile_transition_reasons, retired_artifact_paths, "
+                "retired_rule_present)\n"
+                'EXECUTION_PROFILE_PATH = ".engineering/execution-profile.yaml"\n'
+                "def _execution_surface_reasons(path, content, profile):\n"
+                "    return retired_rule_present(content, profile)\n"
+                "def evaluate(root, base_ref, head_ref):\n"
+                "    profile = load_profile_text('contract_version: 1')\n"
+                "    profile_transition_reasons('base', 'head')\n"
+                "    retired_artifact_paths(profile)\n"
+                "    retired_rule_present('', profile)\n"
+                "    return 'PASS', [], 1, 2\n",
+                encoding="utf-8",
+            )
+        else:
+            floor_path.write_text(
+                floor_path.read_text(encoding="utf-8")
+                + "\n# byte-changed but still legacy floor\n",
+                encoding="utf-8",
+            )
 
 
 def fixture(root: Path) -> str:
@@ -325,6 +447,181 @@ def test_guard_change_requires_policy_epoch() -> None:
         assert status3 == "PASS", reasons3
 
 
+def test_execution_profile_bootstrap_is_provider_neutral_and_root_bound() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_bootstrap_profile(root, primary="ANOTHER_RUNTIME")
+        head_without_manifest = commit(root, "bootstrap profile without migration evidence")
+        status0, reasons0, _, _ = floor.evaluate(root, base, head_without_manifest)
+        assert status0 == "BLOCK"
+        assert "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING" in reasons0
+
+        migration_paths = [
+            "tools/governance_floor.py",
+            "tools/context_epoch.py",
+            ".engineering/execution-profile.yaml",
+            "schemas/execution-profile.schema.json",
+            "tools/execution_profile.py",
+        ]
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=migration_paths,
+        )
+        head = commit(root, "bootstrap provider-neutral profile")
+        status, reasons, base_epoch, head_epoch = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+        assert reasons == []
+        assert (base_epoch, head_epoch) == (1, 2)
+
+
+def test_execution_profile_bootstrap_requires_generic_authority_binding() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_bootstrap_profile(root, include_agents_binding=False)
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[
+                "tools/governance_floor.py",
+                "tools/context_epoch.py",
+                ".engineering/execution-profile.yaml",
+                "schemas/execution-profile.schema.json",
+                "tools/execution_profile.py",
+            ],
+        )
+        head = commit(root, "bootstrap profile without AGENTS binding")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert (
+            "MANAGED_EXECUTION_INVARIANT_MISSING:"
+            "AGENTS.md:Execution profile authority:"
+        ) in reasons
+
+
+def test_execution_profile_bootstrap_rejects_comment_only_floor_replacement() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_bootstrap_profile(root, profile_aware_floor=False)
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[
+                "tools/governance_floor.py",
+                "tools/context_epoch.py",
+                ".engineering/execution-profile.yaml",
+                "schemas/execution-profile.schema.json",
+                "tools/execution_profile.py",
+            ],
+        )
+        head = commit(root, "bootstrap with comment-only floor replacement")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert any(
+            reason.startswith("EXECUTION_PROFILE_BOOTSTRAP_FLOOR_IMPORT_MISSING:")
+            or reason.startswith("EXECUTION_PROFILE_BOOTSTRAP_FLOOR_CALL_MISSING:")
+            for reason in reasons
+        )
+
+
+def test_execution_profile_bootstrap_preserves_mandatory_high_risk_effects() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_bootstrap_profile(root)
+        profile_path = root / ".engineering/execution-profile.yaml"
+        profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        profile["effect_policy"]["trusted_boundary_required"].remove("production")
+        profile_path.write_text(
+            yaml.safe_dump(profile, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[
+                "tools/governance_floor.py",
+                "tools/context_epoch.py",
+                ".engineering/execution-profile.yaml",
+                "schemas/execution-profile.schema.json",
+                "tools/execution_profile.py",
+            ],
+        )
+        head = commit(root, "bootstrap profile missing mandatory effect")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "EXECUTION_PROFILE_MANDATORY_EFFECT_MISSING:production" in reasons
+
+
+def test_execution_profile_bootstrap_requires_floor_replacement() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False),
+            encoding="utf-8",
+        )
+        write_bootstrap_profile(root, replace_floor=False)
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=[
+                "tools/context_epoch.py",
+                ".engineering/execution-profile.yaml",
+                "schemas/execution-profile.schema.json",
+                "tools/execution_profile.py",
+            ],
+        )
+        head = commit(root, "bootstrap profile without floor replacement")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "EXECUTION_PROFILE_BOOTSTRAP_FLOOR_HELPER_UNCHANGED" in reasons
+
+
 def test_workflow_self_preservation_blocks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -473,6 +770,11 @@ def main() -> int:
     test_filtered_pull_request_target_blocks()
     test_unrelated_database_cursor_language_is_allowed()
     test_guard_change_requires_policy_epoch()
+    test_execution_profile_bootstrap_is_provider_neutral_and_root_bound()
+    test_execution_profile_bootstrap_requires_generic_authority_binding()
+    test_execution_profile_bootstrap_rejects_comment_only_floor_replacement()
+    test_execution_profile_bootstrap_preserves_mandatory_high_risk_effects()
+    test_execution_profile_bootstrap_requires_floor_replacement()
     test_workflow_self_preservation_blocks()
     test_managed_pr_jobs_cannot_be_removed()
     test_dependency_manifest_requires_policy_epoch()

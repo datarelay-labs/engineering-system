@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -16,10 +18,8 @@ MANAGED_EXECUTION_SURFACES = (
     "tools/engineering-context.py",
 )
 PROTECTED_GOVERNANCE_SURFACES = (
-    # Executable governance semantics may change only with an explicit
-    # policy-epoch advance. The current pull_request_target run remains
-    # base-owned, so candidate copies cannot affect the check evaluating them.
-    "tools/context_epoch.py",
+    # Read-only orientation remains protected by policy epoch. Runtime-selection
+    # authority is migrated separately through the root-bound profile bridge.
     "tools/engineering-context.py",
 )
 RETIRED_AGENT_ARTIFACTS = (".cursor", ".cursorignore", ".cursorrules")
@@ -27,12 +27,38 @@ GOVERNANCE_HELPER = "tools/governance_floor.py"
 GOVERNANCE_REUSABLE_WORKFLOW = ".github/workflows/governance-floor.yml"
 GOVERNANCE_DEPENDENCY_MANIFEST = ".engineering/requirements-engineering-system.txt"
 ROOT_MIGRATION_MANIFEST = ".engineering/governance-migration.yaml"
+EXECUTION_PROFILE_PATH = ".engineering/execution-profile.yaml"
+EXECUTION_PROFILE_SCHEMA_PATH = "schemas/execution-profile.schema.json"
+EXECUTION_PROFILE_HELPER_PATH = "tools/execution_profile.py"
+EXECUTION_PROFILE_BOOTSTRAP_SURFACES = (
+    EXECUTION_PROFILE_PATH,
+    EXECUTION_PROFILE_SCHEMA_PATH,
+    EXECUTION_PROFILE_HELPER_PATH,
+)
 EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_HELPER,
     GOVERNANCE_DEPENDENCY_MANIFEST,
+    "tools/context_epoch.py",
 )
 CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES = (
     GOVERNANCE_REUSABLE_WORKFLOW,
+    ".github/workflows/adoption-compliance.yml",
+    "tools/check-adoption.py",
+    "tools/adopt.py",
+    "tools/upgrade-adoption.py",
+)
+PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+EFFECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MANDATORY_TRUSTED_BOUNDARY_EFFECTS = frozenset(
+    {
+        "production",
+        "destructive",
+        "credential",
+        "permission_boundary",
+        "irreversible_publication",
+        "release_authority",
+    }
 )
 ADOPTED_ENGINEERING_WORKFLOW = ".github/workflows/engineering-system.yml"
 CANONICAL_VALIDATE_WORKFLOW = ".github/workflows/validate.yml"
@@ -125,6 +151,320 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{label} engineering_system.policy_epoch is invalid")
     return value
+
+
+def _profile_string_list(
+    value: object, label: str, pattern: re.Pattern[str]
+) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label}_INVALID")
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or pattern.fullmatch(item) is None:
+            raise ValueError(f"{label}_INVALID")
+        if item in out:
+            raise ValueError(f"{label}_DUPLICATE")
+        out.append(item)
+    return tuple(out)
+
+
+def _bootstrap_execution_profile(text: str) -> dict[str, object]:
+    """Validate the first provider-neutral profile as base-owned data only.
+
+    The bridge never imports candidate-controlled helpers. It validates the
+    bootstrap profile structure itself, then root-migration evidence binds the
+    exact profile/helper/schema/context/adoption blobs reviewed by the owner.
+    """
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError("EXECUTION_PROFILE_YAML_INVALID") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("EXECUTION_PROFILE_INVALID")
+    expected = {
+        "contract_version",
+        "profile_id",
+        "revision",
+        "runtime",
+        "packet_compatibility",
+        "retired_surface",
+        "effect_policy",
+        "policy_migration",
+    }
+    if set(raw) != expected:
+        raise ValueError("EXECUTION_PROFILE_KEYS_INVALID")
+    if raw.get("contract_version") != 1:
+        raise ValueError("EXECUTION_PROFILE_CONTRACT_VERSION_INVALID")
+    profile_id = raw.get("profile_id")
+    if not isinstance(profile_id, str) or PROFILE_ID_RE.fullmatch(profile_id) is None:
+        raise ValueError("EXECUTION_PROFILE_ID_INVALID")
+    revision = raw.get("revision")
+    if isinstance(revision, bool) or revision != 1:
+        raise ValueError("EXECUTION_PROFILE_BOOTSTRAP_REVISION_INVALID")
+
+    runtime = raw.get("runtime")
+    if not isinstance(runtime, dict) or set(runtime) != {
+        "primary",
+        "optional_reviewers",
+        "disabled",
+    }:
+        raise ValueError("EXECUTION_PROFILE_RUNTIME_INVALID")
+    primary = runtime.get("primary")
+    if not isinstance(primary, str) or RUNTIME_ID_RE.fullmatch(primary) is None:
+        raise ValueError("EXECUTION_PROFILE_PRIMARY_INVALID")
+    reviewers = _profile_string_list(
+        runtime.get("optional_reviewers"),
+        "EXECUTION_PROFILE_REVIEWERS",
+        RUNTIME_ID_RE,
+    )
+    disabled = _profile_string_list(
+        runtime.get("disabled"), "EXECUTION_PROFILE_DISABLED", RUNTIME_ID_RE
+    )
+    if primary in disabled or set(reviewers) & set(disabled):
+        raise ValueError("EXECUTION_PROFILE_RUNTIME_CONFLICT")
+
+    compatibility = raw.get("packet_compatibility")
+    if not isinstance(compatibility, dict) or set(compatibility) != {
+        "legacy_v2_implementers"
+    }:
+        raise ValueError("EXECUTION_PROFILE_COMPATIBILITY_INVALID")
+    legacy = compatibility.get("legacy_v2_implementers")
+    if not isinstance(legacy, dict) or not legacy:
+        raise ValueError("EXECUTION_PROFILE_LEGACY_COMPATIBILITY_INVALID")
+    for implementer, target in legacy.items():
+        if (
+            not isinstance(implementer, str)
+            or RUNTIME_ID_RE.fullmatch(implementer) is None
+            or target != profile_id
+        ):
+            raise ValueError("EXECUTION_PROFILE_LEGACY_COMPATIBILITY_INVALID")
+    if legacy.get(primary) != profile_id:
+        raise ValueError("EXECUTION_PROFILE_PRIMARY_COMPATIBILITY_MISSING")
+
+    retired = raw.get("retired_surface")
+    if not isinstance(retired, dict) or set(retired) != {
+        "artifact_paths",
+        "text_patterns",
+        "remove_exact_text",
+    }:
+        raise ValueError("EXECUTION_PROFILE_RETIRED_SURFACE_INVALID")
+    artifacts = retired.get("artifact_paths")
+    if not isinstance(artifacts, list) or any(
+        not isinstance(item, str)
+        or not item
+        or Path(item).is_absolute()
+        or ".." in Path(item).parts
+        for item in artifacts
+    ):
+        raise ValueError("EXECUTION_PROFILE_RETIRED_ARTIFACT_INVALID")
+    if len(artifacts) != len(set(artifacts)):
+        raise ValueError("EXECUTION_PROFILE_RETIRED_ARTIFACT_DUPLICATE")
+    patterns = retired.get("text_patterns")
+    if not isinstance(patterns, list) or any(
+        not isinstance(item, str) or not item for item in patterns
+    ):
+        raise ValueError("EXECUTION_PROFILE_RETIRED_PATTERN_INVALID")
+    for pattern in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError("EXECUTION_PROFILE_RETIRED_PATTERN_INVALID") from exc
+    removals = retired.get("remove_exact_text")
+    if not isinstance(removals, list) or any(
+        not isinstance(item, str) or not item for item in removals
+    ):
+        raise ValueError("EXECUTION_PROFILE_RETIRED_REMOVAL_INVALID")
+
+    effect_policy = raw.get("effect_policy")
+    if not isinstance(effect_policy, dict) or set(effect_policy) != {
+        "trusted_boundary_required"
+    }:
+        raise ValueError("EXECUTION_PROFILE_EFFECT_POLICY_INVALID")
+    high_risk_effects = _profile_string_list(
+        effect_policy.get("trusted_boundary_required"),
+        "EXECUTION_PROFILE_EFFECTS",
+        EFFECT_ID_RE,
+    )
+    missing_high_risk = sorted(
+        MANDATORY_TRUSTED_BOUNDARY_EFFECTS.difference(high_risk_effects)
+    )
+    if missing_high_risk:
+        raise ValueError(
+            "EXECUTION_PROFILE_MANDATORY_EFFECT_MISSING:" + missing_high_risk[0]
+        )
+
+    migration = raw.get("policy_migration")
+    if not isinstance(migration, dict) or set(migration) != {
+        "legacy_execution_profile_markers",
+        "legacy_external_write_markers",
+    }:
+        raise ValueError("EXECUTION_PROFILE_POLICY_MIGRATION_INVALID")
+    for key in (
+        "legacy_execution_profile_markers",
+        "legacy_external_write_markers",
+    ):
+        values = migration.get(key)
+        if not isinstance(values, list) or any(
+            not isinstance(item, str) or not item for item in values
+        ):
+            raise ValueError("EXECUTION_PROFILE_POLICY_MIGRATION_INVALID")
+
+    return {
+        "profile_id": profile_id,
+        "revision": 1,
+        "runtime": {
+            "primary": primary,
+            "optional_reviewers": reviewers,
+            "disabled": disabled,
+        },
+    }
+
+
+def _profile_aware_floor_source_reasons(
+    content: str, profile: dict[str, object]
+) -> list[str]:
+    reasons: list[str] = []
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return ["EXECUTION_PROFILE_BOOTSTRAP_FLOOR_INVALID_PYTHON"]
+
+    imported: set[str] = set()
+    defined: set[str] = set()
+    called: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "execution_profile":
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called.add(node.func.id)
+
+    required_imports = {
+        "load_profile_text",
+        "profile_transition_reasons",
+        "retired_artifact_paths",
+        "retired_rule_present",
+    }
+    for name in sorted(required_imports - imported):
+        reasons.append(
+            "EXECUTION_PROFILE_BOOTSTRAP_FLOOR_IMPORT_MISSING:" + name
+        )
+    for name in ("evaluate", "_execution_surface_reasons"):
+        if name not in defined:
+            reasons.append(
+                "EXECUTION_PROFILE_BOOTSTRAP_FLOOR_FUNCTION_MISSING:" + name
+            )
+    for name in sorted(required_imports - called):
+        reasons.append(
+            "EXECUTION_PROFILE_BOOTSTRAP_FLOOR_CALL_MISSING:" + name
+        )
+
+    runtime = profile.get("runtime") or {}
+    if isinstance(runtime, dict):
+        names = {
+            str(runtime.get("primary") or ""),
+            *[str(item) for item in runtime.get("optional_reviewers", ())],
+            *[str(item) for item in runtime.get("disabled", ())],
+        }
+        if any(name and name in content for name in names):
+            reasons.append("PROVIDER_RUNTIME_COUPLING:tools/governance_floor.py")
+    return reasons
+
+
+def _execution_profile_bootstrap_reasons(
+    root: Path, head: str, profile: dict[str, object]
+) -> list[str]:
+    reasons: list[str] = []
+    agents = _read_at(root, head, "AGENTS.md")
+    if agents is None:
+        reasons.append("MANAGED_GOVERNANCE_PATH_MISSING:AGENTS.md")
+    else:
+        for token in (
+            "Execution profile authority:",
+            EXECUTION_PROFILE_PATH,
+            "Execution authority precedence:",
+        ):
+            if token not in agents:
+                reasons.append(
+                    f"MANAGED_EXECUTION_INVARIANT_MISSING:AGENTS.md:{token}"
+                )
+        if RETIRED_AGENTS_RE.search(agents):
+            reasons.append("RETIRED_IMPLEMENTER_REINTRODUCED:AGENTS.md")
+
+    context = _read_at(root, head, "tools/context_epoch.py")
+    if context is None:
+        reasons.append("MANAGED_GOVERNANCE_PATH_MISSING:tools/context_epoch.py")
+    else:
+        for token in ("load_profile", "packet_authority", "EXECUTION_PROFILE_REVISION"):
+            if token not in context:
+                reasons.append(
+                    "MANAGED_EXECUTION_INVARIANT_MISSING:"
+                    f"tools/context_epoch.py:{token}"
+                )
+        runtime = profile.get("runtime") or {}
+        if isinstance(runtime, dict):
+            names = {
+                str(runtime.get("primary") or ""),
+                *[str(item) for item in runtime.get("optional_reviewers", ())],
+                *[str(item) for item in runtime.get("disabled", ())],
+            }
+            if any(name and name in context for name in names):
+                reasons.append("PROVIDER_RUNTIME_COUPLING:tools/context_epoch.py")
+        if "IMPLEMENTER_INVALID" in context:
+            reasons.append("LEGACY_IMPLEMENTER_GUARD_RETAINED:tools/context_epoch.py")
+
+    floor_source = _read_at(root, head, GOVERNANCE_HELPER)
+    if floor_source is None:
+        reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{GOVERNANCE_HELPER}")
+    else:
+        reasons.extend(_profile_aware_floor_source_reasons(floor_source, profile))
+
+    helper = _read_at(root, head, EXECUTION_PROFILE_HELPER_PATH)
+    if helper is None:
+        reasons.append(
+            f"MANAGED_GOVERNANCE_PATH_MISSING:{EXECUTION_PROFILE_HELPER_PATH}"
+        )
+    else:
+        for token in (
+            "PROFILE_PATH",
+            "load_profile_text",
+            "packet_authority",
+            "profile_transition_reasons",
+            "requires_trusted_boundary",
+        ):
+            if token not in helper:
+                reasons.append(
+                    f"EXECUTION_PROFILE_HELPER_INVARIANT_MISSING:{token}"
+                )
+
+    schema_text = _read_at(root, head, EXECUTION_PROFILE_SCHEMA_PATH)
+    if schema_text is None:
+        reasons.append(
+            f"MANAGED_GOVERNANCE_PATH_MISSING:{EXECUTION_PROFILE_SCHEMA_PATH}"
+        )
+    else:
+        try:
+            schema = json.loads(schema_text)
+        except json.JSONDecodeError:
+            reasons.append("EXECUTION_PROFILE_SCHEMA_INVALID_JSON")
+        else:
+            required = set(schema.get("required") or []) if isinstance(schema, dict) else set()
+            expected = {
+                "contract_version",
+                "profile_id",
+                "revision",
+                "runtime",
+                "packet_compatibility",
+                "retired_surface",
+                "effect_policy",
+                "policy_migration",
+            }
+            if not isinstance(schema, dict) or schema.get("additionalProperties") is not False:
+                reasons.append("EXECUTION_PROFILE_SCHEMA_NOT_FAIL_CLOSED")
+            if required != expected:
+                reasons.append("EXECUTION_PROFILE_SCHEMA_REQUIRED_SET_INVALID")
+    return reasons
 
 
 def _root_migration_reasons(
@@ -518,17 +858,51 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     mode = str(_profile_engineering(head_profile).get("mode") or "")
     reasons: list[str] = []
 
+    base_execution_profile_text = _read_at(root, base, EXECUTION_PROFILE_PATH)
+    head_execution_profile_text = _read_at(root, head, EXECUTION_PROFILE_PATH)
+    execution_profile_bootstrap = (
+        base_execution_profile_text is None and head_execution_profile_text is not None
+    )
+    bootstrap_profile: dict[str, object] | None = None
+    if base_execution_profile_text is not None and head_execution_profile_text is None:
+        reasons.append("EXECUTION_PROFILE_HEAD_MISSING")
+    elif execution_profile_bootstrap:
+        try:
+            bootstrap_profile = _bootstrap_execution_profile(
+                head_execution_profile_text or ""
+            )
+        except ValueError as exc:
+            reasons.append(str(exc))
+        if _read_at(root, base, GOVERNANCE_HELPER) == _read_at(
+            root, head, GOVERNANCE_HELPER
+        ):
+            reasons.append("EXECUTION_PROFILE_BOOTSTRAP_FLOOR_HELPER_UNCHANGED")
+
     if head_epoch < base_epoch:
         reasons.append(
             f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}"
         )
 
-    epoch_guarded_surfaces = PROTECTED_GOVERNANCE_SURFACES + EPOCH_GUARDED_GOVERNANCE_SURFACES + (
-        CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES if mode == "canonical" else ()
+    profile_surfaces = (
+        EXECUTION_PROFILE_BOOTSTRAP_SURFACES if execution_profile_bootstrap else ()
+    )
+    canonical_cutover_surfaces = ()
+    if mode == "canonical":
+        canonical_cutover_surfaces = tuple(
+            path
+            for path in CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES
+            if _read_at(root, base, path) is not None
+            or _read_at(root, head, path) is not None
+        )
+    epoch_guarded_surfaces = (
+        PROTECTED_GOVERNANCE_SURFACES
+        + EPOCH_GUARDED_GOVERNANCE_SURFACES
+        + profile_surfaces
+        + canonical_cutover_surfaces
     )
     root_migration_surfaces = set(EPOCH_GUARDED_GOVERNANCE_SURFACES)
-    if mode == "canonical":
-        root_migration_surfaces.update(CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES)
+    root_migration_surfaces.update(profile_surfaces)
+    root_migration_surfaces.update(canonical_cutover_surfaces)
     changed_root_surfaces: list[str] = []
     for path in epoch_guarded_surfaces:
         base_content = _read_at(root, base, path)
@@ -567,12 +941,18 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     else:
         reasons.append("GOVERNANCE_PROJECT_MODE_INVALID")
 
-    for path in MANAGED_EXECUTION_SURFACES:
-        content = _read_at(root, head, path)
-        if content is None:
-            reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
-            continue
-        reasons.extend(_execution_surface_reasons(path, content))
+    if execution_profile_bootstrap:
+        if bootstrap_profile is not None:
+            reasons.extend(
+                _execution_profile_bootstrap_reasons(root, head, bootstrap_profile)
+            )
+    else:
+        for path in MANAGED_EXECUTION_SURFACES:
+            content = _read_at(root, head, path)
+            if content is None:
+                reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
+                continue
+            reasons.extend(_execution_surface_reasons(path, content))
 
     for path in RETIRED_AGENT_ARTIFACTS:
         if _tree_has_path(root, head, path):
