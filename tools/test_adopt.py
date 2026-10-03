@@ -2742,6 +2742,9 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         assert user_tests["contract_version"] == 2
         assert user_tests["executor"] == "EXECUTION_PROFILE"
         assert user_tests["direct_persona_execution_required"] is True
+        assert user_tests["canonical_contract_read_before_execution_required"] is True
+        assert user_tests["complete_rerun_after_remediation_required"] is True
+        assert user_tests["wrapper_user_substitution_forbidden"] is True
         assert user_tests["actual_user_surface_required"] is True
         assert user_tests["actual_browser_process_required"] is True
         assert user_tests["same_candidate_required"] is True
@@ -2779,6 +2782,30 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
         assert blocked.returncode != 0
         assert "human-equivalent user tests require direct_persona_execution_required=true" in blocked.stdout
+
+        for field, message in (
+            (
+                "canonical_contract_read_before_execution_required",
+                "human-equivalent user tests require canonical_contract_read_before_execution_required=true",
+            ),
+            (
+                "complete_rerun_after_remediation_required",
+                "human-equivalent user tests require complete_rerun_after_remediation_required=true",
+            ),
+            (
+                "wrapper_user_substitution_forbidden",
+                "human-equivalent user tests require wrapper_user_substitution_forbidden=true",
+            ),
+        ):
+            release = load_yaml(target / ".engineering/release.yaml")
+            release["human_equivalent_user_tests"]["direct_persona_execution_required"] = True
+            release["human_equivalent_user_tests"][field] = False
+            (target / ".engineering/release.yaml").write_text(
+                yaml.safe_dump(release, sort_keys=False), encoding="utf-8"
+            )
+            blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+            assert blocked.returncode != 0
+            assert message in blocked.stdout
 
 
 def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -> None:
@@ -2828,6 +2855,9 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         for key in (
             "contract_version",
             "direct_persona_execution_required",
+            "canonical_contract_read_before_execution_required",
+            "complete_rerun_after_remediation_required",
+            "wrapper_user_substitution_forbidden",
             "finding_accumulation_before_remediation",
             "same_head_quality_closure_required",
             "candidate_freeze_after_quality_closure",
@@ -2869,6 +2899,9 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         assert repaired_user_tests["executor"] == "EXECUTION_PROFILE"
         assert repaired_user_tests["contract_version"] == 2
         assert repaired_user_tests["direct_persona_execution_required"] is True
+        assert repaired_user_tests["canonical_contract_read_before_execution_required"] is True
+        assert repaired_user_tests["complete_rerun_after_remediation_required"] is True
+        assert repaired_user_tests["wrapper_user_substitution_forbidden"] is True
         assert repaired_user_tests["finding_accumulation_before_remediation"] is True
         assert repaired_user_tests["same_head_quality_closure_required"] is True
         assert repaired_user_tests["candidate_freeze_after_quality_closure"] is True
@@ -2998,6 +3031,9 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
         "user-facing project requires human_equivalent_user_tests_required=true",
         "human-equivalent user tests require contract_version=2",
         "human-equivalent user tests require direct_persona_execution_required=true",
+        "human-equivalent user tests require canonical_contract_read_before_execution_required=true",
+        "human-equivalent user tests require complete_rerun_after_remediation_required=true",
+        "human-equivalent user tests require wrapper_user_substitution_forbidden=true",
         "human-equivalent user tests require actual_user_surface_required=true",
         "human-equivalent user tests require finding_accumulation_before_remediation=true",
         "human-equivalent user tests require same_head_quality_closure_required=true",

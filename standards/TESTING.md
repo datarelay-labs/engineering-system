@@ -108,7 +108,7 @@ fast release preflight
  -> post-release public smoke
 ```
 
-Each discovery pass continues every safe independent scenario/journey after findings to maximize defect discovery. Freeze the complete finding set, remediate it as one bounded batch, and rerun the invalidated gate from the beginning on the new candidate until it is clean. Project-specific release contracts may require additional clean repeat passes. Do not interleave each finding fix with remote CI.
+Before either user gate starts, read the repository-local canonical gate contract **in full** and bind the run to that contract; a wrapper/script/harness/CI-first substitute is invalid primary user evidence. Each discovery pass continues every safe independent scenario/journey after findings to maximize defect discovery. Freeze the complete finding set, finish the gate's final report/readback/offboarding, remediate it as one bounded batch, and then start a brand-new **complete** gate run with a new run identity. Targeted/affected reruns are regression evidence only. Repeat with no fixed pass ceiling until the latest complete run is clean. Project-specific release contracts may require additional clean repeat passes. Do not interleave each finding fix with remote CI.
 
 **Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
 
@@ -144,8 +144,8 @@ Run these when the change touches performance/resilience boundaries or at the re
 - development: affected L0-L5 only
 - PR: affected scenarios + cheap `pr` guardrails
 - optional nightly: broader deterministic/integration
-- release closure discovery: breadth-first Feature/Scenario PASS1 -> batched remediation -> PASS2
-- release user validation: Full User E2E PASS1 -> batched remediation -> PASS2
+- release closure discovery: complete breadth-first Feature/Scenario run -> final report/offboard -> batched remediation -> brand-new complete rerun -> repeat until clean (no fixed pass ceiling)
+- release user validation: complete Full User E2E run -> final report/offboard -> batched remediation -> brand-new complete rerun -> repeat until clean (no fixed pass ceiling)
 - release-specific qualification: upgrade/migration/platform/performance as applicable
 - final release candidate: one exact-head automated deterministic/platform CI qualification
 - integrity: artifact/hash/SBOM/provenance/manifest/attestation after final CI

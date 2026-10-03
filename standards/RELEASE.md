@@ -38,9 +38,11 @@ For products whose public surface is not a CLI, `Feature/Scenario` means the equ
 
 ### Discovery / remediation / rerun semantics
 
-Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set and perform one batched remediation rather than alternating one fix with one remote CI run.
+Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for ChatGPT's primary persona-led public-surface execution.
 
-Any product/harness/public-surface source change during remediation creates a new candidate. Restart the invalidated gate from the beginning on that new candidate and repeat until it is clean with zero mandatory FAIL/PARTIAL/BLOCKED findings. If Full User E2E remediation changes the public surface or its contract, Surface Reconciliation must be rerun too.
+Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set, perform its mandatory final report/readback/offboarding, and then perform one batched remediation rather than alternating one fix with one remote CI run.
+
+Any product/harness/public-surface/contract source change during remediation creates a new candidate. Targeted/affected reruns may prove the fix, but they never close the user gate. Start a brand-new **complete** gate run with a new run identity and repeat with no fixed pass ceiling until the latest complete run is clean with zero mandatory FAIL/PARTIAL/BLOCKED findings and zero unresolved actionable findings. If Full User E2E remediation changes the public surface or its contract, Surface Reconciliation must be rerun too.
 
 A project may require additional clean repeat passes (for example DRLink's release-specific double-pass rule), but the portable minimum is convergence of both gates to clean PASS on one unchanged exact HEAD before candidate freeze.
 
