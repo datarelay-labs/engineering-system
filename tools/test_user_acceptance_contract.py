@@ -65,23 +65,24 @@ class UserAcceptanceTests(unittest.TestCase):
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
 
-    def test_each_gate_and_same_head_close_pass(self) -> None:
+    def test_machine_check_is_structural_only(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             base = Path(d)
             surface = self.write(base, "surface.json", evidence("SURFACE_RECONCILIATION"))
             e2e = self.write(base, "e2e.json", evidence("FULL_USER_E2E"))
             cp = self.run_tool("validate-gate", "--evidence", str(surface))
             self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+            self.assertIn("USER_ACCEPTANCE_GATE_STRUCTURAL=PASS", cp.stdout)
+            self.assertIn("USER_GATE_EXECUTION_PASS=NOT_ESTABLISHED", cp.stdout)
             cp = self.run_tool(
                 "quality-close",
                 "--surface-evidence", str(surface),
                 "--e2e-evidence", str(e2e),
-                "--expected-head", HEAD,
             )
             self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
-            self.assertIn("PRODUCT_QUALITY_CLOSURE=PASS", cp.stdout)
-            self.assertIn("USER_ACCEPTANCE_EXECUTOR=CHATGPT", cp.stdout)
-            self.assertIn("AUTHORIZES_RELEASE=NO", cp.stdout)
+            self.assertIn("PRODUCT_QUALITY_CLOSURE_STRUCTURAL=PASS", cp.stdout)
+            self.assertIn("EXECUTOR_PROVENANCE=UNVERIFIED", cp.stdout)
+            self.assertIn("CANDIDATE_FREEZE_ELIGIBLE=NO", cp.stdout)
 
     def test_chatgpt_direct_persona_is_mandatory(self) -> None:
         with tempfile.TemporaryDirectory() as d:
