@@ -102,6 +102,16 @@ class UserAcceptanceTests(unittest.TestCase):
             self.assertEqual(cp.returncode, 3)
             self.assertIn("PUBLIC_SURFACE_COVERAGE_INCOMPLETE", cp.stdout)
 
+    def test_stale_candidate_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            data = evidence("SURFACE_RECONCILIATION")
+            data["candidate_head"] = "c" * 40
+            path = self.write(Path(d), "surface.json", data)
+            cp = self.run_tool("validate-gate", "--evidence", str(path))
+            self.assertEqual(cp.returncode, 3)
+            self.assertIn("CANDIDATE_HEAD_NOT_CURRENT", cp.stdout)
+
+
     def test_e2e_requires_real_effect_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             data = evidence("FULL_USER_E2E")
