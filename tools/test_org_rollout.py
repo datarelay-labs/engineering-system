@@ -71,6 +71,40 @@ def adopt_python(target: Path, baseline: str = BASELINE) -> None:
     commit_all(target, "adopt engineering system")
 
 
+def adopt_user_facing(target: Path, baseline: str = BASELINE) -> None:
+    (target / "pyproject.toml").write_text("[project]\nname='demo-user'\n", encoding="utf-8")
+    (target / "tests").mkdir(exist_ok=True)
+    (target / "tests" / "test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+    (target / "docs").mkdir(exist_ok=True)
+    (target / "docs/SURFACE_RECONCILIATION.md").write_text(
+        "# Surface Reconciliation\n", encoding="utf-8"
+    )
+    (target / "docs/FULL_USER_E2E.md").write_text(
+        "# Full User E2E\n", encoding="utf-8"
+    )
+    commit_all(target, "user-facing product fixture")
+    run(
+        sys.executable,
+        str(ADOPT),
+        "--root",
+        str(target),
+        "--apply",
+        "--baseline-sha",
+        baseline,
+        "--test-command",
+        "python -m pytest -q",
+        "--user-facing",
+        "--user-gate-contracts-reviewed",
+        "--primary-user-surface",
+        "cli",
+        "--surface-reconciliation-contract",
+        "docs/SURFACE_RECONCILIATION.md",
+        "--full-user-e2e-contract",
+        "docs/FULL_USER_E2E.md",
+    )
+    commit_all(target, "adopt user-facing engineering system")
+
+
 def write_inventory(path: Path, rows: list[dict]) -> None:
     path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
@@ -589,6 +623,55 @@ def test_override_manifest_exclude_and_adopt() -> None:
         assert project["engineering_system"]["baseline"] == NEW_BASELINE
 
 
+def test_attestation_repair_classification() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "review-provenance"
+        root.mkdir()
+        init_repo(root)
+        adopt_user_facing(root, BASELINE)
+
+        release_path = root / ".engineering/release.yaml"
+        release = load_yaml(release_path)
+        release["human_equivalent_user_tests"].pop(
+            "contract_review_attestation_version", None
+        )
+        release_path.write_text(
+            yaml.safe_dump(release, sort_keys=False), encoding="utf-8"
+        )
+        commit_all(root, "remove review attestation")
+
+        missing = org_rollout.classify_checkout(root, "1.7.0", BASELINE)
+        assert missing.state == "OUTDATED", missing
+        assert missing.action == "UPGRADE", missing
+        repaired = org_rollout.apply_upgrade(
+            root, BASELINE, {"user_gate_contracts_reviewed": True}
+        )
+        assert repaired.returncode == 0, repaired.stdout
+        commit_all(root, "repair review attestation")
+
+        for malformed in (True, 1.0):
+            bad = load_yaml(release_path)
+            bad["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = malformed
+            release_path.write_text(
+                yaml.safe_dump(bad, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(root, f"malformed review attestation {malformed!r}")
+            classified = org_rollout.classify_checkout(root, "1.7.0", BASELINE)
+            assert classified.state == "INCOMPLETE", classified
+            assert classified.action == "NEEDS_INPUT", classified
+
+            fixed = load_yaml(release_path)
+            fixed["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = 1
+            release_path.write_text(
+                yaml.safe_dump(fixed, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(root, "restore valid review attestation")
+
+
 def test_user_gate_contract_review_override_propagates() -> None:
     root = Path("/tmp/example-user-facing")
     override = {"user_gate_contracts_reviewed": True}
@@ -675,6 +758,7 @@ def main() -> int:
     test_repair_markers_match_checker_diagnostics()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
+    test_attestation_repair_classification()
     test_user_gate_contract_review_override_propagates()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
     return 0
