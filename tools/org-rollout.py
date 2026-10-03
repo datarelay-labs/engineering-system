@@ -159,6 +159,20 @@ def run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedPro
     )
 
 
+def require_canonical_checkout_matches_baseline(target_baseline: str) -> None:
+    """Fail closed when rollout helpers are not loaded from the claimed baseline."""
+    exists = run_cmd(["git", "-C", str(CANONICAL), "cat-file", "-e", f"{target_baseline}^{{commit}}"] )
+    if exists.returncode != 0:
+        return
+    head = run_cmd(["git", "-C", str(CANONICAL), "rev-parse", "HEAD"])
+    current = head.stdout.strip() if head.returncode == 0 else ""
+    if current != target_baseline:
+        raise SystemExit(
+            "FAIL canonical rollout checkout HEAD does not match target baseline; "
+            f"checkout={current or '<unavailable>'} target={target_baseline}"
+        )
+
+
 def load_yaml(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
@@ -975,6 +989,8 @@ def main() -> int:
     target_baseline = canonical_baseline(args.baseline_sha)
     if apply and not target_baseline:
         raise SystemExit("FAIL --apply requires --baseline-sha or a resolvable canonical HEAD")
+    if apply:
+        require_canonical_checkout_matches_baseline(target_baseline)
 
     overrides = OverrideManifest()
     if args.override_manifest:

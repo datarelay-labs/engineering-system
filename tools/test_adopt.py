@@ -446,6 +446,8 @@ def test_managed_upgrade_to_1_6() -> None:
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert "does not serialize unrelated repository work behind a waiting packet" in upgraded_agents
         assert "make measurable progress in the same turn" in upgraded_agents
+        assert "completed bounded Work Packet ends that workstream, not a repository-level continue/resume request" in upgraded_agents
+        assert "roadmap/release objective is complete" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert ".engineering/execution-profile.yaml" in upgraded_agents
         assert "selected execution profile" in upgraded_agents

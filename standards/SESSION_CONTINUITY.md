@@ -390,7 +390,7 @@ For implementation, hardening, audit, refactor, cleanup, and optimization work:
    - **FOLLOW_UP** — defense-in-depth, hypothetical hardening without a demonstrated path, cleanup, consistency improvement, optional optimization, or independently releasable work. Record it durably and do not keep the current packet open for it.
 3. Once required evidence passes and no BLOCKING finding remains, mark the packet complete. Do not continue speculative auditing merely because additional improvements are imaginable.
 4. A new audit round after sufficiency requires a new explicit trigger: a regression/failing oracle, incident evidence, a newly demonstrated exploit/path, a release requirement, or an explicit owner request.
-5. Completion of one workstream returns control to roadmap/portfolio priority. Do not immediately reopen the same theme merely because its follow-up backlog is non-empty.
+5. Completion of one workstream returns control to roadmap/portfolio priority. Under a repository-level continue request, this return is an internal scheduling transition, not a user-visible stop: select and execute the next dependency-eligible runnable roadmap/release workstream. Stop only when the roadmap/release objective is complete, no dependency-eligible runnable work remains, or genuine owner input/credentials/approval is required. Do not immediately reopen the same theme merely because its follow-up backlog is non-empty.
 
 ### Default depth budget
 
@@ -668,7 +668,7 @@ Guidance:
 - When a workstream is waiting on CI/review/deploy or another machine-observable condition, persist the named wait and yield that workstream back to repository-level scheduling. Select the highest-priority dependency-eligible independent ACTIVE Work Packet/worktree when safe rather than polling or stopping. The single matching ACTIVE packet rule is scoped to the current branch/workstream and must not be interpreted as repository-wide serialization behind a waiting packet.
 - Parallel work is allowed when dependencies are satisfied and worktrees, owned paths, shared mutable runtimes, and irreversible external effects do not conflict. Use a separate worktree/state owner for concurrent mutation.
 - Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-runtime work.
-- Stop only for a genuine owner decision/credential, an irreconcilable blocker, an explicit status-only request, or a completed bounded outcome.
+- Stop only for a genuine owner decision/credential, an irreconcilable blocker, or an explicit status-only request. Completing a bounded packet/PR/test phase is a scheduling boundary, not a repository-level continue/resume stop. For a repository-level continue request, immediately reschedule to the next dependency-eligible runnable roadmap/release workstream and continue until the roadmap/release objective is complete or no runnable work remains.
 
 Release qualification follows `standards/RELEASE.md` and the target repository release profile. Product-specific choreography belongs in that repository, not in this continuity standard.
 
