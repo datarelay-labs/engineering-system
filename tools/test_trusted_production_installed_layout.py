@@ -1,4 +1,4 @@
-import shutil, subprocess, tempfile, unittest
+import shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -18,7 +18,7 @@ class InstalledLayoutTests(unittest.TestCase):
             env={"PATH":"/usr/bin:/bin","PYTHONPATH":""}
             for tool in ("skills-contract.py","trusted-external-write-coordinator","trusted-production-write-coordinator","trusted-production-write-signer"):
                 cp=subprocess.run(
-                    ["python3",str(installed/tool),"--help"],
+                    [sys.executable,str(installed/tool),"--help"],
                     cwd="/",env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
                 )
                 self.assertEqual(cp.returncode,0,cp.stderr)
