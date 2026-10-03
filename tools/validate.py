@@ -105,6 +105,13 @@ REQUIRED_METHOD_FILES = (
     "tools/test_trusted_external_write_signer.py",
     "tools/trusted_external_write_coordinator.py",
     "tools/test_trusted_external_write_coordinator.py",
+    "tools/trusted_boundary_admin.py",
+    "tools/test_trusted_boundary_admin.py",
+    "tools/trusted_production_write_signer.py",
+    "tools/test_trusted_production_write_signer.py",
+    "tools/trusted_production_write_coordinator.py",
+    "tools/test_trusted_production_write_coordinator.py",
+    "tools/test_trusted_production_installed_layout.py",
     "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
@@ -1776,6 +1783,15 @@ def main():
     completed = subprocess.run(["python3", "tools/test_trusted_external_write_coordinator.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    for boundary_test in (
+        "tools/test_trusted_boundary_admin.py",
+        "tools/test_trusted_production_write_signer.py",
+        "tools/test_trusted_production_write_coordinator.py",
+        "tools/test_trusted_production_installed_layout.py",
+    ):
+        completed = subprocess.run(["python3", boundary_test], cwd=ROOT)
+        if completed.returncode:
+            raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_skills_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

@@ -12,10 +12,14 @@ REPLAY=ETC/"skills-replay-state"
 INSTALLS={
  "skills-contract.py":"skills-contract.py",
  "trusted_external_write_signer.py":"trusted-external-write-signer",
- "trusted_external_write_coordinator.py":"trusted_external_write_coordinator.py",
+ "trusted_external_write_coordinator.py":"trusted-external-write-coordinator",
  "trusted_production_write_signer.py":"trusted-production-write-signer",
  "trusted_production_write_coordinator.py":"trusted-production-write-coordinator",
  "execution_profile.py":"execution_profile.py",
+}
+IMPORTS={
+ "trusted_external_write_coordinator.py":"trusted_external_write_coordinator.py",
+ "work_packet_authority.py":"work_packet_authority.py",
 }
 OPENSSL=Path("/usr/bin/openssl")
 
@@ -36,7 +40,7 @@ def install(args):
     _root()
     source=args.source.resolve()
     if not source.is_dir() or source.is_symlink(): raise BoundaryError("canonical source directory is invalid")
-    for name in INSTALLS:
+    for name in dict.fromkeys((*INSTALLS, *IMPORTS)):
         p=source/"tools"/name
         if not p.is_file() or p.is_symlink(): raise BoundaryError(f"canonical source missing: {name}")
     ETC.mkdir(parents=True,exist_ok=True,mode=0o700); os.chmod(ETC,0o700)
@@ -49,9 +53,9 @@ def install(args):
                    env={"PATH":"/usr/bin:/bin","LANG":"C","LC_ALL":"C"},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     os.chmod(PUB,0o644)
     REPLAY.mkdir(mode=0o700); os.chmod(REPLAY,0o700)
-    for src,dst in INSTALLS.items():
+    for src,dst in (*INSTALLS.items(), *IMPORTS.items()):
         target=LIB/dst
-        if target.exists(): raise BoundaryError(f"boundary executable already exists: {target}")
+        if target.exists(): raise BoundaryError(f"boundary artifact already exists: {target}")
         shutil.copyfile(source/"tools"/src,target,follow_symlinks=False)
         os.chown(target,0,0); os.chmod(target,0o755 if dst.startswith("trusted-") else 0o644)
     verify(args)
@@ -60,14 +64,14 @@ def install(args):
 def verify(args):
     _root(); _secure_dir(ETC,0o700); _secure_dir(LIB,0o755); _secure_dir(REPLAY,0o700)
     _secure_file(KEY,0o600); _secure_file(PUB,0o644)
-    for _,dst in INSTALLS.items(): _secure_file(LIB/dst,0o755 if dst.startswith("trusted-") else 0o644)
+    for _,dst in (*INSTALLS.items(), *IMPORTS.items()): _secure_file(LIB/dst,0o755 if dst.startswith("trusted-") else 0o644)
     cp=subprocess.run([str(OPENSSL),"pkey","-pubin","-in",str(PUB),"-noout"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if cp.returncode: raise BoundaryError("public trust anchor is invalid")
     print("TRUSTED_BOUNDARY_VERIFY=PASS")
 
 def remove(args):
     _root()
-    for _,dst in INSTALLS.items():
+    for _,dst in (*INSTALLS.items(), *IMPORTS.items()):
         p=LIB/dst
         if p.exists():
             if p.is_symlink(): raise BoundaryError("refusing symlink boundary removal")

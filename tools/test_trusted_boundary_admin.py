@@ -13,7 +13,7 @@ class BoundaryAdminTests(unittest.TestCase):
     def setUp(self):
         self.t=tempfile.TemporaryDirectory(); self.addCleanup(self.t.cleanup)
         base=Path(self.t.name); self.etc=base/"etc"; self.lib=base/"lib"; self.source=base/"src"; (self.source/"tools").mkdir(parents=True)
-        for name in m.INSTALLS: (self.source/"tools"/name).write_text("#!/usr/bin/env python3\n")
+        for name in dict.fromkeys((*m.INSTALLS, *m.IMPORTS)): (self.source/"tools"/name).write_text("#!/usr/bin/env python3\n")
         self.old=(m.ETC,m.LIB,m.KEY,m.PUB,m.REPLAY)
         m.ETC=self.etc; m.LIB=self.lib; m.KEY=self.etc/"skills-trust-anchor.key"; m.PUB=self.etc/"skills-trust-anchor.pub"; m.REPLAY=self.etc/"skills-replay-state"
         self.addCleanup(self.restore)
@@ -29,6 +29,10 @@ class BoundaryAdminTests(unittest.TestCase):
             return R()
         with patch.object(m.os,"geteuid",return_value=0), patch.object(m.os,"chown",return_value=None), patch.object(m.subprocess,"run",side_effect=fake_run), patch.object(m,"_secure_dir",return_value=None), patch.object(m,"_secure_file",return_value=None):
             m.install(Args(self.source)); self.assertTrue(m.KEY.exists()); self.assertEqual(m.KEY.stat().st_mode&0o777,0o600)
+            self.assertTrue((m.LIB/"trusted-external-write-coordinator").is_file())
+            self.assertTrue((m.LIB/"trusted_external_write_coordinator.py").is_file())
+            self.assertEqual((m.LIB/"trusted-external-write-coordinator").stat().st_mode&0o777,0o755)
+            self.assertEqual((m.LIB/"trusted_external_write_coordinator.py").stat().st_mode&0o777,0o644)
             m.verify(Args()); m.remove(Args()); self.assertFalse(m.KEY.exists())
     def test_existing_anchor_fails_closed(self):
         self.etc.mkdir(); m.KEY.write_text("x")
