@@ -974,7 +974,7 @@ def main() -> int:
     ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
-    read_only_audit = args.audit or not args.apply
+    read_only_audit = not args.apply
     user_tests = release.get("human_equivalent_user_tests")
     user_gate_contract_review_required = (
         isinstance(user_tests, dict)

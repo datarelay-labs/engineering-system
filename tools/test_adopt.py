@@ -2932,6 +2932,21 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         assert "--user-gate-contracts-reviewed" in blocked_review.stdout
         assert release_path.read_bytes() == before_review
 
+        blocked_audit_apply = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked_audit_apply.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_audit_apply.stdout
+        assert release_path.read_bytes() == before_review
+
         repaired = run(
             sys.executable,
             str(UPGRADE),
