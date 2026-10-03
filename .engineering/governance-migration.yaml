@@ -1,13 +1,15 @@
 contract_version: 1
-base_sha: 5b1a2a6706dff874c83710702e4007c9c66d22e6
-from_policy_epoch: 8
-to_policy_epoch: 9
+base_sha: 10a1ee238c95df47d676e014cdb1a43c67615297
+from_policy_epoch: 9
+to_policy_epoch: 10
 requires_exact_head_validate: true
 automation_eligible: false
 rationale: >-
-  Add the managed Atlas derived-context workflow surface after the user-quality
-  gate epoch, enabling bounded JIT context, candidate write-back, and content-free
-  M5 telemetry without changing canonical Git/GitHub authority.
+  Bind continue/resume execution to the owner-selected target repository and fail
+  closed when an active Work Packet targets a different repository, preventing
+  cross-project handoff/context references from retargeting mutation authority.
 changed_surfaces:
   - path: tools/adopt.py
-    head_blob_sha: e076828097e069dbdebbfeae446a191cd27cac31
+    head_blob_sha: d304abc61e10f31797dbad5e518ec2abcb544937
+  - path: tools/context_epoch.py
+    head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895

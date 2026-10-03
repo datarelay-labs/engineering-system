@@ -339,20 +339,19 @@ The model-visible marker contains only version, store-local opaque handle, and o
 
 When resuming work:
 
-1. Resolve the target repository first from the owner's current explicit project/repository context, using the current Git remote only when that context does not already identify the repository.
-2. Bind that repository as the expected target for the current owner-selected workstream. Only a new explicit owner project/repository switch may replace the binding.
-3. Once bound, do not search unrelated repositories. Cross-project handoffs, dependencies, Issue references, derived context, and waiting-work scheduling may be inspected as read-only context but never retarget implementation/testing/mutation authority.
-4. Resolve the current branch when a local repository is available.
-5. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
-6. Require exact `TARGET_REPO` match and lint with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>`; `TARGET_REPO_SCOPE_MISMATCH` is non-runnable.
-7. Prefer an exact `BRANCH` match when branch context exists.
-8. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
-9. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
-10. For legacy packet v2, require its v2 identity/intent fields, require current execution-profile compatibility, and migrate it to v3 on the next meaningful update.
-11. Reject packet v1 and versionless packets as non-runnable; migrate them to v3 before implementation.
-12. Zero matches: report no active packet; do not reconstruct state from guesses.
-13. Multiple matches: fail closed and ask which workstream to use.
-14. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
+1. Resolve the target repository first from the owner's current explicit project/repository context, using the current Git remote only when that context does not already identify the repository, and bind it as the expected target for the current owner-selected workstream. Only a new explicit owner project/repository switch may replace the binding.
+2. Once bound, do not search unrelated repositories. Cross-project handoffs, dependencies, Issue references, derived context, and waiting-work scheduling may be inspected as read-only context but never retarget implementation/testing/mutation authority.
+3. Resolve the current branch when a local repository is available.
+4. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
+5. Require exact `TARGET_REPO` match and lint with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>`; `TARGET_REPO_SCOPE_MISMATCH` is non-runnable.
+6. Prefer an exact `BRANCH` match when branch context exists.
+7. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
+8. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
+9. For legacy packet v2, require its v2 identity/intent fields, require current execution-profile compatibility, and migrate it to v3 on the next meaningful update.
+10. Reject packet v1 and versionless packets as non-runnable; migrate them to v3 before implementation.
+11. Zero matches: report no active packet; do not reconstruct state from guesses.
+12. Multiple matches: fail closed and ask which workstream to use.
+13. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
 
 Never treat a stale packet HEAD as current truth.
 
