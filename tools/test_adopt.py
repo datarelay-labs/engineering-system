@@ -3011,7 +3011,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
                 sys.executable, str(CHECK), "--root", str(target), check=False
             )
             assert checker_invalid.returncode != 0
-            assert "contract_review_attestation_version=1 as an integer" in checker_invalid.stdout
+            assert "invalid contract_review_attestation_version; manual review required" in checker_invalid.stdout
 
             upgrade_invalid = run(
                 sys.executable,
@@ -3156,7 +3156,8 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
         "human-equivalent user tests require canonical_contract_read_before_execution_required=true",
         "human-equivalent user tests require complete_rerun_after_remediation_required=true",
         "human-equivalent user tests require wrapper_user_substitution_forbidden=true",
-        "human-equivalent user tests require contract_review_attestation_version=1 as an integer",
+        "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance",
+        "human-equivalent user tests have invalid contract_review_attestation_version; manual review required",
         "human-equivalent user tests require actual_user_surface_required=true",
         "human-equivalent user tests require finding_accumulation_before_remediation=true",
         "human-equivalent user tests require same_head_quality_closure_required=true",

@@ -450,7 +450,7 @@ def test_repair_markers_match_checker_diagnostics() -> None:
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
     assert (
-        "human-equivalent user tests require contract_review_attestation_version=1 as an integer"
+        "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance"
         in org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
     assert org_rollout.repairable_structural_failure(
@@ -469,7 +469,10 @@ def test_repair_markers_match_checker_diagnostics() -> None:
         "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
     )
     assert org_rollout.repairable_structural_failure(
-        "FAIL human-equivalent user tests require contract_review_attestation_version=1 as an integer"
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance"
+    )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests have invalid contract_review_attestation_version; manual review required"
     )
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"

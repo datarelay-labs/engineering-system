@@ -306,7 +306,7 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
     "managed Work Packet template missing required packet-v3 metadata",
     "differs from canonical managed helper",
     "human-equivalent user tests executor must be EXECUTION_PROFILE",
-    "human-equivalent user tests require contract_review_attestation_version=1 as an integer",
+    "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance",
 )
 
 
