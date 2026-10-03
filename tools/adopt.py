@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 7
+POLICY_EPOCH = 8
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -62,6 +62,12 @@ VERIFICATION_CONTRACT_MANAGED = (
     "schemas/verification-contract.schema.json",
     "schemas/trust-evidence-receipt.schema.json",
     "schemas/trust-evidence-boundary.schema.json",
+)
+
+# Human-equivalent user acceptance evidence validator for user-facing releases.
+USER_ACCEPTANCE_MANAGED = (
+    "tools/user_acceptance_contract.py",
+    "schemas/user-acceptance-evidence.schema.json",
 )
 
 # Repository-relative helpers referenced by the managed AGENTS execution rules.
@@ -134,6 +140,7 @@ REQUIRED_MANAGED = (
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
+    *USER_ACCEPTANCE_MANAGED,
     *AGENT_RUNTIME_MANAGED,
     *IMPLEMENTATION_PREFLIGHT_MANAGED,
     *TERMINAL_COMPLETION_NOTIFY_MANAGED,
@@ -1002,12 +1009,18 @@ def release_yaml(
         browser_required = primary_user_surface in {"browser", "mixed"}
         lines.extend([
             "human_equivalent_user_tests:",
+            "  contract_version: 2",
             "  executor: EXECUTION_PROFILE",
+            "  direct_persona_execution_required: true",
             "  actual_user_surface_required: true",
             f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
             f"  actual_browser_process_required: {'true' if browser_required else 'false'}",
             "  same_candidate_required: true",
+            "  finding_accumulation_before_remediation: true",
+            "  same_head_quality_closure_required: true",
+            "  candidate_freeze_after_quality_closure: true",
             "  ci_contract_validation_only: true",
+            "  evidence_validator: tools/user_acceptance_contract.py",
             "  surface_reconciliation:",
             "    mandatory: true",
             f"    contract: {yaml_scalar(surface_reconciliation_contract)}",
@@ -1253,6 +1266,20 @@ def ensure_verification_contract_compatible(root: Path) -> None:
     `.engineering/verification.yaml` is not consulted and is never created.
     """
     for rel in VERIFICATION_CONTRACT_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
+def ensure_user_acceptance_compatible(root: Path) -> None:
+    """Reject incompatible managed user-acceptance validator/schema before writes."""
+    for rel in USER_ACCEPTANCE_MANAGED:
         path = root / rel
         if not path.exists():
             continue
@@ -1511,6 +1538,7 @@ def main() -> int:
     ensure_runtime_contract_compatible(root)
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
+    ensure_user_acceptance_compatible(root)
     ensure_agent_runtime_compatible(root)
     ensure_implementation_preflight_compatible(root)
     ensure_terminal_completion_notify_compatible(root)
@@ -1532,6 +1560,7 @@ def main() -> int:
         *RUNTIME_CONTRACT_MANAGED,
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
+        *USER_ACCEPTANCE_MANAGED,
         *AGENT_RUNTIME_MANAGED,
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
         *TERMINAL_COMPLETION_NOTIFY_MANAGED,

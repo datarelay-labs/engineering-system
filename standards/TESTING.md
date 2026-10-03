@@ -94,36 +94,42 @@ Deterministic unit/component/API/matrix tests are necessary but do not reproduce
 A user-facing release MUST use the human-equivalent gates as the semantic defect-discovery stages **before final exact-head CI and release-integrity qualification**:
 
 ```text
-Surface Reconciliation / Feature-Scenario PASS1
- -> batched remediation
- -> PASS2 clean
- -> Full User E2E PASS1
- -> batched remediation
- -> PASS2 clean
- -> release-specific upgrade/platform qualification
+fast release preflight
+ -> Surface Reconciliation discovery/remediation/rerun until clean
+ -> Full User E2E discovery/remediation/rerun until clean
+ -> rerun Surface Reconciliation when E2E fixes changed the public surface
+ -> both user gates PASS on the same exact HEAD
+ -> candidate freeze
+ -> release-specific upgrade/platform/performance qualification
  -> final exact-head automated CI
  -> release integrity / final audit
- -> owner/manual acceptance when required
- -> release authorization
+ -> owner acceptance / release authorization
+ -> stable publication
+ -> post-release public smoke
 ```
 
-PASS1 continues every safe independent scenario/journey after findings to maximize defect discovery. PASS1 findings are remediated as one bounded batch. PASS2 restarts the complete gate on the new candidate and requires zero mandatory findings. Do not interleave each finding fix with remote CI.
+Each discovery pass continues every safe independent scenario/journey after findings to maximize defect discovery. Freeze the complete finding set, remediate it as one bounded batch, and rerun the invalidated gate from the beginning on the new candidate until it is clean. Project-specific release contracts may require additional clean repeat passes. Do not interleave each finding fix with remote CI.
 
 **Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
 
 **Full User E2E** is depth-first. It executes complete realistic user missions through the real primary product surface, proves actual outcomes, injects realistic mistakes/failures, performs user-visible diagnosis and recovery, exercises live edits/destructive lifecycle, and verifies cleanup/orphan truth.
 
 Both gates:
+- are executed and finally audited by **ChatGPT itself**, directly acting as the applicable User/Operator/Admin persona;
 - run on the same exact candidate HEAD;
 - are independently required and never substitute for each other;
 - require zero mandatory FAIL/PARTIAL/BLOCKED for release PASS;
-- may reuse machine evidence for verification but not to replace the user action;
+- may reuse machine evidence for verification but not to replace ChatGPT's real user action;
+- forbid a coding agent, alternate model, wrapper, scripted scenario replay, test harness, or CI job from impersonating the acting user or declaring the gate PASS;
 - must continue safe independent scenarios after a failure so one defect does not hide others;
-- must retain run/evidence identity in the active release Work Packet.
+- freeze the complete finding set before batched remediation;
+- must retain machine-readable ledger-derived run/evidence identity in the active release Work Packet.
 
-For browser products, the user action MUST be performed by an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
+If ChatGPT cannot execute a mandatory user action because the real environment or required interaction capability is unavailable, that scenario is BLOCKED; do not delegate it to another agent merely to manufacture PASS.
 
-For CLI/desktop/mobile products, use the actual supported public primary interface with the same human-equivalent principle.
+For browser products, ChatGPT MUST perform the user action through an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
+
+For CLI/desktop/mobile products, ChatGPT directly uses the actual supported public primary interface with the same human-equivalent principle. See `standards/USER_ACCEPTANCE.md` for the portable gate semantics and evidence contract.
 
 ## Performance/resilience
 

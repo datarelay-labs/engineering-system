@@ -12,6 +12,7 @@ import ci_policy_audit
 from adopt import (
     AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
+    USER_ACCEPTANCE_MANAGED,
     canonical_execution_policy_line,
     canonical_managed_policy_lines,
     retired_agent_artifact_paths,
@@ -34,6 +35,7 @@ MANAGED_ADOPTION_REQUIRED = (
     ".engineering/requirements-engineering-system.txt",
     "tools/governance_floor.py",
     *EXECUTION_PROFILE_MANAGED,
+    *USER_ACCEPTANCE_MANAGED,
     *AGENT_RUNTIME_MANAGED,
 )
 
@@ -385,6 +387,8 @@ def main() -> int:
                 if not isinstance(user_tests, dict):
                     failures.append("user-facing project requires release.human_equivalent_user_tests mapping")
                 else:
+                    if user_tests.get("contract_version") != 2:
+                        failures.append("human-equivalent user tests require contract_version=2")
                     executor = str(user_tests.get("executor") or "").strip()
                     if not executor:
                         failures.append("human-equivalent user tests require an executor")
@@ -392,14 +396,24 @@ def main() -> int:
                         failures.append(
                             "human-equivalent user tests executor must be EXECUTION_PROFILE"
                         )
+                    if user_tests.get("direct_persona_execution_required") is not True:
+                        failures.append("human-equivalent user tests require direct_persona_execution_required=true")
                     if user_tests.get("actual_user_surface_required") is not True:
                         failures.append("human-equivalent user tests require actual_user_surface_required=true")
                     if str(user_tests.get("primary_user_surface") or "") != primary_user_surface:
                         failures.append("release human-equivalent primary_user_surface must match project.primary_user_surface")
                     if user_tests.get("same_candidate_required") is not True:
                         failures.append("human-equivalent user tests require same_candidate_required=true")
+                    if user_tests.get("finding_accumulation_before_remediation") is not True:
+                        failures.append("human-equivalent user tests require finding_accumulation_before_remediation=true")
+                    if user_tests.get("same_head_quality_closure_required") is not True:
+                        failures.append("human-equivalent user tests require same_head_quality_closure_required=true")
+                    if user_tests.get("candidate_freeze_after_quality_closure") is not True:
+                        failures.append("human-equivalent user tests require candidate_freeze_after_quality_closure=true")
                     if user_tests.get("ci_contract_validation_only") is not True:
                         failures.append("human-equivalent user tests require ci_contract_validation_only=true")
+                    if str(user_tests.get("evidence_validator") or "") != "tools/user_acceptance_contract.py":
+                        failures.append("human-equivalent user tests require managed user acceptance evidence validator")
                     if primary_user_surface in {"browser", "mixed"} and user_tests.get("actual_browser_process_required") is not True:
                         failures.append("browser user-facing project requires actual_browser_process_required=true")
                     for gate_name in ("surface_reconciliation", "full_user_e2e"):

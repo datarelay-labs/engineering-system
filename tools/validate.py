@@ -18,6 +18,7 @@ REQUIRED_STANDARDS = (
     "standards/TESTING.md",
     "standards/SECURITY.md",
     "standards/RELEASE.md",
+    "standards/USER_ACCEPTANCE.md",
     "standards/OPERATIONS.md",
     "standards/KNOWLEDGE.md",
     "standards/SKILLS.md",
@@ -112,6 +113,9 @@ REQUIRED_METHOD_FILES = (
     "tools/trusted_production_write_coordinator.py",
     "tools/test_trusted_production_write_coordinator.py",
     "tools/test_trusted_production_installed_layout.py",
+    "tools/user_acceptance_contract.py",
+    "tools/test_user_acceptance_contract.py",
+    "schemas/user-acceptance-evidence.schema.json",
     "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
     "tools/test_behavior_eval.py",
@@ -1796,6 +1800,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_user_acceptance_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_auto_merge_eligibility.py"], cwd=ROOT)

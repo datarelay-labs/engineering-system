@@ -1,17 +1,14 @@
 contract_version: 1
-base_sha: f2ecbeec1686b925f64dac925333dace2f969466
-from_policy_epoch: 6
-to_policy_epoch: 7
+base_sha: 9e0001efd8e67413e203a4ff7bbc6a70cf9c8664
+from_policy_epoch: 7
+to_policy_epoch: 8
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Close XDR rollout findings by making managed AGENTS helper references executable,
-  blocking untouched Work Packet template authority, and hardening GitHub origin binding.
+rationale: Generalize the proven DRLink human-equivalent quality model into enforced portable Surface Reconciliation and Full User E2E contracts, requiring direct ChatGPT persona execution and same-HEAD product-quality closure before candidate freeze.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 641f40429316bf77ee670a0ce3b1e011d25da28e
+  head_blob_sha: 38bf8ab43789f731c46325099984f54813c7764f
 - path: tools/check-adoption.py
-  head_blob_sha: 4393d7e4883488cf7ea7cd157ad3cbefb7508c3e
-- path: tools/context_epoch.py
-  head_blob_sha: ab834099634cbfacc131e9a332473fc5fc3e58d2
+  head_blob_sha: 91bb236b396721a9f79e3510c1d26e11c4e3acbc
 - path: tools/upgrade-adoption.py
-  head_blob_sha: 761a84f4f6e47bd72dab75f4c596a55c75fe5aaa
+  head_blob_sha: 4d2fd51d003d24efae8c17126fd5e689a06bcd1b

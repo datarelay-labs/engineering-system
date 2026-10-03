@@ -145,6 +145,14 @@ paths:
     domains: [standards, enforcement]
   "standards/RELEASE.md":
     domains: [standards, release-contract]
+  "standards/USER_ACCEPTANCE.md":
+    domains: [standards, release-contract]
+  "tools/user_acceptance_contract.py":
+    domains: [release-contract, workflows]
+  "tools/test_user_acceptance_contract.py":
+    domains: [release-contract]
+  "schemas/user-acceptance-evidence.schema.json":
+    domains: [schemas, release-contract]
   "standards/OPERATIONS.md":
     domains: [standards, operations-contract]
   "templates/.github/workflows/engineering-system.yml":
@@ -226,7 +234,25 @@ scenarios:
     domains: [schemas]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
-    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
+    command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/user-acceptance-evidence.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
+    release_gate: true
+
+  - id: ENG-RELEASE-USER-ACCEPTANCE-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: User acceptance evidence and same-HEAD closure contract
+    level: unit
+    domains: [release-contract]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_user_acceptance_contract.py"
+    invariants:
+      - "ChatGPT direct persona execution is mandatory for both user gates"
+      - "Surface Reconciliation and Full User E2E must cleanly bind to one exact HEAD before candidate freeze"
+      - "quality closure is evidence-only and does not authorize release"
     release_gate: true
 
   - id: ENG-STATIC-002

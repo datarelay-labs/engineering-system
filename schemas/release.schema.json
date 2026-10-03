@@ -11,31 +11,78 @@
     "full_e2e_passes"
   ],
   "properties": {
-    "version": {"type": "integer", "minimum": 1},
-    "exact_head_required": {"type": "boolean"},
-    "artifact_hash_required": {"type": "boolean"},
-    "provenance_required": {"type": "boolean"},
-    "sbom_required": {"type": "boolean"},
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "exact_head_required": {
+      "type": "boolean"
+    },
+    "artifact_hash_required": {
+      "type": "boolean"
+    },
+    "provenance_required": {
+      "type": "boolean"
+    },
+    "sbom_required": {
+      "type": "boolean"
+    },
     "execution_context": {
       "type": "string",
-      "enum": ["github-hosted", "protected-production"]
+      "enum": [
+        "github-hosted",
+        "protected-production"
+      ]
     },
-    "setup_command": {"type": "string"},
-    "preflight_required": {"type": "boolean"},
-    "preflight_command": {"type": "string"},
-    "qualification_command": {"type": "string"},
-    "artifact_hash_command": {"type": "string"},
-    "provenance_command": {"type": "string"},
-    "sbom_command": {"type": "string"},
-    "operational_e2e_required": {"type": "boolean"},
-    "operational_e2e_command": {"type": "string"},
-    "full_e2e_passes": {"type": "integer", "minimum": 0},
-    "public_smoke_required": {"type": "boolean"},
-    "public_smoke_command": {"type": "string"},
-    "human_equivalent_user_tests_required": {"type": "boolean"},
+    "setup_command": {
+      "type": "string"
+    },
+    "preflight_required": {
+      "type": "boolean"
+    },
+    "preflight_command": {
+      "type": "string"
+    },
+    "qualification_command": {
+      "type": "string"
+    },
+    "artifact_hash_command": {
+      "type": "string"
+    },
+    "provenance_command": {
+      "type": "string"
+    },
+    "sbom_command": {
+      "type": "string"
+    },
+    "operational_e2e_required": {
+      "type": "boolean"
+    },
+    "operational_e2e_command": {
+      "type": "string"
+    },
+    "full_e2e_passes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "public_smoke_required": {
+      "type": "boolean"
+    },
+    "public_smoke_command": {
+      "type": "string"
+    },
+    "human_equivalent_user_tests_required": {
+      "type": "boolean"
+    },
     "human_equivalent_user_tests": {
       "type": "object",
       "required": [
+        "evidence_validator",
+        "candidate_freeze_after_quality_closure",
+        "same_head_quality_closure_required",
+        "finding_accumulation_before_remediation",
+        "direct_persona_execution_required",
+        "contract_version",
         "executor",
         "actual_user_surface_required",
         "primary_user_surface",
@@ -46,35 +93,96 @@
         "full_user_e2e"
       ],
       "properties": {
-        "executor": {"type": "string", "minLength": 1},
-        "actual_user_surface_required": {"type": "boolean"},
+        "executor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actual_user_surface_required": {
+          "type": "boolean"
+        },
         "primary_user_surface": {
           "type": "string",
-          "enum": ["browser", "cli", "desktop", "mobile", "mixed", "other"]
+          "enum": [
+            "browser",
+            "cli",
+            "desktop",
+            "mobile",
+            "mixed",
+            "other"
+          ]
         },
-        "actual_browser_process_required": {"type": "boolean"},
-        "same_candidate_required": {"type": "boolean"},
-        "ci_contract_validation_only": {"type": "boolean"},
+        "actual_browser_process_required": {
+          "type": "boolean"
+        },
+        "same_candidate_required": {
+          "type": "boolean"
+        },
+        "ci_contract_validation_only": {
+          "type": "boolean"
+        },
         "surface_reconciliation": {
           "type": "object",
-          "required": ["mandatory", "contract", "minimum_passes"],
+          "required": [
+            "mandatory",
+            "contract",
+            "minimum_passes"
+          ],
           "properties": {
-            "mandatory": {"type": "boolean"},
-            "contract": {"type": "string"},
-            "minimum_passes": {"type": "integer", "minimum": 0}
+            "mandatory": {
+              "type": "boolean"
+            },
+            "contract": {
+              "type": "string"
+            },
+            "minimum_passes": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         "full_user_e2e": {
           "type": "object",
-          "required": ["mandatory", "contract", "minimum_passes"],
+          "required": [
+            "mandatory",
+            "contract",
+            "minimum_passes"
+          ],
           "properties": {
-            "mandatory": {"type": "boolean"},
-            "contract": {"type": "string"},
-            "minimum_passes": {"type": "integer", "minimum": 0}
+            "mandatory": {
+              "type": "boolean"
+            },
+            "contract": {
+              "type": "string"
+            },
+            "minimum_passes": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
+        },
+        "contract_version": {
+          "const": 2
+        },
+        "direct_persona_execution_required": {
+          "type": "boolean"
+        },
+        "finding_accumulation_before_remediation": {
+          "type": "boolean"
+        },
+        "same_head_quality_closure_required": {
+          "type": "boolean"
+        },
+        "candidate_freeze_after_quality_closure": {
+          "type": "boolean"
+        },
+        "evidence_validator": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
-    "blockers": {"type": "object"}
+    "blockers": {
+      "type": "object"
+    }
   }
 }
