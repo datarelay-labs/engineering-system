@@ -38,6 +38,14 @@ The release profile must use `human_equivalent_user_tests.contract_version: 2`, 
 
 Machine/unit/component/API/static checks may support the gates but never substitute for the actual user action.
 
+## Contract-first execution hard gate
+
+Before **either** user gate starts, ChatGPT MUST resolve the repository-local canonical contract referenced by the release profile and read the **entire current contract end-to-end**. This happens before scenario execution, wrapper/harness execution, source/parser inspection, CI inspection, or an improvised checklist. The purpose is to bind execution to the project's actual personas, scope, prohibited actions, evidence rules, cleanup, invalidation, and PASS/FAIL/BLOCKED semantics rather than to the executor's remembered or guessed version of the test.
+
+A run is invalid as user-gate evidence when it starts from a wrapper/scripted replay, generic test harness, source/test oracle, or CI shortcut before the canonical contract has been fully read and adopted for that run. Automation remains supporting evidence/orchestration only; it never becomes the acting persona merely because it covers many commands or scenarios.
+
+A standalone request for one gate authorizes only that gate. Chaining Surface Reconciliation into state-changing Full User E2E requires either the current release-quality workflow/Work Packet to require the next gate or an explicit Full User E2E/release-qualification request.
+
 ## Shared execution semantics
 
 Both gates MUST bind to an exact candidate HEAD/build and exact committed test contract, use the actual supported primary public surface, use ChatGPT-led persona execution rather than a hidden/scripted answer key, and separate acting-user knowledge from auditor/source/test oracle knowledge.Both gates MUST also:
@@ -120,14 +128,18 @@ A finding is not automatically a stop condition.
 For each gate:
 
 ```text
-execute complete safe discovery pass
+read the complete current canonical gate contract
+ -> execute complete safe discovery pass
  -> retain all findings/evidence
  -> freeze ledgers/counters
+ -> final gate report/readback and run offboarding
  -> bounded batched remediation
- -> new candidate when source/public surface changes
- -> rerun invalidated gate from the beginning
- -> repeat until clean
-```Stop only the dependent unsafe/impossible lane; continue independent lanes. Do not patch the product in the middle of a frozen discovery pass.
+ -> new candidate when source/public surface/contract changes
+ -> start a brand-new complete gate run with a new run identity
+ -> repeat with no fixed pass ceiling until the latest complete run is clean
+```
+
+Targeted/affected reruns after a fix are regression evidence only; they never replace the required new complete gate run. Stop only the dependent unsafe/impossible lane; continue independent lanes. Do not patch the product in the middle of a frozen discovery pass.
 
 ## Product-quality closure and candidate freeze
 

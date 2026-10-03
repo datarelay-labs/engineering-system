@@ -81,6 +81,9 @@
         "candidate_freeze_after_quality_closure",
         "same_head_quality_closure_required",
         "finding_accumulation_before_remediation",
+        "canonical_contract_read_before_execution_required",
+        "complete_rerun_after_remediation_required",
+        "wrapper_user_substitution_forbidden",
         "direct_persona_execution_required",
         "contract_version",
         "executor",
@@ -164,6 +167,15 @@
           "const": 2
         },
         "direct_persona_execution_required": {
+          "type": "boolean"
+        },
+        "canonical_contract_read_before_execution_required": {
+          "type": "boolean"
+        },
+        "complete_rerun_after_remediation_required": {
+          "type": "boolean"
+        },
+        "wrapper_user_substitution_forbidden": {
           "type": "boolean"
         },
         "finding_accumulation_before_remediation": {

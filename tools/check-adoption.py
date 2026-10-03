@@ -398,6 +398,12 @@ def main() -> int:
                         )
                     if user_tests.get("direct_persona_execution_required") is not True:
                         failures.append("human-equivalent user tests require direct_persona_execution_required=true")
+                    if user_tests.get("canonical_contract_read_before_execution_required") is not True:
+                        failures.append("human-equivalent user tests require canonical_contract_read_before_execution_required=true")
+                    if user_tests.get("complete_rerun_after_remediation_required") is not True:
+                        failures.append("human-equivalent user tests require complete_rerun_after_remediation_required=true")
+                    if user_tests.get("wrapper_user_substitution_forbidden") is not True:
+                        failures.append("human-equivalent user tests require wrapper_user_substitution_forbidden=true")
                     if user_tests.get("actual_user_surface_required") is not True:
                         failures.append("human-equivalent user tests require actual_user_surface_required=true")
                     if str(user_tests.get("primary_user_surface") or "") != primary_user_surface:

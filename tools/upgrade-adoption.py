@@ -121,6 +121,9 @@ def write_yaml(path: Path, data: dict) -> None:
 USER_ACCEPTANCE_V2_MANAGED_FIELDS = {
     "contract_version": 2,
     "direct_persona_execution_required": True,
+    "canonical_contract_read_before_execution_required": True,
+    "complete_rerun_after_remediation_required": True,
+    "wrapper_user_substitution_forbidden": True,
     "finding_accumulation_before_remediation": True,
     "same_head_quality_closure_required": True,
     "candidate_freeze_after_quality_closure": True,
