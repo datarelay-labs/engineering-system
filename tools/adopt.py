@@ -1395,9 +1395,9 @@ def main() -> int:
             raise SystemExit("FAIL --user-facing requires both --surface-reconciliation-contract and --full-user-e2e-contract")
         for label, rel in (("surface reconciliation", args.surface_reconciliation_contract), ("Full User E2E", args.full_user_e2e_contract)):
             require_repository_relative_contract(root, rel, label)
-        if not args.user_gate_contracts_reviewed:
+        if args.apply and not args.user_gate_contracts_reviewed:
             raise SystemExit(
-                "FAIL --user-facing requires --user-gate-contracts-reviewed after explicitly reviewing "
+                "FAIL --user-facing apply requires --user-gate-contracts-reviewed after explicitly reviewing "
                 "both repository-local user-gate contracts for contract-first execution, direct persona "
                 "ownership, wrapper/script non-substitution, and complete rerun-until-clean semantics"
             )

@@ -2721,6 +2721,21 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         (target / "docs/FULL_USER_E2E.md").write_text("# Full User E2E\n", encoding="utf-8")
         commit_all(target)
 
+        audit_review = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--audit",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert audit_review.returncode == 0
+        assert "ADOPTION_AUDIT=PASS" in audit_review.stdout
+        assert not (target / ".engineering").exists()
+
         blocked_review = run(
             sys.executable, str(ADOPT),
             "--root", str(target),

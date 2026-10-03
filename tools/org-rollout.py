@@ -60,6 +60,9 @@ ADOPT_SCALAR_FLAGS = {
     "public_smoke_command": "--public-smoke-command",
     "baseline_sha": "--baseline-sha",
     "project_type": "--project-type",
+    "primary_user_surface": "--primary-user-surface",
+    "surface_reconciliation_contract": "--surface-reconciliation-contract",
+    "full_user_e2e_contract": "--full-user-e2e-contract",
     "ci_mode": "--ci-mode",
     "merge_gate_status": "--merge-gate-status",
     "maturity": "--maturity",
@@ -602,11 +605,14 @@ def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any])
         str(override.get("baseline_sha") or target_baseline),
     ]
     append_bool_flag(argv, bool(override.get("ack_rule_review")), "--ack-rule-review")
-    append_bool_flag(
-        argv,
-        override.get("user_gate_contracts_reviewed") is True,
-        "--user-gate-contracts-reviewed",
-    )
+    reviewed = override.get("user_gate_contracts_reviewed") is True
+    user_facing = override.get("user_facing") is True
+    if reviewed and not user_facing:
+        raise SystemExit(
+            "FAIL user_gate_contracts_reviewed on ADOPT requires repository override user_facing: true"
+        )
+    append_bool_flag(argv, user_facing, "--user-facing")
+    append_bool_flag(argv, reviewed, "--user-gate-contracts-reviewed")
     append_bool_flag(argv, bool(override.get("allow_no_tests")), "--allow-no-tests")
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
     append_bool_flag(argv, bool(override.get("persistent_state")), "--persistent-state")

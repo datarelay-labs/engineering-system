@@ -682,11 +682,33 @@ def test_attestation_repair_classification() -> None:
 
 def test_user_gate_contract_review_override_propagates() -> None:
     root = Path("/tmp/example-user-facing")
-    override = {"user_gate_contracts_reviewed": True}
+    override = {
+        "user_facing": True,
+        "user_gate_contracts_reviewed": True,
+        "primary_user_surface": "browser",
+        "surface_reconciliation_contract": "docs/SURFACE_RECONCILIATION.md",
+        "full_user_e2e_contract": "docs/FULL_USER_E2E.md",
+    }
     adopt_argv = org_rollout.build_adopt_argv(root, NEW_BASELINE, override)
     upgrade_argv = org_rollout.build_upgrade_argv(root, NEW_BASELINE, override)
+    assert "--user-facing" in adopt_argv
     assert "--user-gate-contracts-reviewed" in adopt_argv
+    assert "--primary-user-surface" in adopt_argv
+    assert "browser" in adopt_argv
+    assert "--surface-reconciliation-contract" in adopt_argv
+    assert "docs/SURFACE_RECONCILIATION.md" in adopt_argv
+    assert "--full-user-e2e-contract" in adopt_argv
+    assert "docs/FULL_USER_E2E.md" in adopt_argv
     assert "--user-gate-contracts-reviewed" in upgrade_argv
+
+    try:
+        org_rollout.build_adopt_argv(
+            root, NEW_BASELINE, {"user_gate_contracts_reviewed": True}
+        )
+    except SystemExit as exc:
+        assert "requires repository override user_facing: true" in str(exc)
+    else:
+        raise AssertionError("review acknowledgement must not silently adopt as non-user-facing")
 
     for no_review in ({}, {"user_gate_contracts_reviewed": False}, {"user_gate_contracts_reviewed": "false"}):
         assert "--user-gate-contracts-reviewed" not in org_rollout.build_adopt_argv(
