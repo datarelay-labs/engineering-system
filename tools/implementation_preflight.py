@@ -295,6 +295,8 @@ def normalize_origin(url: str) -> tuple[str, str]:
         raise PreflightError("ORIGIN_INVALID")
     if "://" in raw:
         parsed = urlsplit(raw)
+        if parsed.scheme.lower() not in {"https", "ssh"}:
+            raise PreflightError("ORIGIN_INVALID")
         host = (parsed.hostname or "").lower()
         path = parsed.path.lstrip("/")
     elif raw.startswith("git@") and ":" in raw:

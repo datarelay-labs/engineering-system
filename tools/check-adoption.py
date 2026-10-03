@@ -10,6 +10,7 @@ import yaml
 
 import ci_policy_audit
 from adopt import (
+    AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
     canonical_execution_policy_line,
     canonical_managed_policy_lines,
@@ -33,6 +34,7 @@ MANAGED_ADOPTION_REQUIRED = (
     ".engineering/requirements-engineering-system.txt",
     "tools/governance_floor.py",
     *EXECUTION_PROFILE_MANAGED,
+    *AGENT_RUNTIME_MANAGED,
 )
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")

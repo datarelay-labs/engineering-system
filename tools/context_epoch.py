@@ -65,6 +65,17 @@ DEFAULT_META_VALUE_CAP = 512
 DEFAULT_SECTION_CHAR_CAP = 3500
 DEFAULT_PROJECTION_CHAR_CAP = 14000
 PROJECTION_TAIL_RESERVE = 512
+TEMPLATE_META_SENTINELS = {
+    "TARGET_REPO": "owner/repository",
+    "WORKSTREAM": "replace-with-stable-slug",
+    "BRANCH": "replace-with-branch-or-N/A",
+    "OWNER_INTENT": "State the owner's current explicit request in one concise line.",
+}
+TEMPLATE_SECTION_SENTINELS = {
+    "Goal": "State the stable workstream outcome in one concise paragraph.",
+    "Current State": "- Keep only facts needed to resume now.",
+    "Next Action": "State the next bounded **outcome / execution bundle**, not one command, one tiny Issue, or one micro-step.",
+}
 NATIVE_EVENTS = {
     "sessionStart", "sessionEnd", "beforeSubmitPrompt", "preCompact", "stop",
     "subagentStart", "subagentStop",
@@ -204,6 +215,14 @@ def analyze_packet(
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
         blocking.append("STATUS_INVALID")
+    if version == "3":
+        for key, sentinel in TEMPLATE_META_SENTINELS.items():
+            if packet.metadata.get(key) == sentinel:
+                blocking.append(f"PACKET_TEMPLATE_PLACEHOLDER:{key}")
+        for section, sentinel in TEMPLATE_SECTION_SENTINELS.items():
+            body = packet.sections.get(section, "")
+            if sentinel in body:
+                blocking.append(f"PACKET_TEMPLATE_PLACEHOLDER:{section}")
     for section in REQUIRED_SECTIONS:
         if section not in packet.sections:
             blocking.append(f"MISSING_SECTION:{section}")

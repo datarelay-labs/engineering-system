@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from adopt import POLICY_EPOCH
+from adopt import POLICY_EPOCH, REQUIRED_MANAGED
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
@@ -471,6 +471,19 @@ def test_managed_upgrade_to_1_6() -> None:
         assert f"enforcement-check.yml@{NEW_BASELINE}" in upgraded_workflow
         assert f"affected-tests.yml@{NEW_BASELINE}" in upgraded_workflow
 
+
+
+
+def test_generated_agents_references_only_managed_tools() -> None:
+    template = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    referenced: set[str] = set()
+    for line in template.splitlines():
+        if "canonical Engineering System checkout" in line:
+            continue
+        referenced.update(re.findall(r"tools/[A-Za-z0-9_.-]+\.py", line))
+    managed = {path for path in REQUIRED_MANAGED if path.startswith("tools/")}
+    missing = sorted(referenced - managed)
+    assert not missing, missing
 
 def test_general_upgrade_requires_stage_a_bridge_before_profile_v3() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -3102,6 +3115,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
     test_same_baseline_execution_profile_repair_advances_epoch()

@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 6
+POLICY_EPOCH = 7
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -62,6 +62,23 @@ VERIFICATION_CONTRACT_MANAGED = (
     "schemas/verification-contract.schema.json",
     "schemas/trust-evidence-receipt.schema.json",
     "schemas/trust-evidence-boundary.schema.json",
+)
+
+# Repository-relative helpers referenced by the managed AGENTS execution rules.
+# Keep the whole dependency closure together so an adopted repository never
+# receives instructions for a helper that the managed snapshot did not install.
+AGENT_RUNTIME_MANAGED = (
+    "tools/work_admission.py",
+    "tools/coordinator.py",
+    "tools/coordinator_watch.py",
+    "tools/coordinator_watch_collect.py",
+    "tools/coordinator_watch_effects.py",
+    "tools/coordinator_watch_host.py",
+    "tools/worker_adapter.py",
+    "schemas/coordinator-decision.schema.json",
+    "schemas/coordinator-watch.schema.json",
+    "schemas/coordinator-watch-host.schema.json",
+    "schemas/worker-adapter-result.schema.json",
 )
 
 # Provider-neutral implementation preflight for direct Chat/remote mutation.
@@ -117,6 +134,7 @@ REQUIRED_MANAGED = (
     *RUNTIME_CONTRACT_MANAGED,
     *SKILLS_CONTRACT_MANAGED,
     *VERIFICATION_CONTRACT_MANAGED,
+    *AGENT_RUNTIME_MANAGED,
     *IMPLEMENTATION_PREFLIGHT_MANAGED,
     *TERMINAL_COMPLETION_NOTIFY_MANAGED,
     *EXECUTION_PROFILE_MANAGED,
@@ -1130,6 +1148,20 @@ def ensure_knowledge_contract_compatible(root: Path) -> None:
         )
 
 
+def ensure_agent_runtime_compatible(root: Path) -> None:
+    """Reject custom managed runtime helpers before adoption writes."""
+    for rel in AGENT_RUNTIME_MANAGED:
+        path = root / rel
+        if not path.exists():
+            continue
+        canonical = (CANONICAL / rel).read_text(encoding="utf-8")
+        if path.is_file() and path.read_text(encoding="utf-8") == canonical:
+            continue
+        raise SystemExit(
+            f"FAIL {rel} contains local/custom changes; preserve/review them manually before adoption"
+        )
+
+
 def ensure_implementation_preflight_compatible(root: Path) -> None:
     # Reject a custom implementation-preflight helper before adoption writes.
     for rel in IMPLEMENTATION_PREFLIGHT_MANAGED:
@@ -1479,6 +1511,7 @@ def main() -> int:
     ensure_runtime_contract_compatible(root)
     ensure_skills_contract_compatible(root)
     ensure_verification_contract_compatible(root)
+    ensure_agent_runtime_compatible(root)
     ensure_implementation_preflight_compatible(root)
     ensure_terminal_completion_notify_compatible(root)
     ensure_execution_profile_compatible(root)
@@ -1499,6 +1532,7 @@ def main() -> int:
         *RUNTIME_CONTRACT_MANAGED,
         *SKILLS_CONTRACT_MANAGED,
         *VERIFICATION_CONTRACT_MANAGED,
+        *AGENT_RUNTIME_MANAGED,
         *IMPLEMENTATION_PREFLIGHT_MANAGED,
         *TERMINAL_COMPLETION_NOTIFY_MANAGED,
         *EXECUTION_PROFILE_MANAGED,
