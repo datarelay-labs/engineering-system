@@ -127,6 +127,9 @@ class OverrideManifest:
 
     def for_repo(self, full_name: str) -> dict[str, Any]:
         merged = dict(self.defaults)
+        # User-gate contract review is intentionally repository-scoped and must
+        # never be inherited from organization-wide defaults.
+        merged.pop("user_gate_contracts_reviewed", None)
         merged.update(self.repositories.get(full_name) or {})
         return merged
 
@@ -258,6 +261,10 @@ def load_override_manifest(path: Path) -> OverrideManifest:
         raise SystemExit("FAIL override manifest defaults must be a mapping")
     if not isinstance(repositories, dict):
         raise SystemExit("FAIL override manifest repositories must be a mapping")
+    if "user_gate_contracts_reviewed" in defaults:
+        raise SystemExit(
+            "FAIL user_gate_contracts_reviewed is repository-specific and is forbidden in override defaults"
+        )
     normalized: dict[str, dict[str, Any]] = {}
     for name, entry in repositories.items():
         full_name = str(name).strip()
@@ -268,6 +275,12 @@ def load_override_manifest(path: Path) -> OverrideManifest:
             continue
         if not isinstance(entry, dict):
             raise SystemExit(f"FAIL override for {full_name} must be a mapping")
+        if "user_gate_contracts_reviewed" in entry and not isinstance(
+            entry["user_gate_contracts_reviewed"], bool
+        ):
+            raise SystemExit(
+                f"FAIL user_gate_contracts_reviewed for {full_name} must be a literal boolean"
+            )
         normalized[full_name] = entry
     return OverrideManifest(version=int(version), defaults=defaults, repositories=normalized)
 
@@ -580,7 +593,7 @@ def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any])
     append_bool_flag(argv, bool(override.get("ack_rule_review")), "--ack-rule-review")
     append_bool_flag(
         argv,
-        bool(override.get("user_gate_contracts_reviewed")),
+        override.get("user_gate_contracts_reviewed") is True,
         "--user-gate-contracts-reviewed",
     )
     append_bool_flag(argv, bool(override.get("allow_no_tests")), "--allow-no-tests")
@@ -611,7 +624,7 @@ def build_upgrade_argv(root: Path, target_baseline: str, override: dict[str, Any
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
     append_bool_flag(
         argv,
-        bool(override.get("user_gate_contracts_reviewed")),
+        override.get("user_gate_contracts_reviewed") is True,
         "--user-gate-contracts-reviewed",
     )
     if "persistent_state" in override and override["persistent_state"] is not None:

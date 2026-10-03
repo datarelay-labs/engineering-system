@@ -587,13 +587,71 @@ def test_user_gate_contract_review_override_propagates() -> None:
     assert "--user-gate-contracts-reviewed" in adopt_argv
     assert "--user-gate-contracts-reviewed" in upgrade_argv
 
-    no_review = {}
-    assert "--user-gate-contracts-reviewed" not in org_rollout.build_adopt_argv(
-        root, NEW_BASELINE, no_review
-    )
-    assert "--user-gate-contracts-reviewed" not in org_rollout.build_upgrade_argv(
-        root, NEW_BASELINE, no_review
-    )
+    for no_review in ({}, {"user_gate_contracts_reviewed": False}, {"user_gate_contracts_reviewed": "false"}):
+        assert "--user-gate-contracts-reviewed" not in org_rollout.build_adopt_argv(
+            root, NEW_BASELINE, no_review
+        )
+        assert "--user-gate-contracts-reviewed" not in org_rollout.build_upgrade_argv(
+            root, NEW_BASELINE, no_review
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = Path(tmp) / "overrides.yaml"
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {"user_gate_contracts_reviewed": True},
+                    "repositories": {},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            org_rollout.load_override_manifest(manifest)
+        except SystemExit as exc:
+            assert "forbidden in override defaults" in str(exc)
+        else:
+            raise AssertionError("defaults review acknowledgement must fail closed")
+
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {},
+                    "repositories": {
+                        "demo/repo": {"user_gate_contracts_reviewed": "false"}
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            org_rollout.load_override_manifest(manifest)
+        except SystemExit as exc:
+            assert "must be a literal boolean" in str(exc)
+        else:
+            raise AssertionError("non-boolean review acknowledgement must fail closed")
+
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {"ci_mode": "shared"},
+                    "repositories": {
+                        "demo/reviewed": {"user_gate_contracts_reviewed": True},
+                        "demo/unreviewed": {},
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        loaded = org_rollout.load_override_manifest(manifest)
+        assert loaded.for_repo("demo/reviewed")["user_gate_contracts_reviewed"] is True
+        assert "user_gate_contracts_reviewed" not in loaded.for_repo("demo/unreviewed")
 
 
 def main() -> int:
