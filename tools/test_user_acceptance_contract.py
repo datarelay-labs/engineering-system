@@ -91,7 +91,7 @@ class UserAcceptanceTests(unittest.TestCase):
             path = self.write(Path(d), "surface.json", data)
             cp = self.run_tool("validate-gate", "--evidence", str(path))
             self.assertEqual(cp.returncode, 3)
-            self.assertIn("CHATGPT_DIRECT_PERSONA_EXECUTION_REQUIRED", cp.stdout)
+            self.assertIn("PERSONA_EXECUTION_CLAIM_INVALID", cp.stdout)
 
     def test_surface_requires_full_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as d:
