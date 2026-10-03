@@ -35,6 +35,7 @@ RULE_SURFACES = (
 # AGENTS.md instructions resolve. The index itself is never created.
 KNOWLEDGE_CONTRACT_MANAGED = (
     "tools/knowledge-contract.py",
+    "tools/atlas-context-contract.py",
     "schemas/knowledge-index.schema.json",
 )
 

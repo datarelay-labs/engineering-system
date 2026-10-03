@@ -133,6 +133,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_efficiency_telemetry.py",
     "schemas/efficiency-telemetry.schema.json",
     "tools/knowledge-contract.py",
+    "tools/atlas-context-contract.py",
+    "tools/test_atlas_context_contract.py",
     "tools/test_knowledge_contract.py",
     "schemas/knowledge-index.schema.json",
     "tools/runtime-contract.py",
