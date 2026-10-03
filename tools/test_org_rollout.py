@@ -109,6 +109,19 @@ def write_inventory(path: Path, rows: list[dict]) -> None:
     path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
+def test_rollout_rejects_stale_canonical_checkout_for_real_baseline() -> None:
+    head = run("git", "-C", str(ROOT), "rev-parse", "HEAD").stdout.strip()
+    parent = run("git", "-C", str(ROOT), "rev-parse", "HEAD^").stdout.strip()
+    assert head != parent
+    try:
+        org_rollout.require_canonical_checkout_matches_baseline(parent)
+    except SystemExit as exc:
+        assert "checkout HEAD does not match target baseline" in str(exc)
+    else:
+        raise AssertionError("stale canonical checkout was not rejected")
+    org_rollout.require_canonical_checkout_matches_baseline(head)
+
+
 def test_flatten_paginated_inventory() -> None:
     page_one = [{"full_name": f"org/repo-{i}", "archived": False, "default_branch": "main"} for i in range(100)]
     page_two = [{"full_name": f"org/repo-{i}", "archived": False, "default_branch": "main"} for i in range(100, 105)]
@@ -904,6 +917,7 @@ def test_user_facing_contract_paths_fail_during_audit() -> None:
 
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
+    test_rollout_rejects_stale_canonical_checkout_for_real_baseline()
     test_flatten_paginated_inventory()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()
