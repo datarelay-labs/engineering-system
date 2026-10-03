@@ -728,10 +728,6 @@ def process_repo(
         result.outcome = "NEEDS_INPUT"
         return result
 
-    if not apply:
-        result.outcome = "PLANNED"
-        return result
-
     if result.action == "ADOPT":
         reviewed = override.get("user_gate_contracts_reviewed") is True
         user_facing = override.get("user_facing") is True
@@ -762,6 +758,10 @@ def process_repo(
                 result.outcome = "NEEDS_INPUT"
                 result.detail = "user-facing ADOPT requires repository inputs: " + ", ".join(missing)
                 return result
+
+    if not apply:
+        result.outcome = "PLANNED"
+        return result
 
     branch_name = f"{branch_prefix}{target_version.replace('.', '-')}"
     try:

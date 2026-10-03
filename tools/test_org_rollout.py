@@ -621,6 +621,23 @@ def test_override_manifest_exclude_and_adopt() -> None:
             ),
             encoding="utf-8",
         )
+        audited = run(
+            sys.executable,
+            str(ROLLOUT),
+            "--inventory-file",
+            str(inventory),
+            "--override-manifest",
+            str(manifest),
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        audit_invalid = audited.stdout.split("REPO=demo/invalid-review", 1)[1].split("---", 1)[0]
+        assert "ACTION=NEEDS_INPUT" in audit_invalid
+        assert "OUTCOME=NEEDS_INPUT" in audit_invalid
+        audit_adoptable = audited.stdout.split("REPO=demo/adoptable", 1)[1].split("---", 1)[0]
+        assert "OUTCOME=PLANNED" in audit_adoptable
+
         applied = run(
             sys.executable,
             str(ROLLOUT),
