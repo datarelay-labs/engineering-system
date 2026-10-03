@@ -331,6 +331,7 @@ scenarios:
     command: "python3 tools/test_context_epoch.py"
     invariants:
       - "routine resume excludes append-only Work Packet history from model context"
+      - "owner-selected target repository stays bound across packet validation and cross-project references cannot retarget mutation authority"
       - "context reset is coordinator-owned and never derived from cache-read ratio or resident session count"
       - "native hook reduction retains no raw prompt transcript tool payload or workspace path"
     release_gate: true
