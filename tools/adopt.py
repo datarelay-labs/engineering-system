@@ -1017,6 +1017,7 @@ def release_yaml(
             "  canonical_contract_read_before_execution_required: true",
             "  complete_rerun_after_remediation_required: true",
             "  wrapper_user_substitution_forbidden: true",
+            "  contract_review_attestation_version: 1",
             "  actual_user_surface_required: true",
             f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
             f"  actual_browser_process_required: {'true' if browser_required else 'false'}",

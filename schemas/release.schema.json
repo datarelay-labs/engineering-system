@@ -84,6 +84,7 @@
         "canonical_contract_read_before_execution_required",
         "complete_rerun_after_remediation_required",
         "wrapper_user_substitution_forbidden",
+        "contract_review_attestation_version",
         "direct_persona_execution_required",
         "contract_version",
         "executor",
@@ -177,6 +178,9 @@
         },
         "wrapper_user_substitution_forbidden": {
           "type": "boolean"
+        },
+        "contract_review_attestation_version": {
+          "const": 1
         },
         "finding_accumulation_before_remediation": {
           "type": "boolean"

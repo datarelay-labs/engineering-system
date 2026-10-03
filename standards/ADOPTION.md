@@ -271,7 +271,7 @@ python tools/upgrade-adoption.py \
   --baseline-sha <canonical-sha>
 ```
 
-If an existing user-facing adoption does not yet carry the current contract-first/complete-rerun/wrapper-non-substitution declarations, the upgrade fails closed before mutation. Review and update both repository-local user-gate contracts first, then rerun with `--user-gate-contracts-reviewed`. Existing explicit `false` or custom values are never overwritten by that acknowledgement.
+If an existing user-facing adoption does not carry `contract_review_attestation_version: 1`, the upgrade treats its user-gate semantics as **unreviewed provenance even when the three semantic booleans already read `true`**. It fails closed before mutation. Review and update both repository-local user-gate contracts first, then rerun with `--user-gate-contracts-reviewed`; that reviewed migration writes the attestation. Existing explicit `false` or custom values are never overwritten by that acknowledgement.
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 

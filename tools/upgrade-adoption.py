@@ -132,6 +132,7 @@ USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS = {
     "complete_rerun_after_remediation_required": True,
     "wrapper_user_substitution_forbidden": True,
 }
+USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION = 1
 
 
 def plan_release_executor_migration(
@@ -164,17 +165,30 @@ def plan_release_executor_migration(
                 f"FAIL release human-equivalent {key} contains local/custom changes; "
                 "review manually before upgrade"
             )
+    attestation = user_tests.get("contract_review_attestation_version")
+    if attestation is None:
+        if not user_gate_contracts_reviewed:
+            raise SystemExit(
+                "FAIL repository-local user-gate contracts have no reviewed provenance; rerun with "
+                "--user-gate-contracts-reviewed only after both gate contracts have been reviewed and "
+                "updated as needed"
+            )
+        planned = True
+    elif attestation != USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION:
+        raise SystemExit(
+            "FAIL release human-equivalent contract_review_attestation_version contains "
+            "local/custom changes; review manually before upgrade"
+        )
+
     missing_reviewed_fields = [
         key for key in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS if key not in user_tests
     ]
-    if missing_reviewed_fields and not user_gate_contracts_reviewed:
-        raise SystemExit(
-            "FAIL repository-local user-gate contracts require explicit review before upgrade can "
-            "certify contract-first/complete-rerun/wrapper-non-substitution semantics; rerun with "
-            "--user-gate-contracts-reviewed only after both gate contracts have been reviewed and "
-            "updated as needed"
-        )
     if missing_reviewed_fields:
+        if attestation != USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION and not user_gate_contracts_reviewed:
+            raise SystemExit(
+                "FAIL repository-local user-gate contracts require explicit review before upgrade can "
+                "certify contract-first/complete-rerun/wrapper-non-substitution semantics"
+            )
         planned = True
     for key, expected in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS.items():
         if key in user_tests and user_tests.get(key) != expected:
@@ -195,8 +209,15 @@ def apply_release_executor_migration(
         raise SystemExit("FAIL release human_equivalent_user_tests became invalid during upgrade")
     user_tests["executor"] = PROFILE_RELEASE_EXECUTOR
     user_tests.update(USER_ACCEPTANCE_V2_MANAGED_FIELDS)
-    if user_gate_contracts_reviewed:
+    if (
+        user_gate_contracts_reviewed
+        or user_tests.get("contract_review_attestation_version")
+        == USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
+    ):
         user_tests.update(USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS)
+        user_tests["contract_review_attestation_version"] = (
+            USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
+        )
     release["human_equivalent_user_tests"] = user_tests
     return True
 

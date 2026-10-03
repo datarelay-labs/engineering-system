@@ -46,7 +46,7 @@ A run is invalid as user-gate evidence when it starts from a wrapper/scripted re
 
 A standalone request for one gate authorizes only that gate. Chaining Surface Reconciliation into state-changing Full User E2E requires either the current release-quality workflow/Work Packet to require the next gate or an explicit Full User E2E/release-qualification request.
 
-Managed adoption/upgrade MUST NOT infer these contract semantics merely from the existence of contract paths. Writing compliance declarations for contract-first execution, complete rerun after remediation, or wrapper non-substitution requires an explicit review acknowledgement made only after both repository-local gate contracts have been inspected and updated as needed.
+Managed adoption/upgrade MUST NOT infer these contract semantics merely from the existence of contract paths or from pre-existing boolean declarations. Writing compliance declarations for contract-first execution, complete rerun after remediation, or wrapper non-substitution requires an explicit review acknowledgement made only after both repository-local gate contracts have been inspected and updated as needed. The managed release profile records `contract_review_attestation_version: 1`; absence of that attestation means reviewed provenance is unknown and upgrades fail closed until review is acknowledged.
 
 ## Shared execution semantics
 
