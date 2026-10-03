@@ -53,7 +53,7 @@ def evidence(gate: str) -> dict:
 class UserAcceptanceTests(unittest.TestCase):
     def run_tool(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(TOOL), *args],
+            ["python3", str(TOOL), *args, "--root", str(ROOT)],
             cwd=ROOT,
             text=True,
             capture_output=True,
