@@ -163,14 +163,16 @@ Each gate emits one evidence JSON conforming to `schemas/user-acceptance-evidenc
 Use:
 
 ```text
-python3 tools/user_acceptance_contract.py validate-gate --evidence <gate.json>
+python3 tools/user_acceptance_contract.py validate-gate \
+  --root <repository> \
+  --evidence <gate.json>
 python3 tools/user_acceptance_contract.py quality-close \
+  --root <repository> \
   --surface-evidence <surface.json> \
-  --e2e-evidence <e2e.json> \
-  --expected-head <40-hex-head>
+  --e2e-evidence <e2e.json>
 ```
 
-`quality-close` is evidence-only. It does not freeze a branch, merge, tag, publish, deploy, or authorize a release. It reports whether the exact HEAD is eligible to enter the candidate-freeze stage.
+The validator independently resolves the repository's current Git HEAD, verifies the referenced contract bytes and digest at that exact commit, and rejects stale or dirty contract evidence. It is structural evidence only: evidence identity fields are self-reported metadata, so this tool does not establish terminal user-gate PASS, product-quality closure, or candidate-freeze eligibility and performs no merge, tag, publication, or deployment.
 
 ## Project-local contract requirements
 
