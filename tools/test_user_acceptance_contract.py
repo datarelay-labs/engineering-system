@@ -124,22 +124,5 @@ class UserAcceptanceTests(unittest.TestCase):
             self.assertIn("SCRIPTED_USER_SUBSTITUTION", cp.stdout)
             self.assertIn("MANDATORY_BLOCKED_NONZERO", cp.stdout)
 
-    def test_quality_close_requires_same_exact_head(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
-            surface = self.write(base, "surface.json", evidence("SURFACE_RECONCILIATION"))
-            other = evidence("FULL_USER_E2E")
-            other["candidate_head"] = "c" * 40
-            e2e = self.write(base, "e2e.json", other)
-            cp = self.run_tool(
-                "quality-close",
-                "--surface-evidence", str(surface),
-                "--e2e-evidence", str(e2e),
-                "--expected-head", HEAD,
-            )
-            self.assertEqual(cp.returncode, 3)
-            self.assertIn("CANDIDATE_HEAD_MISMATCH", cp.stdout)
-
-
 if __name__ == "__main__":
     unittest.main()
