@@ -2904,6 +2904,20 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         )
 
         before_review = release_path.read_bytes()
+        audit_review = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "USER_GATE_CONTRACT_REVIEW=REQUIRED" in audit_review.stdout
+        assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in audit_review.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" in audit_review.stdout
+        assert release_path.read_bytes() == before_review
+
         blocked_review = run(
             sys.executable,
             str(UPGRADE),

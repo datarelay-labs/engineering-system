@@ -136,7 +136,10 @@ USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION = 1
 
 
 def plan_release_executor_migration(
-    release: dict, *, user_gate_contracts_reviewed: bool = False
+    release: dict,
+    *,
+    user_gate_contracts_reviewed: bool = False,
+    allow_unreviewed_audit: bool = False,
 ) -> bool:
     """Migrate only known managed executor/user-acceptance metadata."""
     user_tests = release.get("human_equivalent_user_tests")
@@ -172,7 +175,7 @@ def plan_release_executor_migration(
         and attestation == USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
     )
     if attestation is None:
-        if not user_gate_contracts_reviewed:
+        if not user_gate_contracts_reviewed and not allow_unreviewed_audit:
             raise SystemExit(
                 "FAIL repository-local user-gate contracts have no reviewed provenance; rerun with "
                 "--user-gate-contracts-reviewed only after both gate contracts have been reviewed and "
@@ -189,7 +192,11 @@ def plan_release_executor_migration(
         key for key in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS if key not in user_tests
     ]
     if missing_reviewed_fields:
-        if not attestation_valid and not user_gate_contracts_reviewed:
+        if (
+            not attestation_valid
+            and not user_gate_contracts_reviewed
+            and not allow_unreviewed_audit
+        ):
             raise SystemExit(
                 "FAIL repository-local user-gate contracts require explicit review before upgrade can "
                 "certify contract-first/complete-rerun/wrapper-non-substitution semantics"
@@ -967,8 +974,17 @@ def main() -> int:
     ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
+    read_only_audit = args.audit or not args.apply
+    user_tests = release.get("human_equivalent_user_tests")
+    user_gate_contract_review_required = (
+        isinstance(user_tests, dict)
+        and user_tests.get("contract_review_attestation_version") is None
+        and not args.user_gate_contracts_reviewed
+    )
     planned_release_executor = plan_release_executor_migration(
-        release, user_gate_contracts_reviewed=args.user_gate_contracts_reviewed
+        release,
+        user_gate_contracts_reviewed=args.user_gate_contracts_reviewed,
+        allow_unreviewed_audit=read_only_audit,
     )
 
     if semver_tuple(old_version) > semver_tuple(current_version):
@@ -1000,7 +1016,9 @@ def main() -> int:
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
         planned_release_executor = plan_release_executor_migration(
-            release, user_gate_contracts_reviewed=args.user_gate_contracts_reviewed
+            release,
+            user_gate_contracts_reviewed=args.user_gate_contracts_reviewed,
+            allow_unreviewed_audit=read_only_audit,
         )
         planned_root_surfaces = {
             **planned_dependencies,
@@ -1078,6 +1096,8 @@ def main() -> int:
             print("EXECUTION_POLICY_REPAIR=REQUIRED")
         if planned_release_executor:
             print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
+        if user_gate_contract_review_required:
+            print("USER_GATE_CONTRACT_REVIEW=REQUIRED")
         if retired_agent_artifacts:
             print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
         if args.audit or not args.apply:
@@ -1260,6 +1280,8 @@ def main() -> int:
         print("RETIRED_AGENT_ARTIFACTS_REMOVE=" + ",".join(retired_agent_artifacts))
     if planned_release_executor:
         print("RELEASE_EXECUTOR_MIGRATION=REQUIRED")
+    if user_gate_contract_review_required:
+        print("USER_GATE_CONTRACT_REVIEW=REQUIRED")
 
     if args.audit or not args.apply:
         print("ADOPTION_UPGRADE_AUDIT=PASS")
