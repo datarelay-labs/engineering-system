@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 8
+POLICY_EPOCH = 9
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -35,6 +35,8 @@ RULE_SURFACES = (
 # AGENTS.md instructions resolve. The index itself is never created.
 KNOWLEDGE_CONTRACT_MANAGED = (
     "tools/knowledge-contract.py",
+    "tools/atlas-context-contract.py",
+    "tools/atlas-workflow.py",
     "schemas/knowledge-index.schema.json",
 )
 

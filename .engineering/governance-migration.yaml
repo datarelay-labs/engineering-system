@@ -1,14 +1,13 @@
 contract_version: 1
-base_sha: 9e0001efd8e67413e203a4ff7bbc6a70cf9c8664
-from_policy_epoch: 7
-to_policy_epoch: 8
+base_sha: 5b1a2a6706dff874c83710702e4007c9c66d22e6
+from_policy_epoch: 8
+to_policy_epoch: 9
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Generalize the proven DRLink human-equivalent quality model into enforced portable Surface Reconciliation and Full User E2E contracts, requiring direct ChatGPT persona execution and same-HEAD product-quality closure before candidate freeze.
+rationale: >-
+  Add the managed Atlas derived-context workflow surface after the user-quality
+  gate epoch, enabling bounded JIT context, candidate write-back, and content-free
+  M5 telemetry without changing canonical Git/GitHub authority.
 changed_surfaces:
-- path: tools/adopt.py
-  head_blob_sha: 38bf8ab43789f731c46325099984f54813c7764f
-- path: tools/check-adoption.py
-  head_blob_sha: 91bb236b396721a9f79e3510c1d26e11c4e3acbc
-- path: tools/upgrade-adoption.py
-  head_blob_sha: 4d2fd51d003d24efae8c17126fd5e689a06bcd1b
+  - path: tools/adopt.py
+    head_blob_sha: e076828097e069dbdebbfeae446a191cd27cac31
