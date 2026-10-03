@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -314,16 +315,17 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
 
 
 def repairable_structural_failure(detail: str) -> bool:
-    lines = [
-        line.strip()
-        for line in str(detail or "").splitlines()
-        if line.strip().startswith("FAIL ")
+    raw = str(detail or "")
+    failures = [
+        part.strip()
+        for part in re.split(r"(?:\r?\n|;\s*)(?=FAIL\s)", raw)
+        if part.strip().startswith("FAIL ")
     ]
-    if not lines:
-        return any(marker in str(detail or "") for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+    if not failures:
+        return any(marker in raw for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
     return all(
-        any(marker in line for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
-        for line in lines
+        any(marker in failure for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+        for failure in failures
     )
 
 
@@ -729,6 +731,37 @@ def process_repo(
     if not apply:
         result.outcome = "PLANNED"
         return result
+
+    if result.action == "ADOPT":
+        reviewed = override.get("user_gate_contracts_reviewed") is True
+        user_facing = override.get("user_facing") is True
+        if reviewed and not user_facing:
+            result.state = "UNADOPTED"
+            result.action = "NEEDS_INPUT"
+            result.outcome = "NEEDS_INPUT"
+            result.detail = (
+                "user_gate_contracts_reviewed requires repository override "
+                "user_facing: true before ADOPT"
+            )
+            return result
+        if user_facing:
+            missing = []
+            if not reviewed:
+                missing.append("user_gate_contracts_reviewed: true")
+            if not str(override.get("primary_user_surface") or "").strip() or str(
+                override.get("primary_user_surface") or ""
+            ).strip() == "none":
+                missing.append("primary_user_surface")
+            if not str(override.get("surface_reconciliation_contract") or "").strip():
+                missing.append("surface_reconciliation_contract")
+            if not str(override.get("full_user_e2e_contract") or "").strip():
+                missing.append("full_user_e2e_contract")
+            if missing:
+                result.state = "UNADOPTED"
+                result.action = "NEEDS_INPUT"
+                result.outcome = "NEEDS_INPUT"
+                result.detail = "user-facing ADOPT requires repository inputs: " + ", ".join(missing)
+                return result
 
     branch_name = f"{branch_prefix}{target_version.replace('.', '-')}"
     try:

@@ -512,12 +512,16 @@ def test_repair_markers_match_checker_diagnostics() -> None:
         "FAIL project-specific custom rule requires owner input"
     )
     assert not org_rollout.repairable_structural_failure(
-        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance; "
         "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md"
     )
     assert org_rollout.repairable_structural_failure(
-        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance; "
         "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
+    )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent full_user_e2e contract missing: docs/FULL_USER_E2E.md"
     )
 
 
@@ -569,8 +573,9 @@ def test_override_manifest_exclude_and_adopt() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         excluded = base / "excluded"
+        invalid_review = base / "invalid-review"
         adoptable = base / "adoptable"
-        for path in (excluded, adoptable):
+        for path in (excluded, invalid_review, adoptable):
             path.mkdir()
             init_repo(path)
             (path / "README.md").write_text("x\n", encoding="utf-8")
@@ -585,6 +590,12 @@ def test_override_manifest_exclude_and_adopt() -> None:
                     "archived": False,
                     "default_branch": "main",
                     "local_path": str(excluded),
+                },
+                {
+                    "full_name": "demo/invalid-review",
+                    "archived": False,
+                    "default_branch": "main",
+                    "local_path": str(invalid_review),
                 },
                 {
                     "full_name": "demo/adoptable",
@@ -602,6 +613,7 @@ def test_override_manifest_exclude_and_adopt() -> None:
                     "defaults": {"ack_rule_review": True, "allow_no_tests": True, "ci_mode": "shared"},
                     "repositories": {
                         "demo/excluded": {"exclude": True},
+                        "demo/invalid-review": {"user_gate_contracts_reviewed": True},
                         "demo/adoptable": {"test_command": "true"},
                     },
                 },
@@ -623,8 +635,14 @@ def test_override_manifest_exclude_and_adopt() -> None:
         )
         assert "REPO=demo/excluded" in applied.stdout
         assert "STATE=EXCLUDED" in applied.stdout
+        assert "REPO=demo/invalid-review" in applied.stdout
+        invalid_segment = applied.stdout.split("REPO=demo/invalid-review", 1)[1].split("---", 1)[0]
+        assert "ACTION=NEEDS_INPUT" in invalid_segment
+        assert "OUTCOME=NEEDS_INPUT" in invalid_segment
+        assert not (invalid_review / ".engineering").exists()
         assert "REPO=demo/adoptable" in applied.stdout
-        assert "OUTCOME=APPLIED" in applied.stdout
+        adopt_segment = applied.stdout.split("REPO=demo/adoptable", 1)[1].split("---", 1)[0]
+        assert "OUTCOME=APPLIED" in adopt_segment
         assert (adoptable / ".engineering" / "project.yaml").is_file()
         project = load_yaml(adoptable / ".engineering" / "project.yaml")
         assert project["engineering_system"]["version"] == "1.7.0"
