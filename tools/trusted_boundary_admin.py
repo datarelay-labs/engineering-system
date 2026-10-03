@@ -12,7 +12,7 @@ REPLAY=ETC/"skills-replay-state"
 INSTALLS={
  "skills-contract.py":"skills-contract.py",
  "trusted_external_write_signer.py":"trusted-external-write-signer",
- "trusted_external_write_coordinator.py":"trusted-external-write-coordinator",
+ "trusted_external_write_coordinator.py":"trusted_external_write_coordinator.py",
  "trusted_production_write_signer.py":"trusted-production-write-signer",
  "trusted_production_write_coordinator.py":"trusted-production-write-coordinator",
  "execution_profile.py":"execution_profile.py",
