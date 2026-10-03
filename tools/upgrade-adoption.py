@@ -166,6 +166,11 @@ def plan_release_executor_migration(
                 "review manually before upgrade"
             )
     attestation = user_tests.get("contract_review_attestation_version")
+    attestation_valid = (
+        not isinstance(attestation, bool)
+        and isinstance(attestation, int)
+        and attestation == USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
+    )
     if attestation is None:
         if not user_gate_contracts_reviewed:
             raise SystemExit(
@@ -174,7 +179,7 @@ def plan_release_executor_migration(
                 "updated as needed"
             )
         planned = True
-    elif attestation != USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION:
+    elif not attestation_valid:
         raise SystemExit(
             "FAIL release human-equivalent contract_review_attestation_version contains "
             "local/custom changes; review manually before upgrade"
@@ -184,7 +189,7 @@ def plan_release_executor_migration(
         key for key in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS if key not in user_tests
     ]
     if missing_reviewed_fields:
-        if attestation != USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION and not user_gate_contracts_reviewed:
+        if not attestation_valid and not user_gate_contracts_reviewed:
             raise SystemExit(
                 "FAIL repository-local user-gate contracts require explicit review before upgrade can "
                 "certify contract-first/complete-rerun/wrapper-non-substitution semantics"
@@ -211,8 +216,12 @@ def apply_release_executor_migration(
     user_tests.update(USER_ACCEPTANCE_V2_MANAGED_FIELDS)
     if (
         user_gate_contracts_reviewed
-        or user_tests.get("contract_review_attestation_version")
-        == USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
+        or (
+            not isinstance(user_tests.get("contract_review_attestation_version"), bool)
+            and isinstance(user_tests.get("contract_review_attestation_version"), int)
+            and user_tests.get("contract_review_attestation_version")
+            == USER_GATE_CONTRACT_REVIEW_ATTESTATION_VERSION
+        )
     ):
         user_tests.update(USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS)
         user_tests["contract_review_attestation_version"] = (

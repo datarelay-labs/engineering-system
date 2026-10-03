@@ -2996,6 +2996,42 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         )
         commit_all(target, "attest reviewed user gate contracts")
 
+        attested_bytes = release_path.read_bytes()
+        for invalid_attestation in (True, 1.0):
+            invalid_release = load_yaml(release_path)
+            invalid_release["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = invalid_attestation
+            release_path.write_text(
+                yaml.safe_dump(invalid_release, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(target, f"invalid attestation {invalid_attestation!r}")
+
+            checker_invalid = run(
+                sys.executable, str(CHECK), "--root", str(target), check=False
+            )
+            assert checker_invalid.returncode != 0
+            assert "contract_review_attestation_version=1 as an integer" in checker_invalid.stdout
+
+            upgrade_invalid = run(
+                sys.executable,
+                str(UPGRADE),
+                "--root",
+                str(target),
+                "--apply",
+                "--baseline-sha",
+                BASELINE,
+                "--user-gate-contracts-reviewed",
+                check=False,
+            )
+            assert upgrade_invalid.returncode != 0
+            assert "contract_review_attestation_version contains local/custom changes" in (
+                upgrade_invalid.stdout
+            )
+
+            release_path.write_bytes(attested_bytes)
+            commit_all(target, "restore valid review attestation")
+
         custom_release = load_yaml(release_path)
         custom_release["human_equivalent_user_tests"]["executor"] = "CUSTOM_RUNNER"
         release_path.write_text(
@@ -3120,7 +3156,7 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
         "human-equivalent user tests require canonical_contract_read_before_execution_required=true",
         "human-equivalent user tests require complete_rerun_after_remediation_required=true",
         "human-equivalent user tests require wrapper_user_substitution_forbidden=true",
-        "human-equivalent user tests require contract_review_attestation_version=1",
+        "human-equivalent user tests require contract_review_attestation_version=1 as an integer",
         "human-equivalent user tests require actual_user_surface_required=true",
         "human-equivalent user tests require finding_accumulation_before_remediation=true",
         "human-equivalent user tests require same_head_quality_closure_required=true",

@@ -449,6 +449,10 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert "human-equivalent user tests executor must be EXECUTION_PROFILE" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
+    assert (
+        "human-equivalent user tests require contract_review_attestation_version=1 as an integer"
+        in org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
     assert org_rollout.repairable_structural_failure(
         "FAIL retired runtime artifact must be removed: .cursor"
     )
@@ -463,6 +467,9 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     )
     assert org_rollout.repairable_structural_failure(
         "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests require contract_review_attestation_version=1 as an integer"
     )
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"

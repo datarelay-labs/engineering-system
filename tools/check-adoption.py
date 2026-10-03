@@ -404,8 +404,13 @@ def main() -> int:
                         failures.append("human-equivalent user tests require complete_rerun_after_remediation_required=true")
                     if user_tests.get("wrapper_user_substitution_forbidden") is not True:
                         failures.append("human-equivalent user tests require wrapper_user_substitution_forbidden=true")
-                    if user_tests.get("contract_review_attestation_version") != 1:
-                        failures.append("human-equivalent user tests require contract_review_attestation_version=1")
+                    attestation = user_tests.get("contract_review_attestation_version")
+                    if (
+                        isinstance(attestation, bool)
+                        or not isinstance(attestation, int)
+                        or attestation != 1
+                    ):
+                        failures.append("human-equivalent user tests require contract_review_attestation_version=1 as an integer")
                     if user_tests.get("actual_user_surface_required") is not True:
                         failures.append("human-equivalent user tests require actual_user_surface_required=true")
                     if str(user_tests.get("primary_user_surface") or "") != primary_user_surface:
