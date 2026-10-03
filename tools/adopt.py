@@ -36,6 +36,7 @@ RULE_SURFACES = (
 KNOWLEDGE_CONTRACT_MANAGED = (
     "tools/knowledge-contract.py",
     "tools/atlas-context-contract.py",
+    "tools/atlas-workflow.py",
     "schemas/knowledge-index.schema.json",
 )
 
