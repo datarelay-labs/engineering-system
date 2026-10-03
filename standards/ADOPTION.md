@@ -119,13 +119,14 @@ For repositories with a known release qualification command, also provide `--rel
 
 For production-oriented repositories, pass `--operations-mode production`. The generated project profile then requires runbook/incident handling and the release profile requires operational E2E plus public smoke. If deployment signals exist while maturity is not clearly production/non-production, automatic mode fails closed for review instead of silently writing `production_oriented: false`.
 
-For a user-facing product, also pass `--user-facing`, identify the actual primary public surface, and provide both user-test contracts:
+For a user-facing product, also pass `--user-facing`, identify the actual primary public surface, and provide both user-test contracts. Before setting `--user-gate-contracts-reviewed`, a human/authorized engineering review must confirm that **both repository-local contracts** require contract-first execution, ChatGPT-direct persona ownership, wrapper/script non-substitution, complete finding exhaustion, final report/readback/offboarding, and a brand-new complete rerun after remediation until clean. The flag is an explicit review acknowledgement; adoption must not infer these semantics merely because the files exist.
 
 ```bash
 python tools/adopt.py \
   --root /path/to/project \
   --apply \
   --user-facing \
+  --user-gate-contracts-reviewed \
   --primary-user-surface browser \
   --surface-reconciliation-contract docs/SURFACE_RECONCILIATION.md \
   --full-user-e2e-contract docs/FULL_USER_E2E.md \
@@ -267,8 +268,10 @@ Then apply only after required production/operations/release inputs are resolved
 python tools/upgrade-adoption.py \
   --root /path/to/project \
   --apply \
-  --baseline-sha <canonical-1.6-sha>
+  --baseline-sha <canonical-sha>
 ```
+
+If an existing user-facing adoption does not yet carry the current contract-first/complete-rerun/wrapper-non-substitution declarations, the upgrade fails closed before mutation. Review and update both repository-local user-gate contracts first, then rerun with `--user-gate-contracts-reviewed`. Existing explicit `false` or custom values are never overwritten by that acknowledgement.
 
 The upgrade helper only rewrites known managed metadata/workflow surfaces and fails closed when it detects local/custom workflow changes. It does not rewrite Product Master/specification content or project-specific AI rules.
 
@@ -285,7 +288,7 @@ python tools/org-rollout.py --org <github-org> --apply --baseline-sha <canonical
 
 Default mode is audit/dry-run and always resolves/compares the immutable canonical baseline. Archived repositories are reported as `SKIP_ARCHIVED` unless `--include-archived` is set. Apply mode reuses `tools/adopt.py` and `tools/upgrade-adoption.py`, never writes directly to default branches, and fails closed when adoption/upgrade inputs are ambiguous. A partial inventory must be reported as `ORG_ROLLOUT=PARTIAL` or `FAIL`, never as a global PASS. Per-repository checkout/clone failures are isolated as `ERROR`/`FAIL` results so the organization summary remains complete.
 
-For a reviewed one-command apply, supply an optional versioned override manifest (`--override-manifest`) with repository-specific inputs that cannot be safely inferred (CI mode/native workflows, allow-no-tests, production/nonproduction, persistent-state, runbooks, health/backup/restore/release/E2E/smoke commands, and explicit exclusions). Missing required inputs still fail closed per repository.
+For a reviewed one-command apply, supply an optional versioned override manifest (`--override-manifest`) with repository-specific inputs that cannot be safely inferred (CI mode/native workflows, allow-no-tests, production/nonproduction, persistent-state, runbooks, health/backup/restore/release/E2E/smoke commands, and explicit exclusions). For a user-facing repository, set `user_gate_contracts_reviewed: true` only after that repository's two local user-gate contracts have been explicitly reviewed/migrated; the organization rollout passes this acknowledgement through but never infers it. Missing required inputs still fail closed per repository.
 
 Example override manifest:
 

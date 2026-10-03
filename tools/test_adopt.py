@@ -2721,6 +2721,22 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         (target / "docs/FULL_USER_E2E.md").write_text("# Full User E2E\n", encoding="utf-8")
         commit_all(target)
 
+        blocked_review = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+            check=False,
+        )
+        assert blocked_review.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_review.stdout
+        assert not (target / ".engineering").exists()
+
         applied = run(
             sys.executable, str(ADOPT),
             "--root", str(target),
@@ -2728,6 +2744,7 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
             "--baseline-sha", BASELINE,
             "--test-command", "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
             "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
@@ -2839,6 +2856,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             "--test-command",
             "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface",
             "browser",
             "--surface-reconciliation-contract",
@@ -2883,6 +2901,21 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             in checker.stdout
         )
 
+        before_review = release_path.read_bytes()
+        blocked_review = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked_review.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_review.stdout
+        assert release_path.read_bytes() == before_review
+
         repaired = run(
             sys.executable,
             str(UPGRADE),
@@ -2891,6 +2924,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             "--apply",
             "--baseline-sha",
             BASELINE,
+            "--user-gate-contracts-reviewed",
         )
         assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in repaired.stdout
         assert "RELEASE_EXECUTOR_SYNCED=YES" in repaired.stdout
@@ -2952,6 +2986,7 @@ def test_user_facing_adoption_fails_without_contracts() -> None:
             "--baseline-sha", BASELINE,
             "--allow-no-tests",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             check=False,
         )
@@ -2990,6 +3025,7 @@ def test_user_facing_contract_paths_are_repository_bounded() -> None:
                 "--baseline-sha", BASELINE,
                 "--test-command", "python -m pytest -q",
                 "--user-facing",
+                "--user-gate-contracts-reviewed",
                 "--primary-user-surface", "browser",
                 "--surface-reconciliation-contract", invalid_surface,
                 "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
@@ -3005,6 +3041,7 @@ def test_user_facing_contract_paths_are_repository_bounded() -> None:
             "--baseline-sha", BASELINE,
             "--test-command", "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
             "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",

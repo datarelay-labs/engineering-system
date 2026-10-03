@@ -579,6 +579,23 @@ def test_override_manifest_exclude_and_adopt() -> None:
         assert project["engineering_system"]["baseline"] == NEW_BASELINE
 
 
+def test_user_gate_contract_review_override_propagates() -> None:
+    root = Path("/tmp/example-user-facing")
+    override = {"user_gate_contracts_reviewed": True}
+    adopt_argv = org_rollout.build_adopt_argv(root, NEW_BASELINE, override)
+    upgrade_argv = org_rollout.build_upgrade_argv(root, NEW_BASELINE, override)
+    assert "--user-gate-contracts-reviewed" in adopt_argv
+    assert "--user-gate-contracts-reviewed" in upgrade_argv
+
+    no_review = {}
+    assert "--user-gate-contracts-reviewed" not in org_rollout.build_adopt_argv(
+        root, NEW_BASELINE, no_review
+    )
+    assert "--user-gate-contracts-reviewed" not in org_rollout.build_upgrade_argv(
+        root, NEW_BASELINE, no_review
+    )
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
     test_flatten_paginated_inventory()
@@ -590,6 +607,7 @@ def main() -> int:
     test_repair_markers_match_checker_diagnostics()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
+    test_user_gate_contract_review_override_propagates()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
     return 0
 

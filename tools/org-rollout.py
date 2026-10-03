@@ -578,6 +578,11 @@ def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any])
         str(override.get("baseline_sha") or target_baseline),
     ]
     append_bool_flag(argv, bool(override.get("ack_rule_review")), "--ack-rule-review")
+    append_bool_flag(
+        argv,
+        bool(override.get("user_gate_contracts_reviewed")),
+        "--user-gate-contracts-reviewed",
+    )
     append_bool_flag(argv, bool(override.get("allow_no_tests")), "--allow-no-tests")
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
     append_bool_flag(argv, bool(override.get("persistent_state")), "--persistent-state")
@@ -604,6 +609,11 @@ def build_upgrade_argv(root: Path, target_baseline: str, override: dict[str, Any
         str(override.get("baseline_sha") or target_baseline),
     ]
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
+    append_bool_flag(
+        argv,
+        bool(override.get("user_gate_contracts_reviewed")),
+        "--user-gate-contracts-reviewed",
+    )
     if "persistent_state" in override and override["persistent_state"] is not None:
         value = override["persistent_state"]
         if isinstance(value, bool):

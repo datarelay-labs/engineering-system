@@ -121,17 +121,22 @@ def write_yaml(path: Path, data: dict) -> None:
 USER_ACCEPTANCE_V2_MANAGED_FIELDS = {
     "contract_version": 2,
     "direct_persona_execution_required": True,
-    "canonical_contract_read_before_execution_required": True,
-    "complete_rerun_after_remediation_required": True,
-    "wrapper_user_substitution_forbidden": True,
     "finding_accumulation_before_remediation": True,
     "same_head_quality_closure_required": True,
     "candidate_freeze_after_quality_closure": True,
     "evidence_validator": "tools/user_acceptance_contract.py",
 }
 
+USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS = {
+    "canonical_contract_read_before_execution_required": True,
+    "complete_rerun_after_remediation_required": True,
+    "wrapper_user_substitution_forbidden": True,
+}
 
-def plan_release_executor_migration(release: dict) -> bool:
+
+def plan_release_executor_migration(
+    release: dict, *, user_gate_contracts_reviewed: bool = False
+) -> bool:
     """Migrate only known managed executor/user-acceptance metadata."""
     user_tests = release.get("human_equivalent_user_tests")
     if user_tests is None:
@@ -159,10 +164,30 @@ def plan_release_executor_migration(release: dict) -> bool:
                 f"FAIL release human-equivalent {key} contains local/custom changes; "
                 "review manually before upgrade"
             )
+    missing_reviewed_fields = [
+        key for key in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS if key not in user_tests
+    ]
+    if missing_reviewed_fields and not user_gate_contracts_reviewed:
+        raise SystemExit(
+            "FAIL repository-local user-gate contracts require explicit review before upgrade can "
+            "certify contract-first/complete-rerun/wrapper-non-substitution semantics; rerun with "
+            "--user-gate-contracts-reviewed only after both gate contracts have been reviewed and "
+            "updated as needed"
+        )
+    if missing_reviewed_fields:
+        planned = True
+    for key, expected in USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS.items():
+        if key in user_tests and user_tests.get(key) != expected:
+            raise SystemExit(
+                f"FAIL release human-equivalent {key} contains local/custom changes; "
+                "review manually before upgrade"
+            )
     return planned
 
 
-def apply_release_executor_migration(release: dict, planned: bool) -> bool:
+def apply_release_executor_migration(
+    release: dict, planned: bool, *, user_gate_contracts_reviewed: bool = False
+) -> bool:
     if not planned:
         return False
     user_tests = release.get("human_equivalent_user_tests")
@@ -170,8 +195,41 @@ def apply_release_executor_migration(release: dict, planned: bool) -> bool:
         raise SystemExit("FAIL release human_equivalent_user_tests became invalid during upgrade")
     user_tests["executor"] = PROFILE_RELEASE_EXECUTOR
     user_tests.update(USER_ACCEPTANCE_V2_MANAGED_FIELDS)
+    if user_gate_contracts_reviewed:
+        user_tests.update(USER_ACCEPTANCE_REVIEWED_CONTRACT_FIELDS)
     release["human_equivalent_user_tests"] = user_tests
     return True
+
+
+def validate_user_gate_contract_review(root: Path, release: dict, reviewed: bool) -> None:
+    if not reviewed:
+        return
+    user_tests = release.get("human_equivalent_user_tests")
+    if not isinstance(user_tests, dict):
+        raise SystemExit("FAIL --user-gate-contracts-reviewed requires human_equivalent_user_tests")
+    for gate_name in ("surface_reconciliation", "full_user_e2e"):
+        gate = user_tests.get(gate_name)
+        if not isinstance(gate, dict):
+            raise SystemExit(
+                f"FAIL --user-gate-contracts-reviewed requires {gate_name}.contract"
+            )
+        raw = str(gate.get("contract") or "").strip()
+        relative = Path(raw)
+        if not raw or relative.is_absolute() or ".." in relative.parts:
+            raise SystemExit(
+                f"FAIL --user-gate-contracts-reviewed requires repository-local {gate_name}.contract"
+            )
+        resolved = (root / relative).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise SystemExit(
+                f"FAIL --user-gate-contracts-reviewed contract escapes repository: {raw}"
+            ) from exc
+        if not resolved.is_file():
+            raise SystemExit(
+                f"FAIL --user-gate-contracts-reviewed contract file missing: {raw}"
+            )
 
 
 def semver_tuple(value: str) -> tuple[int, int, int]:
@@ -821,6 +879,7 @@ def main() -> int:
     parser.add_argument("--operational-e2e-command", default="")
     parser.add_argument("--public-smoke-command", default="")
     parser.add_argument("--full-e2e-passes", type=int, default=-1)
+    parser.add_argument("--user-gate-contracts-reviewed", action="store_true")
     args = parser.parse_args()
 
     root = Path(args.root).expanduser().resolve()
@@ -863,6 +922,10 @@ def main() -> int:
     if ci_mode not in {"shared", "native"}:
         raise SystemExit("FAIL existing adoption has invalid ci_mode")
 
+    validate_user_gate_contract_review(
+        root, release, args.user_gate_contracts_reviewed
+    )
+
     release_execution_context = (
         args.release_execution_context
         if args.release_execution_context
@@ -874,7 +937,9 @@ def main() -> int:
     ):
         raise SystemExit("FAIL release execution_context is unsupported")
 
-    planned_release_executor = plan_release_executor_migration(release)
+    planned_release_executor = plan_release_executor_migration(
+        release, user_gate_contracts_reviewed=args.user_gate_contracts_reviewed
+    )
 
     if semver_tuple(old_version) > semver_tuple(current_version):
         raise SystemExit(
@@ -904,7 +969,9 @@ def main() -> int:
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
         planned_execution_policy = plan_execution_policy_sync(root)
-        planned_release_executor = plan_release_executor_migration(release)
+        planned_release_executor = plan_release_executor_migration(
+            release, user_gate_contracts_reviewed=args.user_gate_contracts_reviewed
+        )
         planned_root_surfaces = {
             **planned_dependencies,
             **planned_governance_floor,
@@ -1044,7 +1111,9 @@ def main() -> int:
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         release_executor_synced = apply_release_executor_migration(
-            release, planned_release_executor
+            release,
+            planned_release_executor,
+            user_gate_contracts_reviewed=args.user_gate_contracts_reviewed,
         )
         if release_executor_synced:
             write_yaml(release_path, release)
@@ -1180,7 +1249,11 @@ def main() -> int:
     operations["rollback_command"] = rollback_command
     project["operations"] = operations
 
-    apply_release_executor_migration(release, planned_release_executor)
+    apply_release_executor_migration(
+        release,
+        planned_release_executor,
+        user_gate_contracts_reviewed=args.user_gate_contracts_reviewed,
+    )
     release["execution_context"] = release_execution_context
     release["setup_command"] = setup_command
     release["preflight_command"] = preflight_command
