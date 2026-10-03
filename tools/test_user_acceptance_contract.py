@@ -7,8 +7,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "user_acceptance_contract.py"
-HEAD = "a" * 40
-DIGEST = "b" * 64
+CONTRACT_REL = "standards/USER_ACCEPTANCE.md"
+HEAD = subprocess.check_output(
+    ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True
+).strip()
+DIGEST = hashlib.sha256(
+    subprocess.check_output(["git", "-C", str(ROOT), "show", f"{HEAD}:{CONTRACT_REL}"])
+).hexdigest()
 
 
 def evidence(gate: str) -> dict:
