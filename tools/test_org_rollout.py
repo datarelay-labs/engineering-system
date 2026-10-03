@@ -525,6 +525,28 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     )
 
 
+def test_structural_adoption_preserves_all_failures() -> None:
+    original = org_rollout.run_cmd
+    try:
+        org_rollout.run_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout=(
+                "FAIL AGENTS.md missing managed continuous-execution policy\n"
+                "FAIL managed-profile adoption missing required helper\n"
+                "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE\n"
+                "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md\n"
+            ),
+        )
+        ok, detail = org_rollout.structural_adoption_ok(Path("/tmp/example"))
+        assert not ok
+        assert detail.count("FAIL ") == 4
+        assert "surface_reconciliation contract missing" in detail
+        assert not org_rollout.repairable_structural_failure(detail)
+    finally:
+        org_rollout.run_cmd = original
+
+
 def test_checkout_failure_continues_inventory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -793,6 +815,27 @@ def test_user_gate_contract_review_override_propagates() -> None:
         else:
             raise AssertionError("non-boolean review acknowledgement must fail closed")
 
+        for malformed_user_facing in ("true", 1):
+            manifest.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "defaults": {},
+                        "repositories": {
+                            "demo/repo": {"user_facing": malformed_user_facing}
+                        },
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                org_rollout.load_override_manifest(manifest)
+            except SystemExit as exc:
+                assert "user_facing for demo/repo must be a literal boolean" in str(exc)
+            else:
+                raise AssertionError("non-boolean user_facing must fail closed")
+
         manifest.write_text(
             yaml.safe_dump(
                 {
@@ -812,6 +855,53 @@ def test_user_gate_contract_review_override_propagates() -> None:
         assert "user_gate_contracts_reviewed" not in loaded.for_repo("demo/unreviewed")
 
 
+def test_user_facing_contract_paths_fail_during_audit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "user-facing-invalid-contracts"
+        root.mkdir()
+        init_repo(root)
+        (root / "README.md").write_text("x\n", encoding="utf-8")
+        commit_all(root)
+        record = org_rollout.RepoRecord(
+            full_name="demo/user-facing-invalid-contracts",
+            archived=False,
+            default_branch="main",
+            local_path=str(root),
+        )
+        base_override = {
+            "user_facing": True,
+            "user_gate_contracts_reviewed": True,
+            "primary_user_surface": "browser",
+            "surface_reconciliation_contract": "docs/SURFACE_RECONCILIATION.md",
+            "full_user_e2e_contract": "docs/FULL_USER_E2E.md",
+        }
+        for bad_override, expected in (
+            (
+                {
+                    **base_override,
+                    "surface_reconciliation_contract": "/tmp/outside.md",
+                },
+                "must be repository-relative",
+            ),
+            (base_override, "contract missing"),
+        ):
+            result = org_rollout.process_repo(
+                record,
+                apply=False,
+                include_archived=False,
+                target_version="1.7.0",
+                target_baseline=NEW_BASELINE,
+                branch_prefix="chore/engineering-system-",
+                workdir=Path(tmp) / "workdir",
+                create_pr=False,
+                override=bad_override,
+            )
+            assert result.action == "NEEDS_INPUT", result
+            assert result.outcome == "NEEDS_INPUT", result
+            assert expected in result.detail
+            assert not (root / ".engineering").exists()
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
     test_flatten_paginated_inventory()
@@ -821,10 +911,12 @@ def main() -> int:
     test_current_baseline_with_stale_execution_policy_is_repairable()
     test_current_baseline_with_managed_byte_drift_is_repairable()
     test_repair_markers_match_checker_diagnostics()
+    test_structural_adoption_preserves_all_failures()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
     test_attestation_repair_classification()
     test_user_gate_contract_review_override_propagates()
+    test_user_facing_contract_paths_fail_during_audit()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
     return 0
 

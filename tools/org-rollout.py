@@ -285,6 +285,10 @@ def load_override_manifest(path: Path) -> OverrideManifest:
             raise SystemExit(
                 f"FAIL user_gate_contracts_reviewed for {full_name} must be a literal boolean"
             )
+        if "user_facing" in entry and not isinstance(entry["user_facing"], bool):
+            raise SystemExit(
+                f"FAIL user_facing for {full_name} must be a literal boolean"
+            )
         normalized[full_name] = entry
     return OverrideManifest(version=int(version), defaults=defaults, repositories=normalized)
 
@@ -296,7 +300,7 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
     detail = completed.stdout.strip().splitlines()
     failures = [line for line in detail if line.startswith("FAIL ")]
     if failures:
-        summary = "; ".join(failures[:3])
+        summary = "; ".join(failures)
     else:
         summary = detail[-1] if detail else "structural adoption validation failed"
     return False, summary
@@ -596,6 +600,23 @@ def append_repeatable(argv: list[str], override: dict[str, Any], key: str, flag:
             argv.extend([flag, text])
 
 
+def validate_repo_local_contract(root: Path, value: Any, label: str) -> str | None:
+    if not isinstance(value, str):
+        return f"{label} must be a repository-relative path string"
+    raw = value.strip()
+    relative = Path(raw)
+    if not raw or relative.is_absolute() or ".." in relative.parts:
+        return f"{label} must be repository-relative and stay inside repository: {raw}"
+    try:
+        resolved = (root / relative).resolve(strict=False)
+        resolved.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return f"{label} must be repository-relative and stay inside repository: {raw}"
+    if not resolved.is_file():
+        return f"{label} contract missing: {raw}"
+    return None
+
+
 def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any]) -> list[str]:
     argv = [
         sys.executable,
@@ -757,6 +778,28 @@ def process_repo(
                 result.action = "NEEDS_INPUT"
                 result.outcome = "NEEDS_INPUT"
                 result.detail = "user-facing ADOPT requires repository inputs: " + ", ".join(missing)
+                return result
+            contract_errors = [
+                error
+                for error in (
+                    validate_repo_local_contract(
+                        root,
+                        override.get("surface_reconciliation_contract"),
+                        "surface_reconciliation_contract",
+                    ),
+                    validate_repo_local_contract(
+                        root,
+                        override.get("full_user_e2e_contract"),
+                        "full_user_e2e_contract",
+                    ),
+                )
+                if error
+            ]
+            if contract_errors:
+                result.state = "UNADOPTED"
+                result.action = "NEEDS_INPUT"
+                result.outcome = "NEEDS_INPUT"
+                result.detail = "; ".join(contract_errors)
                 return result
 
     if not apply:
