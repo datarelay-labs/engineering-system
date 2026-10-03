@@ -536,6 +536,14 @@ def main() -> int:
         wrong_origin = invoke(repo, head)
         assert wrong_origin.returncode == 2
         assert "ORIGIN_HOST_MISMATCH" in wrong_origin.stdout
+        for unsupported in (
+            "file://github.com/datarelay-labs/engineering-system.git",
+            "ftp://github.com/datarelay-labs/engineering-system.git",
+        ):
+            git("remote", "set-url", "origin", unsupported, cwd=repo)
+            invalid_scheme = invoke(repo, head)
+            assert invalid_scheme.returncode == 2, invalid_scheme.stdout
+            assert "ORIGIN_INVALID" in invalid_scheme.stdout, invalid_scheme.stdout
         git(
             "remote",
             "set-url",

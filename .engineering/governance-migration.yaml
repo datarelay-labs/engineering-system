@@ -1,12 +1,17 @@
 contract_version: 1
-base_sha: 1d483c95474a57a1082109c2f393306af64bd576
-from_policy_epoch: 5
-to_policy_epoch: 6
+base_sha: f2ecbeec1686b925f64dac925333dace2f969466
+from_policy_epoch: 6
+to_policy_epoch: 7
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Allow deterministic reconciliation of unrelated target-base advances for root migrations only when governance authority state is byte-identical.
+rationale: Close XDR rollout findings by making managed AGENTS helper references executable,
+  blocking untouched Work Packet template authority, and hardening GitHub origin binding.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 34a5c8ca218453a37d1142cc5b2babe2319440a3
-- path: tools/governance_floor.py
-  head_blob_sha: 70fc525315b3bfed893035de1824f0a4ed37fd26
+  head_blob_sha: 641f40429316bf77ee670a0ce3b1e011d25da28e
+- path: tools/check-adoption.py
+  head_blob_sha: 4393d7e4883488cf7ea7cd157ad3cbefb7508c3e
+- path: tools/context_epoch.py
+  head_blob_sha: ab834099634cbfacc131e9a332473fc5fc3e58d2
+- path: tools/upgrade-adoption.py
+  head_blob_sha: 761a84f4f6e47bd72dab75f4c596a55c75fe5aaa

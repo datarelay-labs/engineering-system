@@ -138,6 +138,27 @@ def test_refetched_projection_identity_binding() -> None:
             fail(f"packet v2 no longer blocks missing intent revision: {audit}")
 
 
+
+
+def test_template_placeholders_block_runnable_packet() -> None:
+    template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
+        encoding="utf-8"
+    )
+    audit = ce.analyze_packet(ce.parse_packet(template))
+    if audit["status"] != "BLOCK":
+        fail(f"template packet remained runnable: {audit}")
+    expected = {
+        "PACKET_TEMPLATE_PLACEHOLDER:TARGET_REPO",
+        "PACKET_TEMPLATE_PLACEHOLDER:WORKSTREAM",
+        "PACKET_TEMPLATE_PLACEHOLDER:BRANCH",
+        "PACKET_TEMPLATE_PLACEHOLDER:OWNER_INTENT",
+        "PACKET_TEMPLATE_PLACEHOLDER:Goal",
+        "PACKET_TEMPLATE_PLACEHOLDER:Current State",
+        "PACKET_TEMPLATE_PLACEHOLDER:Next Action",
+    }
+    if not expected.issubset(set(audit["blocking"])):
+        fail(f"template placeholder reasons incomplete: {audit}")
+
 def test_packet_v3_requires_authority_metadata() -> None:
     for key, line in (
         ("INTENT_REVISION", "INTENT_REVISION=1\n"),
@@ -551,6 +572,7 @@ def main() -> None:
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
         test_refetched_projection_identity_binding,
+        test_template_placeholders_block_runnable_packet,
         test_packet_v3_requires_authority_metadata,
         test_packet_v2_legacy_profile_compatibility,
         test_nonstructural_authority_examples_do_not_change_metadata,

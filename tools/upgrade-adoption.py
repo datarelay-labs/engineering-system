@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from adopt import (
+    AGENT_RUNTIME_MANAGED,
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
     ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
@@ -457,6 +458,23 @@ def apply_skills_contract_install(root: Path, planned: dict[str, str]) -> list[s
     return installed
 
 
+def plan_agent_runtime_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade helpers referenced by managed AGENTS execution rules."""
+    return plan_managed_file_install(
+        root, AGENT_RUNTIME_MANAGED, label="agent runtime", old_baseline=old_baseline
+    )
+
+
+def apply_agent_runtime_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def plan_implementation_preflight_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     return plan_managed_file_install(
         root, IMPLEMENTATION_PREFLIGHT_MANAGED, label="implementation preflight", old_baseline=old_baseline
@@ -833,6 +851,7 @@ def main() -> int:
         planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
         planned_skills_contract = plan_skills_contract_install(root, old_baseline)
         planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+        planned_agent_runtime = plan_agent_runtime_install(root, old_baseline)
         planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
         planned_terminal_completion_notify = plan_terminal_completion_notify_install(
             root, old_baseline
@@ -868,6 +887,7 @@ def main() -> int:
             and not planned_runtime_contract
             and not planned_skills_contract
             and not planned_verification_contract
+            and not planned_agent_runtime
             and not planned_implementation_preflight
             and not planned_terminal_completion_notify
             and not planned_execution_profile
@@ -891,6 +911,8 @@ def main() -> int:
             print("SKILLS_CONTRACT_REPAIR=REQUIRED")
         if planned_verification_contract:
             print("VERIFICATION_CONTRACT_REPAIR=REQUIRED")
+        if planned_agent_runtime:
+            print("AGENT_RUNTIME_REPAIR=REQUIRED")
         if planned_implementation_preflight:
             print("IMPLEMENTATION_PREFLIGHT_REPAIR=REQUIRED")
         if planned_terminal_completion_notify:
@@ -945,6 +967,8 @@ def main() -> int:
             root, planned_verification_contract
         )
         print("VERIFICATION_CONTRACT_INSTALLED=" + (",".join(installed_verification) if installed_verification else "<none>"))
+        installed_agent_runtime = apply_agent_runtime_install(root, planned_agent_runtime)
+        print("AGENT_RUNTIME_INSTALLED=" + (",".join(installed_agent_runtime) if installed_agent_runtime else "<none>"))
         installed_preflight = apply_implementation_preflight_install(
             root, planned_implementation_preflight
         )
@@ -1159,6 +1183,7 @@ def main() -> int:
     planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
     planned_skills_contract = plan_skills_contract_install(root, old_baseline)
     planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+    planned_agent_runtime = plan_agent_runtime_install(root, old_baseline)
     planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
     planned_terminal_completion_notify = plan_terminal_completion_notify_install(
         root, old_baseline
@@ -1244,6 +1269,12 @@ def main() -> int:
         print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
     else:
         print("VERIFICATION_CONTRACT_INSTALLED=<none>")
+
+    installed_agent_runtime = apply_agent_runtime_install(root, planned_agent_runtime)
+    if installed_agent_runtime:
+        print("AGENT_RUNTIME_INSTALLED=" + ",".join(installed_agent_runtime))
+    else:
+        print("AGENT_RUNTIME_INSTALLED=<none>")
 
     installed_preflight = apply_implementation_preflight_install(
         root, planned_implementation_preflight
