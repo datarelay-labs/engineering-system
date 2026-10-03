@@ -1017,6 +1017,7 @@ def release_yaml(
             "  canonical_contract_read_before_execution_required: true",
             "  complete_rerun_after_remediation_required: true",
             "  wrapper_user_substitution_forbidden: true",
+            "  contract_review_attestation_version: 1",
             "  actual_user_surface_required: true",
             f"  primary_user_surface: {yaml_scalar(primary_user_surface)}",
             f"  actual_browser_process_required: {'true' if browser_required else 'false'}",
@@ -1363,6 +1364,7 @@ def main() -> int:
     parser.add_argument("--baseline-sha", default="")
     parser.add_argument("--project-type", default="")
     parser.add_argument("--user-facing", action="store_true")
+    parser.add_argument("--user-gate-contracts-reviewed", action="store_true")
     parser.add_argument("--primary-user-surface", default="none", choices=("none", "browser", "cli", "desktop", "mobile", "mixed", "other"))
     parser.add_argument("--surface-reconciliation-contract", default="")
     parser.add_argument("--full-user-e2e-contract", default="")
@@ -1393,6 +1395,12 @@ def main() -> int:
             raise SystemExit("FAIL --user-facing requires both --surface-reconciliation-contract and --full-user-e2e-contract")
         for label, rel in (("surface reconciliation", args.surface_reconciliation_contract), ("Full User E2E", args.full_user_e2e_contract)):
             require_repository_relative_contract(root, rel, label)
+        if args.apply and not args.user_gate_contracts_reviewed:
+            raise SystemExit(
+                "FAIL --user-facing apply requires --user-gate-contracts-reviewed after explicitly reviewing "
+                "both repository-local user-gate contracts for contract-first execution, direct persona "
+                "ownership, wrapper/script non-substitution, and complete rerun-until-clean semantics"
+            )
     elif args.primary_user_surface != "none":
         raise SystemExit("FAIL --primary-user-surface requires --user-facing")
 

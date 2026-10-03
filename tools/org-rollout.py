@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,9 @@ ADOPT_SCALAR_FLAGS = {
     "public_smoke_command": "--public-smoke-command",
     "baseline_sha": "--baseline-sha",
     "project_type": "--project-type",
+    "primary_user_surface": "--primary-user-surface",
+    "surface_reconciliation_contract": "--surface-reconciliation-contract",
+    "full_user_e2e_contract": "--full-user-e2e-contract",
     "ci_mode": "--ci-mode",
     "merge_gate_status": "--merge-gate-status",
     "maturity": "--maturity",
@@ -127,6 +131,9 @@ class OverrideManifest:
 
     def for_repo(self, full_name: str) -> dict[str, Any]:
         merged = dict(self.defaults)
+        # User-gate contract review is intentionally repository-scoped and must
+        # never be inherited from organization-wide defaults.
+        merged.pop("user_gate_contracts_reviewed", None)
         merged.update(self.repositories.get(full_name) or {})
         return merged
 
@@ -258,6 +265,10 @@ def load_override_manifest(path: Path) -> OverrideManifest:
         raise SystemExit("FAIL override manifest defaults must be a mapping")
     if not isinstance(repositories, dict):
         raise SystemExit("FAIL override manifest repositories must be a mapping")
+    if "user_gate_contracts_reviewed" in defaults:
+        raise SystemExit(
+            "FAIL user_gate_contracts_reviewed is repository-specific and is forbidden in override defaults"
+        )
     normalized: dict[str, dict[str, Any]] = {}
     for name, entry in repositories.items():
         full_name = str(name).strip()
@@ -268,6 +279,16 @@ def load_override_manifest(path: Path) -> OverrideManifest:
             continue
         if not isinstance(entry, dict):
             raise SystemExit(f"FAIL override for {full_name} must be a mapping")
+        if "user_gate_contracts_reviewed" in entry and not isinstance(
+            entry["user_gate_contracts_reviewed"], bool
+        ):
+            raise SystemExit(
+                f"FAIL user_gate_contracts_reviewed for {full_name} must be a literal boolean"
+            )
+        if "user_facing" in entry and not isinstance(entry["user_facing"], bool):
+            raise SystemExit(
+                f"FAIL user_facing for {full_name} must be a literal boolean"
+            )
         normalized[full_name] = entry
     return OverrideManifest(version=int(version), defaults=defaults, repositories=normalized)
 
@@ -279,7 +300,7 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
     detail = completed.stdout.strip().splitlines()
     failures = [line for line in detail if line.startswith("FAIL ")]
     if failures:
-        summary = "; ".join(failures[:3])
+        summary = "; ".join(failures)
     else:
         summary = detail[-1] if detail else "structural adoption validation failed"
     return False, summary
@@ -293,11 +314,23 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
     "managed Work Packet template missing required packet-v3 metadata",
     "differs from canonical managed helper",
     "human-equivalent user tests executor must be EXECUTION_PROFILE",
+    "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance",
 )
 
 
 def repairable_structural_failure(detail: str) -> bool:
-    return any(marker in detail for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+    raw = str(detail or "")
+    failures = [
+        part.strip()
+        for part in re.split(r"(?:\r?\n|;\s*)(?=FAIL\s)", raw)
+        if part.strip().startswith("FAIL ")
+    ]
+    if not failures:
+        return any(marker in raw for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+    return all(
+        any(marker in failure for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+        for failure in failures
+    )
 
 
 def classify_checkout(root: Path, target_version: str, target_baseline: str) -> RepoResult:
@@ -567,6 +600,23 @@ def append_repeatable(argv: list[str], override: dict[str, Any], key: str, flag:
             argv.extend([flag, text])
 
 
+def validate_repo_local_contract(root: Path, value: Any, label: str) -> str | None:
+    if not isinstance(value, str):
+        return f"{label} must be a repository-relative path string"
+    raw = value.strip()
+    relative = Path(raw)
+    if not raw or relative.is_absolute() or ".." in relative.parts:
+        return f"{label} must be repository-relative and stay inside repository: {raw}"
+    try:
+        resolved = (root / relative).resolve(strict=False)
+        resolved.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return f"{label} must be repository-relative and stay inside repository: {raw}"
+    if not resolved.is_file():
+        return f"{label} contract missing: {raw}"
+    return None
+
+
 def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any]) -> list[str]:
     argv = [
         sys.executable,
@@ -578,6 +628,14 @@ def build_adopt_argv(root: Path, target_baseline: str, override: dict[str, Any])
         str(override.get("baseline_sha") or target_baseline),
     ]
     append_bool_flag(argv, bool(override.get("ack_rule_review")), "--ack-rule-review")
+    reviewed = override.get("user_gate_contracts_reviewed") is True
+    user_facing = override.get("user_facing") is True
+    if reviewed and not user_facing:
+        raise SystemExit(
+            "FAIL user_gate_contracts_reviewed on ADOPT requires repository override user_facing: true"
+        )
+    append_bool_flag(argv, user_facing, "--user-facing")
+    append_bool_flag(argv, reviewed, "--user-gate-contracts-reviewed")
     append_bool_flag(argv, bool(override.get("allow_no_tests")), "--allow-no-tests")
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
     append_bool_flag(argv, bool(override.get("persistent_state")), "--persistent-state")
@@ -604,6 +662,11 @@ def build_upgrade_argv(root: Path, target_baseline: str, override: dict[str, Any
         str(override.get("baseline_sha") or target_baseline),
     ]
     append_bool_flag(argv, bool(override.get("allow_dirty")), "--allow-dirty")
+    append_bool_flag(
+        argv,
+        override.get("user_gate_contracts_reviewed") is True,
+        "--user-gate-contracts-reviewed",
+    )
     if "persistent_state" in override and override["persistent_state"] is not None:
         value = override["persistent_state"]
         if isinstance(value, bool):
@@ -685,6 +748,59 @@ def process_repo(
     if result.action == "NEEDS_INPUT" or result.state in {"INCOMPLETE", "ERROR"}:
         result.outcome = "NEEDS_INPUT"
         return result
+
+    if result.action == "ADOPT":
+        reviewed = override.get("user_gate_contracts_reviewed") is True
+        user_facing = override.get("user_facing") is True
+        if reviewed and not user_facing:
+            result.state = "UNADOPTED"
+            result.action = "NEEDS_INPUT"
+            result.outcome = "NEEDS_INPUT"
+            result.detail = (
+                "user_gate_contracts_reviewed requires repository override "
+                "user_facing: true before ADOPT"
+            )
+            return result
+        if user_facing:
+            missing = []
+            if not reviewed:
+                missing.append("user_gate_contracts_reviewed: true")
+            if not str(override.get("primary_user_surface") or "").strip() or str(
+                override.get("primary_user_surface") or ""
+            ).strip() == "none":
+                missing.append("primary_user_surface")
+            if not str(override.get("surface_reconciliation_contract") or "").strip():
+                missing.append("surface_reconciliation_contract")
+            if not str(override.get("full_user_e2e_contract") or "").strip():
+                missing.append("full_user_e2e_contract")
+            if missing:
+                result.state = "UNADOPTED"
+                result.action = "NEEDS_INPUT"
+                result.outcome = "NEEDS_INPUT"
+                result.detail = "user-facing ADOPT requires repository inputs: " + ", ".join(missing)
+                return result
+            contract_errors = [
+                error
+                for error in (
+                    validate_repo_local_contract(
+                        root,
+                        override.get("surface_reconciliation_contract"),
+                        "surface_reconciliation_contract",
+                    ),
+                    validate_repo_local_contract(
+                        root,
+                        override.get("full_user_e2e_contract"),
+                        "full_user_e2e_contract",
+                    ),
+                )
+                if error
+            ]
+            if contract_errors:
+                result.state = "UNADOPTED"
+                result.action = "NEEDS_INPUT"
+                result.outcome = "NEEDS_INPUT"
+                result.detail = "; ".join(contract_errors)
+                return result
 
     if not apply:
         result.outcome = "PLANNED"

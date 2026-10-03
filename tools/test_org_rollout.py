@@ -71,6 +71,40 @@ def adopt_python(target: Path, baseline: str = BASELINE) -> None:
     commit_all(target, "adopt engineering system")
 
 
+def adopt_user_facing(target: Path, baseline: str = BASELINE) -> None:
+    (target / "pyproject.toml").write_text("[project]\nname='demo-user'\n", encoding="utf-8")
+    (target / "tests").mkdir(exist_ok=True)
+    (target / "tests" / "test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+    (target / "docs").mkdir(exist_ok=True)
+    (target / "docs/SURFACE_RECONCILIATION.md").write_text(
+        "# Surface Reconciliation\n", encoding="utf-8"
+    )
+    (target / "docs/FULL_USER_E2E.md").write_text(
+        "# Full User E2E\n", encoding="utf-8"
+    )
+    commit_all(target, "user-facing product fixture")
+    run(
+        sys.executable,
+        str(ADOPT),
+        "--root",
+        str(target),
+        "--apply",
+        "--baseline-sha",
+        baseline,
+        "--test-command",
+        "python -m pytest -q",
+        "--user-facing",
+        "--user-gate-contracts-reviewed",
+        "--primary-user-surface",
+        "cli",
+        "--surface-reconciliation-contract",
+        "docs/SURFACE_RECONCILIATION.md",
+        "--full-user-e2e-contract",
+        "docs/FULL_USER_E2E.md",
+    )
+    commit_all(target, "adopt user-facing engineering system")
+
+
 def write_inventory(path: Path, rows: list[dict]) -> None:
     path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
@@ -449,6 +483,10 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert "human-equivalent user tests executor must be EXECUTION_PROFILE" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
+    assert (
+        "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance"
+        in org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
     assert org_rollout.repairable_structural_failure(
         "FAIL retired runtime artifact must be removed: .cursor"
     )
@@ -464,9 +502,49 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert org_rollout.repairable_structural_failure(
         "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
     )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance"
+    )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests have invalid contract_review_attestation_version; manual review required"
+    )
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"
     )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance; "
+        "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance; "
+        "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
+    )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent full_user_e2e contract missing: docs/FULL_USER_E2E.md"
+    )
+
+
+def test_structural_adoption_preserves_all_failures() -> None:
+    original = org_rollout.run_cmd
+    try:
+        org_rollout.run_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout=(
+                "FAIL AGENTS.md missing managed continuous-execution policy\n"
+                "FAIL managed-profile adoption missing required helper\n"
+                "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE\n"
+                "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md\n"
+            ),
+        )
+        ok, detail = org_rollout.structural_adoption_ok(Path("/tmp/example"))
+        assert not ok
+        assert detail.count("FAIL ") == 4
+        assert "surface_reconciliation contract missing" in detail
+        assert not org_rollout.repairable_structural_failure(detail)
+    finally:
+        org_rollout.run_cmd = original
 
 
 def test_checkout_failure_continues_inventory() -> None:
@@ -517,8 +595,9 @@ def test_override_manifest_exclude_and_adopt() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         excluded = base / "excluded"
+        invalid_review = base / "invalid-review"
         adoptable = base / "adoptable"
-        for path in (excluded, adoptable):
+        for path in (excluded, invalid_review, adoptable):
             path.mkdir()
             init_repo(path)
             (path / "README.md").write_text("x\n", encoding="utf-8")
@@ -533,6 +612,12 @@ def test_override_manifest_exclude_and_adopt() -> None:
                     "archived": False,
                     "default_branch": "main",
                     "local_path": str(excluded),
+                },
+                {
+                    "full_name": "demo/invalid-review",
+                    "archived": False,
+                    "default_branch": "main",
+                    "local_path": str(invalid_review),
                 },
                 {
                     "full_name": "demo/adoptable",
@@ -550,6 +635,7 @@ def test_override_manifest_exclude_and_adopt() -> None:
                     "defaults": {"ack_rule_review": True, "allow_no_tests": True, "ci_mode": "shared"},
                     "repositories": {
                         "demo/excluded": {"exclude": True},
+                        "demo/invalid-review": {"user_gate_contracts_reviewed": True},
                         "demo/adoptable": {"test_command": "true"},
                     },
                 },
@@ -557,6 +643,23 @@ def test_override_manifest_exclude_and_adopt() -> None:
             ),
             encoding="utf-8",
         )
+        audited = run(
+            sys.executable,
+            str(ROLLOUT),
+            "--inventory-file",
+            str(inventory),
+            "--override-manifest",
+            str(manifest),
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        audit_invalid = audited.stdout.split("REPO=demo/invalid-review", 1)[1].split("---", 1)[0]
+        assert "ACTION=NEEDS_INPUT" in audit_invalid
+        assert "OUTCOME=NEEDS_INPUT" in audit_invalid
+        audit_adoptable = audited.stdout.split("REPO=demo/adoptable", 1)[1].split("---", 1)[0]
+        assert "OUTCOME=PLANNED" in audit_adoptable
+
         applied = run(
             sys.executable,
             str(ROLLOUT),
@@ -571,12 +674,232 @@ def test_override_manifest_exclude_and_adopt() -> None:
         )
         assert "REPO=demo/excluded" in applied.stdout
         assert "STATE=EXCLUDED" in applied.stdout
+        assert "REPO=demo/invalid-review" in applied.stdout
+        invalid_segment = applied.stdout.split("REPO=demo/invalid-review", 1)[1].split("---", 1)[0]
+        assert "ACTION=NEEDS_INPUT" in invalid_segment
+        assert "OUTCOME=NEEDS_INPUT" in invalid_segment
+        assert not (invalid_review / ".engineering").exists()
         assert "REPO=demo/adoptable" in applied.stdout
-        assert "OUTCOME=APPLIED" in applied.stdout
+        adopt_segment = applied.stdout.split("REPO=demo/adoptable", 1)[1].split("---", 1)[0]
+        assert "OUTCOME=APPLIED" in adopt_segment
         assert (adoptable / ".engineering" / "project.yaml").is_file()
         project = load_yaml(adoptable / ".engineering" / "project.yaml")
         assert project["engineering_system"]["version"] == "1.7.0"
         assert project["engineering_system"]["baseline"] == NEW_BASELINE
+
+
+def test_attestation_repair_classification() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "review-provenance"
+        root.mkdir()
+        init_repo(root)
+        adopt_user_facing(root, BASELINE)
+
+        release_path = root / ".engineering/release.yaml"
+        release = load_yaml(release_path)
+        release["human_equivalent_user_tests"].pop(
+            "contract_review_attestation_version", None
+        )
+        release_path.write_text(
+            yaml.safe_dump(release, sort_keys=False), encoding="utf-8"
+        )
+        commit_all(root, "remove review attestation")
+
+        missing = org_rollout.classify_checkout(root, "1.7.0", BASELINE)
+        assert missing.state == "OUTDATED", missing
+        assert missing.action == "UPGRADE", missing
+        repaired = org_rollout.apply_upgrade(
+            root, BASELINE, {"user_gate_contracts_reviewed": True}
+        )
+        assert repaired.returncode == 0, repaired.stdout
+        commit_all(root, "repair review attestation")
+
+        for malformed in (True, 1.0):
+            bad = load_yaml(release_path)
+            bad["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = malformed
+            release_path.write_text(
+                yaml.safe_dump(bad, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(root, f"malformed review attestation {malformed!r}")
+            classified = org_rollout.classify_checkout(root, "1.7.0", BASELINE)
+            assert classified.state == "INCOMPLETE", classified
+            assert classified.action == "NEEDS_INPUT", classified
+
+            fixed = load_yaml(release_path)
+            fixed["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = 1
+            release_path.write_text(
+                yaml.safe_dump(fixed, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(root, "restore valid review attestation")
+
+
+def test_user_gate_contract_review_override_propagates() -> None:
+    root = Path("/tmp/example-user-facing")
+    override = {
+        "user_facing": True,
+        "user_gate_contracts_reviewed": True,
+        "primary_user_surface": "browser",
+        "surface_reconciliation_contract": "docs/SURFACE_RECONCILIATION.md",
+        "full_user_e2e_contract": "docs/FULL_USER_E2E.md",
+    }
+    adopt_argv = org_rollout.build_adopt_argv(root, NEW_BASELINE, override)
+    upgrade_argv = org_rollout.build_upgrade_argv(root, NEW_BASELINE, override)
+    assert "--user-facing" in adopt_argv
+    assert "--user-gate-contracts-reviewed" in adopt_argv
+    assert "--primary-user-surface" in adopt_argv
+    assert "browser" in adopt_argv
+    assert "--surface-reconciliation-contract" in adopt_argv
+    assert "docs/SURFACE_RECONCILIATION.md" in adopt_argv
+    assert "--full-user-e2e-contract" in adopt_argv
+    assert "docs/FULL_USER_E2E.md" in adopt_argv
+    assert "--user-gate-contracts-reviewed" in upgrade_argv
+
+    try:
+        org_rollout.build_adopt_argv(
+            root, NEW_BASELINE, {"user_gate_contracts_reviewed": True}
+        )
+    except SystemExit as exc:
+        assert "requires repository override user_facing: true" in str(exc)
+    else:
+        raise AssertionError("review acknowledgement must not silently adopt as non-user-facing")
+
+    for no_review in ({}, {"user_gate_contracts_reviewed": False}, {"user_gate_contracts_reviewed": "false"}):
+        assert "--user-gate-contracts-reviewed" not in org_rollout.build_adopt_argv(
+            root, NEW_BASELINE, no_review
+        )
+        assert "--user-gate-contracts-reviewed" not in org_rollout.build_upgrade_argv(
+            root, NEW_BASELINE, no_review
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = Path(tmp) / "overrides.yaml"
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {"user_gate_contracts_reviewed": True},
+                    "repositories": {},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            org_rollout.load_override_manifest(manifest)
+        except SystemExit as exc:
+            assert "forbidden in override defaults" in str(exc)
+        else:
+            raise AssertionError("defaults review acknowledgement must fail closed")
+
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {},
+                    "repositories": {
+                        "demo/repo": {"user_gate_contracts_reviewed": "false"}
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            org_rollout.load_override_manifest(manifest)
+        except SystemExit as exc:
+            assert "must be a literal boolean" in str(exc)
+        else:
+            raise AssertionError("non-boolean review acknowledgement must fail closed")
+
+        for malformed_user_facing in ("true", 1):
+            manifest.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "defaults": {},
+                        "repositories": {
+                            "demo/repo": {"user_facing": malformed_user_facing}
+                        },
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                org_rollout.load_override_manifest(manifest)
+            except SystemExit as exc:
+                assert "user_facing for demo/repo must be a literal boolean" in str(exc)
+            else:
+                raise AssertionError("non-boolean user_facing must fail closed")
+
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "version": 1,
+                    "defaults": {"ci_mode": "shared"},
+                    "repositories": {
+                        "demo/reviewed": {"user_gate_contracts_reviewed": True},
+                        "demo/unreviewed": {},
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        loaded = org_rollout.load_override_manifest(manifest)
+        assert loaded.for_repo("demo/reviewed")["user_gate_contracts_reviewed"] is True
+        assert "user_gate_contracts_reviewed" not in loaded.for_repo("demo/unreviewed")
+
+
+def test_user_facing_contract_paths_fail_during_audit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "user-facing-invalid-contracts"
+        root.mkdir()
+        init_repo(root)
+        (root / "README.md").write_text("x\n", encoding="utf-8")
+        commit_all(root)
+        record = org_rollout.RepoRecord(
+            full_name="demo/user-facing-invalid-contracts",
+            archived=False,
+            default_branch="main",
+            local_path=str(root),
+        )
+        base_override = {
+            "user_facing": True,
+            "user_gate_contracts_reviewed": True,
+            "primary_user_surface": "browser",
+            "surface_reconciliation_contract": "docs/SURFACE_RECONCILIATION.md",
+            "full_user_e2e_contract": "docs/FULL_USER_E2E.md",
+        }
+        for bad_override, expected in (
+            (
+                {
+                    **base_override,
+                    "surface_reconciliation_contract": "/tmp/outside.md",
+                },
+                "must be repository-relative",
+            ),
+            (base_override, "contract missing"),
+        ):
+            result = org_rollout.process_repo(
+                record,
+                apply=False,
+                include_archived=False,
+                target_version="1.7.0",
+                target_baseline=NEW_BASELINE,
+                branch_prefix="chore/engineering-system-",
+                workdir=Path(tmp) / "workdir",
+                create_pr=False,
+                override=bad_override,
+            )
+            assert result.action == "NEEDS_INPUT", result
+            assert result.outcome == "NEEDS_INPUT", result
+            assert expected in result.detail
+            assert not (root / ".engineering").exists()
 
 
 def main() -> int:
@@ -588,8 +911,12 @@ def main() -> int:
     test_current_baseline_with_stale_execution_policy_is_repairable()
     test_current_baseline_with_managed_byte_drift_is_repairable()
     test_repair_markers_match_checker_diagnostics()
+    test_structural_adoption_preserves_all_failures()
     test_checkout_failure_continues_inventory()
     test_override_manifest_exclude_and_adopt()
+    test_attestation_repair_classification()
+    test_user_gate_contract_review_override_propagates()
+    test_user_facing_contract_paths_fail_during_audit()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
     return 0
 

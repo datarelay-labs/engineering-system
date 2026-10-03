@@ -2721,6 +2721,37 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         (target / "docs/FULL_USER_E2E.md").write_text("# Full User E2E\n", encoding="utf-8")
         commit_all(target)
 
+        audit_review = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--audit",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+        )
+        assert audit_review.returncode == 0
+        assert "ADOPTION_AUDIT=PASS" in audit_review.stdout
+        assert not (target / ".engineering").exists()
+
+        blocked_review = run(
+            sys.executable, str(ADOPT),
+            "--root", str(target),
+            "--apply",
+            "--baseline-sha", BASELINE,
+            "--test-command", "python -m pytest -q",
+            "--user-facing",
+            "--primary-user-surface", "browser",
+            "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
+            "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
+            check=False,
+        )
+        assert blocked_review.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_review.stdout
+        assert not (target / ".engineering").exists()
+
         applied = run(
             sys.executable, str(ADOPT),
             "--root", str(target),
@@ -2728,6 +2759,7 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
             "--baseline-sha", BASELINE,
             "--test-command", "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
             "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
@@ -2745,6 +2777,7 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         assert user_tests["canonical_contract_read_before_execution_required"] is True
         assert user_tests["complete_rerun_after_remediation_required"] is True
         assert user_tests["wrapper_user_substitution_forbidden"] is True
+        assert user_tests["contract_review_attestation_version"] == 1
         assert user_tests["actual_user_surface_required"] is True
         assert user_tests["actual_browser_process_required"] is True
         assert user_tests["same_candidate_required"] is True
@@ -2839,6 +2872,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             "--test-command",
             "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface",
             "browser",
             "--surface-reconciliation-contract",
@@ -2858,6 +2892,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             "canonical_contract_read_before_execution_required",
             "complete_rerun_after_remediation_required",
             "wrapper_user_substitution_forbidden",
+            "contract_review_attestation_version",
             "finding_accumulation_before_remediation",
             "same_head_quality_closure_required",
             "candidate_freeze_after_quality_closure",
@@ -2883,6 +2918,50 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             in checker.stdout
         )
 
+        before_review = release_path.read_bytes()
+        audit_review = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert "USER_GATE_CONTRACT_REVIEW=REQUIRED" in audit_review.stdout
+        assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in audit_review.stdout
+        assert "ADOPTION_UPGRADE_AUDIT=PASS" in audit_review.stdout
+        assert release_path.read_bytes() == before_review
+
+        blocked_review = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked_review.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_review.stdout
+        assert release_path.read_bytes() == before_review
+
+        blocked_audit_apply = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--audit",
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked_audit_apply.returncode != 0
+        assert "--user-gate-contracts-reviewed" in blocked_audit_apply.stdout
+        assert release_path.read_bytes() == before_review
+
         repaired = run(
             sys.executable,
             str(UPGRADE),
@@ -2891,6 +2970,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             "--apply",
             "--baseline-sha",
             BASELINE,
+            "--user-gate-contracts-reviewed",
         )
         assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in repaired.stdout
         assert "RELEASE_EXECUTOR_SYNCED=YES" in repaired.stdout
@@ -2902,6 +2982,7 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         assert repaired_user_tests["canonical_contract_read_before_execution_required"] is True
         assert repaired_user_tests["complete_rerun_after_remediation_required"] is True
         assert repaired_user_tests["wrapper_user_substitution_forbidden"] is True
+        assert repaired_user_tests["contract_review_attestation_version"] == 1
         assert repaired_user_tests["finding_accumulation_before_remediation"] is True
         assert repaired_user_tests["same_head_quality_closure_required"] is True
         assert repaired_user_tests["candidate_freeze_after_quality_closure"] is True
@@ -2912,6 +2993,88 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
             sys.executable, str(CHECK), "--root", str(target)
         ).returncode == 0
         commit_all(target, "migrate release executor")
+
+        # Simulate the brief pre-corrective baseline that wrote the semantic
+        # booleans true without reviewed provenance. Booleans alone must not
+        # allow a later upgrade to self-certify the local contracts.
+        pre_fix_release = load_yaml(release_path)
+        pre_fix_release["human_equivalent_user_tests"].pop(
+            "contract_review_attestation_version", None
+        )
+        release_path.write_text(
+            yaml.safe_dump(pre_fix_release, sort_keys=False), encoding="utf-8"
+        )
+        commit_all(target, "simulate pre-fix unreviewed declarations")
+        before_attestation = release_path.read_bytes()
+        blocked_attestation = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked_attestation.returncode != 0
+        assert "no reviewed provenance" in blocked_attestation.stdout
+        assert release_path.read_bytes() == before_attestation
+
+        attested = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--user-gate-contracts-reviewed",
+        )
+        assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in attested.stdout
+        attested_release = load_yaml(release_path)
+        assert (
+            attested_release["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ]
+            == 1
+        )
+        commit_all(target, "attest reviewed user gate contracts")
+
+        attested_bytes = release_path.read_bytes()
+        for invalid_attestation in (True, 1.0):
+            invalid_release = load_yaml(release_path)
+            invalid_release["human_equivalent_user_tests"][
+                "contract_review_attestation_version"
+            ] = invalid_attestation
+            release_path.write_text(
+                yaml.safe_dump(invalid_release, sort_keys=False), encoding="utf-8"
+            )
+            commit_all(target, f"invalid attestation {invalid_attestation!r}")
+
+            checker_invalid = run(
+                sys.executable, str(CHECK), "--root", str(target), check=False
+            )
+            assert checker_invalid.returncode != 0
+            assert "invalid contract_review_attestation_version; manual review required" in checker_invalid.stdout
+
+            upgrade_invalid = run(
+                sys.executable,
+                str(UPGRADE),
+                "--root",
+                str(target),
+                "--apply",
+                "--baseline-sha",
+                BASELINE,
+                "--user-gate-contracts-reviewed",
+                check=False,
+            )
+            assert upgrade_invalid.returncode != 0
+            assert "contract_review_attestation_version contains local/custom changes" in (
+                upgrade_invalid.stdout
+            )
+
+            release_path.write_bytes(attested_bytes)
+            commit_all(target, "restore valid review attestation")
 
         custom_release = load_yaml(release_path)
         custom_release["human_equivalent_user_tests"]["executor"] = "CUSTOM_RUNNER"
@@ -2952,6 +3115,7 @@ def test_user_facing_adoption_fails_without_contracts() -> None:
             "--baseline-sha", BASELINE,
             "--allow-no-tests",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             check=False,
         )
@@ -2990,6 +3154,7 @@ def test_user_facing_contract_paths_are_repository_bounded() -> None:
                 "--baseline-sha", BASELINE,
                 "--test-command", "python -m pytest -q",
                 "--user-facing",
+                "--user-gate-contracts-reviewed",
                 "--primary-user-surface", "browser",
                 "--surface-reconciliation-contract", invalid_surface,
                 "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
@@ -3005,6 +3170,7 @@ def test_user_facing_contract_paths_are_repository_bounded() -> None:
             "--baseline-sha", BASELINE,
             "--test-command", "python -m pytest -q",
             "--user-facing",
+            "--user-gate-contracts-reviewed",
             "--primary-user-surface", "browser",
             "--surface-reconciliation-contract", "docs/SURFACE_RECONCILIATION.md",
             "--full-user-e2e-contract", "docs/FULL_USER_E2E.md",
@@ -3034,6 +3200,8 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
         "human-equivalent user tests require canonical_contract_read_before_execution_required=true",
         "human-equivalent user tests require complete_rerun_after_remediation_required=true",
         "human-equivalent user tests require wrapper_user_substitution_forbidden=true",
+        "human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance",
+        "human-equivalent user tests have invalid contract_review_attestation_version; manual review required",
         "human-equivalent user tests require actual_user_surface_required=true",
         "human-equivalent user tests require finding_accumulation_before_remediation=true",
         "human-equivalent user tests require same_head_quality_closure_required=true",
