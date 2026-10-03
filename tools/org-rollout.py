@@ -311,7 +311,17 @@ REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
 
 
 def repairable_structural_failure(detail: str) -> bool:
-    return any(marker in detail for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+    lines = [
+        line.strip()
+        for line in str(detail or "").splitlines()
+        if line.strip().startswith("FAIL ")
+    ]
+    if not lines:
+        return any(marker in str(detail or "") for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+    return all(
+        any(marker in line for marker in REPAIRABLE_STRUCTURAL_FAILURE_MARKERS)
+        for line in lines
+    )
 
 
 def classify_checkout(root: Path, target_version: str, target_baseline: str) -> RepoResult:

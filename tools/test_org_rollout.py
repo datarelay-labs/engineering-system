@@ -511,6 +511,14 @@ def test_repair_markers_match_checker_diagnostics() -> None:
     assert not org_rollout.repairable_structural_failure(
         "FAIL project-specific custom rule requires owner input"
     )
+    assert not org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL human-equivalent user tests missing contract_review_attestation_version=1 reviewed provenance\n"
+        "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE"
+    )
 
 
 def test_checkout_failure_continues_inventory() -> None:
