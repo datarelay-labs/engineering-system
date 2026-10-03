@@ -22,7 +22,7 @@ def evidence(gate: str) -> dict:
         "gate": gate,
         "run_id": "run-1",
         "candidate_head": HEAD,
-        "contract_path": "docs/test.md",
+        "contract_path": CONTRACT_REL,
         "contract_sha256": DIGEST,
         "contract_dirty": False,
         "final_status": "PASS",
