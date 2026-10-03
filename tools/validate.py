@@ -674,6 +674,7 @@ def validate_worker_adapter_contract():
     for label, text in (("AGENTS.md", agents), ("templates/AGENTS.md", agents_template)):
         for token in (
             "continue/resume",
+            "roadmap/release objective is complete",
             "additional magic phrase",
             "ordinary authenticated GitHub Issue/PR coordination",
             "high-risk external write",
