@@ -158,6 +158,7 @@ def analyze_packet(
     packet: Packet,
     *,
     profile_root: Path | str | None = None,
+    expected_target_repo: str | None = None,
     warn_chars: int | None = None,
     warn_lines: int | None = None,
 ) -> dict[str, Any]:
@@ -180,6 +181,14 @@ def analyze_packet(
         len(repository) > 200 or SAFE_REPO_RE.fullmatch(repository) is None
     ):
         blocking.append("TARGET_REPO_INVALID")
+    if expected_target_repo is not None:
+        if (
+            len(expected_target_repo) > 200
+            or SAFE_REPO_RE.fullmatch(expected_target_repo) is None
+        ):
+            blocking.append("EXPECTED_TARGET_REPO_INVALID")
+        elif repository and repository != expected_target_repo:
+            blocking.append("TARGET_REPO_SCOPE_MISMATCH")
     workstream = packet.metadata.get("WORKSTREAM")
     if workstream and SAFE_WORKSTREAM_RE.fullmatch(workstream) is None:
         blocking.append("WORKSTREAM_INVALID")
@@ -555,6 +564,7 @@ def main() -> int:
     lint = sub.add_parser("packet-lint")
     lint.add_argument("--body-file", required=True)
     lint.add_argument("--root")
+    lint.add_argument("--expect-target-repo")
     lint.add_argument("--warn-chars", type=int)
     lint.add_argument("--warn-lines", type=int)
 
@@ -597,6 +607,7 @@ def main() -> int:
             result = analyze_packet(
                 parse_packet(_read_text(args.body_file)),
                 profile_root=args.root,
+                expected_target_repo=args.expect_target_repo,
                 warn_chars=args.warn_chars,
                 warn_lines=args.warn_lines,
             )

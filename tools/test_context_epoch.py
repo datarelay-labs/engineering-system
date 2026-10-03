@@ -140,6 +140,64 @@ def test_refetched_projection_identity_binding() -> None:
 
 
 
+def test_packet_lint_binds_owner_selected_target_repo() -> None:
+    expected = "datarelay-labs/engineering-system"
+    packet_ok = ce.parse_packet(packet())
+    matched = ce.analyze_packet(packet_ok, expected_target_repo=expected)
+    if matched["status"] != "PASS":
+        fail(f"matching expected target unexpectedly blocked: {matched}")
+
+    drlink_body = packet().replace(
+        "TARGET_REPO=datarelay-labs/engineering-system",
+        "TARGET_REPO=datarelay-labs/datarelay-link",
+    )
+    mismatch = ce.analyze_packet(
+        ce.parse_packet(drlink_body),
+        expected_target_repo=expected,
+    )
+    if (
+        mismatch["status"] != "BLOCK"
+        or "TARGET_REPO_SCOPE_MISMATCH" not in mismatch["blocking"]
+    ):
+        fail(f"cross-project packet did not fail closed: {mismatch}")
+
+    explicit_switch = ce.analyze_packet(
+        ce.parse_packet(drlink_body),
+        expected_target_repo="datarelay-labs/datarelay-link",
+    )
+    if explicit_switch["status"] != "PASS":
+        fail(f"explicit target switch did not rebind cleanly: {explicit_switch}")
+
+    invalid_expected = ce.analyze_packet(
+        packet_ok,
+        expected_target_repo="not-a-repository",
+    )
+    if "EXPECTED_TARGET_REPO_INVALID" not in invalid_expected["blocking"]:
+        fail(f"unsafe expected target did not block: {invalid_expected}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "drlink-packet.md"
+        path.write_text(drlink_body, encoding="utf-8")
+        cli = subprocess.run(
+            [
+                "python3",
+                str(ROOT / "tools/context_epoch.py"),
+                "packet-lint",
+                "--body-file",
+                str(path),
+                "--expect-target-repo",
+                expected,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        result = json.loads(cli.stdout)
+        if cli.returncode != 2 or "TARGET_REPO_SCOPE_MISMATCH" not in result["blocking"]:
+            fail(f"CLI expected target binding did not block cross-project packet: {cli.stdout} {cli.stderr}")
+
+
 def test_template_placeholders_block_runnable_packet() -> None:
     template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
         encoding="utf-8"
@@ -488,6 +546,31 @@ def test_adoption_compliance_carries_implementation_preflight_baseline() -> None
             fail(f"adoption compliance missing managed helper checkout: {token}")
 
 
+def test_managed_instructions_bind_target_repository() -> None:
+    paths = (
+        ROOT / "AGENTS.md",
+        ROOT / "templates/AGENTS.md",
+        ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
+        ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
+        ROOT / "standards/SESSION_CONTINUITY.md",
+    )
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        if "--expect-target-repo" not in text:
+            fail(f"managed target-repository binding missing from {path.relative_to(ROOT)}")
+    custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
+    if "cross-project handoffs" not in custom or "never retarget" not in custom:
+        fail("custom instruction does not keep cross-project references read-only")
+    standard = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    for token in (
+        "TARGET_REPO_SCOPE_MISMATCH",
+        "Only a new explicit owner project/repository switch may replace the binding",
+        "cross-project handoffs",
+    ):
+        if token not in standard:
+            fail(f"session continuity missing target-repository boundary token: {token}")
+
+
 def test_cli_lint_and_identity() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "packet.md"
@@ -572,6 +655,7 @@ def main() -> None:
         test_projection_excludes_history,
         test_preauthority_identity_is_structural_only,
         test_refetched_projection_identity_binding,
+        test_packet_lint_binds_owner_selected_target_repo,
         test_template_placeholders_block_runnable_packet,
         test_packet_v3_requires_authority_metadata,
         test_packet_v2_legacy_profile_compatibility,
@@ -588,6 +672,7 @@ def main() -> None:
         test_hook_sanitizer_is_content_free,
         test_adoption_compliance_carries_context_helper_baseline,
         test_adoption_compliance_carries_implementation_preflight_baseline,
+        test_managed_instructions_bind_target_repository,
         test_cli_lint_and_identity,
         test_cli_lint_explicit_profile_root,
     ]

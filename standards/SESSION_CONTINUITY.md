@@ -267,7 +267,7 @@ After meaningful progress:
 - replace `Latest Evidence`
 - replace `Blockers`
 - update `LAST_VERIFIED_HEAD`
-- after every ACTIVE packet create or material update, lint the exact resulting authoritative body with `python3 tools/context_epoch.py packet-lint --body-file <file>`; a BLOCK result means the packet is non-runnable and must be corrected before implementation, handoff, or any implementation session/process start or resume
+- after every ACTIVE packet create or material update, lint the exact resulting authoritative body with `python3 tools/context_epoch.py packet-lint --body-file <file> --expect-target-repo <bound-owner/repo>` using the owner/project-bound expected repository; a `TARGET_REPO_SCOPE_MISMATCH` or other BLOCK means the packet is non-runnable and must be corrected before implementation, handoff, or any implementation session/process start or resume
 
 Do not keep accumulating old phase text in the Issue body.
 
@@ -339,11 +339,11 @@ The model-visible marker contains only version, store-local opaque handle, and o
 
 When resuming work:
 
-1. Resolve the target repository first from the current Git remote or explicit user/project context.
-2. Once resolved, do not search unrelated repositories.
+1. Resolve the target repository first from the owner's current explicit project/repository context, using the current Git remote only when that context does not already identify the repository, and bind it as the expected target for the current owner-selected workstream. Only a new explicit owner project/repository switch may replace the binding.
+2. Once bound, do not search unrelated repositories. Cross-project handoffs, dependencies, Issue references, derived context, and waiting-work scheduling may be inspected as read-only context but never retarget implementation/testing/mutation authority.
 3. Resolve the current branch when a local repository is available.
 4. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
-5. Require exact `TARGET_REPO` match.
+5. Require exact `TARGET_REPO` match and lint with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>`; `TARGET_REPO_SCOPE_MISMATCH` is non-runnable.
 6. Prefer an exact `BRANCH` match when branch context exists.
 7. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
 8. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
@@ -638,11 +638,12 @@ For an effect explicitly classified as high-risk by the core or a stricter proje
 
 When the user asks to continue/resume an existing engineering workstream:
 
-- resolve the target repository
-- load its active Work Packet
+- resolve and bind the target repository from the owner's current explicit project/repository request
+- load only that bound repository's active Work Packet; cross-project handoffs/dependencies remain read-only context
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
-- lint the exact fresh authoritative packet body and require `packet-lint=PASS`; a stale/mismatched execution-profile identity or revision is non-runnable
-- immediately before any implementation adapter/session/process start or resume, re-read the authoritative packet and lint it again; do not start or resume on WARN/BLOCK ambiguity and never treat a handoff comment as authority
+- lint the exact fresh authoritative packet body with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>` and require PASS; `TARGET_REPO_SCOPE_MISMATCH`, stale/mismatched execution-profile identity, or revision is non-runnable
+- immediately before any implementation adapter/session/process start or resume, re-read the authoritative packet and lint it again with the same bound expected repository; do not start or resume on WARN/BLOCK ambiguity and never treat a handoff comment as authority
+- replace the bound expected repository only after a new explicit owner project/repository switch
 - verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence for packet v2/v3, and require exact profile identity/revision binding for v3
 - verify current GitHub/repository facts
 - continue from `Next Action` only when it still matches the current owner intent
