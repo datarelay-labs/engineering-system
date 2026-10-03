@@ -2739,12 +2739,21 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         release = load_yaml(target / ".engineering/release.yaml")
         assert release["human_equivalent_user_tests_required"] is True
         user_tests = release["human_equivalent_user_tests"]
+        assert user_tests["contract_version"] == 2
+        assert user_tests["executor"] == "EXECUTION_PROFILE"
+        assert user_tests["direct_persona_execution_required"] is True
         assert user_tests["actual_user_surface_required"] is True
         assert user_tests["actual_browser_process_required"] is True
         assert user_tests["same_candidate_required"] is True
+        assert user_tests["finding_accumulation_before_remediation"] is True
+        assert user_tests["same_head_quality_closure_required"] is True
+        assert user_tests["candidate_freeze_after_quality_closure"] is True
         assert user_tests["ci_contract_validation_only"] is True
+        assert user_tests["evidence_validator"] == "tools/user_acceptance_contract.py"
         assert user_tests["surface_reconciliation"]["contract"] == "docs/SURFACE_RECONCILIATION.md"
         assert user_tests["full_user_e2e"]["contract"] == "docs/FULL_USER_E2E.md"
+        assert (target / "tools/user_acceptance_contract.py").is_file()
+        assert (target / "schemas/user-acceptance-evidence.schema.json").is_file()
         assert run(sys.executable, str(CHECK), "--root", str(target)).returncode == 0
 
         for invalid_required in ("true", "false", 1):
@@ -2763,6 +2772,13 @@ def test_user_facing_browser_release_requires_human_equivalent_contracts() -> No
         blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
         assert blocked.returncode != 0
         assert "browser user-facing project requires actual_browser_process_required=true" in blocked.stdout
+
+        release["human_equivalent_user_tests"]["actual_browser_process_required"] = True
+        release["human_equivalent_user_tests"]["direct_persona_execution_required"] = False
+        (target / ".engineering/release.yaml").write_text(yaml.safe_dump(release, sort_keys=False), encoding="utf-8")
+        blocked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+        assert blocked.returncode != 0
+        assert "human-equivalent user tests require direct_persona_execution_required=true" in blocked.stdout
 
 
 def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -> None:
@@ -2807,12 +2823,22 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
 
         release_path = target / ".engineering/release.yaml"
         release = load_yaml(release_path)
-        release["human_equivalent_user_tests"]["executor"] = "CHATGPT_CHAT"
+        user_tests = release["human_equivalent_user_tests"]
+        user_tests["executor"] = "CHATGPT_CHAT"
+        for key in (
+            "contract_version",
+            "direct_persona_execution_required",
+            "finding_accumulation_before_remediation",
+            "same_head_quality_closure_required",
+            "candidate_freeze_after_quality_closure",
+            "evidence_validator",
+        ):
+            user_tests.pop(key, None)
         release_path.write_text(
             yaml.safe_dump(release, sort_keys=False),
             encoding="utf-8",
         )
-        commit_all(target, "legacy managed release executor")
+        commit_all(target, "legacy managed release user-test contract")
 
         checker = run(
             sys.executable,
@@ -2839,10 +2865,16 @@ def test_managed_upgrade_migrates_legacy_release_executor_and_rejects_custom() -
         assert "RELEASE_EXECUTOR_MIGRATION=REQUIRED" in repaired.stdout
         assert "RELEASE_EXECUTOR_SYNCED=YES" in repaired.stdout
         repaired_release = load_yaml(release_path)
-        assert (
-            repaired_release["human_equivalent_user_tests"]["executor"]
-            == "EXECUTION_PROFILE"
-        )
+        repaired_user_tests = repaired_release["human_equivalent_user_tests"]
+        assert repaired_user_tests["executor"] == "EXECUTION_PROFILE"
+        assert repaired_user_tests["contract_version"] == 2
+        assert repaired_user_tests["direct_persona_execution_required"] is True
+        assert repaired_user_tests["finding_accumulation_before_remediation"] is True
+        assert repaired_user_tests["same_head_quality_closure_required"] is True
+        assert repaired_user_tests["candidate_freeze_after_quality_closure"] is True
+        assert repaired_user_tests["evidence_validator"] == "tools/user_acceptance_contract.py"
+        assert (target / "tools/user_acceptance_contract.py").is_file()
+        assert (target / "schemas/user-acceptance-evidence.schema.json").is_file()
         assert run(
             sys.executable, str(CHECK), "--root", str(target)
         ).returncode == 0
@@ -2964,7 +2996,13 @@ def test_adoption_compliance_workflow_enforces_user_facing_release_gates() -> No
     assert "--expected-mode adopted" in workflow
     for needle in (
         "user-facing project requires human_equivalent_user_tests_required=true",
+        "human-equivalent user tests require contract_version=2",
+        "human-equivalent user tests require direct_persona_execution_required=true",
         "human-equivalent user tests require actual_user_surface_required=true",
+        "human-equivalent user tests require finding_accumulation_before_remediation=true",
+        "human-equivalent user tests require same_head_quality_closure_required=true",
+        "human-equivalent user tests require candidate_freeze_after_quality_closure=true",
+        "human-equivalent user tests require managed user acceptance evidence validator",
         "browser user-facing project requires actual_browser_process_required=true",
         'for gate_name in ("surface_reconciliation", "full_user_e2e")',
         'failures.append(f"human-equivalent {gate_name} gate must be mandatory")',

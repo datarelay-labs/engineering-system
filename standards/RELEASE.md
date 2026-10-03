@@ -9,39 +9,44 @@ A release is qualified for an exact source revision and the artifacts produced f
 Release closure is defect-discovery-first. Do not spend CI, packaging, SBOM, provenance, or publication cycles on a candidate that is still expected to change because product/user findings are being collected.
 
 ```text
-development complete enough for release closure
- -> product Feature/Scenario PASS1 (continue safe scenarios; collect all findings)
- -> one batched remediation of PASS1 findings
- -> new candidate
- -> product Feature/Scenario PASS2 (zero mandatory findings)
- -> Full User E2E PASS1 (continue safe journeys; collect all findings)
- -> one batched remediation of E2E PASS1 findings
- -> new candidate
- -> Full User E2E PASS2 (zero mandatory findings)
- -> release-specific upgrade / migration / platform qualification
+roadmap/function implementation complete enough for release closure
+ -> fast release preflight
+ -> Surface Reconciliation discovery pass (continue safe scenarios; collect all findings)
+ -> bounded batched remediation
+ -> rerun Surface Reconciliation from the beginning
+ -> repeat until Surface Reconciliation is clean
+ -> Full User E2E discovery pass (continue safe journeys; collect all findings)
+ -> bounded batched remediation
+ -> rerun Full User E2E from the beginning
+ -> repeat until Full User E2E is clean
+ -> rerun Surface Reconciliation when E2E remediation changed the public surface/contract
+ -> require both user gates PASS on the same exact HEAD
+ -> PRODUCT_QUALITY_CLOSURE=PASS
+ -> freeze that exact HEAD as the release candidate
+ -> release-specific upgrade / migration / platform / performance qualification
  -> final exact-head automated CI/regression qualification
  -> release artifact rebuild
  -> hashes / SBOM / provenance / manifest / attestation as required
- -> final release audit: every mandatory evidence class binds to the same exact candidate
- -> merge/tag/stable publication authorization
- -> immutable tag/release
- -> public smoke
+ -> candidate/preview smoke when applicable
+ -> owner acceptance / release authorization
+ -> immutable tag / stable publication
+ -> post-release public smoke
  -> monitor / rollback if required
 ```
 
 For products whose public surface is not a CLI, `Feature/Scenario` means the equivalent breadth-first product capability/public-surface scenario suite. Surface Reconciliation is the canonical human-equivalent form of this breadth-first gate.
 
-### PASS1 / remediation / PASS2 semantics
+### Discovery / remediation / rerun semantics
 
-PASS1 is a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When PASS1 finishes, classify the complete bounded finding set and perform one batched remediation rather than alternating one fix with one remote CI run.
+Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set and perform one batched remediation rather than alternating one fix with one remote CI run.
 
-Any product/harness/public-surface source change during remediation creates a new candidate. PASS2 restarts the same suite from the beginning on that new candidate. PASS2 requires zero mandatory FAIL/PARTIAL/BLOCKED findings.
+Any product/harness/public-surface source change during remediation creates a new candidate. Restart the invalidated gate from the beginning on that new candidate and repeat until it is clean with zero mandatory FAIL/PARTIAL/BLOCKED findings. If Full User E2E remediation changes the public surface or its contract, Surface Reconciliation must be rerun too.
 
-The same rule applies independently to Full User E2E: E2E PASS1 exhausts safe real-user journeys and collects findings; remediation is batched; E2E PASS2 restarts from the beginning and must be clean.
+A project may require additional clean repeat passes (for example DRLink's release-specific double-pass rule), but the portable minimum is convergence of both gates to clean PASS on one unchanged exact HEAD before candidate freeze.
 
 ### Stage ordering and invalidation
 
-Do not start release-specific upgrade/platform qualification until product Feature/Scenario PASS2 and Full User E2E PASS2 are clean for the candidate. Do not run final exact-head CI until those semantic/user gates and required release-specific qualification are complete. Do not build final release artifacts, SBOM, hashes, provenance, manifest, or attestation until final exact-head CI is green and product code is frozen.
+Do not freeze the release candidate or start release-specific upgrade/platform/performance qualification until Surface Reconciliation and Full User E2E are both clean on the same exact HEAD. Do not run final exact-head CI until that product-quality closure and required release-specific qualification are complete. Do not build final release artifacts, SBOM, hashes, provenance, manifest, or attestation until final exact-head CI is green on the frozen candidate.
 
 If source changes after a clean PASS2, upgrade/platform qualification, final CI, or integrity stage, invalidate the affected downstream evidence and resume from the earliest stage whose evidence is no longer exact-candidate valid. Never preserve a later-stage PASS across a source change.
 
@@ -49,15 +54,15 @@ If source changes after a clean PASS2, upgrade/platform qualification, final CI,
 
 Within a release closure, do not parallelize downstream stages against an upstream stage that can still change the release candidate.
 
-- while Feature/Scenario PASS1/PASS2 is active, do not run Full User E2E qualification, upgrade qualification, final CI, or release integrity work for that candidate;
-- while Full User E2E PASS1/PASS2 is active, do not run upgrade qualification, final CI, or release integrity work for that candidate;
+- while Surface Reconciliation is still discovering findings or being remediated, do not run final Full User E2E qualification, candidate freeze, upgrade qualification, final CI, or release integrity work for that candidate;
+- while Full User E2E is still discovering findings or being remediated, do not freeze the candidate or run downstream qualification, final CI, or release integrity work;
 - while release-specific qualification is active, do not run final CI or integrity work for that candidate;
 - final CI may fan out independent platform/regression jobs for the same frozen HEAD;
 - integrity work may fan out hashes/SBOM/provenance/manifest/attestation only after final CI green on the frozen HEAD.
 
 The selected implementation runtime may still use idle capacity for unrelated roadmap work whose worktree, owned paths, runtime, release candidate, and dependencies do not overlap this release closure. The external-wait work-conservation rule never authorizes running a downstream release stage early.
 
-A blocking or non-blocking finding during PASS1 is collected according to safe-continuation rules. A blocking PASS2 or later-stage failure prevents downstream progression; remediate in a bounded batch, create the new candidate if source changes, and restart from the earliest invalidated stage.
+A blocking or non-blocking finding during a discovery pass is collected according to safe-continuation rules. A blocking finding on a claimed clean pass or any later-stage failure prevents downstream progression; remediate in a bounded batch, create the new candidate if source changes, and restart from the earliest invalidated stage.
 
 ## Fast release preflight
 
@@ -72,11 +77,15 @@ When `.engineering/project.yaml` declares `project.user_facing: true`, the relea
 1. `surface_reconciliation` — capability/public-surface/control/scenario completeness;
 2. `full_user_e2e` — complete real-user missions with actual outcomes, failures/recovery, destructive lifecycle, and cleanup.
 
-The release profile must bind both gates to the same exact candidate and retain their contract paths. CI may validate that the contracts exist and are wired, but CI/static validation alone MUST NOT be interpreted as execution PASS. Actual PASS authority comes from the active release Work Packet plus retained exact-candidate run evidence.
+The release profile must use human-equivalent contract version 2, bind both gates to the same exact candidate, retain their contract paths, require direct persona execution, require finding accumulation before remediation, and require product-quality closure before candidate freeze.
 
-For `project.primary_user_surface: browser`, the release profile MUST require an actual Chromium/Chrome browser process. Browser automation frameworks are drivers, not substitutes for the browser. Headless mode is allowed because it still launches a real browser engine.
+**ChatGPT itself MUST execute and finally audit both user gates by directly acting as the applicable User/Operator/Admin personas.** A coding agent, alternate model, wrapper, automated harness, CI job, unit/integration suite, or synthetic replay cannot substitute for ChatGPT's direct public-surface user execution. Such automation is supporting evidence only. If ChatGPT cannot perform a mandatory real user action because the environment or interaction capability is unavailable, that scenario remains BLOCKED rather than being delegated merely to obtain PASS.
 
-A product/harness/public-surface change after either gate PASS invalidates affected evidence. Re-establish the required exact-HEAD sequence before release.
+CI may validate that the contracts exist and are wired, and `tools/user_acceptance_contract.py` may validate retained evidence and same-HEAD closure, but neither CI/static validation nor machine evidence alone is execution PASS. Actual PASS authority comes from ChatGPT's retained exact-candidate persona-led run evidence under the active release Work Packet.
+
+For `project.primary_user_surface: browser`, ChatGPT MUST perform the user action through an actual Chromium/Chrome browser process. Browser automation frameworks are drivers, not substitutes for the browser. Headless mode is allowed because it still launches a real browser engine.
+
+A product/harness/public-surface change after either gate PASS invalidates affected evidence. Re-establish the required exact-HEAD sequence before release. Canonical portable semantics are in `standards/USER_ACCEPTANCE.md`.
 
 ## Avoid duplicate qualification
 

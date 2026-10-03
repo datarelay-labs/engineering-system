@@ -26,6 +26,7 @@ from adopt import (
     RUNTIME_CONTRACT_MANAGED,
     SKILLS_CONTRACT_MANAGED,
     TERMINAL_COMPLETION_NOTIFY_MANAGED,
+    USER_ACCEPTANCE_MANAGED,
     VERIFICATION_CONTRACT_MANAGED,
     WORK_PACKET_TEMPLATE_MANAGED,
     apply_execution_policy_sync,
@@ -117,8 +118,18 @@ def write_yaml(path: Path, data: dict) -> None:
     )
 
 
+USER_ACCEPTANCE_V2_MANAGED_FIELDS = {
+    "contract_version": 2,
+    "direct_persona_execution_required": True,
+    "finding_accumulation_before_remediation": True,
+    "same_head_quality_closure_required": True,
+    "candidate_freeze_after_quality_closure": True,
+    "evidence_validator": "tools/user_acceptance_contract.py",
+}
+
+
 def plan_release_executor_migration(release: dict) -> bool:
-    """Migrate only the known managed provider-bound release executor."""
+    """Migrate only known managed executor/user-acceptance metadata."""
     user_tests = release.get("human_equivalent_user_tests")
     if user_tests is None:
         return False
@@ -128,14 +139,24 @@ def plan_release_executor_migration(release: dict) -> bool:
             "review manually before upgrade"
         )
     executor = str(user_tests.get("executor") or "").strip()
-    if executor == PROFILE_RELEASE_EXECUTOR:
-        return False
+    planned = False
     if executor in LEGACY_MANAGED_RELEASE_EXECUTORS:
-        return True
-    raise SystemExit(
-        "FAIL release human-equivalent executor contains local/custom changes; "
-        "review manually before upgrade"
-    )
+        planned = True
+    elif executor != PROFILE_RELEASE_EXECUTOR:
+        raise SystemExit(
+            "FAIL release human-equivalent executor contains local/custom changes; "
+            "review manually before upgrade"
+        )
+    for key, expected in USER_ACCEPTANCE_V2_MANAGED_FIELDS.items():
+        if key not in user_tests:
+            planned = True
+            continue
+        if user_tests.get(key) != expected:
+            raise SystemExit(
+                f"FAIL release human-equivalent {key} contains local/custom changes; "
+                "review manually before upgrade"
+            )
+    return planned
 
 
 def apply_release_executor_migration(release: dict, planned: bool) -> bool:
@@ -145,6 +166,7 @@ def apply_release_executor_migration(release: dict, planned: bool) -> bool:
     if not isinstance(user_tests, dict):
         raise SystemExit("FAIL release human_equivalent_user_tests became invalid during upgrade")
     user_tests["executor"] = PROFILE_RELEASE_EXECUTOR
+    user_tests.update(USER_ACCEPTANCE_V2_MANAGED_FIELDS)
     release["human_equivalent_user_tests"] = user_tests
     return True
 
@@ -646,6 +668,23 @@ def apply_verification_contract_install(root: Path, planned: dict[str, str]) -> 
     return installed
 
 
+def plan_user_acceptance_install(root: Path, old_baseline: str = "") -> dict[str, str]:
+    """Install or upgrade the managed user-acceptance evidence validator."""
+    return plan_managed_file_install(
+        root, USER_ACCEPTANCE_MANAGED, label="user acceptance", old_baseline=old_baseline
+    )
+
+
+def apply_user_acceptance_install(root: Path, planned: dict[str, str]) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def _span_covered(span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
     start, end = span
     return any(start >= c_start and end <= c_end for c_start, c_end in covered)
@@ -851,6 +890,7 @@ def main() -> int:
         planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
         planned_skills_contract = plan_skills_contract_install(root, old_baseline)
         planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+        planned_user_acceptance = plan_user_acceptance_install(root, old_baseline)
         planned_agent_runtime = plan_agent_runtime_install(root, old_baseline)
         planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
         planned_terminal_completion_notify = plan_terminal_completion_notify_install(
@@ -887,6 +927,7 @@ def main() -> int:
             and not planned_runtime_contract
             and not planned_skills_contract
             and not planned_verification_contract
+            and not planned_user_acceptance
             and not planned_agent_runtime
             and not planned_implementation_preflight
             and not planned_terminal_completion_notify
@@ -911,6 +952,8 @@ def main() -> int:
             print("SKILLS_CONTRACT_REPAIR=REQUIRED")
         if planned_verification_contract:
             print("VERIFICATION_CONTRACT_REPAIR=REQUIRED")
+        if planned_user_acceptance:
+            print("USER_ACCEPTANCE_REPAIR=REQUIRED")
         if planned_agent_runtime:
             print("AGENT_RUNTIME_REPAIR=REQUIRED")
         if planned_implementation_preflight:
@@ -967,6 +1010,10 @@ def main() -> int:
             root, planned_verification_contract
         )
         print("VERIFICATION_CONTRACT_INSTALLED=" + (",".join(installed_verification) if installed_verification else "<none>"))
+        installed_user_acceptance = apply_user_acceptance_install(
+            root, planned_user_acceptance
+        )
+        print("USER_ACCEPTANCE_INSTALLED=" + (",".join(installed_user_acceptance) if installed_user_acceptance else "<none>"))
         installed_agent_runtime = apply_agent_runtime_install(root, planned_agent_runtime)
         print("AGENT_RUNTIME_INSTALLED=" + (",".join(installed_agent_runtime) if installed_agent_runtime else "<none>"))
         installed_preflight = apply_implementation_preflight_install(
@@ -1183,6 +1230,7 @@ def main() -> int:
     planned_runtime_contract = plan_runtime_contract_install(root, old_baseline)
     planned_skills_contract = plan_skills_contract_install(root, old_baseline)
     planned_verification_contract = plan_verification_contract_install(root, old_baseline)
+    planned_user_acceptance = plan_user_acceptance_install(root, old_baseline)
     planned_agent_runtime = plan_agent_runtime_install(root, old_baseline)
     planned_implementation_preflight = plan_implementation_preflight_install(root, old_baseline)
     planned_terminal_completion_notify = plan_terminal_completion_notify_install(
@@ -1269,6 +1317,12 @@ def main() -> int:
         print("VERIFICATION_CONTRACT_INSTALLED=" + ",".join(installed_verification))
     else:
         print("VERIFICATION_CONTRACT_INSTALLED=<none>")
+
+    installed_user_acceptance = apply_user_acceptance_install(root, planned_user_acceptance)
+    if installed_user_acceptance:
+        print("USER_ACCEPTANCE_INSTALLED=" + ",".join(installed_user_acceptance))
+    else:
+        print("USER_ACCEPTANCE_INSTALLED=<none>")
 
     installed_agent_runtime = apply_agent_runtime_install(root, planned_agent_runtime)
     if installed_agent_runtime:

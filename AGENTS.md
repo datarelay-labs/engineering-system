@@ -50,7 +50,7 @@ Use the minimum sufficient context and reasoning. Expand only when a concrete bl
 - Stop expensive downstream qualification after a blocking deterministic failure.
 - Add durable regression coverage for bug fixes when practical.
 - Never weaken validation or report unexecuted, blocked, historical, or different-HEAD evidence as PASS.
-- User-facing products require two human-equivalent pre-release gates on the same exact candidate: Surface Reconciliation and Full User E2E. The actual primary public user surface must be exercised; browser products require a real Chromium/Chrome process driven by the authorized executor. Playwright/headless browser is valid; jsdom/component/API/static/CI checks are not execution PASS.
+- User-facing products require two human-equivalent pre-release gates on the same exact candidate: Surface Reconciliation and Full User E2E. **ChatGPT itself executes and finally audits both gates by directly acting as the applicable User/Operator/Admin persona.** Coding agents, alternate models, wrappers, scripted scenario replays, test harnesses, and CI are supporting evidence only and cannot substitute for the user-gate PASS. The actual primary public user surface must be exercised; browser products require a real Chromium/Chrome process driven by ChatGPT (Playwright/headless allowed). jsdom/component/API/static/CI contract checks are not execution PASS.
 - Before merge or terminal completion, inspect actionable review feedback and fix/revalidate or evidence-disposition every actionable finding.
 - Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.
 - Keep schemas/templates/workflows backward-aware.
