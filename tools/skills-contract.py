@@ -94,6 +94,9 @@ HOOKS_EXECUTABLE = False
 SCRIPTS_GRANT_EXECUTION = False
 RESOURCES_EXECUTABLE = False
 HIGH_RISK_CLASSES = frozenset({"external_write", "production_write", "destructive"})
+COLLABORATOR_AUTHORITY_BASIS = "collaborator_permission"
+PRODUCTION_APPROVER_AUTHORITY_BASIS = "production_approver_policy"
+PRODUCTION_APPROVER_PERMISSION = "production_approver"
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
@@ -175,6 +178,7 @@ class TrustedSessionBinding:
     profile: str
     policy_digest: str
     authority_permission: str
+    authority_basis: str
     approved_classes: frozenset[str]
     public_key_sha256: str
 
@@ -487,13 +491,24 @@ def bind_session(
     *,
     profile: str,
     authority_permission: Any,
+    authority_basis: str = COLLABORATOR_AUTHORITY_BASIS,
     policy_digest_value: str,
     approved_classes: Any = (),
     profiles: dict[str, dict[str, frozenset[str]]] | None = None,
     expected_digest: str | None = None,
     public_key_sha256: str = "",
 ) -> TrustedSessionBinding:
-    permission = authorize_work_packet_author_permission(authority_permission)
+    basis = str(authority_basis or "").strip().lower()
+    if basis == COLLABORATOR_AUTHORITY_BASIS:
+        permission = authorize_work_packet_author_permission(authority_permission)
+    elif (
+        basis == PRODUCTION_APPROVER_AUTHORITY_BASIS
+        and str(authority_permission or "").strip().lower() == PRODUCTION_APPROVER_PERMISSION
+        and profile == "production_write"
+    ):
+        permission = PRODUCTION_APPROVER_PERMISSION
+    else:
+        raise SystemExit("SKILLS_CONTRACT=FAIL trusted authority basis invalid")
     active = profiles or DEFAULT_PROFILES
     if profile not in active:
         raise SystemExit("SKILLS_CONTRACT=FAIL unknown profile")
@@ -509,6 +524,7 @@ def bind_session(
         profile=profile,
         policy_digest=policy_digest_value,
         authority_permission=permission,
+        authority_basis=basis,
         approved_classes=approved,
         public_key_sha256=public_key_sha256,
     )
@@ -532,7 +548,17 @@ def evaluate_action(
     digest = expected_digest if expected_digest is not None else policy_digest(active)
     if binding.policy_digest != digest:
         return Decision(False, "POLICY_DIGEST_MISMATCH")
-    if binding.authority_permission not in AUTHORIZED_WORK_PACKET_PERMISSIONS:
+    collaborator_authority = (
+        binding.authority_basis == COLLABORATOR_AUTHORITY_BASIS
+        and binding.authority_permission in AUTHORIZED_WORK_PACKET_PERMISSIONS
+    )
+    production_approver_authority = (
+        binding.authority_basis == PRODUCTION_APPROVER_AUTHORITY_BASIS
+        and binding.authority_permission == PRODUCTION_APPROVER_PERMISSION
+    )
+    if not (collaborator_authority or production_approver_authority):
+        return Decision(False, "AUTHORITY_UNTRUSTED")
+    if production_approver_authority and request.tool_id != "shell.production_write":
         return Decision(False, "AUTHORITY_UNTRUSTED")
     if binding.profile not in active:
         return Decision(False, "UNKNOWN_PROFILE")
@@ -564,6 +590,7 @@ def reject_untrusted_override(payload: Any) -> Decision | None:
         "approved_classes",
         "policy_digest",
         "authority_permission",
+        "authority_basis",
         "binding",
         "classes",
         "signature",
@@ -1108,6 +1135,7 @@ def authorize(
     binding = bind_session(
         profile=str(binding_payload.get("profile") or ""),
         authority_permission=binding_payload.get("authority_permission"),
+        authority_basis=str(binding_payload.get("authority_basis") or COLLABORATOR_AUTHORITY_BASIS),
         policy_digest_value=str(binding_payload.get("policy_digest") or ""),
         approved_classes=binding_payload.get("approved_classes", ()),
         profiles=profiles,

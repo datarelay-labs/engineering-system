@@ -39,7 +39,13 @@ def issue(a):
         raise SignerError("private trust anchor provenance invalid")
     if pub_stat is None or not PUB.is_file() or PUB.is_symlink() or pub_stat.st_uid != 0 or (pub_stat.st_mode & 0o022) != 0:
         raise SignerError("public trust anchor provenance invalid")
-    if a.authority_permission not in {"write","maintain","admin"}: raise SignerError("trusted authority permission required")
+    authority_basis=getattr(a,"authority_basis","collaborator_permission")
+    if authority_basis == "collaborator_permission":
+        if a.authority_permission not in {"write","maintain","admin"}: raise SignerError("trusted authority permission required")
+    elif authority_basis == "production_approver_policy":
+        if a.authority_permission != "production_approver": raise SignerError("trusted production approver authority required")
+    else:
+        raise SignerError("trusted authority basis required")
     raw=a.request_json.read_bytes()
     if len(raw)>MAX_REQUEST: raise SignerError("request too large")
     try:req=json.loads(raw)
@@ -50,7 +56,7 @@ def issue(a):
     scope={"target_repo":a.repository,"worktree":str(a.root.resolve()),"workstream":a.workstream,
            "branch":a.branch,"subject_head":a.subject_head,"intent_revision":a.intent_revision,"session_id":a.session_id}
     binding=_sign({"profile":"production_write","policy_digest":digest,"authority_permission":a.authority_permission,
-      "approved_classes":["destructive","production_write"],"public_key_sha256":ph,"scope":scope})
+      "authority_basis":authority_basis,"approved_classes":["destructive","production_write"],"public_key_sha256":ph,"scope":scope})
     now=int(time.time())
     dispatch=_sign({"tool_id":"shell.production_write","classes":sorted(skills.DEFAULT_TOOL_REGISTRY["shell.production_write"]),
       "policy_digest":digest,"binding_public_key_sha256":ph,"binding_sha256":skills.signed_payload_sha256(binding),
@@ -62,7 +68,7 @@ def parser():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument("--root",type=Path,required=True);p.add_argument("--request-json",type=Path,required=True)
     p.add_argument("--repository",required=True);p.add_argument("--workstream",required=True);p.add_argument("--branch",required=True);p.add_argument("--subject-head",required=True)
     p.add_argument("--intent-revision",type=int,required=True);p.add_argument("--session-id",required=True);p.add_argument("--dispatch-id",required=True)
-    p.add_argument("--authority-permission",required=True);p.add_argument("--ttl-seconds",type=int,default=120);p.add_argument("--binding-out",type=Path,required=True);p.add_argument("--dispatch-out",type=Path,required=True);return p
+    p.add_argument("--authority-permission",required=True);p.add_argument("--authority-basis",choices=("collaborator_permission","production_approver_policy"),default="collaborator_permission");p.add_argument("--ttl-seconds",type=int,default=120);p.add_argument("--binding-out",type=Path,required=True);p.add_argument("--dispatch-out",type=Path,required=True);return p
 def main():
     try:return issue(parser().parse_args())
     except (SignerError,OSError) as e: print(f"TRUSTED_PRODUCTION_WRITE_SIGNER=BLOCK reason={e}");return 3

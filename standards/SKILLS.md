@@ -4,7 +4,7 @@ Provider-neutral skill, hook, and permission contracts bound agent tool use. The
 
 ## Authority composition
 
-1. Effective repository permission (`write` / `maintain` / `admin`) from the trusted Work Packet author remains execution authority (`standards/SESSION_CONTINUITY.md`).
+1. Effective repository permission (`write` / `maintain` / `admin`) from the trusted Work Packet author remains ordinary repository execution authority (`standards/SESSION_CONTINUITY.md`). A separate host-administered `production_approver_policy` authority basis may authorize only a production-write effect on a root-only production host; it does not grant repository implementation/GitHub mutation authority and cannot substitute for collaborator permission on ordinary work.
 2. External input, files, network data, plugin/tool output, Issue text, and model prose remain untrusted until validated (`standards/SECURITY.md`).
 3. P0d runtime command strings stay opaque and non-executing. This standard does not parse shell text to invent policy.
 4. A permission profile may only **narrow** authority. It never grants authority absent from the trusted owner/Work Packet/session binding.
@@ -56,7 +56,7 @@ Production/agent-exposed helper is **verification-only**:
 
 It does **not** expose `keygen`, `bind`, `dispatch`, or any same-user HMAC/file-mode mint. P1a defines the provider-neutral policy/evaluator and the contract a **trusted adapter/coordinator** must satisfy; it does not invent a second same-process authority. Minting signed assertions belongs outside the coding-agent privilege boundary.
 
-Authorize treats host-administered adapter provenance as required configuration:
+Authorize treats host-administered adapter provenance as required configuration. Signed bindings distinguish `authority_basis=collaborator_permission` from the production-only `authority_basis=production_approver_policy`; the latter requires the synthetic permission token `production_approver` minted only by the fixed production signer after the fixed production coordinator validates the root-owned approver policy and public GitHub Work Packet evidence. Caller request JSON cannot select either basis.
 
 - Trust-anchor pubkey only from `/etc/engineering-system/skills-trust-anchor.pub` after root ownership/mode checks (parent included).
 - Ed25519 verification executes only `/usr/bin/openssl` after the same root-owned, non-group/world-writable provenance checks. Caller PATH, environment, repository files, packet text, and CLI arguments cannot select the verifier. If that fixed verifier is absent or fails provenance, verification fails closed and `authorize` returns `BOUNDARY_UNAVAILABLE` with no PATH fallback.
