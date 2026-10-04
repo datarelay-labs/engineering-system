@@ -24,6 +24,7 @@ CONTEXT_EPOCH_BASELINE = "cdc54b3220b5ec38e84dc2c33bd500b35edd6b39"
 TRUST_HELPER_BASELINE = "dfe9b2c5ad47cc2e4ef6563717a7722635251fe9"
 PROVIDER_NEUTRAL_BASELINE = "6bf89e1fc716eff242a10eeb84dd25b5186ccc71"
 STAGE_A_BASELINE = "04ea5080440371e895d9a57570ba70e6a3318781"
+PROFILE_V2_BASELINE = "298ea8bd937cc1d5c84837ec30e6cd24fb8d93ce"
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -710,6 +711,7 @@ def test_managed_file_hash_manifests_match_immutable_revisions() -> None:
         ("1.6.5-dfe9b2c.sha256", TRUST_HELPER_BASELINE),
         ("1.7.0-6bf89e1.sha256", PROVIDER_NEUTRAL_BASELINE),
         ("1.7.0-04ea508.sha256", STAGE_A_BASELINE),
+        ("1.7.0-298ea8b.sha256", PROFILE_V2_BASELINE),
     )
     history = ROOT / "tools" / "managed_adapter_history" / "file_hashes"
     for name, revision in cases:
@@ -837,10 +839,15 @@ def test_same_baseline_repairs_stage_a_managed_bytes_after_metadata_stamp() -> N
             "tools/governance_floor.py",
         )
         for rel in stale_paths:
+            historical_ref = (
+                PROFILE_V2_BASELINE
+                if rel == ".engineering/execution-profile.yaml"
+                else STAGE_A_BASELINE
+            )
             historical = run(
                 "git",
                 "show",
-                f"{STAGE_A_BASELINE}:{rel}",
+                f"{historical_ref}:{rel}",
                 cwd=ROOT,
             ).stdout
             assert historical != (ROOT / rel).read_text(encoding="utf-8"), rel

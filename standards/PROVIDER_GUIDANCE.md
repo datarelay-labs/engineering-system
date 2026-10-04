@@ -5,7 +5,7 @@
 Provider guidance is an upstream design input for the Engineering System, not execution authority. The system periodically reviews official guidance from the AI providers it actually uses and converts only durable, evidenced lessons into canonical policy.
 
 Current reference set, reviewed 2026-10-01:
-- OpenAI, *Harness engineering: leveraging Codex in an agent-first world* — repository knowledge as system of record, progressive disclosure, mechanical enforcement of architecture/invariants, autonomy inside boundaries.
+- OpenAI, *Harness engineering* — repository knowledge as system of record, progressive disclosure, mechanical enforcement of architecture/invariants, autonomy inside boundaries.
 - OpenAI Developers, *Rethinking skills and prompts for GPT-6 Astra* — revisit accumulated prompts/skills/AGENTS scaffolding as models improve; avoid bloated context and stale hand-holding.
 - Anthropic, *Harness design for long-running application development* — start from the simplest effective harness and remove components methodically while measuring outcome impact.
 - Anthropic, *Scaling Managed Agents: Decoupling the brain from the hands* — harnesses encode assumptions that can become stale as model capability improves; keep stable interfaces while allowing harness internals to change.
@@ -60,7 +60,7 @@ The current runtime selection is defined only by `.engineering/execution-profile
 
 A continue/resume request that resolves to one runnable packet bound to the selected execution profile authorizes the selected runtime to continue implementation directly; no additional magic phrase and no alternate-runtime handoff is required. Moving another provider/runtime into an implementation role requires an explicit execution-profile revision with deterministic regression evidence; historical adapter text or provider availability never activates it.
 
-Optional fresh Chat, Codex, Claude, or other reviewers may be used when the risk/task contract justifies independent perspective, but provider availability/quota is not a universal completion dependency.
+The selected implementation runtime performs terminal review directly. A distinct reviewer is introduced only when a specific risk/task contract explicitly requires independent perspective; reviewer-provider availability or quota is never a universal completion dependency.
 
 ## Measurable progress, not forced mutation
 

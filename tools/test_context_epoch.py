@@ -27,7 +27,7 @@ LAST_VERIFIED_HEAD={'a' * 40}
 INTENT_REVISION=1
 CHANGE_RISK=MEDIUM
 EXECUTION_PROFILE=datarelay-managed
-EXECUTION_PROFILE_REVISION=2
+EXECUTION_PROFILE_REVISION=3
 
 ## Goal
 
@@ -115,7 +115,7 @@ def test_refetched_projection_identity_binding() -> None:
             "--expect-intent-revision", "1",
             "--expect-change-risk", "MEDIUM",
             "--expect-execution-profile", "datarelay-managed",
-            "--expect-execution-profile-revision", "2",
+            "--expect-execution-profile-revision", "3",
             "--expect-body-sha256", original.body_sha256,
         ]
         matched = subprocess.run(
@@ -222,7 +222,7 @@ def test_packet_v3_requires_authority_metadata() -> None:
         ("INTENT_REVISION", "INTENT_REVISION=1\n"),
         ("CHANGE_RISK", "CHANGE_RISK=MEDIUM\n"),
         ("EXECUTION_PROFILE", "EXECUTION_PROFILE=datarelay-managed\n"),
-        ("EXECUTION_PROFILE_REVISION", "EXECUTION_PROFILE_REVISION=2\n"),
+        ("EXECUTION_PROFILE_REVISION", "EXECUTION_PROFILE_REVISION=3\n"),
     ):
         parsed = ce.parse_packet(packet().replace(line, ""))
         audit = ce.analyze_packet(parsed)
@@ -233,7 +233,7 @@ def test_packet_v3_requires_authority_metadata() -> None:
 
 def test_packet_v2_legacy_profile_compatibility() -> None:
     body = packet().replace("PACKET_VERSION=3", "PACKET_VERSION=2", 1).replace(
-        "EXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=2\n",
+        "EXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=3\n",
         "IMPLEMENTER=CHATGPT_CHAT\n",
         1,
     )
@@ -247,7 +247,7 @@ def test_packet_v2_legacy_profile_compatibility() -> None:
 
     ambiguous = body.replace(
         "IMPLEMENTER=CHATGPT_CHAT\n",
-        "IMPLEMENTER=CHATGPT_CHAT\nEXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=2\n",
+        "IMPLEMENTER=CHATGPT_CHAT\nEXECUTION_PROFILE=datarelay-managed\nEXECUTION_PROFILE_REVISION=3\n",
         1,
     )
     parsed = ce.parse_packet(ambiguous)
@@ -600,7 +600,7 @@ def test_cli_lint_explicit_profile_root() -> None:
             encoding="utf-8"
         )
         profile_text = profile_text.replace("datarelay-managed", "secondary-profile")
-        profile_text = profile_text.replace("revision: 2", "revision: 9", 1)
+        profile_text = profile_text.replace("revision: 3", "revision: 9", 1)
         (profile_root / ".engineering/execution-profile.yaml").write_text(
             profile_text,
             encoding="utf-8",
@@ -612,7 +612,7 @@ def test_cli_lint_explicit_profile_root() -> None:
                 "EXECUTION_PROFILE=datarelay-managed",
                 "EXECUTION_PROFILE=secondary-profile",
             )
-            .replace("EXECUTION_PROFILE_REVISION=2", "EXECUTION_PROFILE_REVISION=9"),
+            .replace("EXECUTION_PROFILE_REVISION=3", "EXECUTION_PROFILE_REVISION=9"),
             encoding="utf-8",
         )
         explicit = subprocess.run(
