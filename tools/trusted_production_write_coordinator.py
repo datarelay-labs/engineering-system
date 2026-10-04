@@ -21,7 +21,9 @@ from production_approver_policy import PolicyError, load_policy_bytes
 SIGNER = Path("/usr/lib/engineering-system/trusted-production-write-signer")
 APPROVERS = Path("/etc/engineering-system/production-approvers.json")
 PUBLIC_GITHUB_HOST = "api.github.com"
+SYSTEM_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
 MAX_PUBLIC_JSON = 256 * 1024
+MAX_CA_BUNDLE_BYTES = 4 * 1024 * 1024
 
 
 class Error(Exception):
@@ -71,6 +73,41 @@ def _load_approver_policy() -> dict[str, frozenset[str]]:
         raise Error(str(exc)) from exc
 
 
+def _trusted_ca_bundle() -> Path:
+    try:
+        st = SYSTEM_CA_BUNDLE.lstat()
+        parent = SYSTEM_CA_BUNDLE.parent.lstat()
+    except OSError as exc:
+        raise Error("system CA bundle unavailable") from exc
+    if (
+        not stat.S_ISREG(st.st_mode)
+        or stat.S_ISLNK(st.st_mode)
+        or st.st_uid != 0
+        or (st.st_mode & 0o022) != 0
+        or st.st_size <= 0
+        or st.st_size > MAX_CA_BUNDLE_BYTES
+        or not stat.S_ISDIR(parent.st_mode)
+        or stat.S_ISLNK(parent.st_mode)
+        or parent.st_uid != 0
+        or (parent.st_mode & 0o022) != 0
+    ):
+        raise Error("system CA bundle provenance invalid")
+    return SYSTEM_CA_BUNDLE
+
+
+def _public_ssl_context() -> ssl.SSLContext:
+    ca_bundle = _trusted_ca_bundle()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        context.load_verify_locations(cafile=str(ca_bundle))
+    except (OSError, ssl.SSLError) as exc:
+        raise Error("system CA bundle load failed") from exc
+    return context
+
+
 def _public_json(path: str) -> Any:
     if (
         not path.startswith("/repos/")
@@ -83,7 +120,7 @@ def _public_json(path: str) -> Any:
         PUBLIC_GITHUB_HOST,
         443,
         timeout=10,
-        context=ssl.create_default_context(),
+        context=_public_ssl_context(),
     )
     try:
         conn.request(

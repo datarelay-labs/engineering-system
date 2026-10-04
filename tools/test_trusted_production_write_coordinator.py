@@ -45,6 +45,16 @@ class ProductionCoordinatorTests(unittest.TestCase):
     cmd=run.call_args.args[0]
     self.assertIn("--authority-basis",cmd);self.assertIn("production_approver_policy",cmd)
     self.assertIn("--authority-permission",cmd);self.assertIn("production_approver",cmd)
+ def test_public_tls_context_ignores_caller_trust_store_environment(self):
+  class Context:
+   def __init__(self): self.cafile=None; self.check_hostname=False; self.verify_mode=None; self.minimum_version=None
+   def load_verify_locations(self,*,cafile): self.cafile=cafile
+  context=Context()
+  with patch.dict(m.os.environ,{"SSL_CERT_FILE":"/attacker/ca.pem","SSL_CERT_DIR":"/attacker/certs"},clear=False), patch.object(m,"_trusted_ca_bundle",return_value=Path("/fixed/admin-ca.pem")), patch.object(m.ssl,"SSLContext",return_value=context) as ctor:
+   self.assertIs(m._public_ssl_context(),context)
+  ctor.assert_called_once_with(m.ssl.PROTOCOL_TLS_CLIENT)
+  self.assertEqual(context.cafile,"/fixed/admin-ca.pem")
+  self.assertTrue(context.check_hostname);self.assertEqual(context.verify_mode,m.ssl.CERT_REQUIRED);self.assertEqual(context.minimum_version,m.ssl.TLSVersion.TLSv1_2)
  def test_root_only_fallback_rejects_missing_policy_or_unallowlisted_author(self):
   with tempfile.TemporaryDirectory() as d:
    a=self.args(Path(d))

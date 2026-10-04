@@ -78,6 +78,7 @@ When the coordinator is invoked directly as root with no non-root `SUDO_UID`, it
 - requires `/etc/engineering-system/production-approvers.json` with root ownership, mode `0600`, and secure parent provenance;
 - requires the target repository to be public;
 - reads only fixed `https://api.github.com` repository/Issue/commit/content endpoints with the standard-library HTTPS client, bounded response sizes, no arbitrary caller URL, and no redirect-following behavior;
+- trusts only the root-owned, non-group/world-writable `/etc/ssl/certs/ca-certificates.crt` bundle and ignores caller `SSL_CERT_FILE` / `SSL_CERT_DIR` overrides;
 - requires the Work Packet author login to be allowlisted for that exact repository;
 - requires exact Work Packet repository/workstream/branch/HEAD/intent/risk/profile binding;
 - requires the named branch to resolve to the exact `LAST_VERIFIED_HEAD`;
