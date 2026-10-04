@@ -33,6 +33,8 @@ def test_current_profile() -> None:
     profile_id, revision = ep.profile_identity(profile)
     primary = profile["runtime"]["primary"]
     assert profile["authority_contract"] == "profile-v3"
+    assert profile["revision"] == 3
+    assert profile["runtime"]["optional_reviewers"] == ()
     assert primary not in profile["runtime"]["disabled"]
 
     blocking, warnings = ep.packet_authority(

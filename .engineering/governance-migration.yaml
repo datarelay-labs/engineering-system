@@ -1,15 +1,16 @@
 contract_version: 1
-base_sha: 10a1ee238c95df47d676e014cdb1a43c67615297
-from_policy_epoch: 9
-to_policy_epoch: 10
+base_sha: 298ea8bd937cc1d5c84837ec30e6cd24fb8d93ce
+from_policy_epoch: 10
+to_policy_epoch: 11
 requires_exact_head_validate: true
 automation_eligible: false
 rationale: >-
-  Bind continue/resume execution to the owner-selected target repository and fail
-  closed when an active Work Packet targets a different repository, preventing
-  cross-project handoff/context references from retargeting mutation authority.
+  Retire the alternate managed reviewer path so the selected ChatGPT Chat runtime
+  performs implementation and terminal audit/review directly without waiting on
+  an alternate reviewer provider, and propagate the new policy epoch through
+  managed adoption.
 changed_surfaces:
+  - path: .engineering/execution-profile.yaml
+    head_blob_sha: 96487f4783bff392d6ec2d9ae6b92cd1242bdf49
   - path: tools/adopt.py
-    head_blob_sha: d304abc61e10f31797dbad5e518ec2abcb544937
-  - path: tools/context_epoch.py
-    head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895
+    head_blob_sha: a0cc4743266fa4b22db43baffaedc3ce26f568ef

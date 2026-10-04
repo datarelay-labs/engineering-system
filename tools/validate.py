@@ -278,8 +278,10 @@ def validate_execution_profile_contract():
     reviewers = {str(item) for item in (runtime.get("optional_reviewers") or [])}
     if not primary or primary in disabled:
         raise SystemExit("FAIL execution profile has invalid primary runtime")
-    if payload.get("revision") != 2:
-        raise SystemExit("FAIL canonical execution profile revision must be 2")
+    if payload.get("revision") != 3:
+        raise SystemExit("FAIL canonical execution profile revision must be 3")
+    if reviewers:
+        raise SystemExit("FAIL canonical execution profile must not configure optional reviewers")
     if payload.get("authority_contract") != "profile-v3":
         raise SystemExit("FAIL canonical execution profile authority_contract must be profile-v3")
     helper_text = helper.read_text(encoding="utf-8")
