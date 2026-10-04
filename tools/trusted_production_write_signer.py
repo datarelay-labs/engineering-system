@@ -1,15 +1,145 @@
 #!/usr/bin/env python3
 """Root-only issuer for one exact shell.production_write authorization."""
 from __future__ import annotations
-import argparse, base64, hashlib, importlib.util, json, os, subprocess, sys, tempfile, time
+import argparse, base64, hashlib, importlib.util, json, os, stat, subprocess, sys, tempfile, time
 from pathlib import Path
 
 OPENSSL=Path("/usr/bin/openssl")
 KEY=Path("/etc/engineering-system/skills-trust-anchor.key")
 PUB=Path("/etc/engineering-system/skills-trust-anchor.pub")
 SKILLS=Path("/usr/lib/engineering-system/skills-contract.py")
+GIT=Path("/usr/bin/git")
 MAX_REQUEST=64*1024
 class SignerError(Exception):pass
+
+def _git_env():
+    return {"PATH":"/usr/bin:/bin","LANG":"C","LC_ALL":"C","GIT_CONFIG_NOSYSTEM":"1","GIT_NO_REPLACE_OBJECTS":"1","HOME":"/nonexistent","XDG_CONFIG_HOME":"/nonexistent"}
+
+def _git(root,*args):
+    cp=subprocess.run([str(GIT),"-c",f"safe.directory={root}","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",*args],
+        cwd=root,env=_git_env(),check=False,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    if cp.returncode: raise SignerError("trusted production worktree identity check failed")
+    return cp.stdout.strip()
+
+def _git_bytes(root,*args):
+    cp=subprocess.run([str(GIT),"-c",f"safe.directory={root}","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",*args],
+        cwd=root,env=_git_env(),check=False,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if cp.returncode: raise SignerError("trusted production worktree identity check failed")
+    return cp.stdout
+
+def _secure_node(path,allow_symlink=False):
+    try: st=path.lstat()
+    except OSError as exc: raise SignerError("production worktree provenance unavailable") from exc
+    if st.st_uid!=0: raise SignerError("production worktree provenance invalid")
+    if stat.S_ISLNK(st.st_mode):
+        if not allow_symlink: raise SignerError("production worktree provenance invalid")
+    elif st.st_mode & 0o022:
+        raise SignerError("production worktree provenance invalid")
+    return st
+
+def _require_root_owned_checkout(root):
+    resolved=root.resolve()
+    for node in (resolved,*resolved.parents): _secure_node(node)
+    gitdir=resolved/".git"
+    st=_secure_node(gitdir)
+    if not stat.S_ISDIR(st.st_mode): raise SignerError("production worktree Git metadata invalid")
+    for dirpath,dirnames,filenames in os.walk(gitdir,topdown=True,followlinks=False):
+        base=Path(dirpath); _secure_node(base)
+        for name in dirnames:
+            child=base/name
+            cst=_secure_node(child)
+            if not stat.S_ISDIR(cst.st_mode): raise SignerError("production worktree Git metadata invalid")
+        for name in filenames:
+            child=base/name
+            cst=_secure_node(child)
+            if not stat.S_ISREG(cst.st_mode): raise SignerError("production worktree Git metadata invalid")
+
+def _regular_blob_sha1(path):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        st=os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode): raise SignerError("production worktree entry type mismatch")
+        h=hashlib.sha1();h.update(f"blob {st.st_size}\0".encode("ascii"));total=0
+        while True:
+            chunk=os.read(fd,1024*1024)
+            if not chunk: break
+            total+=len(chunk);h.update(chunk)
+        if total!=st.st_size: raise SignerError("production worktree file changed during verification")
+        return st,h.hexdigest()
+    finally: os.close(fd)
+
+def _verify_committed_tree(root,subject_head,root_provenance=True):
+    raw=_git_bytes(root,"ls-tree","-rz","--full-tree",subject_head)
+    expected={};expected_dirs=set()
+    for record in raw.split(b"\0"):
+        if not record: continue
+        try:
+            meta,path_raw=record.split(b"\t",1)
+            mode,kind,oid=meta.decode("ascii").split()
+            rel=path_raw.decode("utf-8")
+        except (ValueError,UnicodeError) as exc:
+            raise SignerError("production worktree tree metadata invalid") from exc
+        parts=rel.split("/")
+        if not rel or any(part in {"",".",".."} for part in parts) or parts[0]==".git":
+            raise SignerError("production worktree tree path invalid")
+        if kind!="blob" or mode not in {"100644","100755"}:
+            raise SignerError("production worktree tree entry unsupported")
+        expected[rel]=(mode,oid)
+        for i in range(1,len(parts)): expected_dirs.add("/".join(parts[:i]))
+    actual=set();actual_dirs=set()
+    for dirpath,dirnames,filenames in os.walk(root,topdown=True,followlinks=False):
+        base=Path(dirpath)
+        if base==root and ".git" in dirnames: dirnames.remove(".git")
+        if root_provenance:
+            bst=base.lstat()
+            if bst.st_uid!=0 or bst.st_mode & 0o022: raise SignerError("production worktree provenance invalid")
+        relbase="" if base==root else base.relative_to(root).as_posix()
+        for name in list(dirnames):
+            path=base/name;st=path.lstat();rel=f"{relbase}/{name}" if relbase else name
+            if root_provenance and (st.st_uid!=0 or (not stat.S_ISLNK(st.st_mode) and st.st_mode & 0o022)):
+                raise SignerError("production worktree provenance invalid")
+            if stat.S_ISLNK(st.st_mode):
+                actual.add(rel);dirnames.remove(name)
+            elif stat.S_ISDIR(st.st_mode):
+                actual_dirs.add(rel)
+            else:
+                raise SignerError("production worktree entry type mismatch")
+        for name in filenames:
+            path=base/name;st=path.lstat();rel=f"{relbase}/{name}" if relbase else name
+            if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
+                raise SignerError("production worktree entry type mismatch")
+            if root_provenance and (st.st_uid!=0 or (not stat.S_ISLNK(st.st_mode) and st.st_mode & 0o022)):
+                raise SignerError("production worktree provenance invalid")
+            actual.add(rel)
+    if actual!=set(expected) or actual_dirs!=expected_dirs:
+        raise SignerError("production worktree content set mismatch")
+    for rel,(mode,oid) in expected.items():
+        path=root/rel;st=path.lstat()
+        if root_provenance and st.st_uid!=0: raise SignerError("production worktree provenance invalid")
+        if stat.S_ISLNK(st.st_mode): raise SignerError("production worktree entry type mismatch")
+        if root_provenance and st.st_mode & 0o022: raise SignerError("production worktree provenance invalid")
+        st,digest=_regular_blob_sha1(path)
+        if root_provenance and (st.st_uid!=0 or st.st_mode & 0o022): raise SignerError("production worktree provenance invalid")
+        executable=bool(st.st_mode & 0o111)
+        if executable!=(mode=="100755"): raise SignerError("production worktree executable mode mismatch")
+        if digest!=oid: raise SignerError("production worktree content differs from approved HEAD")
+
+def _verify_local_scope(a,root_provenance=True):
+    root=a.root
+    if not root.is_dir() or root.is_symlink(): raise SignerError("production worktree must be a real directory")
+    resolved=root.resolve()
+    if Path(os.path.abspath(root))!=resolved: raise SignerError("production worktree path must not traverse symlinks")
+    if root_provenance: _require_root_owned_checkout(resolved)
+    top=Path(_git(root,"rev-parse","--show-toplevel")).resolve()
+    if top!=resolved: raise SignerError("production worktree root mismatch")
+    if _git(root,"rev-parse","--show-object-format")!="sha1": raise SignerError("production worktree object format unsupported")
+    if _git(root,"rev-parse","HEAD").lower()!=str(a.subject_head).lower(): raise SignerError("production worktree subject_head mismatch")
+    branch=_git(root,"branch","--show-current")
+    if branch!=a.branch: raise SignerError("production worktree branch mismatch")
+    suffix=a.repository
+    accepted={f"https://github.com/{suffix}",f"https://github.com/{suffix}.git",f"git@github.com:{suffix}",f"git@github.com:{suffix}.git",f"ssh://git@github.com/{suffix}",f"ssh://git@github.com/{suffix}.git"}
+    if _git(root,"remote","get-url","origin") not in accepted: raise SignerError("production worktree origin repository mismatch")
+    _verify_committed_tree(root,a.subject_head,root_provenance=root_provenance)
 
 def _load():
     spec=importlib.util.spec_from_file_location("trusted_prod_skills",SKILLS)
@@ -44,6 +174,7 @@ def issue(a):
         if a.authority_permission not in {"write","maintain","admin"}: raise SignerError("trusted authority permission required")
     elif authority_basis == "production_approver_policy":
         if a.authority_permission != "production_approver": raise SignerError("trusted production approver authority required")
+        _verify_local_scope(a)
     else:
         raise SignerError("trusted authority basis required")
     raw=a.request_json.read_bytes()

@@ -23,7 +23,8 @@ class BoundaryAdminTests(unittest.TestCase):
     def restore(self): m.ETC,m.LIB,m.KEY,m.PUB,m.REPLAY,m.APPROVERS=self.old
     def policy(self):
         path=Path(self.t.name)/"approvers.json"
-        path.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","repositories":{"datarelay-labs/datarelay-atlas":["RickLee-kr"]}}))
+        approval={"repository":"datarelay-labs/datarelay-atlas","issue_id":307,"workstream":"prod-web-recovery-rollout-7e9ff06","branch":"ops/prod-web-recovery-rollout-7e9ff06","subject_head":"a"*40,"intent_revision":1,"session_id":"rollout-307","dispatch_id":"rollout-307-stage","packet_sha256":"b"*64,"request_sha256":"c"*64,"approved_by":"RickLee-kr"}
+        path.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","approvals":[approval]}))
         return path
     def fake_run(self,cmd,**kw):
         if "genpkey" in cmd: m.KEY.write_text("private")
@@ -59,7 +60,7 @@ class BoundaryAdminTests(unittest.TestCase):
             m.upgrade(Args(self.source,self.policy(),True))
             self.assertEqual(m.KEY.read_bytes(),key_before); self.assertEqual(m.PUB.read_bytes(),pub_before)
             self.assertTrue(m.APPROVERS.is_file()); self.assertEqual(m.APPROVERS.stat().st_mode&0o777,0o600)
-            payload=json.loads(m.APPROVERS.read_text()); self.assertEqual(payload["repositories"]["datarelay-labs/datarelay-atlas"],["RickLee-kr"])
+            payload=json.loads(m.APPROVERS.read_text()); self.assertEqual(payload["approvals"][0]["approved_by"],"RickLee-kr"); self.assertEqual(payload["approvals"][0]["dispatch_id"],"rollout-307-stage")
             self.assertIn("upgraded",(m.LIB/"trusted-production-write-coordinator").read_text())
             m.verify(Args(require=True))
     def test_invalid_policy_fails_before_install_or_upgrade_mutation(self):
@@ -76,6 +77,39 @@ class BoundaryAdminTests(unittest.TestCase):
             with self.assertRaisesRegex(m.BoundaryError,"policy"):
                 m.upgrade(Args(self.source,invalid))
             self.assertEqual(installed.read_bytes(),before)
+    def test_upgrade_rejects_legacy_installed_policy_before_tool_mutation(self):
+        p=self.patches()
+        with p[0],p[1],p[2],p[3],p[4]:
+            m.install(Args(self.source))
+            m.APPROVERS.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","repositories":{"datarelay-labs/datarelay-atlas":["RickLee-kr"]}}))
+            installed=m.LIB/"trusted-production-write-coordinator"; before=installed.read_bytes()
+            (self.source/"tools"/"trusted_production_write_coordinator.py").write_text("#!/usr/bin/env python3\n# must-not-land-legacy\n")
+            with self.assertRaisesRegex(m.BoundaryError,"policy"):
+                m.upgrade(Args(self.source))
+            self.assertEqual(installed.read_bytes(),before)
+    def test_policy_ids_match_authorization_grammar(self):
+        base=json.loads(self.policy().read_text())
+        for field,bad in (("session_id","bad/session"),("dispatch_id","bad:dispatch"),("dispatch_id","bad dispatch")):
+            mutated=json.loads(json.dumps(base)); mutated["approvals"][0][field]=bad
+            path=Path(self.t.name)/f"bad-{field}-{len(bad)}.json"; path.write_text(json.dumps(mutated))
+            with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,field.replace("_"," ")):
+                m.install(Args(self.source,path))
+            self.assertFalse(self.etc.exists())
+    def test_duplicate_dispatch_ids_fail_before_install_mutation(self):
+        payload=json.loads(self.policy().read_text())
+        duplicate=json.loads(json.dumps(payload["approvals"][0])); duplicate["request_sha256"]="d"*64
+        payload["approvals"].append(duplicate)
+        path=Path(self.t.name)/"duplicate-dispatch.json"; path.write_text(json.dumps(payload))
+        with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"dispatch id is duplicated"):
+            m.install(Args(self.source,path))
+        self.assertFalse(self.etc.exists())
+    def test_policy_branch_rejects_nul(self):
+        payload=json.loads(self.policy().read_text())
+        payload["approvals"][0]["branch"]="bad\x00branch"
+        path=Path(self.t.name)/"bad-branch.json"; path.write_text(json.dumps(payload))
+        with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"branch"):
+            m.install(Args(self.source,path))
+        self.assertFalse(self.etc.exists())
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import stat
@@ -12,9 +11,8 @@ import tempfile
 from pathlib import Path
 
 from production_approver_policy import (
-    POLICY_KIND,
-    POLICY_VERSION,
     PolicyError,
+    canonical_policy_bytes,
     load_policy_bytes,
 )
 
@@ -114,14 +112,9 @@ def _canonical_policy_bytes(path:Path)->bytes:
             raise BoundaryError("production approver policy source is invalid")
         raw=path.read_bytes()
         normalized=load_policy_bytes(raw)
+        return canonical_policy_bytes(normalized)
     except (OSError,PolicyError) as exc:
         raise BoundaryError(str(exc)) from exc
-    payload={
-        "schema_version":POLICY_VERSION,
-        "kind":POLICY_KIND,
-        "repositories":{repo:sorted(logins) for repo,logins in sorted(normalized.items())},
-    }
-    return (json.dumps(payload,sort_keys=True,indent=2)+"\n").encode("utf-8")
 
 
 def _install_policy_bytes(raw:bytes,*,replace:bool):
@@ -200,6 +193,12 @@ def upgrade(args):
     policy=getattr(args,"production_approver_policy",None)
     policy_bytes=_canonical_policy_bytes(policy) if policy is not None else None
     _verify_anchor_and_dirs()
+    if policy_bytes is None and (APPROVERS.exists() or APPROVERS.is_symlink()):
+        _secure_file(APPROVERS,0o600)
+        try:
+            load_policy_bytes(APPROVERS.read_bytes())
+        except (OSError,PolicyError) as exc:
+            raise BoundaryError(str(exc)) from exc
     for _,dst in (*INSTALLS.items(), *IMPORTS.items()):
         target=LIB/dst
         if target.exists() or target.is_symlink():
