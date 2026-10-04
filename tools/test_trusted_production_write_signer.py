@@ -49,7 +49,9 @@ class ProductionSignerTests(unittest.TestCase):
    subprocess.run([str(m.GIT),"-C",str(repo),"remote","add","origin","https://github.com/datarelay-labs/engineering-system.git"],check=True)
    a=A();a.root=repo;a.repository="datarelay-labs/engineering-system";a.subject_head=head;a.branch=branch
    m._verify_local_scope(a,root_provenance=False)
-   a.subject_head="0"*40
+   alias=Path(d)/"alias";alias.symlink_to(repo.parent,target_is_directory=True);a.root=alias/"repo"
+   with self.assertRaisesRegex(m.SignerError,"must not traverse symlinks"):m._verify_local_scope(a,root_provenance=False)
+   a.root=repo;a.subject_head="0"*40
    with self.assertRaisesRegex(m.SignerError,"subject_head mismatch"):m._verify_local_scope(a,root_provenance=False)
    a.subject_head=head;a.repository="datarelay-labs/other"
    with self.assertRaisesRegex(m.SignerError,"origin repository mismatch"):m._verify_local_scope(a,root_provenance=False)

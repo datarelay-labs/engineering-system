@@ -38,9 +38,9 @@ def _secure_node(path,allow_symlink=False):
     return st
 
 def _require_root_owned_checkout(root):
-    _secure_node(root)
-    _secure_node(root.parent)
-    gitdir=root/".git"
+    resolved=root.resolve()
+    for node in (resolved,*resolved.parents): _secure_node(node)
+    gitdir=resolved/".git"
     st=_secure_node(gitdir)
     if not stat.S_ISDIR(st.st_mode): raise SignerError("production worktree Git metadata invalid")
     for dirpath,dirnames,filenames in os.walk(gitdir,topdown=True,followlinks=False):
@@ -137,8 +137,9 @@ def _verify_committed_tree(root,subject_head,root_provenance=True):
 def _verify_local_scope(a,root_provenance=True):
     root=a.root
     if not root.is_dir() or root.is_symlink(): raise SignerError("production worktree must be a real directory")
-    if root_provenance: _require_root_owned_checkout(root)
     resolved=root.resolve()
+    if Path(os.path.abspath(root))!=resolved: raise SignerError("production worktree path must not traverse symlinks")
+    if root_provenance: _require_root_owned_checkout(resolved)
     top=Path(_git(root,"rev-parse","--show-toplevel")).resolve()
     if top!=resolved: raise SignerError("production worktree root mismatch")
     if _git(root,"rev-parse","--show-object-format")!="sha1": raise SignerError("production worktree object format unsupported")
