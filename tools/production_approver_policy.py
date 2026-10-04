@@ -123,7 +123,10 @@ def canonical_policy_bytes(approvals: tuple[dict[str, Any], ...]) -> bytes:
         "kind": POLICY_KIND,
         "approvals": [dict(item) for item in ordered],
     }
-    return (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    raw = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(raw) > MAX_POLICY_BYTES:
+        raise PolicyError("canonical production approver policy is too large")
+    return raw
 
 def load_policy_bytes(raw: bytes) -> tuple[dict[str, Any], ...]:
     if not raw or len(raw) > MAX_POLICY_BYTES:

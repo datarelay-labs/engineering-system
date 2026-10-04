@@ -53,6 +53,9 @@ class ProductionCoordinatorTests(unittest.TestCase):
     cmd=run.call_args.args[0]
     self.assertIn("--authority-basis",cmd);self.assertIn("production_approver_policy",cmd)
     self.assertIn("--authority-permission",cmd);self.assertIn("production_approver",cmd)
+    request_arg=Path(cmd[cmd.index("--request-json")+1])
+    self.assertNotEqual(request_arg,a.request_json)
+    self.assertFalse(request_arg.exists())
  def test_root_only_fallback_rejects_mutated_packet_request_or_dispatch(self):
   with tempfile.TemporaryDirectory() as d:
    a=self.args(Path(d));policy=self.approval(a)

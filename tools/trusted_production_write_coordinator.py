@@ -18,6 +18,7 @@ from typing import Any
 
 import trusted_external_write_coordinator as ext
 from production_approver_policy import (
+    MAX_POLICY_BYTES,
     PolicyError,
     canonical_json_sha256,
     find_exact_approval,
@@ -72,7 +73,7 @@ def _load_approver_policy() -> tuple[dict[str, Any], ...]:
     try:
         fd = os.open(APPROVERS, os.O_RDONLY | os.O_NOFOLLOW)
         try:
-            raw = os.read(fd, 32 * 1024 + 1)
+            raw = os.read(fd, MAX_POLICY_BYTES + 1)
         finally:
             os.close(fd)
         return load_policy_bytes(raw)
@@ -289,13 +290,14 @@ def _invoke_signer(
     *,
     permission: str,
     authority_basis: str | None = None,
+    request_json: Path | None = None,
 ) -> int:
     cmd = [
         str(signer),
         "--root",
         str(a.root),
         "--request-json",
-        str(a.request_json),
+        str(request_json or a.request_json),
         "--repository",
         a.repository,
         "--workstream",
@@ -433,12 +435,20 @@ def _authorize_root_public(a: argparse.Namespace) -> int:
         authority_login=approved_by,
     )
     signer = ext._exec_path(SIGNER, None)
-    _invoke_signer(
-        a,
-        signer,
-        permission="production_approver",
-        authority_basis="production_approver_policy",
-    )
+    snapshot_dir, snapshot_path = _snapshot_request(request_payload)
+    try:
+        _invoke_signer(
+            a,
+            signer,
+            permission="production_approver",
+            authority_basis="production_approver_policy",
+            request_json=snapshot_path,
+        )
+    finally:
+        try:
+            snapshot_path.unlink()
+        finally:
+            snapshot_dir.rmdir()
     print("TRUSTED_PRODUCTION_WRITE_COORDINATOR=PASS")
     print(f"AUTHOR={login}")
     print("AUTHOR_PERMISSION=production_approver")

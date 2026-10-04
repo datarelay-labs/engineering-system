@@ -77,6 +77,16 @@ class BoundaryAdminTests(unittest.TestCase):
             with self.assertRaisesRegex(m.BoundaryError,"policy"):
                 m.upgrade(Args(self.source,invalid))
             self.assertEqual(installed.read_bytes(),before)
+    def test_upgrade_rejects_legacy_installed_policy_before_tool_mutation(self):
+        p=self.patches()
+        with p[0],p[1],p[2],p[3],p[4]:
+            m.install(Args(self.source))
+            m.APPROVERS.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","repositories":{"datarelay-labs/datarelay-atlas":["RickLee-kr"]}}))
+            installed=m.LIB/"trusted-production-write-coordinator"; before=installed.read_bytes()
+            (self.source/"tools"/"trusted_production_write_coordinator.py").write_text("#!/usr/bin/env python3\n# must-not-land-legacy\n")
+            with self.assertRaisesRegex(m.BoundaryError,"policy"):
+                m.upgrade(Args(self.source))
+            self.assertEqual(installed.read_bytes(),before)
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:
