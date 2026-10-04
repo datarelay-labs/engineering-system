@@ -449,6 +449,8 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "make measurable progress in the same turn" in upgraded_agents
         assert "completed bounded Work Packet ends that workstream, not a repository-level continue/resume request" in upgraded_agents
         assert "roadmap/release objective is complete" in upgraded_agents
+        assert "persist the accepted result in the smallest appropriate canonical spec/ADR/roadmap/contract" in upgraded_agents
+        assert "continue directly into implementation and deterministic validation" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert ".engineering/execution-profile.yaml" in upgraded_agents
         assert "selected execution profile" in upgraded_agents

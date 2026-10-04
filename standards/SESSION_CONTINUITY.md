@@ -228,6 +228,27 @@ Before handing work to an implementation agent, the coordinating agent must sync
 5. If the new request is still the same workstream, update the existing packet. If it is a genuinely independent workstream, create a separate packet.
 6. If `Goal`, `OWNER_INTENT`, `TASK_KIND`, and `Next Action` materially conflict, do not execute the packet. Report `WORK_PACKET_SCOPE_MISMATCH` and obtain or record the minimum correction needed.
 
+### Research-informed continuation
+
+A research/discovery phase is part of the engineering workstream, not a terminal advisory handoff. When competitive/vendor/best-practice/standards research materially resolves architecture, public-contract, dependency, migration, or product-direction uncertainty:
+
+- if the owner accepts the result or says `proceed`, `continue`, `진행해`, `계속`, or an equivalent instruction, treat that as authority to perform the minimum durable design/roadmap/Work-Packet updates and then continue into the already-scoped implementation;
+- do not require the owner to separately say “write the docs” and then “start coding” when those are the natural next steps of the accepted workstream;
+- persist accepted conclusions before code when they create or change a durable architecture/public-contract/dependency boundary;
+- use Atlas only as optional derived context/history, never as the canonical implementation contract;
+- stop for owner input only when research exposes a genuinely unresolved choice that changes breaking compatibility, security/privilege, irreversible publication/destruction, production behavior, credentials, legal/distribution authority, or another explicit approval boundary.
+
+The required sequence for material research-informed work is therefore:
+
+```text
+research/discovery when warranted
+ -> accepted decision
+ -> minimum canonical documentation / roadmap synchronization
+ -> implementation
+ -> deterministic validation
+ -> PR/merge/closure by the normal risk contract
+```
+
 `STATUS` is deliberately small and fixed. Do not invent transient readiness values such as `WAITING` or `DONE`.
 
 - `ACTIVE` — work is runnable or waiting on a machine-observable condition that can be resumed automatically.

@@ -34,6 +34,21 @@ Use the smallest durable destination that fits the decision:
 
 Discussion that is not yet accepted remains discussion and must not be promoted automatically to canonical design.
 
+## Research / discovery to design handoff
+
+External research, competitor/vendor comparison, standards review, or exploratory discovery is not mandatory ceremony. Use it only when current repository evidence is insufficient or a material architecture/product/dependency decision benefits from outside evidence.
+
+When such research materially shapes the intended solution and the owner accepts the direction or says to proceed/continue, do not leave the result only in chat, memory, or Atlas. Before implementation:
+
+1. Distill only the accepted conclusions, constraints, rejected alternatives that matter, and migration/compatibility implications.
+2. Persist them in the **smallest canonical artifact** that fits: existing spec/charter/roadmap, ADR for durable expensive-to-reverse architecture, contract/schema for executable public behavior, or Work Packet for temporary execution state.
+3. Update the active Work Packet/roadmap so `Next Action` implements that accepted design.
+4. Continue directly into implementation and deterministic validation in the same workstream when no genuine unresolved owner decision, approval, credential, destructive/production boundary, or breaking-choice ambiguity remains. Do not ask for a second generic implementation confirmation merely because the preceding phase was research or documentation.
+
+Atlas may retain bounded derived rationale/history for JIT retrieval, but it is non-authoritative. Git/GitHub canonical artifacts and executable contracts remain the implementation authority.
+
+For research that yields no accepted design change, record at most the bounded finding needed for future context; do not create durable documents merely to prove that research occurred.
+
 ## Design review trigger
 
 Stop implementation and ask for the minimum missing decision when:
