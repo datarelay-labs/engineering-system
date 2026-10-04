@@ -95,6 +95,14 @@ class BoundaryAdminTests(unittest.TestCase):
             with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,field.replace("_"," ")):
                 m.install(Args(self.source,path))
             self.assertFalse(self.etc.exists())
+    def test_duplicate_dispatch_ids_fail_before_install_mutation(self):
+        payload=json.loads(self.policy().read_text())
+        duplicate=json.loads(json.dumps(payload["approvals"][0])); duplicate["request_sha256"]="d"*64
+        payload["approvals"].append(duplicate)
+        path=Path(self.t.name)/"duplicate-dispatch.json"; path.write_text(json.dumps(payload))
+        with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"dispatch id is duplicated"):
+            m.install(Args(self.source,path))
+        self.assertFalse(self.etc.exists())
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:

@@ -72,6 +72,18 @@ class ProductionCoordinatorTests(unittest.TestCase):
    public=[{"private":False,"visibility":"public"},self.issue()]
    with patch.object(m,"_direct_root_without_operator",return_value=True), patch.object(m,"_load_approver_policy",return_value=policy), patch.object(m,"_public_json",side_effect=public), self.assertRaisesRegex(m.Error,"exact root-admin production approval"):
     m.authorize(a)
+ def test_unicode_request_snapshot_stays_within_signer_limit(self):
+  payload={"message":"😀"*6000}
+  directory,path=m._snapshot_request(payload)
+  try:
+   raw=path.read_bytes()
+   self.assertLessEqual(len(raw),m.MAX_REQUEST_BYTES)
+   self.assertNotIn(b"\\ud83d",raw)
+   self.assertEqual(json.loads(raw),payload)
+  finally:
+   path.unlink(); directory.rmdir()
+  with self.assertRaisesRegex(m.Error,"too large"):
+   m._snapshot_request({"message":"😀"*20000})
  def test_public_tls_context_ignores_caller_trust_store_environment(self):
   class Context:
    def __init__(self): self.cafile=None; self.check_hostname=False; self.verify_mode=None; self.minimum_version=None

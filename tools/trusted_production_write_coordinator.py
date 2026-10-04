@@ -32,6 +32,7 @@ PUBLIC_GITHUB_HOST = "api.github.com"
 SYSTEM_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
 MAX_PUBLIC_JSON = 256 * 1024
 MAX_CA_BUNDLE_BYTES = 4 * 1024 * 1024
+MAX_REQUEST_BYTES = 64 * 1024
 
 
 class Error(Exception):
@@ -272,11 +273,21 @@ def _validate_packet(
 
 
 def _snapshot_request(payload: dict[str, Any]) -> tuple[Path, Path]:
+    raw = (
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if not raw or len(raw) > MAX_REQUEST_BYTES:
+        raise Error("canonical production request is too large")
     directory = Path(tempfile.mkdtemp(prefix="engineering-production-request-", dir="/tmp"))
     path = directory / "request.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        raw = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         os.write(fd, raw)
         os.fsync(fd)
     finally:
@@ -383,7 +394,7 @@ def _authorize_root_public(a: argparse.Namespace) -> int:
         raise Error("active Work Packet unavailable")
     try:
         request_raw = a.request_json.read_bytes()
-        if not request_raw or len(request_raw) > 64 * 1024:
+        if not request_raw or len(request_raw) > MAX_REQUEST_BYTES:
             raise Error("production request size is invalid")
         request_payload = json.loads(request_raw)
     except (OSError, json.JSONDecodeError) as exc:

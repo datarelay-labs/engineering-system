@@ -100,6 +100,7 @@ def normalize_policy(payload: Any) -> tuple[dict[str, Any], ...]:
         raise PolicyError("production approver policy approvals are invalid")
     normalized = tuple(_approval(item) for item in approvals)
     seen: set[tuple[object, ...]] = set()
+    dispatch_ids: set[str] = set()
     for item in normalized:
         identity = (
             item["repository"], item["issue_id"], item["workstream"], item["branch"],
@@ -108,7 +109,10 @@ def normalize_policy(payload: Any) -> tuple[dict[str, Any], ...]:
         )
         if identity in seen:
             raise PolicyError("production approval is duplicated")
+        if item["dispatch_id"] in dispatch_ids:
+            raise PolicyError("production approval dispatch id is duplicated")
         seen.add(identity)
+        dispatch_ids.add(item["dispatch_id"])
     return normalized
 
 def canonical_policy_bytes(approvals: tuple[dict[str, Any], ...]) -> bytes:
