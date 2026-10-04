@@ -37,7 +37,22 @@ A manifest may define a top-level `setup_command` for deterministic CI dependenc
 For a PR:
 - scenarios tagged `pr` are cheap global guardrails and always run
 - scenarios tagged `affected` run when their domains intersect changed-path domains
+- a path rule may also declare `invalidates: [SCENARIO-ID, ...]` for a non-local closure dependency; those target scenarios run even when their domains do not intersect, and each target must itself declare the `affected` trigger
 - unmatched changed paths widen selection conservatively rather than silently skipping validation
+
+### Change closure and direct invalidation
+
+Domains express **behavioral ownership**. Direct invalidation expresses a different relation: changing one file can make another representation or derived artifact stale even when both belong to different domains.
+
+Use `paths.<pattern>.invalidates` for deterministic non-local closure edges such as:
+
+- a public-surface authority changing and therefore invalidating CLI/API/UI help, menus, generated docs, SDKs, or parity checks;
+- source/test/release-input changes invalidating generated bundles, checksums, SBOM inputs, provenance, or release manifests;
+- a schema/catalog change invalidating a generated fixture or contract snapshot.
+
+The invalidated scenario is a **verification oracle**, not an auto-fix hook. Ordinary PR CI should fail when generated/derived state is stale; it must not silently rewrite the repository to make itself green. Refresh/regeneration happens during implementation, then the verification scenario proves closure.
+
+Keep invalidation edges sparse and intentional. Do not use them as a second domain graph or point them at expensive release-only qualification. Targets must declare `affected` and should normally be cheap or medium closure checks.
 
 Ordinary PR validation must not duplicate the same native workflow through overlapping push+pull_request, and expensive release_gate scenarios must not be default affected/pr work or be invoked unconditionally by ordinary PR jobs; an expensive release-gate command must not be directly executed by an unconditional ordinary-PR job.
 
@@ -86,6 +101,41 @@ Important scenarios should have stable IDs plus level, domains, triggers, platfo
 ## Human UX
 
 Test help/navigation, wizard inputs, invalid input recovery, copy/paste, wrong context, cancellation/EOF/Ctrl+C, generated remediation commands, and cross-output consistency. Run affected UX tests during development and broader UX qualification near release.
+
+### Public-surface authority and parity
+
+When one user-visible contract is represented in several places, the project must avoid independent hand-maintained truth.
+
+Examples include:
+
+- CLI catalog / grammar / help / completion / menu / documentation;
+- API schema / router / SDK / examples / reference docs;
+- UI route model / navigation / permissions / user help;
+- configuration schema / generated samples / validation docs.
+
+The project chooses the authority that fits its architecture; Engineering System does not impose a universal catalog format. Secondary representations must either be generated from that authority or have a deterministic parity check that fails when they drift. The canonical product/specification still defines intended behavior, while actual code/artifact/tested behavior remains the observed implementation truth.
+
+For a structured public surface, add a cheap/medium affected scenario that proves the applicable parity/derivation invariant. When changes span domains, use direct invalidation edges so the closure scenario cannot be skipped.
+
+### Surface Delta Reconciliation — development / PR gate
+
+Do not wait until release to discover ordinary public-surface workflow drift.
+
+For a user-facing change that adds or materially changes a capability, command, API action, UI control, configuration path, installer flow, or generated user guidance, perform a **bounded Surface Delta Reconciliation** for the changed slice during development/PR:
+
+```text
+changed feature
+ -> current public discovery surface
+ -> primary happy-path action or syntax
+ -> inspect/show/readback
+ -> misuse / wrong-context / error guidance
+ -> edit/disable/delete/recovery semantics when applicable
+ -> cross-output terminology/parity
+```
+
+This is L5 human-UX/change-closure evidence for the affected slice, not the exhaustive release gate. It may be represented as a stable `affected` scenario (normally cheap/medium) plus direct invalidation from all representations of that surface. ChatGPT should directly exercise the applicable public surface when human-equivalent interaction is available; deterministic tests remain supporting evidence.
+
+A clean Surface Delta Reconciliation does **not** satisfy or reduce the mandatory release Surface Reconciliation scope. The release gate still reruns the complete product surface on the exact candidate HEAD.
 
 ### Human-equivalent user-surface release tests — mandatory for user-facing products
 

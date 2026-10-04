@@ -10,6 +10,7 @@ import yaml
 
 import ci_policy_audit
 from adopt import (
+    AFFECTED_TEST_SELECTION_MANAGED,
     AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
     USER_ACCEPTANCE_MANAGED,
@@ -34,6 +35,7 @@ MANAGED_ADOPTION_REQUIRED = (
     ".github/workflows/engineering-system.yml",
     ".engineering/requirements-engineering-system.txt",
     "tools/governance_floor.py",
+    *AFFECTED_TEST_SELECTION_MANAGED,
     *EXECUTION_PROFILE_MANAGED,
     *USER_ACCEPTANCE_MANAGED,
     *AGENT_RUNTIME_MANAGED,
@@ -338,6 +340,11 @@ def main() -> int:
             if not isinstance(scenarios, list) or not scenarios:
                 failures.append("tests.yaml must contain at least one scenario")
             else:
+                scenario_by_id = {
+                    str((scenario or {}).get("id") or ""): (scenario or {})
+                    for scenario in scenarios
+                    if str((scenario or {}).get("id") or "")
+                }
                 for scenario in scenarios:
                     scenario = scenario or {}
                     if not str(scenario.get("command") or "").strip():
@@ -347,6 +354,21 @@ def main() -> int:
                         if project_domains and str(domain) not in project_domains:
                             failures.append(
                                 f"tests.yaml scenario {scenario.get('id', '<unknown>')} references unknown domain: {domain}"
+                            )
+                for pattern, spec in paths.items():
+                    for scenario_id in (spec or {}).get("invalidates") or []:
+                        sid = str(scenario_id)
+                        target = scenario_by_id.get(sid)
+                        if target is None:
+                            failures.append(
+                                f"tests.yaml path {pattern} invalidates unknown scenario: {sid}"
+                            )
+                            continue
+                        if "affected" not in {
+                            str(item) for item in target.get("triggers") or []
+                        }:
+                            failures.append(
+                                f"tests.yaml path {pattern} invalidates scenario without affected trigger: {sid}"
                             )
         except Exception as exc:
             failures.append(f"cannot parse tests.yaml: {exc}")

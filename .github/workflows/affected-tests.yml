@@ -91,101 +91,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import fnmatch
-          import os
-          import subprocess
-          from pathlib import Path
-
-          import yaml
-
-          manifest_path = Path(os.environ["ENGINEERING_TEST_MANIFEST"])
-          if not manifest_path.is_file():
-              raise SystemExit(f"FAIL missing test manifest: {manifest_path}")
-
-          manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-          path_rules = manifest.get("paths") or {}
-          scenarios = manifest.get("scenarios") or []
-          setup_command = str(manifest.get("setup_command") or "").strip()
-          trigger = os.environ.get("ENGINEERING_TRIGGER", "pr").strip() or "pr"
-          base = os.environ.get("ENGINEERING_BASE_REF", "").strip()
-
-          if base:
-              changed_text = subprocess.check_output(
-                  ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...HEAD"],
-                  text=True,
-              )
-              changed = [line.strip() for line in changed_text.splitlines() if line.strip()]
-              no_base = False
-          else:
-              changed = []
-              no_base = True
-
-          affected_domains = set()
-          unmapped = []
-          matched = {}
-
-          for path in changed:
-              domains = set()
-              patterns = []
-              for pattern, spec in path_rules.items():
-                  if fnmatch.fnmatchcase(path, pattern):
-                      patterns.append(pattern)
-                      domains.update((spec or {}).get("domains") or [])
-              if domains:
-                  affected_domains.update(domains)
-                  matched[path] = patterns
-              else:
-                  unmapped.append(path)
-
-          widen = no_base or bool(unmapped)
-          if no_base:
-              print("AFFECTED_SELECTOR_BASE=UNAVAILABLE")
-          print("CHANGED_FILES=" + (",".join(changed) if changed else "<none>"))
-          print("AFFECTED_DOMAINS=" + (",".join(sorted(affected_domains)) if affected_domains else "<none>"))
-          if unmapped:
-              print("UNMAPPED_CHANGED_FILES=" + ",".join(unmapped))
-              print("AFFECTED_SELECTOR_MODE=WIDEN")
-          else:
-              print("AFFECTED_SELECTOR_MODE=" + ("WIDEN" if no_base else "MAPPED"))
-
-          selected = []
-          seen = set()
-          for scenario in scenarios:
-              sid = str(scenario.get("id") or "")
-              triggers = set(scenario.get("triggers") or [])
-              domains = set(scenario.get("domains") or [])
-              always_for_trigger = trigger in triggers
-              domain_affected = "affected" in triggers and bool(domains & affected_domains)
-              conservative = widen and (trigger in triggers or "affected" in triggers)
-              if always_for_trigger or domain_affected or conservative:
-                  if sid and sid not in seen:
-                      selected.append(scenario)
-                      seen.add(sid)
-
-          if not selected:
-              print("SELECTED_SCENARIOS=<none>")
-              print("AFFECTED_TESTS=PASS")
-              raise SystemExit(0)
-
-          print("SELECTED_SCENARIOS=" + ",".join(str(s.get("id")) for s in selected))
-          if setup_command:
-              print("=== setup ===", flush=True)
-              print(f"$ {setup_command}", flush=True)
-              completed = subprocess.run(["bash", "-lc", setup_command])
-              if completed.returncode:
-                  raise SystemExit(f"FAIL setup_command exit={completed.returncode}")
-              print("PASS setup", flush=True)
-
-          for scenario in selected:
-              sid = scenario["id"]
-              command = scenario["command"]
-              print(f"=== {sid}: {scenario.get('name', sid)} ===", flush=True)
-              print(f"$ {command}", flush=True)
-              completed = subprocess.run(["bash", "-lc", command])
-              if completed.returncode:
-                  raise SystemExit(f"FAIL scenario {sid} exit={completed.returncode}")
-              print(f"PASS {sid}", flush=True)
-
-          print("AFFECTED_TESTS=PASS")
-          PY
+          expected_selector_sha256="39904fbf438ea186ef9078659d6f8b4b52e11083ffd6cd0ef221710c5f4799a6"
+          actual_selector_sha256="$(sha256sum tools/affected_test_selection.py 2>/dev/null | awk '{print $1}')"
+          if [[ "$actual_selector_sha256" != "$expected_selector_sha256" ]]; then
+            echo "FAIL managed affected-test selector does not match pinned Engineering System baseline" >&2
+            echo "EXPECTED_SELECTOR_SHA256=$expected_selector_sha256" >&2
+            echo "ACTUAL_SELECTOR_SHA256=${actual_selector_sha256:-MISSING}" >&2
+            exit 2
+          fi
+          python tools/affected_test_selection.py \
+            --manifest "$ENGINEERING_TEST_MANIFEST" \
+            --base "$ENGINEERING_BASE_REF" \
+            --trigger "$ENGINEERING_TRIGGER"

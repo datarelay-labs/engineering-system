@@ -91,6 +91,10 @@ paths:
     domains: [enforcement, session-continuity, workflows]
   "tools/test_governance_floor.py":
     domains: [enforcement, session-continuity]
+  "tools/affected_test_selection.py":
+    domains: [workflows, adoption]
+  "tools/test_affected_test_selection.py":
+    domains: [workflows, adoption]
   ".github/workflows/governance-floor.yml":
     domains: [enforcement, workflows]
   "evals/context-optimization/**":
@@ -235,6 +239,24 @@ scenarios:
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
     command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/user-acceptance-evidence.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
+    release_gate: true
+
+  - id: ENG-AFFECTED-SELECTION-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: unit
+    name: Affected selection direct invalidation contract
+    level: unit
+    domains: [workflows, adoption]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_affected_test_selection.py"
+    invariants:
+      - "direct invalidation selects non-local closure scenarios deterministically"
+      - "invalid invalidation targets fail closed"
+      - "manifests without invalidation edges remain backward-compatible"
     release_gate: true
 
   - id: ENG-RELEASE-USER-ACCEPTANCE-001

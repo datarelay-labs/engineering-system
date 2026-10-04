@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import re
 import subprocess
@@ -76,6 +77,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_engineering_context.py",
     "tools/governance_floor.py",
     "tools/test_governance_floor.py",
+    "tools/affected_test_selection.py",
+    "tools/test_affected_test_selection.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -890,6 +893,51 @@ def validate_context_economics_contract():
     if tests.count("def test_") < 6:
         raise SystemExit("FAIL context economics regression suite is unexpectedly incomplete")
     print("PASS net context economics factual delta contract")
+
+
+def validate_change_closure_contract():
+    schema = load_json(ROOT / "schemas/tests.schema.json")
+    path_props = schema["properties"]["paths"]["additionalProperties"]["properties"]
+    if "invalidates" not in path_props:
+        raise SystemExit("FAIL test manifest schema missing direct invalidation edges")
+
+    selector = (ROOT / "tools/affected_test_selection.py").read_text(encoding="utf-8")
+    for token in (
+        "invalidated_scenarios",
+        "DIRECT_INVALIDATIONS",
+        "must declare trigger 'affected'",
+        "path invalidates unknown scenario",
+    ):
+        if token not in selector:
+            raise SystemExit(f"FAIL affected selector missing change-closure token: {token}")
+
+    workflow = (ROOT / ".github/workflows/affected-tests.yml").read_text(encoding="utf-8")
+    if "python tools/affected_test_selection.py" not in workflow:
+        raise SystemExit("FAIL affected-tests workflow bypasses managed selector")
+    selector_sha256 = hashlib.sha256(
+        (ROOT / "tools/affected_test_selection.py").read_bytes()
+    ).hexdigest()
+    if selector_sha256 not in workflow:
+        raise SystemExit(
+            "FAIL affected-tests workflow does not pin the managed selector SHA256"
+        )
+
+    testing = (ROOT / "standards/TESTING.md").read_text(encoding="utf-8")
+    for token in (
+        "Public-surface authority and parity",
+        "Surface Delta Reconciliation",
+        "paths.<pattern>.invalidates",
+        "must not silently rewrite the repository",
+    ):
+        if token not in testing:
+            raise SystemExit(f"FAIL testing standard missing change-closure token: {token}")
+
+    quality = (ROOT / "standards/QUALITY.md").read_text(encoding="utf-8")
+    for token in ("one explicit authority", "Surface Delta Reconciliation"):
+        if token not in quality:
+            raise SystemExit(f"FAIL quality standard missing change-closure token: {token}")
+
+    print("PASS deterministic change-closure contract")
 
 
 def validate_token_efficiency_contract():
@@ -1722,6 +1770,7 @@ def main():
     validate_auto_merge_eligibility_contract()
     validate_security_profile()
     validate_security_hardening()
+    validate_change_closure_contract()
     validate_action_pins()
 
     validate(".engineering/project.yaml", "schemas/project.schema.json")
@@ -1823,6 +1872,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_governance_floor.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_affected_test_selection.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)

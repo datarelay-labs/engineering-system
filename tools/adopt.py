@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 11
+POLICY_EPOCH = 12
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -122,6 +122,12 @@ GOVERNANCE_FLOOR_MANAGED = (
     "tools/governance_floor.py",
 )
 
+# Deterministic changed-path -> affected-scenario selector used by the shared
+# affected-tests workflow. Keep it baseline-managed with the workflow contract.
+AFFECTED_TEST_SELECTION_MANAGED = (
+    "tools/affected_test_selection.py",
+)
+
 WORK_PACKET_TEMPLATE_MANAGED = (
     ".github/ISSUE_TEMPLATE/ai-work-packet.md",
 )
@@ -150,6 +156,7 @@ REQUIRED_MANAGED = (
     *CONTEXT_EPOCH_MANAGED,
     *ENGINEERING_CONTEXT_MANAGED,
     *GOVERNANCE_FLOOR_MANAGED,
+    *AFFECTED_TEST_SELECTION_MANAGED,
 )
 
 EXECUTION_PROFILE_MARKER = "- **Execution profile authority:**"
@@ -1581,6 +1588,7 @@ def main() -> int:
         *CONTEXT_EPOCH_MANAGED,
         *ENGINEERING_CONTEXT_MANAGED,
         *GOVERNANCE_FLOOR_MANAGED,
+        *AFFECTED_TEST_SELECTION_MANAGED,
         *ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     ):
         write_missing(

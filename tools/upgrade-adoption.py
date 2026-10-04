@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from adopt import (
+    AFFECTED_TEST_SELECTION_MANAGED,
     AGENT_RUNTIME_MANAGED,
     CONTEXT_EPOCH_MANAGED,
     ENGINEERING_CONTEXT_MANAGED,
@@ -701,6 +702,30 @@ def apply_governance_floor_install(root: Path, planned: dict[str, str]) -> list[
     return installed
 
 
+def plan_affected_test_selection_install(
+    root: Path, old_baseline: str = ""
+) -> dict[str, str]:
+    """Install or upgrade the managed deterministic affected-test selector."""
+    return plan_managed_file_install(
+        root,
+        AFFECTED_TEST_SELECTION_MANAGED,
+        label="affected test selection",
+        old_baseline=old_baseline,
+    )
+
+
+def apply_affected_test_selection_install(
+    root: Path, planned: dict[str, str]
+) -> list[str]:
+    installed: list[str] = []
+    for rel, text in planned.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        installed.append(rel)
+    return installed
+
+
 def git_blob_sha(text: str) -> str:
     data = text.encode("utf-8")
     header = f"blob {len(data)}\0".encode("ascii")
@@ -1014,6 +1039,9 @@ def main() -> int:
         planned_context_epoch = plan_context_epoch_install(root, old_baseline)
         planned_engineering_context = plan_engineering_context_install(root, old_baseline)
         planned_governance_floor = plan_governance_floor_install(root, old_baseline)
+        planned_affected_test_selection = plan_affected_test_selection_install(
+            root, old_baseline
+        )
         planned_execution_policy = plan_execution_policy_sync(root)
         planned_release_executor = plan_release_executor_migration(
             release,
@@ -1086,6 +1114,8 @@ def main() -> int:
             print("ENGINEERING_SYSTEM_DEPENDENCIES_REPAIR=REQUIRED")
         if planned_governance_floor:
             print("GOVERNANCE_FLOOR_REPAIR=REQUIRED")
+        if planned_affected_test_selection:
+            print("AFFECTED_TEST_SELECTION_REPAIR=REQUIRED")
         if planned_execution_profile:
             print("EXECUTION_PROFILE_REPAIR=REQUIRED")
         if policy_epoch_repair:
@@ -1158,6 +1188,17 @@ def main() -> int:
             root, planned_governance_floor
         )
         print("GOVERNANCE_FLOOR_INSTALLED=" + (",".join(installed_governance_floor) if installed_governance_floor else "<none>"))
+        installed_affected_test_selection = apply_affected_test_selection_install(
+            root, planned_affected_test_selection
+        )
+        print(
+            "AFFECTED_TEST_SELECTION_INSTALLED="
+            + (
+                ",".join(installed_affected_test_selection)
+                if installed_affected_test_selection
+                else "<none>"
+            )
+        )
         execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
         print("EXECUTION_POLICY_SYNCED=" + ("YES" if execution_policy_synced else "NO"))
         release_executor_synced = apply_release_executor_migration(
@@ -1375,6 +1416,9 @@ def main() -> int:
     planned_context_epoch = plan_context_epoch_install(root, old_baseline)
     planned_engineering_context = plan_engineering_context_install(root, old_baseline)
     planned_governance_floor = plan_governance_floor_install(root, old_baseline)
+    planned_affected_test_selection = plan_affected_test_selection_install(
+        root, old_baseline
+    )
     planned_root_surfaces = {
         **planned_dependencies,
         **planned_governance_floor,
@@ -1506,6 +1550,17 @@ def main() -> int:
         print("GOVERNANCE_FLOOR_INSTALLED=" + ",".join(installed_governance_floor))
     else:
         print("GOVERNANCE_FLOOR_INSTALLED=<none>")
+
+    installed_affected_test_selection = apply_affected_test_selection_install(
+        root, planned_affected_test_selection
+    )
+    if installed_affected_test_selection:
+        print(
+            "AFFECTED_TEST_SELECTION_INSTALLED="
+            + ",".join(installed_affected_test_selection)
+        )
+    else:
+        print("AFFECTED_TEST_SELECTION_INSTALLED=<none>")
 
     synced_declarations = apply_baseline_declaration_updates(root, planned_declarations)
     if synced_declarations:
