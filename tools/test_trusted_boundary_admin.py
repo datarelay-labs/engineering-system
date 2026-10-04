@@ -62,6 +62,20 @@ class BoundaryAdminTests(unittest.TestCase):
             payload=json.loads(m.APPROVERS.read_text()); self.assertEqual(payload["repositories"]["datarelay-labs/datarelay-atlas"],["RickLee-kr"])
             self.assertIn("upgraded",(m.LIB/"trusted-production-write-coordinator").read_text())
             m.verify(Args(require=True))
+    def test_invalid_policy_fails_before_install_or_upgrade_mutation(self):
+        invalid=Path(self.t.name)/"invalid-policy.json"; invalid.write_text("{}")
+        with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"policy"):
+            m.install(Args(self.source,invalid))
+        self.assertFalse(self.etc.exists())
+        p=self.patches()
+        with p[0],p[1],p[2],p[3],p[4]:
+            m.install(Args(self.source))
+            installed=m.LIB/"trusted-production-write-coordinator"
+            before=installed.read_bytes()
+            (self.source/"tools"/"trusted_production_write_coordinator.py").write_text("#!/usr/bin/env python3\n# must-not-land\n")
+            with self.assertRaisesRegex(m.BoundaryError,"policy"):
+                m.upgrade(Args(self.source,invalid))
+            self.assertEqual(installed.read_bytes(),before)
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:

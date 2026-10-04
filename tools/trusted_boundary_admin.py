@@ -124,8 +124,7 @@ def _canonical_policy_bytes(path:Path)->bytes:
     return (json.dumps(payload,sort_keys=True,indent=2)+"\n").encode("utf-8")
 
 
-def _install_policy(path:Path,*,replace:bool):
-    raw=_canonical_policy_bytes(path)
+def _install_policy_bytes(raw:bytes,*,replace:bool):
     if APPROVERS.exists() or APPROVERS.is_symlink():
         if not replace:
             raise BoundaryError("production approver policy already exists")
@@ -162,6 +161,8 @@ def _verify_anchor_and_dirs():
 def install(args):
     _root()
     source=_source(args)
+    policy=getattr(args,"production_approver_policy",None)
+    policy_bytes=_canonical_policy_bytes(policy) if policy is not None else None
     ETC.mkdir(parents=True,exist_ok=True,mode=0o700)
     os.chmod(ETC,0o700)
     LIB.mkdir(parents=True,exist_ok=True,mode=0o755)
@@ -187,9 +188,8 @@ def install(args):
     REPLAY.mkdir(mode=0o700)
     os.chmod(REPLAY,0o700)
     _copy_tools(source,replace=False)
-    policy=getattr(args,"production_approver_policy",None)
-    if policy is not None:
-        _install_policy(policy,replace=False)
+    if policy_bytes is not None:
+        _install_policy_bytes(policy_bytes,replace=False)
     verify(args)
     print("TRUSTED_BOUNDARY_INSTALL=PASS")
 
@@ -197,6 +197,8 @@ def install(args):
 def upgrade(args):
     _root()
     source=_source(args)
+    policy=getattr(args,"production_approver_policy",None)
+    policy_bytes=_canonical_policy_bytes(policy) if policy is not None else None
     _verify_anchor_and_dirs()
     for _,dst in (*INSTALLS.items(), *IMPORTS.items()):
         target=LIB/dst
@@ -204,9 +206,8 @@ def upgrade(args):
             mode=0o755 if dst.startswith("trusted-") else 0o644
             _secure_file(target,mode)
     _copy_tools(source,replace=True)
-    policy=getattr(args,"production_approver_policy",None)
-    if policy is not None:
-        _install_policy(policy,replace=True)
+    if policy_bytes is not None:
+        _install_policy_bytes(policy_bytes,replace=True)
     verify(args)
     print("TRUSTED_BOUNDARY_UPGRADE=PASS")
 
