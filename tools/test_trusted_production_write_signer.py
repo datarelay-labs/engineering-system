@@ -37,7 +37,7 @@ class ProductionSignerTests(unittest.TestCase):
     self.assertEqual(approver["authority_basis"],"production_approver_policy");self.assertEqual(approver["authority_permission"],"production_approver")
     self.assertEqual(dispatch["classes"],["destructive","external_read","network","production_write","shell"])
    finally:m.KEY,m.PUB,m.SKILLS=old
- def test_root_only_scope_requires_exact_clean_repo_and_head(self):
+ def test_root_only_scope_requires_exact_immutable_repo_and_head(self):
   with tempfile.TemporaryDirectory() as d:
    repo=Path(d)/"repo";repo.mkdir()
    subprocess.run([str(m.GIT),"init","-q",str(repo)],check=True)
@@ -45,13 +45,22 @@ class ProductionSignerTests(unittest.TestCase):
    subprocess.run([str(m.GIT),"-C",str(repo),"add","tracked.txt"],check=True)
    subprocess.run([str(m.GIT),"-C",str(repo),"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","approved"],check=True)
    head=subprocess.check_output([str(m.GIT),"-C",str(repo),"rev-parse","HEAD"],text=True).strip()
+   branch=subprocess.check_output([str(m.GIT),"-C",str(repo),"branch","--show-current"],text=True).strip()
    subprocess.run([str(m.GIT),"-C",str(repo),"remote","add","origin","https://github.com/datarelay-labs/engineering-system.git"],check=True)
-   a=A();a.root=repo;a.repository="datarelay-labs/engineering-system";a.subject_head=head
-   m._verify_local_scope(a)
+   a=A();a.root=repo;a.repository="datarelay-labs/engineering-system";a.subject_head=head;a.branch=branch
+   m._verify_local_scope(a,root_provenance=False)
    a.subject_head="0"*40
-   with self.assertRaisesRegex(m.SignerError,"subject_head mismatch"):m._verify_local_scope(a)
+   with self.assertRaisesRegex(m.SignerError,"subject_head mismatch"):m._verify_local_scope(a,root_provenance=False)
    a.subject_head=head;a.repository="datarelay-labs/other"
-   with self.assertRaisesRegex(m.SignerError,"origin repository mismatch"):m._verify_local_scope(a)
-   a.repository="datarelay-labs/engineering-system";(repo/"untracked.txt").write_text("worker-controlled\n")
-   with self.assertRaisesRegex(m.SignerError,"not clean"):m._verify_local_scope(a)
+   with self.assertRaisesRegex(m.SignerError,"origin repository mismatch"):m._verify_local_scope(a,root_provenance=False)
+   a.repository="datarelay-labs/engineering-system";a.branch="wrong"
+   with self.assertRaisesRegex(m.SignerError,"branch mismatch"):m._verify_local_scope(a,root_provenance=False)
+   a.branch=branch;(repo/"untracked.txt").write_text("worker-controlled\n")
+   with self.assertRaisesRegex(m.SignerError,"content set mismatch"):m._verify_local_scope(a,root_provenance=False)
+   (repo/"untracked.txt").unlink()
+   subprocess.run([str(m.GIT),"-C",str(repo),"update-index","--assume-unchanged","tracked.txt"],check=True)
+   (repo/"tracked.txt").write_text("hidden mutation\n")
+   status=subprocess.check_output([str(m.GIT),"-C",str(repo),"status","--porcelain=v1","--untracked-files=all"],text=True).strip()
+   self.assertEqual(status,"")
+   with self.assertRaisesRegex(m.SignerError,"differs from approved HEAD"):m._verify_local_scope(a,root_provenance=False)
 if __name__=="__main__":unittest.main()

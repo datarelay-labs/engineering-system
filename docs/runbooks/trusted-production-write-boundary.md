@@ -83,7 +83,7 @@ The coordinator:
 - requires exact Work Packet repository/workstream/branch/HEAD/intent/risk/profile binding;
 - requires the named branch to resolve to the exact subject HEAD and that commit to exist;
 - revalidates target/canonical execution-profile bytes at the exact subject/baseline revisions;
-- passes `--root` to the root-owned production signer, which requires a real, clean local Git checkout whose top-level path is the supplied root, whose `origin` is the approved repository, and whose local `HEAD` is the approved subject HEAD immediately before signing; this prevents an exact approval from being reused against another caller-selected checkout;
+- passes `--root` to the root-owned production signer, which requires a standalone root-owned/non-writable Git checkout under a root-owned parent, the exact approved branch/repository/HEAD, no untracked or unsupported tree entries, and byte-for-byte tracked-file/symlink content matching the approved commit blobs; the check does not trust `git status` or index hints such as `assume-unchanged`, so an exact approval cannot be reused against a worker-controlled or locally modified checkout;
 - mints a signed `authority_basis=production_approver_policy` / `authority_permission=production_approver` binding only after every check passes.
 
 A changed packet, request, session, dispatch, branch, HEAD, profile, policy, or public GitHub result fails closed before signing. Pinning `dispatch_id` makes the exact approval one-shot in combination with the existing replay-state consume contract.
