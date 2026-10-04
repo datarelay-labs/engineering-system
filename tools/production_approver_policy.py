@@ -15,6 +15,8 @@ MAX_APPROVALS = 64
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 WORKSTREAM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+DISPATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -30,10 +32,8 @@ def packet_sha256(body: str) -> str:
         raise PolicyError("production approval packet body is invalid")
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
-def _bounded_token(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value or len(value) > 128:
-        raise PolicyError(f"production approval {label} is invalid")
-    if any(ch in value for ch in "\r\n"):
+def _validated_token(value: Any, label: str, pattern: re.Pattern[str]) -> str:
+    if not isinstance(value, str) or pattern.fullmatch(value) is None:
         raise PolicyError(f"production approval {label} is invalid")
     return value
 
@@ -51,8 +51,8 @@ def _approval(raw: Any) -> dict[str, Any]:
     branch = raw.get("branch")
     subject_head = str(raw.get("subject_head") or "").lower()
     intent_revision = raw.get("intent_revision")
-    session_id = _bounded_token(raw.get("session_id"), "session id")
-    dispatch_id = _bounded_token(raw.get("dispatch_id"), "dispatch id")
+    session_id = _validated_token(raw.get("session_id"), "session id", SESSION_ID_RE)
+    dispatch_id = _validated_token(raw.get("dispatch_id"), "dispatch id", DISPATCH_ID_RE)
     packet_digest = str(raw.get("packet_sha256") or "").lower()
     request_digest = str(raw.get("request_sha256") or "").lower()
     approved_by = raw.get("approved_by")

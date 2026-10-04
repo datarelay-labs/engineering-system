@@ -87,6 +87,14 @@ class BoundaryAdminTests(unittest.TestCase):
             with self.assertRaisesRegex(m.BoundaryError,"policy"):
                 m.upgrade(Args(self.source))
             self.assertEqual(installed.read_bytes(),before)
+    def test_policy_ids_match_authorization_grammar(self):
+        base=json.loads(self.policy().read_text())
+        for field,bad in (("session_id","bad/session"),("dispatch_id","bad:dispatch"),("dispatch_id","bad dispatch")):
+            mutated=json.loads(json.dumps(base)); mutated["approvals"][0][field]=bad
+            path=Path(self.t.name)/f"bad-{field}-{len(bad)}.json"; path.write_text(json.dumps(mutated))
+            with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,field.replace("_"," ")):
+                m.install(Args(self.source,path))
+            self.assertFalse(self.etc.exists())
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:
