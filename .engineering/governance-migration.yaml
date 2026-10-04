@@ -1,17 +1,13 @@
 contract_version: 1
-base_sha: 603542dd9c24855a25c0c699c576f54663073cf4
-from_policy_epoch: 11
-to_policy_epoch: 12
+base_sha: a0505c2edf2504c9bb6b0097d039eef61318f2ce
+from_policy_epoch: 12
+to_policy_epoch: 13
 requires_exact_head_validate: true
 automation_eligible: false
 rationale: >-
-  Add deterministic cross-product change-closure enforcement so adopted repositories
-  can select non-local affected verification scenarios for public-surface parity and
-  derived-artifact integrity while preserving the existing release user-gate model.
+  Make targeted/affected validation the mandatory bug-fix convergence loop and defer
+  broad regression plus complete human-equivalent user-gate confirmation until affected
+  findings are clean, preserving exact-HEAD terminal release qualification.
 changed_surfaces:
   - path: tools/adopt.py
-    head_blob_sha: 051c460361f7e4ce43c51ea961df845384f1bc1e
-  - path: tools/check-adoption.py
-    head_blob_sha: 6a75d100c580fd01a8681acb8fb74759ac48ed1c
-  - path: tools/upgrade-adoption.py
-    head_blob_sha: a97111cfdd985d043f3733ef47334d622946690e
+    head_blob_sha: ddec628d5ff03a339a51a30988a414c22c48779c
