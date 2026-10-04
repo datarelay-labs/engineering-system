@@ -65,4 +65,13 @@ class ProductionSignerTests(unittest.TestCase):
    status=subprocess.check_output([str(m.GIT),"-C",str(repo),"status","--porcelain=v1","--untracked-files=all"],text=True).strip()
    self.assertEqual(status,"")
    with self.assertRaisesRegex(m.SignerError,"differs from approved HEAD"):m._verify_local_scope(a,root_provenance=False)
+ def test_root_only_scope_rejects_tracked_symlink(self):
+  with tempfile.TemporaryDirectory() as d:
+   repo=Path(d)/"repo";repo.mkdir();outside=Path(d)/"outside";outside.write_text("mutable\n")
+   subprocess.run([str(m.GIT),"init","-q",str(repo)],check=True)
+   (repo/"escape").symlink_to("../outside")
+   subprocess.run([str(m.GIT),"-C",str(repo),"add","escape"],check=True)
+   subprocess.run([str(m.GIT),"-C",str(repo),"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","symlink"],check=True)
+   head=subprocess.check_output([str(m.GIT),"-C",str(repo),"rev-parse","HEAD"],text=True).strip()
+   with self.assertRaisesRegex(m.SignerError,"tree entry unsupported"):m._verify_committed_tree(repo,head,root_provenance=False)
 if __name__=="__main__":unittest.main()

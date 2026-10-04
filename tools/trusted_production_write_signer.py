@@ -54,11 +54,6 @@ def _require_root_owned_checkout(root):
             cst=_secure_node(child)
             if not stat.S_ISREG(cst.st_mode): raise SignerError("production worktree Git metadata invalid")
 
-def _blob_sha1(raw):
-    h=hashlib.sha1()
-    h.update(f"blob {len(raw)}\0".encode("ascii"));h.update(raw)
-    return h.hexdigest()
-
 def _regular_blob_sha1(path):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
     try:
@@ -87,7 +82,7 @@ def _verify_committed_tree(root,subject_head,root_provenance=True):
         parts=rel.split("/")
         if not rel or any(part in {"",".",".."} for part in parts) or parts[0]==".git":
             raise SignerError("production worktree tree path invalid")
-        if kind!="blob" or mode not in {"100644","100755","120000"}:
+        if kind!="blob" or mode not in {"100644","100755"}:
             raise SignerError("production worktree tree entry unsupported")
         expected[rel]=(mode,oid)
         for i in range(1,len(parts)): expected_dirs.add("/".join(parts[:i]))
@@ -121,18 +116,13 @@ def _verify_committed_tree(root,subject_head,root_provenance=True):
     for rel,(mode,oid) in expected.items():
         path=root/rel;st=path.lstat()
         if root_provenance and st.st_uid!=0: raise SignerError("production worktree provenance invalid")
-        if mode=="120000":
-            if not stat.S_ISLNK(st.st_mode): raise SignerError("production worktree entry type mismatch")
-            content=os.fsencode(os.readlink(path))
-        else:
-            if root_provenance and st.st_mode & 0o022: raise SignerError("production worktree provenance invalid")
-            st,digest=_regular_blob_sha1(path)
-            if root_provenance and (st.st_uid!=0 or st.st_mode & 0o022): raise SignerError("production worktree provenance invalid")
-            executable=bool(st.st_mode & 0o111)
-            if executable!=(mode=="100755"): raise SignerError("production worktree executable mode mismatch")
-            if digest!=oid: raise SignerError("production worktree content differs from approved HEAD")
-            continue
-        if _blob_sha1(content)!=oid: raise SignerError("production worktree content differs from approved HEAD")
+        if stat.S_ISLNK(st.st_mode): raise SignerError("production worktree entry type mismatch")
+        if root_provenance and st.st_mode & 0o022: raise SignerError("production worktree provenance invalid")
+        st,digest=_regular_blob_sha1(path)
+        if root_provenance and (st.st_uid!=0 or st.st_mode & 0o022): raise SignerError("production worktree provenance invalid")
+        executable=bool(st.st_mode & 0o111)
+        if executable!=(mode=="100755"): raise SignerError("production worktree executable mode mismatch")
+        if digest!=oid: raise SignerError("production worktree content differs from approved HEAD")
 
 def _verify_local_scope(a,root_provenance=True):
     root=a.root
