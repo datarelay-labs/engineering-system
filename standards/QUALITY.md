@@ -25,11 +25,13 @@ Use the L0-L8 model defined in `TESTING.md`. Projects choose applicable levels b
 For BUGFIX work:
 1. reproduce the defect
 2. create or identify a regression that exposes it when practical
-3. implement the smallest correct fix
-4. prove the regression passes
-5. run affected tests
-6. retain the regression permanently
-7. update runbook/ADR only when the defect reveals an operational or architectural gap
+3. implement the smallest correct fix or coherent fix batch
+4. prove the focused regression passes
+5. run the cheapest affected/invalidated tests
+6. repeat steps 1-5 for remaining actionable findings without restarting an unrelated full suite
+7. widen to broad/full regression only after affected convergence is clean, or earlier when dependency/invalidation uncertainty or risk requires it
+8. retain the regression permanently
+9. update runbook/ADR only when the defect reveals an operational or architectural gap
 
 ## Flaky tests
 

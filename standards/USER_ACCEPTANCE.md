@@ -46,7 +46,7 @@ A run is invalid as user-gate evidence when it starts from a wrapper/scripted re
 
 A standalone request for one gate authorizes only that gate. Chaining Surface Reconciliation into state-changing Full User E2E requires either the current release-quality workflow/Work Packet to require the next gate or an explicit Full User E2E/release-qualification request.
 
-Managed adoption/upgrade MUST NOT infer these contract semantics merely from the existence of contract paths or from pre-existing boolean declarations. Writing compliance declarations for contract-first execution, complete rerun after remediation, or wrapper non-substitution requires an explicit review acknowledgement made only after both repository-local gate contracts have been inspected and updated as needed. The managed release profile records `contract_review_attestation_version: 1`; absence of that attestation means reviewed provenance is unknown and upgrades fail closed until review is acknowledged.
+Managed adoption/upgrade MUST NOT infer these contract semantics merely from the existence of contract paths or from pre-existing boolean declarations. Writing compliance declarations for contract-first execution, targeted affected convergence followed by complete confirmation rerun, or wrapper non-substitution requires an explicit review acknowledgement made only after both repository-local gate contracts have been inspected and updated as needed. `complete_rerun_after_remediation_required=true` means **after the remediation batch is targeted-clean**, not after every individual fix. The managed release profile records `contract_review_attestation_version: 1`; absence of that attestation means reviewed provenance is unknown and upgrades fail closed until review is acknowledged.
 
 ## Shared execution semantics
 
@@ -137,11 +137,13 @@ read the complete current canonical gate contract
  -> final gate report/readback and run offboarding
  -> bounded batched remediation
  -> new candidate when source/public surface/contract changes
- -> start a brand-new complete gate run with a new run identity
+ -> affected scenario/journey reruns until every frozen finding is targeted-clean
+ -> start one brand-new complete confirmation run with a new run identity
+ -> if new findings appear, return to affected convergence and then run one new complete confirmation
  -> repeat with no fixed pass ceiling until the latest complete run is clean
 ```
 
-Targeted/affected reruns after a fix are regression evidence only; they never replace the required new complete gate run. Stop only the dependent unsafe/impossible lane; continue independent lanes. Do not patch the product in the middle of a frozen discovery pass.
+Targeted/affected reruns after a fix are required regression evidence for the changed slice, but they never replace the final complete confirmation run. Conversely, the complete gate MUST NOT be restarted after every individual fix when untouched scenarios have no affected/invalidation relationship. Stop only the dependent unsafe/impossible lane; continue independent lanes. Do not patch the product in the middle of a frozen discovery pass.
 
 ## Product-quality closure and candidate freeze
 

@@ -24,7 +24,11 @@ Avoid speculative scope expansion, unrelated refactors mixed into fixes, duplica
 
 ## Bug fixes
 
-reproduce -> failing regression -> fix -> regression PASS -> affected suite PASS
+```text
+reproduce -> failing regression -> fix/coherent fix batch -> focused regression PASS -> affected suite PASS -> repeat on remaining findings
+```
+
+Keep this convergence loop on the changed/invalidated slice. Do not restart a broad/full regression after every individual fix. Widen early only when dependency/invalidation mapping is incomplete, the failure is cross-cutting, or risk requires broader evidence. Run the broad/full regression once the affected findings are locally clean and the work reaches its integration/qualification boundary.
 
 If deterministic reproduction is impractical, explain why and retain another durable form of evidence.
 

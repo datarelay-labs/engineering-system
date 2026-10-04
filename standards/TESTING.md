@@ -86,11 +86,17 @@ Do not tag a multi-hour full suite as `pr` merely because it is deterministic.
 
 ## Regression policy
 
-For a real bug:
+For a real bug, use a two-phase strategy:
 
 ```text
-reproduce FAIL -> retain/add regression -> fix -> regression PASS -> affected tests PASS
+CONVERGENCE
+reproduce FAIL -> retain/add regression -> fix/coherent batch -> focused regression PASS -> affected/invalidated tests PASS -> repeat until affected findings are clean
+
+CONFIRMATION
+affected convergence clean -> broad/full regression once at the integration/qualification boundary
 ```
+
+Do not restart a long full suite after every individual fix. Unchanged domains are not retested during convergence unless path/domain/invalidation evidence, shared-state coupling, uncertainty, or change risk says they may be affected. If affected mapping is incomplete or a failure is cross-cutting, widen conservatively.
 
 Do not start a long full suite while a known blocking deterministic regression remains unresolved.
 
@@ -158,7 +164,7 @@ fast release preflight
  -> post-release public smoke
 ```
 
-Before either user gate starts, read the repository-local canonical gate contract **in full** and bind the run to that contract; a wrapper/script/harness/CI-first substitute is invalid primary user evidence. Each discovery pass continues every safe independent scenario/journey after findings to maximize defect discovery. Freeze the complete finding set, finish the gate's final report/readback/offboarding, remediate it as one bounded batch, and then start a brand-new **complete** gate run with a new run identity. Targeted/affected reruns are regression evidence only. Repeat with no fixed pass ceiling until the latest complete run is clean. Project-specific release contracts may require additional clean repeat passes. Do not interleave each finding fix with remote CI.
+Before either user gate starts, read the repository-local canonical gate contract **in full** and bind the run to that contract; a wrapper/script/harness/CI-first substitute is invalid primary user evidence. Each discovery pass continues every safe independent scenario/journey after findings to maximize defect discovery. Freeze the complete finding set and finish the gate's final report/readback/offboarding. Then remediate the findings as one or more coherent bounded batches and use only the affected scenario/journey plus required invalidation/parity checks to prove each batch. Do **not** restart the complete gate after every individual fix or retest untouched journeys merely because source changed. Once every frozen actionable finding is targeted-clean and no affected validation exposes a new blocker, start one brand-new **complete confirmation run** with a new run identity. Targeted/affected reruns are regression evidence only and cannot themselves close the gate; the complete confirmation run proves that untouched areas did not regress. If that confirmation run discovers new findings, freeze that new set, return to targeted convergence, and then run one new complete confirmation again. Repeat with no fixed pass ceiling until the latest complete run is clean. Project-specific release contracts may require additional clean repeat passes. Do not interleave each finding fix with remote CI.
 
 **Surface Reconciliation** exhaustively maps current product capability -> public user surface/control -> real scenario. It is breadth-first and checks discoverability, visible controls/actions, state-specific surfaces, terminology, error/recovery guidance, persistence/effective state, destructive safety, and cleanup.
 
@@ -194,8 +200,8 @@ Run these when the change touches performance/resilience boundaries or at the re
 - development: affected L0-L5 only
 - PR: affected scenarios + cheap `pr` guardrails
 - optional nightly: broader deterministic/integration
-- release closure discovery: complete breadth-first Feature/Scenario run -> final report/offboard -> batched remediation -> brand-new complete rerun -> repeat until clean (no fixed pass ceiling)
-- release user validation: complete Full User E2E run -> final report/offboard -> batched remediation -> brand-new complete rerun -> repeat until clean (no fixed pass ceiling)
+- release closure discovery: complete breadth-first Feature/Scenario discovery -> final report/offboard -> targeted affected remediation/reruns until frozen findings are clean -> one brand-new complete confirmation run -> repeat by finding batch until clean
+- release user validation: complete Full User E2E discovery -> final report/offboard -> targeted affected journey remediation/reruns until frozen findings are clean -> one brand-new complete confirmation run -> repeat by finding batch until clean
 - release-specific qualification: upgrade/migration/platform/performance as applicable
 - final release candidate: one exact-head automated deterministic/platform CI qualification
 - integrity: artifact/hash/SBOM/provenance/manifest/attestation after final CI
