@@ -8,8 +8,28 @@ OPENSSL=Path("/usr/bin/openssl")
 KEY=Path("/etc/engineering-system/skills-trust-anchor.key")
 PUB=Path("/etc/engineering-system/skills-trust-anchor.pub")
 SKILLS=Path("/usr/lib/engineering-system/skills-contract.py")
+GIT=Path("/usr/bin/git")
 MAX_REQUEST=64*1024
 class SignerError(Exception):pass
+
+def _git(root,*args):
+    env={"PATH":"/usr/bin:/bin","LANG":"C","LC_ALL":"C","GIT_CONFIG_NOSYSTEM":"1","HOME":"/nonexistent","XDG_CONFIG_HOME":"/nonexistent"}
+    cp=subprocess.run([str(GIT),"-c",f"safe.directory={root}","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",*args],
+        cwd=root,env=env,check=False,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    if cp.returncode: raise SignerError("trusted production worktree identity check failed")
+    return cp.stdout.strip()
+
+def _verify_local_scope(a):
+    root=a.root
+    if not root.is_dir() or root.is_symlink(): raise SignerError("production worktree must be a real directory")
+    resolved=root.resolve()
+    top=Path(_git(root,"rev-parse","--show-toplevel")).resolve()
+    if top!=resolved: raise SignerError("production worktree root mismatch")
+    if _git(root,"rev-parse","HEAD").lower()!=str(a.subject_head).lower(): raise SignerError("production worktree subject_head mismatch")
+    suffix=a.repository
+    accepted={f"https://github.com/{suffix}",f"https://github.com/{suffix}.git",f"git@github.com:{suffix}",f"git@github.com:{suffix}.git",f"ssh://git@github.com/{suffix}",f"ssh://git@github.com/{suffix}.git"}
+    if _git(root,"remote","get-url","origin") not in accepted: raise SignerError("production worktree origin repository mismatch")
+    if _git(root,"status","--porcelain=v1","--untracked-files=all"): raise SignerError("production worktree is not clean")
 
 def _load():
     spec=importlib.util.spec_from_file_location("trusted_prod_skills",SKILLS)
@@ -44,6 +64,7 @@ def issue(a):
         if a.authority_permission not in {"write","maintain","admin"}: raise SignerError("trusted authority permission required")
     elif authority_basis == "production_approver_policy":
         if a.authority_permission != "production_approver": raise SignerError("trusted production approver authority required")
+        _verify_local_scope(a)
     else:
         raise SignerError("trusted authority basis required")
     raw=a.request_json.read_bytes()

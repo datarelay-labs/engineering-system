@@ -26,15 +26,32 @@ class ProductionSignerTests(unittest.TestCase):
      if Path(path)==m.KEY:return V(real,0o100600)
      if Path(path)==m.PUB:return V(real,0o100644)
      return real
-    with patch.object(m.os,"geteuid",return_value=0), patch.object(m.os,"stat",side_effect=fake_os_stat), patch.object(m,"_load") as load:
+    with patch.object(m.os,"geteuid",return_value=0), patch.object(m.os,"stat",side_effect=fake_os_stat), patch.object(m,"_load") as load, patch.object(m,"_verify_local_scope") as verify_local:
      real=importlib.util.spec_from_file_location("real_skills",ROOT/"tools"/"skills-contract.py")
      skills=importlib.util.module_from_spec(real);sys.modules[real.name]=skills;real.loader.exec_module(skills);load.return_value=skills
      self.assertEqual(m.issue(a),0)
      a.authority_basis="production_approver_policy";a.authority_permission="production_approver";a.binding_out=d/"b2";a.dispatch_out=d/"d2"
-     self.assertEqual(m.issue(a),0)
+     self.assertEqual(m.issue(a),0);verify_local.assert_called_once_with(a)
     binding=json.loads(bo.read_text());dispatch=json.loads(do.read_text());approver=json.loads((d/"b2").read_text())
     self.assertEqual(binding["profile"],"production_write");self.assertEqual(binding["authority_basis"],"collaborator_permission");self.assertEqual(dispatch["tool_id"],"shell.production_write")
     self.assertEqual(approver["authority_basis"],"production_approver_policy");self.assertEqual(approver["authority_permission"],"production_approver")
     self.assertEqual(dispatch["classes"],["destructive","external_read","network","production_write","shell"])
    finally:m.KEY,m.PUB,m.SKILLS=old
+ def test_root_only_scope_requires_exact_clean_repo_and_head(self):
+  with tempfile.TemporaryDirectory() as d:
+   repo=Path(d)/"repo";repo.mkdir()
+   subprocess.run([str(m.GIT),"init","-q",str(repo)],check=True)
+   (repo/"tracked.txt").write_text("approved\n")
+   subprocess.run([str(m.GIT),"-C",str(repo),"add","tracked.txt"],check=True)
+   subprocess.run([str(m.GIT),"-C",str(repo),"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","approved"],check=True)
+   head=subprocess.check_output([str(m.GIT),"-C",str(repo),"rev-parse","HEAD"],text=True).strip()
+   subprocess.run([str(m.GIT),"-C",str(repo),"remote","add","origin","https://github.com/datarelay-labs/engineering-system.git"],check=True)
+   a=A();a.root=repo;a.repository="datarelay-labs/engineering-system";a.subject_head=head
+   m._verify_local_scope(a)
+   a.subject_head="0"*40
+   with self.assertRaisesRegex(m.SignerError,"subject_head mismatch"):m._verify_local_scope(a)
+   a.subject_head=head;a.repository="datarelay-labs/other"
+   with self.assertRaisesRegex(m.SignerError,"origin repository mismatch"):m._verify_local_scope(a)
+   a.repository="datarelay-labs/engineering-system";(repo/"untracked.txt").write_text("worker-controlled\n")
+   with self.assertRaisesRegex(m.SignerError,"not clean"):m._verify_local_scope(a)
 if __name__=="__main__":unittest.main()
