@@ -103,6 +103,13 @@ class BoundaryAdminTests(unittest.TestCase):
         with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"dispatch id is duplicated"):
             m.install(Args(self.source,path))
         self.assertFalse(self.etc.exists())
+    def test_policy_branch_rejects_nul(self):
+        payload=json.loads(self.policy().read_text())
+        payload["approvals"][0]["branch"]="bad\x00branch"
+        path=Path(self.t.name)/"bad-branch.json"; path.write_text(json.dumps(payload))
+        with patch.object(m.os,"geteuid",return_value=0), self.assertRaisesRegex(m.BoundaryError,"branch"):
+            m.install(Args(self.source,path))
+        self.assertFalse(self.etc.exists())
     def test_verify_requires_policy_when_requested(self):
         p=self.patches()
         with p[0],p[1],p[2],p[3],p[4]:

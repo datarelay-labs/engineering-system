@@ -64,7 +64,7 @@ def _approval(raw: Any) -> dict[str, Any]:
         raise PolicyError("production approval workstream is invalid")
     if not isinstance(branch, str) or not branch or len(branch) > 240:
         raise PolicyError("production approval branch is invalid")
-    if any(ch in branch for ch in "\r\n"):
+    if any(ch in branch for ch in "\r\n\x00"):
         raise PolicyError("production approval branch is invalid")
     if SHA40_RE.fullmatch(subject_head) is None:
         raise PolicyError("production approval subject head is invalid")
