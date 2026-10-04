@@ -95,6 +95,8 @@ paths:
     domains: [workflows, adoption]
   "tools/test_affected_test_selection.py":
     domains: [workflows, adoption]
+  "tools/test_targeted_convergence_policy.py":
+    domains: [standards, templates, workflows, release-contract]
   ".github/workflows/governance-floor.yml":
     domains: [enforcement, workflows]
   "evals/context-optimization/**":
@@ -932,3 +934,21 @@ scenarios:
     invariants:
       - "provable duplicate native CI and unconditional expensive ordinary-PR release-gate commands fail closed"
     release_gate: false
+
+  - id: ENG-TARGETED-CONVERGENCE-001
+    cost: cheap
+    estimated_seconds: 1
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Targeted convergence before full confirmation policy
+    level: static
+    domains: [standards, templates, workflows, release-contract]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_targeted_convergence_policy.py"
+    invariants:
+      - "bug-fix convergence stays on changed/invalidated slices instead of restarting full regression after every fix"
+      - "Surface Reconciliation and Full User E2E use targeted remediation reruns followed by one complete confirmation run"
+      - "targeted evidence never replaces terminal complete release confirmation"
+    release_gate: true

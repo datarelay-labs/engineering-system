@@ -1406,7 +1406,8 @@ def main() -> int:
             raise SystemExit(
                 "FAIL --user-facing apply requires --user-gate-contracts-reviewed after explicitly reviewing "
                 "both repository-local user-gate contracts for contract-first execution, direct persona "
-                "ownership, wrapper/script non-substitution, and complete rerun-until-clean semantics"
+                "ownership, wrapper/script non-substitution, targeted affected convergence, and final "
+                "complete confirmation-rerun semantics"
             )
     elif args.primary_user_surface != "none":
         raise SystemExit("FAIL --primary-user-surface requires --user-facing")

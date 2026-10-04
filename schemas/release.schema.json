@@ -174,7 +174,8 @@
           "type": "boolean"
         },
         "complete_rerun_after_remediation_required": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Require one complete confirmation rerun after the remediation batch is targeted-clean; this does not require restarting the complete gate after each individual fix."
         },
         "wrapper_user_substitution_forbidden": {
           "type": "boolean"

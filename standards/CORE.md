@@ -36,11 +36,11 @@ Provider/model upgrades trigger an assumption review: remove or relax scaffoldin
 ## Solo-developer efficiency principles
 
 1. Use the cheapest deterministic check that can falsify correctness first.
-2. Run affected tests before broad suites.
-3. PR validation is fast/affected by default; full qualification is not a default PR gate.
+2. Run affected/targeted tests before broad suites, and keep the bug-fix convergence loop on the affected slice until it is clean.
+3. PR validation is fast/affected by default; full qualification is not a default PR gate and MUST NOT be restarted after every small fix.
 4. Do not run duplicate shared/native gates that prove the same invariant.
 5. A blocking deterministic failure stops downstream expensive qualification until fixed.
-6. Full lifecycle/platform/performance/operational E2E belongs at release-candidate boundaries unless a change specifically requires earlier execution.
+6. Full regression/lifecycle/platform/performance/operational E2E belongs at a meaningful integration or release-candidate confirmation boundary after affected convergence is clean, unless dependency/invalidation uncertainty or the change risk specifically requires earlier widening.
 7. Keep AI context small and high-signal; load only task-relevant standards/specifications.
 8. Use the minimum sufficient AI reasoning/context; do not request maximum reasoning by default. Escalate only when concrete evidence, a failed check, or an unresolved design question requires it.
 9. Do not spend coding-agent model time polling CI, review, deployment, or other machine-observable external waits. Persist state and hand waiting/re-entry to coordinator or automation.

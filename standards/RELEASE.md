@@ -12,13 +12,13 @@ Release closure is defect-discovery-first. Do not spend CI, packaging, SBOM, pro
 roadmap/function implementation complete enough for release closure
  -> fast release preflight
  -> Surface Reconciliation discovery pass (continue safe scenarios; collect all findings)
- -> bounded batched remediation
- -> rerun Surface Reconciliation from the beginning
- -> repeat until Surface Reconciliation is clean
+ -> bounded batched remediation + affected scenario/parity reruns until frozen findings are clean
+ -> one complete Surface Reconciliation confirmation run
+ -> repeat by finding batch until Surface Reconciliation is clean
  -> Full User E2E discovery pass (continue safe journeys; collect all findings)
- -> bounded batched remediation
- -> rerun Full User E2E from the beginning
- -> repeat until Full User E2E is clean
+ -> bounded batched remediation + affected journey reruns until frozen findings are clean
+ -> one complete Full User E2E confirmation run
+ -> repeat by finding batch until Full User E2E is clean
  -> rerun Surface Reconciliation when E2E remediation changed the public surface/contract
  -> require both user gates PASS on the same exact HEAD
  -> PRODUCT_QUALITY_CLOSURE=PASS
@@ -40,9 +40,9 @@ For products whose public surface is not a CLI, `Feature/Scenario` means the equ
 
 Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for ChatGPT's primary persona-led public-surface execution.
 
-Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set, perform its mandatory final report/readback/offboarding, and then perform one batched remediation rather than alternating one fix with one remote CI run.
+Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set, perform its mandatory final report/readback/offboarding, and then remediate in coherent batches rather than alternating one fix with one remote CI run.
 
-Any product/harness/public-surface/contract source change during remediation creates a new candidate. Targeted/affected reruns may prove the fix, but they never close the user gate. Start a brand-new **complete** gate run with a new run identity and repeat with no fixed pass ceiling until the latest complete run is clean with zero mandatory FAIL/PARTIAL/BLOCKED findings and zero unresolved actionable findings. If Full User E2E remediation changes the public surface or its contract, Surface Reconciliation must be rerun too.
+During remediation, prove each batch with the smallest affected scenario/journey, deterministic regression, and required invalidation/parity checks. Do **not** restart the complete user gate after every individual fix or rerun untouched journeys without an affected/invalidation reason. Any product/harness/public-surface/contract source change still creates a new candidate, so targeted evidence cannot close the gate. After all frozen findings are targeted-clean, start exactly one brand-new **complete confirmation run** with a new run identity. If it is clean, the gate may close; if it finds new issues, freeze the new set, return to targeted convergence, and run one complete confirmation again. Repeat with no fixed pass ceiling until the latest complete run has zero mandatory FAIL/PARTIAL/BLOCKED findings and zero unresolved actionable findings. If Full User E2E remediation changes the public surface or its contract, Surface Reconciliation must receive affected surface-delta validation immediately and a complete confirmation rerun before product-quality closure.
 
 A project may require additional clean repeat passes (for example DRLink's release-specific double-pass rule), but the portable minimum is convergence of both gates to clean PASS on one unchanged exact HEAD before candidate freeze.
 

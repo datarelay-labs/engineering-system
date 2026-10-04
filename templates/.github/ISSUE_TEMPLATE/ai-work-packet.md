@@ -80,6 +80,8 @@ Record meaningful out-of-scope findings as linked Issues/Work Packets. Do not si
 ```text
 HEAD=UNKNOWN
 TARGETED_TESTS=NOT_RUN
+AFFECTED_CONVERGENCE=NOT_RUN
+FULL_CONFIRMATION=NOT_RUN
 CI=NOT_RUN
 ```
 
