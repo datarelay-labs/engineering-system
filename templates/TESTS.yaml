@@ -7,6 +7,11 @@ paths:
   "src/**":
     domains:
       - core
+    # Optional direct closure edges for non-local dependencies. Target
+    # scenarios must declare the "affected" trigger.
+    # invalidates:
+    #   - PUBLIC-SURFACE-PARITY-001
+    #   - ARTIFACT-INTEGRITY-001
 
 scenarios:
   - id: CORE-UNIT-001

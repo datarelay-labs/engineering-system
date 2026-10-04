@@ -2011,11 +2011,16 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "context_epoch.py"
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        affected_selector = target / "tools" / "affected_test_selection.py"
+        assert affected_selector.read_bytes() == (
+            ROOT / "tools" / "affected_test_selection.py"
+        ).read_bytes()
         notifier = target / "tools" / "terminal_completion_notify.py"
         assert notifier.read_bytes() == (
             ROOT / "tools" / "terminal_completion_notify.py"
         ).read_bytes()
         helper.unlink()
+        affected_selector.unlink()
         notifier.unlink()
         compliance = run(
             sys.executable,
@@ -2026,6 +2031,10 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert compliance.returncode != 0
         assert "managed-profile adoption missing required helper tools/context_epoch.py" in compliance.stdout
+        assert (
+            "managed adoption missing required file: tools/affected_test_selection.py"
+            in compliance.stdout
+        )
         assert (
             "managed-profile adoption missing required helper tools/terminal_completion_notify.py"
             in compliance.stdout
@@ -2050,10 +2059,17 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
         assert (
+            "AFFECTED_TEST_SELECTION_INSTALLED=tools/affected_test_selection.py"
+            in upgraded.stdout
+        )
+        assert (
             "TERMINAL_COMPLETION_NOTIFY_INSTALLED=tools/terminal_completion_notify.py"
             in upgraded.stdout
         )
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert affected_selector.read_bytes() == (
+            ROOT / "tools" / "affected_test_selection.py"
+        ).read_bytes()
         assert notifier.read_bytes() == (
             ROOT / "tools" / "terminal_completion_notify.py"
         ).read_bytes()

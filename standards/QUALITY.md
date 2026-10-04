@@ -117,6 +117,9 @@ Higher agent throughput must not be allowed to multiply local inconsistencies.
 
 For repositories with meaningful architectural boundaries:
 - encode important layering/dependency/public-boundary invariants as deterministic checks when practical;
+- when one public contract has multiple representations, prefer one explicit authority plus generation or deterministic parity checks instead of independently maintained copies;
+- model non-local derived-state dependencies with direct affected-test invalidation edges when domain mapping alone cannot guarantee closure;
+- for user-facing changes, run a bounded Surface Delta Reconciliation during development/PR so ordinary discoverability/workflow drift is found close to the introducing change rather than first at release;
 - prefer existing canonical abstractions over near-duplicate helpers/frameworks;
 - treat repeated exceptions, duplicated patterns, boundary violations, and stale compatibility shims as quality debt;
 - periodically convert accumulated drift into small, targeted cleanup Work Packets/PRs rather than mixing broad cleanup into feature work;

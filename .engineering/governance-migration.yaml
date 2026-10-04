@@ -1,16 +1,17 @@
 contract_version: 1
-base_sha: 298ea8bd937cc1d5c84837ec30e6cd24fb8d93ce
-from_policy_epoch: 10
-to_policy_epoch: 11
+base_sha: 603542dd9c24855a25c0c699c576f54663073cf4
+from_policy_epoch: 11
+to_policy_epoch: 12
 requires_exact_head_validate: true
 automation_eligible: false
 rationale: >-
-  Retire the alternate managed reviewer path so the selected ChatGPT Chat runtime
-  performs implementation and terminal audit/review directly without waiting on
-  an alternate reviewer provider, and propagate the new policy epoch through
-  managed adoption.
+  Add deterministic cross-product change-closure enforcement so adopted repositories
+  can select non-local affected verification scenarios for public-surface parity and
+  derived-artifact integrity while preserving the existing release user-gate model.
 changed_surfaces:
-  - path: .engineering/execution-profile.yaml
-    head_blob_sha: 96487f4783bff392d6ec2d9ae6b92cd1242bdf49
   - path: tools/adopt.py
-    head_blob_sha: a0cc4743266fa4b22db43baffaedc3ce26f568ef
+    head_blob_sha: 051c460361f7e4ce43c51ea961df845384f1bc1e
+  - path: tools/check-adoption.py
+    head_blob_sha: 6a75d100c580fd01a8681acb8fb74759ac48ed1c
+  - path: tools/upgrade-adoption.py
+    head_blob_sha: a97111cfdd985d043f3733ef47334d622946690e

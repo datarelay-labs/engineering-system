@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from affected_test_selection import SelectionError, analyze_impact
+
 COST_RANK = {"cheap": 0, "medium": 1, "expensive": 2}
 LEVEL_COST = {
     "static": "cheap",
@@ -178,7 +180,12 @@ def is_metadata_only(files: list[str]) -> bool:
     return bool(files) and all(path in METADATA_PATHS for path in files)
 
 
-def select_scenario(data: dict, domains: set[str], scenario_id: str) -> dict | None:
+def select_scenario(
+    data: dict,
+    domains: set[str],
+    invalidated: set[str],
+    scenario_id: str,
+) -> dict | None:
     scenarios = [item or {} for item in data.get("scenarios") or []]
     if scenario_id:
         for item in scenarios:
@@ -190,8 +197,9 @@ def select_scenario(data: dict, domains: set[str], scenario_id: str) -> dict | N
     for item in scenarios:
         if item.get("agent_default") is False:
             continue
+        sid = str(item.get("id") or "")
         item_domains = {str(value) for value in item.get("domains") or []}
-        if domains and item_domains and not (domains & item_domains):
+        if sid not in invalidated and domains and item_domains and not (domains & item_domains):
             continue
         cost = scenario_cost(item)
         estimate = int(item.get("estimated_seconds") or 10**9)
@@ -219,7 +227,12 @@ def main() -> int:
     base = resolve_base(root, args.base)
     files = changed_files(root, base)
     domains = affected_domains(data, files)
-    scenario = select_scenario(data, domains, args.scenario)
+    try:
+        impact = analyze_impact(data, files)
+    except SelectionError as exc:
+        fail_selection(str(exc))
+    invalidated = set(impact.invalidated_scenarios)
+    scenario = select_scenario(data, domains, invalidated, args.scenario)
     if not scenario:
         print("TEST_SELECTION=NONE")
         return 0
@@ -232,6 +245,10 @@ def main() -> int:
 
     print(f"TEST_BASE={base or '<none>'}")
     print("TEST_DOMAINS=" + (",".join(sorted(domains)) if domains else "<none>"))
+    print(
+        "TEST_DIRECT_INVALIDATIONS="
+        + (",".join(sorted(invalidated)) if invalidated else "<none>")
+    )
     print(f"TEST_SELECTED={sid}")
     print(f"TEST_COST={cost}")
     print(f"TEST_SCOPE={scenario.get('scope') or scenario.get('level') or '<unknown>'}")
