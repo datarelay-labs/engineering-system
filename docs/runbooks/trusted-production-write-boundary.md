@@ -6,10 +6,10 @@ This boundary is installed and operated by a human/root administrator. Coding ru
 
 The production coordinator supports two distinct authority bases.
 
-1. **Authenticated collaborator mode** — preferred when a normal operator account invokes the coordinator through `sudo`. The coordinator binds `/usr/bin/gh` authentication to the real `SUDO_UID` user and requires current GitHub `write`, `maintain`, or `admin` permission.
-2. **Root-only production approver mode** — for production hosts intentionally operated through direct root access and without GitHub credentials. This mode is production-write-only. It requires a separately installed root-owned approver policy plus public GitHub evidence for an owner-authored Work Packet and exact public repository/branch/commit state. It does not grant repository implementation or ordinary GitHub mutation authority.
+1. **Authenticated collaborator mode** — a normal operator invokes the coordinator through `sudo`; fixed `/usr/bin/gh` proves current `write`, `maintain`, or `admin` permission.
+2. **Root-only production approver mode** — for production hosts intentionally operated through direct root access without GitHub credentials. This mode is limited to `production_write` + `shell.production_write`. It requires a separately installed root-owned exact approval record.
 
-Never fake `SUDO_UID`, call the signer directly, copy a GitHub token to production merely to satisfy this boundary, or represent the production approver basis as collaborator permission.
+Never fake `SUDO_UID`, invoke the signer directly, or copy a GitHub token to production merely to satisfy this boundary.
 
 ## Install
 
@@ -18,50 +18,50 @@ Use a clean immutable checkout of the intended Engineering System baseline and r
     sudo python3 tools/trusted_boundary_admin.py install --source "$PWD"
     sudo python3 tools/trusted_boundary_admin.py verify
 
-The bootstrap creates fixed root-owned paths under `/etc/engineering-system` and `/usr/lib/engineering-system`, an Ed25519 private key mode `0600`, public anchor mode `0644`, and replay-state directory mode `0700`. The private key is never printed.
+The bootstrap creates fixed root-owned paths under `/etc/engineering-system` and `/usr/lib/engineering-system`, an Ed25519 private key mode `0600`, public anchor mode `0644`, and replay-state directory mode `0700`.
 
-### Root-only production approver policy
+## Root-only exact production approval
 
-For a root-only production host, a human/root administrator prepares a non-secret policy file outside worker-writable repositories:
+A root-only production approval is not a repository-wide allowlist. Every record binds one exact effect:
 
 ```json
 {
   "schema_version": 1,
   "kind": "trusted_production_approver_policy",
-  "repositories": {
-    "datarelay-labs/datarelay-atlas": ["RickLee-kr"]
-  }
+  "approvals": [
+    {
+      "repository": "datarelay-labs/datarelay-atlas",
+      "issue_id": 307,
+      "workstream": "prod-web-recovery-rollout-7e9ff06",
+      "branch": "ops/prod-web-recovery-rollout-7e9ff06",
+      "subject_head": "<40-char candidate SHA>",
+      "intent_revision": 1,
+      "session_id": "rollout-307-stage",
+      "dispatch_id": "rollout-307-stage",
+      "packet_sha256": "<sha256 of the exact current Work Packet body>",
+      "request_sha256": "<canonical sha256 of the exact production request JSON>",
+      "approved_by": "RickLee-kr"
+    }
+  ]
 }
 ```
 
-Install it together with a new boundary, or during a boundary tool upgrade:
-
-    sudo python3 tools/trusted_boundary_admin.py install \
-      --source "$PWD" \
-      --production-approver-policy /root/production-approvers.json
-
-The installed policy is `/etc/engineering-system/production-approvers.json`, root-owned mode `0600`. It is an explicit host-admin authorization allowlist, not a GitHub credential and not a repository permission cache.
+The policy is installed as `/etc/engineering-system/production-approvers.json`, root-owned mode `0600`. The security boundary is the root-admin installation plus the exact packet/request/session/dispatch binding; the mutable Issue creator field is not production authority.
 
 ## Upgrade an existing boundary
 
-Do not remove or rotate an existing trust anchor merely to update trusted boundary code. From a clean immutable checkout of the newly qualified Engineering System baseline:
+Do not rotate an existing trust anchor merely to update trusted boundary code:
 
     sudo python3 tools/trusted_boundary_admin.py upgrade \
       --source "$PWD" \
       --production-approver-policy /root/production-approvers.json
 
-`upgrade` preserves the existing private/public trust anchor and replay-state directory, verifies their provenance first, atomically replaces the installed trusted tools/import modules, and installs/replaces the canonicalized approver policy when supplied.
+`upgrade` validates and canonicalizes the policy before any mutation, preserves the existing private/public trust anchor and replay-state directory, and atomically replaces trusted tools/import modules.
 
-Then require the policy explicitly:
+Then verify:
 
     sudo python3 tools/trusted_boundary_admin.py verify \
       --require-production-approvers
-
-## Verify
-
-    sudo python3 tools/trusted_boundary_admin.py verify
-
-Verification performs no production mutation. When `--require-production-approvers` is used it also requires a valid root-owned `0600` approver policy.
 
 ## Production assertion issuance
 
@@ -69,30 +69,25 @@ A production Work Packet must be open `[AI Work]`, `ACTIVE`, `HIGH`/`CRITICAL`, 
 
 ### Authenticated collaborator mode
 
-When invoked as root through `sudo` from a normal operator account, the coordinator authenticates the Issue, collaborator permission, branch HEAD, subject profile, and immutable Engineering System execution-profile bytes through fixed `/usr/bin/gh`. Current `write`/`maintain`/`admin` permission is required.
+The coordinator authenticates the Issue, collaborator permission, branch HEAD, subject profile, and immutable Engineering System execution-profile bytes through fixed `/usr/bin/gh`. Current `write`/`maintain`/`admin` permission is required.
 
-### Root-only production approver mode
+### Root-only mode
 
-When the coordinator is invoked directly as root with no non-root `SUDO_UID`, it does not use or accept caller GitHub credentials. It:
+The coordinator:
 
-- requires `/etc/engineering-system/production-approvers.json` with root ownership, mode `0600`, and secure parent provenance;
+- requires the root-owned mode-`0600` exact approval policy;
 - requires the target repository to be public;
-- reads only fixed `https://api.github.com` repository/Issue/commit/content endpoints with the standard-library HTTPS client, bounded response sizes, no arbitrary caller URL, and no redirect-following behavior;
-- trusts only the root-owned, non-group/world-writable `/etc/ssl/certs/ca-certificates.crt` bundle and ignores caller `SSL_CERT_FILE` / `SSL_CERT_DIR` overrides;
-- requires the Work Packet author login to be allowlisted for that exact repository;
+- reads only fixed `https://api.github.com` repository/Issue/commit/content endpoints with bounded responses;
+- builds TLS trust only from root-owned, non-group/world-writable `/etc/ssl/certs/ca-certificates.crt` and ignores caller trust-store environment overrides;
+- hashes the current Work Packet body and exact request JSON and requires an exact policy match including session and dispatch IDs;
 - requires exact Work Packet repository/workstream/branch/HEAD/intent/risk/profile binding;
-- requires the named branch to resolve to the exact `LAST_VERIFIED_HEAD`;
-- requires that exact commit to exist in the public repository;
+- requires the named branch to resolve to the exact subject HEAD and that commit to exist;
 - revalidates target/canonical execution-profile bytes at the exact subject/baseline revisions;
-- asks the fixed production signer to mint `authority_basis=production_approver_policy` with `authority_permission=production_approver`.
+- mints a signed `authority_basis=production_approver_policy` / `authority_permission=production_approver` binding only after every check passes.
 
-Any missing policy, provenance defect, public GitHub failure/rate limit, malformed response, private repository, wrong author, stale packet, branch/HEAD mismatch, subject commit mismatch, or execution-profile mismatch fails closed before signing.
+A changed packet, request, session, dispatch, branch, HEAD, profile, policy, or public GitHub result fails closed before signing. Pinning `dispatch_id` makes the exact approval one-shot in combination with the existing replay-state consume contract.
 
-The request JSON describes the exact opaque production effect. The coordinator/signer do not execute that effect. The resulting assertion is bound to the canonical request hash and is consumed once by `skills-contract.py authorize`.
-
-Use `/usr/lib/engineering-system/trusted-production-write-coordinator` with the exact repository, Work Packet issue, worktree, request JSON, workstream, branch, subject HEAD, intent revision, session/dispatch IDs and private output paths. Keep TTL short.
-
-Before the production effect itself, require:
+The coordinator/signer do not execute the production effect. Before execution require:
 
     sudo /usr/bin/python3 /usr/lib/engineering-system/skills-contract.py authorize \
       --root <exact-production-worktree> \
@@ -100,16 +95,16 @@ Before the production effect itself, require:
       --dispatch-assertion <dispatch.json> \
       --request-json <exact-request.json>
 
-Proceed only on `ALLOW`. A replayed dispatch is rejected.
+Proceed only on `ALLOW`.
 
 ## Remove / rollback
 
-Removal destroys the host trust anchor, replay state, and installed approver policy, so it is an explicit root-admin action:
+Removal destroys the host trust anchor, replay state, and installed approval policy:
 
     sudo python3 tools/trusted_boundary_admin.py remove
 
-After removal all trusted high-risk authorization fails closed as `BOUNDARY_UNAVAILABLE`.
+After removal all trusted high-risk authorization fails closed.
 
 ## Atlas continuation
 
-After this boundary is installed/upgraded and independently verified on the required host, resume the current DataRelay Atlas production Work Packet. Obtain a fresh exact-effect production assertion; do not reuse an old dispatch or bypass the boundary with direct deployment.
+After this boundary is merged, installed/upgraded, and independently verified on the required host, resume the current DataRelay Atlas production Work Packet. Generate fresh exact approval records for the approved production effects; do not reuse an old dispatch or bypass the boundary.

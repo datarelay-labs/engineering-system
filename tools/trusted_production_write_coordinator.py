@@ -11,12 +11,19 @@ import pwd
 import ssl
 import stat
 import subprocess
+import tempfile
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
 import trusted_external_write_coordinator as ext
-from production_approver_policy import PolicyError, load_policy_bytes
+from production_approver_policy import (
+    PolicyError,
+    canonical_json_sha256,
+    find_exact_approval,
+    load_policy_bytes,
+    packet_sha256,
+)
 
 SIGNER = Path("/usr/lib/engineering-system/trusted-production-write-signer")
 APPROVERS = Path("/etc/engineering-system/production-approvers.json")
@@ -45,7 +52,7 @@ def _direct_root_without_operator() -> bool:
     return entry.pw_uid == 0 or Path(entry.pw_dir) == Path("/root")
 
 
-def _load_approver_policy() -> dict[str, frozenset[str]]:
+def _load_approver_policy() -> tuple[dict[str, Any], ...]:
     try:
         st = APPROVERS.lstat()
         parent = APPROVERS.parent.lstat()
@@ -220,6 +227,7 @@ def _validate_packet(
     *,
     branch_head: str,
     execution_profile: dict[str, Any],
+    authority_login: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     if (
         not isinstance(issue, dict)
@@ -229,10 +237,15 @@ def _validate_packet(
     ):
         raise Error("active Work Packet unavailable")
     body = issue.get("body")
-    user = issue.get("user")
-    if not isinstance(body, str) or not isinstance(user, dict):
+    if not isinstance(body, str):
         raise Error("Work Packet authority unavailable")
-    login = str(user.get("login") or "")
+    if authority_login is None:
+        user = issue.get("user")
+        if not isinstance(user, dict):
+            raise Error("Work Packet authority unavailable")
+        login = str(user.get("login") or "")
+    else:
+        login = authority_login
     fields = ext._fields(body)
     required = {
         "TARGET_REPO": a.repository,
@@ -255,6 +268,19 @@ def _validate_packet(
             "Work Packet execution profile is not authorized: " + profile_blocking[0]
         )
     return login, fields
+
+
+def _snapshot_request(payload: dict[str, Any]) -> tuple[Path, Path]:
+    directory = Path(tempfile.mkdtemp(prefix="engineering-production-request-", dir="/tmp"))
+    path = directory / "request.json"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        raw = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        os.write(fd, raw)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return directory, path
 
 
 def _invoke_signer(
@@ -351,13 +377,34 @@ def _authorize_root_public(a: argparse.Namespace) -> int:
     ):
         raise Error("root-only fallback requires a public repository")
     issue = _public_json(f"/repos/{a.repository}/issues/{a.issue_id}")
-    if not isinstance(issue, dict):
+    if not isinstance(issue, dict) or not isinstance(issue.get("body"), str):
         raise Error("active Work Packet unavailable")
-    user = issue.get("user")
-    login = str(user.get("login") or "") if isinstance(user, dict) else ""
-    if login not in policy.get(a.repository, frozenset()):
-        raise Error("Work Packet author is not allowlisted by production approver policy")
-    fields = ext._fields(str(issue.get("body") or ""))
+    try:
+        request_raw = a.request_json.read_bytes()
+        if not request_raw or len(request_raw) > 64 * 1024:
+            raise Error("production request size is invalid")
+        request_payload = json.loads(request_raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Error("production request is invalid") from exc
+    if not isinstance(request_payload, dict):
+        raise Error("production request must be an object")
+    approval = find_exact_approval(
+        policy,
+        repository=a.repository,
+        issue_id=int(a.issue_id),
+        workstream=a.workstream,
+        branch=a.branch,
+        subject_head=a.subject_head,
+        intent_revision=a.intent_revision,
+        session_id=a.session_id,
+        dispatch_id=a.dispatch_id,
+        packet_digest=packet_sha256(issue["body"]),
+        request_digest=canonical_json_sha256(request_payload),
+    )
+    if approval is None:
+        raise Error("exact root-admin production approval is unavailable")
+    approved_by = str(approval["approved_by"])
+    fields = ext._fields(issue["body"])
     if fields.get("CHANGE_RISK") not in {"HIGH", "CRITICAL"}:
         raise Error("production write requires HIGH or CRITICAL risk")
     branch_ref = urllib.parse.quote(a.branch, safe="")
@@ -379,7 +426,11 @@ def _authorize_root_public(a: argparse.Namespace) -> int:
         raise Error("authoritative subject commit is unavailable")
     profile = _public_execution_profile(a.repository, a.subject_head)
     login, _ = _validate_packet(
-        a, issue, branch_head=branch_head, execution_profile=profile
+        a,
+        issue,
+        branch_head=branch_head,
+        execution_profile=profile,
+        authority_login=approved_by,
     )
     signer = ext._exec_path(SIGNER, None)
     _invoke_signer(

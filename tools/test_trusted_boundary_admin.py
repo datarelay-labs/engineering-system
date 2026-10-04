@@ -23,7 +23,8 @@ class BoundaryAdminTests(unittest.TestCase):
     def restore(self): m.ETC,m.LIB,m.KEY,m.PUB,m.REPLAY,m.APPROVERS=self.old
     def policy(self):
         path=Path(self.t.name)/"approvers.json"
-        path.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","repositories":{"datarelay-labs/datarelay-atlas":["RickLee-kr"]}}))
+        approval={"repository":"datarelay-labs/datarelay-atlas","issue_id":307,"workstream":"prod-web-recovery-rollout-7e9ff06","branch":"ops/prod-web-recovery-rollout-7e9ff06","subject_head":"a"*40,"intent_revision":1,"session_id":"rollout-307","dispatch_id":"rollout-307-stage","packet_sha256":"b"*64,"request_sha256":"c"*64,"approved_by":"RickLee-kr"}
+        path.write_text(json.dumps({"schema_version":1,"kind":"trusted_production_approver_policy","approvals":[approval]}))
         return path
     def fake_run(self,cmd,**kw):
         if "genpkey" in cmd: m.KEY.write_text("private")
@@ -59,7 +60,7 @@ class BoundaryAdminTests(unittest.TestCase):
             m.upgrade(Args(self.source,self.policy(),True))
             self.assertEqual(m.KEY.read_bytes(),key_before); self.assertEqual(m.PUB.read_bytes(),pub_before)
             self.assertTrue(m.APPROVERS.is_file()); self.assertEqual(m.APPROVERS.stat().st_mode&0o777,0o600)
-            payload=json.loads(m.APPROVERS.read_text()); self.assertEqual(payload["repositories"]["datarelay-labs/datarelay-atlas"],["RickLee-kr"])
+            payload=json.loads(m.APPROVERS.read_text()); self.assertEqual(payload["approvals"][0]["approved_by"],"RickLee-kr"); self.assertEqual(payload["approvals"][0]["dispatch_id"],"rollout-307-stage")
             self.assertIn("upgraded",(m.LIB/"trusted-production-write-coordinator").read_text())
             m.verify(Args(require=True))
     def test_invalid_policy_fails_before_install_or_upgrade_mutation(self):
