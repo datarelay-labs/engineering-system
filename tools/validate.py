@@ -108,6 +108,7 @@ REQUIRED_METHOD_FILES = (
     "tools/test_trusted_external_write_coordinator.py",
     "tools/trusted_boundary_admin.py",
     "tools/test_trusted_boundary_admin.py",
+    "tools/production_approver_policy.py",
     "tools/trusted_production_write_signer.py",
     "tools/test_trusted_production_write_signer.py",
     "tools/trusted_production_write_coordinator.py",

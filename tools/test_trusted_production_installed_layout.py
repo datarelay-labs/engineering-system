@@ -14,6 +14,7 @@ class InstalledLayoutTests(unittest.TestCase):
             shutil.copy2(ROOT/"tools"/"execution_profile.py", installed/"execution_profile.py")
             shutil.copy2(ROOT/"tools"/"skills-contract.py", installed/"skills-contract.py")
             shutil.copy2(ROOT/"tools"/"work_packet_authority.py", installed/"work_packet_authority.py")
+            shutil.copy2(ROOT/"tools"/"production_approver_policy.py", installed/"production_approver_policy.py")
             shutil.copy2(ROOT/"tools"/"trusted_production_write_signer.py", installed/"trusted-production-write-signer")
             env={"PATH":"/usr/bin:/bin","PYTHONPATH":""}
             for tool in ("skills-contract.py","trusted-external-write-coordinator","trusted-production-write-coordinator","trusted-production-write-signer"):

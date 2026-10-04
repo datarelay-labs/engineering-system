@@ -932,6 +932,60 @@ def test_dispatch_reservation_is_effect_bound() -> None:
         contract._TEST_DISPATCH_RESERVATIONS = None
 
 
+def test_production_approver_policy_is_separate_trusted_authority_basis() -> None:
+    digest = contract.policy_digest(contract.DEFAULT_PROFILES)
+    binding = contract.bind_session(
+        profile="production_write",
+        authority_permission="production_approver",
+        authority_basis="production_approver_policy",
+        policy_digest_value=digest,
+        approved_classes=["external_write", "production_write", "destructive"],
+        public_key_sha256="a" * 64,
+    )
+    assert binding.authority_basis == "production_approver_policy"
+    assert binding.authority_permission == "production_approver"
+    decision = contract.evaluate_action(
+        binding,
+        contract.action_request_for_tool("shell.production_write"),
+        expected_digest=digest,
+    )
+    assert decision.allowed is True
+    denied_repo_write = contract.evaluate_action(
+        binding,
+        contract.action_request_for_tool("repo.write"),
+        expected_digest=digest,
+    )
+    assert denied_repo_write.allowed is False
+    assert denied_repo_write.reason == "AUTHORITY_UNTRUSTED"
+    for profile, permission in (("production_write", "admin"), ("repo_write", "production_approver")):
+        try:
+            contract.bind_session(
+                profile=profile,
+                authority_permission=permission,
+                authority_basis="production_approver_policy",
+                policy_digest_value=digest,
+                approved_classes=["production_write"],
+                public_key_sha256="a" * 64,
+            )
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("production approver policy escaped its production-only authority")
+    try:
+        contract.bind_session(
+            profile="production_write",
+            authority_permission="admin",
+            authority_basis="production_approver_policy",
+            policy_digest_value=digest,
+            approved_classes=["production_write"],
+            public_key_sha256="a" * 64,
+        )
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("production approver policy accepted collaborator permission")
+
+
 def main() -> int:
     test_production_cli_is_verification_only()
     test_authorize_without_host_trust_anchor_is_boundary_unavailable()
@@ -951,6 +1005,7 @@ def main() -> int:
     test_unsupported_platform_authorize_is_boundary_unavailable()
     test_repo_policy_cannot_broaden()
     test_dispatch_reservation_is_effect_bound()
+    test_production_approver_policy_is_separate_trusted_authority_basis()
     print("SKILLS_CONTRACT_TESTS=PASS")
     return 0
 
