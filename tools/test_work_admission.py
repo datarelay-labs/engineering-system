@@ -489,7 +489,9 @@ def test_source_does_not_mutate_sessions() -> None:
 def eligible_facts() -> dict:
     from test_context_epoch import packet
     return {"body": packet(), "expected_target_repo": "datarelay-labs/engineering-system",
-            "profile_root": str(ROOT), "issue_state": "OPEN",
+            "profile_root": str(ROOT), "observed_worktree": str(ROOT),
+            "observed_branch": "feat/context-epoch-packet-projection", "observed_head": "a" * 40,
+            "issue_state": "OPEN",
             "dependencies_ready": True, "waiting_for": []}
 
 
@@ -498,6 +500,9 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
     assert evaluate_eligible(facts)["DECISION"] == "ALLOW"
     mutations = [
         {"issue_state": "CLOSED"},
+        {"observed_branch": "another-branch"},
+        {"observed_head": "b" * 40},
+        {"observed_worktree": str(ROOT.parent / "another-worktree")},
         {"dependencies_ready": False},
         {"waiting_for": ["exact-head CI"]},
         {"expected_target_repo": "datarelay-labs/datarelay-link"},
@@ -510,6 +515,17 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
         mutations.append({"body": facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE\nQUEUE_STATE=" + state, 1)})
     for change in mutations:
         assert evaluate_eligible({**facts, **change})["DECISION"] == "DENY", change
+    incomplete = dict(facts)
+    del incomplete["observed_head"]
+    code, result = run_cli("eligible", incomplete)
+    assert code == 3 and result["DECISION"] == "DENY"
+    for field, value, expected in (
+        ("observed_head", "b" * 40, "STALE_HEAD"),
+        ("observed_branch", "another-branch", "BRANCH_MISMATCH"),
+        ("observed_worktree", str(ROOT.parent / "another-worktree"), "WORKTREE_MISMATCH"),
+    ):
+        code, result = run_cli("eligible", {**facts, field: value})
+        assert code == 2 and result["DENY_CLASS"] == expected
     # A CI-waiting lane must not serialize independent ready work.
     reports = [evaluate_eligible({**facts, "waiting_for": ["CI"]}), evaluate_eligible(facts)]
     assert [r["DECISION"] for r in reports] == ["DENY", "ALLOW"]

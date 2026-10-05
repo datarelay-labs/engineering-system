@@ -99,6 +99,25 @@ def test_paused_worker_is_not_resumed_by_ci_reconciliation_override() -> None:
     assert result["coordinator_decision"] == "NOOP_PAUSED"
 
 
+def test_paused_watch_without_pr_cannot_admit_implementation() -> None:
+    for watch_class in ("exact_head_ci", "review_state"):
+        facts = load_fixture("01-ci-pending.json")
+        facts["packet"]["status"] = "PAUSED"
+        facts["watch"]["watch_class"] = watch_class
+        facts["pr"] = {"exists": False}
+        result = evaluate(facts, EMPTY)
+        assert_inert(result)
+        assert result["coordinator_decision"] == "NOOP_PAUSED"
+        assert result["wakes_coordinator"] is False
+        assert result["resumes_worker"] is False
+        facts["pr"] = load_fixture("01-ci-pending.json")["pr"]
+        facts["pr"]["state"] = "CLOSED"
+        result = evaluate(facts, EMPTY)
+        assert_inert(result)
+        assert result["coordinator_decision"] != "ADMIT_IMPLEMENTATION"
+        assert result["resumes_worker"] is False
+
+
 def test_stale_ci_pass_does_not_wake_merge() -> None:
     pending = evaluate(load_fixture("01-ci-pending.json"), EMPTY)
     stale = evaluate(load_fixture("03-ci-pass-stale-head.json"), pending["next_watch_state"])
@@ -525,6 +544,7 @@ def main() -> int:
     test_exact_head_ci_pass_wakes_coordinator()
     test_paused_ci_wait_still_wakes_coordinator_when_condition_changes()
     test_paused_worker_is_not_resumed_by_ci_reconciliation_override()
+    test_paused_watch_without_pr_cannot_admit_implementation()
     test_stale_ci_pass_does_not_wake_merge()
     test_review_clear_on_exact_head_wakes_coordinator()
     test_liveness_without_progress_does_not_resume()

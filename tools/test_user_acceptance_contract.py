@@ -113,6 +113,38 @@ class UserAcceptanceTests(unittest.TestCase):
             self.assertIn("CANDIDATE_HEAD_NOT_CURRENT", cp.stdout)
 
 
+    def test_runtime_comes_from_committed_candidate_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            for rel in (CONTRACT_REL, ".engineering/execution-profile.yaml"):
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(subprocess.check_output(
+                    ["git", "-C", str(ROOT), "show", f"{HEAD}:{rel}"]))
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "candidate"], check=True)
+            candidate = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+            profile = root / ".engineering/execution-profile.yaml"
+            profile.write_text(profile.read_text().replace("primary: CHATGPT_CHAT", "primary: CODEX"))
+            data = evidence("SURFACE_RECONCILIATION")
+            data["candidate_head"] = candidate
+            path = self.write(root, "evidence.json", data)
+            def run():
+                return subprocess.run(["python3", str(TOOL), "validate-gate",
+                                       "--root", str(root), "--evidence", str(path)],
+                                      capture_output=True, text=True)
+            cp = run()
+            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+            data["runtime"] = "CODEX"
+            self.write(root, "evidence.json", data)
+            cp = run()
+            self.assertEqual(cp.returncode, 3, cp.stdout + cp.stderr)
+            self.assertIn("EXECUTION_PROFILE_RUNTIME_MISMATCH", cp.stdout)
+
     def test_e2e_requires_real_effect_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             data = evidence("FULL_USER_E2E")
