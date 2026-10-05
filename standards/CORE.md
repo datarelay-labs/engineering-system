@@ -18,7 +18,7 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 - **Implementation path:** implementation runtime selection is owned only by the versioned execution profile. Optional review/runtime tools never create authority or weaken repository/packet gates; disabled runtimes remain non-runnable until an explicit profile revision is adopted.
 - **Automation:** deterministic validation, CI, security/performance checks, artifact verification.
 - **GitHub:** durable source of truth for code, history, gates, and releases.
-- **Wiki/Athena:** derived human-readable and AI-searchable knowledge; canonical Git content wins on conflict.
+- **Derived knowledge plane:** DataRelay Atlas may provide bounded human-readable and AI-searchable derived context; canonical Git/GitHub content wins on conflict. Retired knowledge systems are provenance-only and never active dependencies.
 
 ## Provider-aligned policy layers
 

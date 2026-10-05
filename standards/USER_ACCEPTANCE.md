@@ -11,24 +11,24 @@ Project-specific scenario catalogs stay in the project repository. This standard
 
 ## Mandatory executor
 
-**ChatGPT itself is the executor and final auditor of both user gates.**
+**The runtime selected by the current execution profile is the executor and final auditor of both user gates.**
 
-ChatGPT MUST directly act as the applicable real user personas — for example End User, Operator, Administrator, Incident Responder, or Platform Maintainer — and directly drive the supported public product surface.
+The selected runtime MUST directly act as the applicable real user personas — for example End User, Operator, Administrator, Incident Responder, or Platform Maintainer — and directly drive the supported public product surface.
 
-A coding agent, alternate model, wrapper, shell script, browser test script, unit/integration suite, CI job, or other automated harness MUST NOT impersonate the acting user or declare either gate PASS.
+Another runtime, wrapper, shell script, browser test script, unit/integration suite, CI job, or other automated harness MUST NOT impersonate the acting user or declare either gate PASS for that run.
 
-Automation may drive a browser or collect supporting evidence, but ChatGPT must own the persona goal, public-surface interaction, observation, recovery decisions, scenario disposition, and final gate judgment.The required authority is:
+Automation may drive a browser or collect supporting evidence, but the selected runtime must own the persona goal, public-surface interaction, observation, recovery decisions, scenario disposition, and final gate judgment. The required authority is:
 
 ```text
-USER_ACCEPTANCE_EXECUTOR=CHATGPT
-USER_ACCEPTANCE_FINAL_AUDITOR=CHATGPT
-CHATGPT_DIRECT_PERSONA_EXECUTION=REQUIRED
-ALTERNATE_AGENT_USER_EXECUTION=FORBIDDEN
+USER_ACCEPTANCE_EXECUTOR=EXECUTION_PROFILE
+USER_ACCEPTANCE_FINAL_AUDITOR=EXECUTION_PROFILE
+DIRECT_PERSONA_EXECUTION=REQUIRED
+ALTERNATE_RUNTIME_USER_EXECUTION=FORBIDDEN
 SCRIPTED_USER_SCENARIO_EXECUTION=FORBIDDEN
 AUTOMATED_HARNESS_ROLE=SUPPLEMENTAL_ONLY
 ```
 
-If ChatGPT cannot perform a mandatory real user action because the required environment or interaction capability is unavailable, that scenario is BLOCKED. It is never delegated to another agent merely to obtain PASS.
+If the selected runtime cannot perform a mandatory real user action because the required environment or interaction capability is unavailable, that scenario is BLOCKED. It is never delegated to another runtime merely to obtain PASS.
 
 ## Applicability
 
@@ -40,7 +40,7 @@ Machine/unit/component/API/static checks may support the gates but never substit
 
 ## Contract-first execution hard gate
 
-Before **either** user gate starts, ChatGPT MUST resolve the repository-local canonical contract referenced by the release profile and read the **entire current contract end-to-end**. This happens before scenario execution, wrapper/harness execution, source/parser inspection, CI inspection, or an improvised checklist. The purpose is to bind execution to the project's actual personas, scope, prohibited actions, evidence rules, cleanup, invalidation, and PASS/FAIL/BLOCKED semantics rather than to the executor's remembered or guessed version of the test.
+Before **either** user gate starts, the selected runtime MUST resolve the repository-local canonical contract referenced by the release profile and read the **entire current contract end-to-end**. This happens before scenario execution, wrapper/harness execution, source/parser inspection, CI inspection, or an improvised checklist. The purpose is to bind execution to the project's actual personas, scope, prohibited actions, evidence rules, cleanup, invalidation, and PASS/FAIL/BLOCKED semantics rather than to the executor's remembered or guessed version of the test.
 
 A run is invalid as user-gate evidence when it starts from a wrapper/scripted replay, generic test harness, source/test oracle, or CI shortcut before the canonical contract has been fully read and adopted for that run. Automation remains supporting evidence/orchestration only; it never becomes the acting persona merely because it covers many commands or scenarios.
 
@@ -50,7 +50,7 @@ Managed adoption/upgrade MUST NOT infer these contract semantics merely from the
 
 ## Shared execution semantics
 
-Both gates MUST bind to an exact candidate HEAD/build and exact committed test contract, use the actual supported primary public surface, use ChatGPT-led persona execution rather than a hidden/scripted answer key, and separate acting-user knowledge from auditor/source/test oracle knowledge.Both gates MUST also:
+Both gates MUST bind to an exact candidate HEAD/build and exact committed test contract, use the actual supported primary public surface, use selected-runtime-led persona execution rather than a hidden/scripted answer key, and separate acting-user knowledge from auditor/source/test oracle knowledge.Both gates MUST also:
 
 - continue every safe independent scenario after a finding;
 - freeze the complete bounded finding set before remediation;
@@ -63,15 +63,15 @@ Both gates MUST bind to an exact candidate HEAD/build and exact committed test c
 
 Parallel execution is preferred whenever independent lanes are isolated. It must never corrupt shared product state or evidence.
 
-For browser products, ChatGPT must perform the user action through a real Chromium/Chrome process. Playwright or another browser driver is allowed as the interaction mechanism because the real browser is still the public surface. Component rendering, jsdom, API-only checks, screenshots without interaction, and static DOM checks are supporting evidence only.
+For browser products, the selected runtime must perform the user action through a real Chromium/Chrome process. Playwright or another browser driver is allowed as the interaction mechanism because the real browser is still the public surface. Component rendering, jsdom, API-only checks, screenshots without interaction, and static DOM checks are supporting evidence only.
 
-For CLI/desktop/mobile/mixed/other surfaces, ChatGPT directly uses the corresponding actual supported public interface.
+For CLI/desktop/mobile/mixed/other surfaces, the selected runtime directly uses the corresponding actual supported public interface.
 
 ## Gate A — Surface Reconciliation
 
 Surface Reconciliation is **feature-first and black-box-first**.
 
-Start from the supported product capability inventory, not from the implementation's command/control list. For each supported capability reconcile product capability, public surface/control, discovery path, role/context, user goal, lifecycle/scenario, error/empty/recovery guidance, result, and evidence.The ChatGPT acting persona discovers the product through the public surface first. Source, parser, route, component, generated metadata, internal catalog, test code, and scenario oracle knowledge may be used only as post-hoc auditor evidence after the corresponding public-surface evidence is frozen.
+Start from the supported product capability inventory, not from the implementation's command/control list. For each supported capability reconcile product capability, public surface/control, discovery path, role/context, user goal, lifecycle/scenario, error/empty/recovery guidance, result, and evidence.The acting persona discovers the product through the public surface first. Source, parser, route, component, generated metadata, internal catalog, test code, and scenario oracle knowledge may be used only as post-hoc auditor evidence after the corresponding public-surface evidence is frozen.
 
 Surface Reconciliation checks, as applicable:
 
@@ -91,7 +91,7 @@ Release PASS requires complete mandatory capability/public-surface disposition p
 
 Full User E2E is **mission-first, black-box, and real-effect**.
 
-For each applicable supported mission, ChatGPT assumes the applicable user role and maps:
+For each applicable supported mission, the selected runtime assumes the applicable user role and maps:
 
 ```text
 PRODUCT_CAPABILITY
@@ -196,4 +196,4 @@ Each user-facing repository must keep two repository-local contract documents re
 
 Those contracts must translate this standard into the project's real public surface and supported capabilities. They define product-specific personas, capability/use-case inventory, mandatory scenarios, environment/topology constraints, cleanup rules, and evidence locations.
 
-A project may be stricter than this standard. It may not weaken the mandatory ChatGPT executor, real public-surface, finding-accumulation, exact-candidate, ledger-derived evidence, or same-HEAD product-quality closure requirements.
+A project may be stricter than this standard. It may not weaken the mandatory execution-profile-selected executor, real public-surface, finding-accumulation, exact-candidate, ledger-derived evidence, or same-HEAD product-quality closure requirements.
