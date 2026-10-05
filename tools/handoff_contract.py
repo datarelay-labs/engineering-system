@@ -8,7 +8,8 @@ from context_epoch import analyze_packet, parse_packet
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 def verify(facts: dict) -> dict:
-    required = ("target_repo","packet_body","persisted_body_sha256","continuation_token")
+    required = ("target_repo","packet_body","persisted_body_sha256","continuation_token",
+                "observed_branch","observed_head","observed_workstream")
     missing=[k for k in required if not facts.get(k)]
     if missing:
         return {"status":"BLOCK","reason":"MISSING_FACTS","missing":missing}
@@ -19,8 +20,18 @@ def verify(facts: dict) -> dict:
         return {"status":"BLOCK","reason":"PERSISTED_PACKET_MISMATCH"}
     packet=parse_packet(body)
     lint=analyze_packet(packet, expected_target_repo=str(facts["target_repo"]))
-    if lint["status"]=="BLOCK":
-        return {"status":"BLOCK","reason":"PACKET_NOT_RUNNABLE","blocking":lint["blocking"]}
+    if lint["status"] != "PASS":
+        return {"status":"BLOCK","reason":"PACKET_NOT_CLEAN",
+                "blocking":lint["blocking"],"warnings":lint["warnings"]}
+    if packet.metadata.get("BRANCH") != str(facts["observed_branch"]):
+        return {"status":"BLOCK","reason":"BRANCH_MISMATCH"}
+    if packet.metadata.get("WORKSTREAM") != str(facts["observed_workstream"]):
+        return {"status":"BLOCK","reason":"WORKSTREAM_MISMATCH"}
+    observed_head=str(facts["observed_head"])
+    if not re.fullmatch(r"[0-9a-f]{40}", observed_head):
+        return {"status":"BLOCK","reason":"OBSERVED_HEAD_INVALID"}
+    if packet.metadata.get("LAST_VERIFIED_HEAD") != observed_head:
+        return {"status":"BLOCK","reason":"HEAD_MISMATCH"}
     if packet.metadata.get("STATUS") != "ACTIVE":
         return {"status":"BLOCK","reason":"PACKET_NOT_ACTIVE"}
     token=str(facts["continuation_token"]).strip()

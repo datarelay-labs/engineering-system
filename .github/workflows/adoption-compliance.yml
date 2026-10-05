@@ -34,6 +34,7 @@ jobs:
             tools/adopt.py
             tools/execution_profile.py
             tools/context_epoch.py
+            tools/handoff_contract.py
             tools/engineering-context.py
             tools/governance_floor.py
             tools/implementation_preflight.py

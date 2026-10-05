@@ -1793,6 +1793,9 @@ def main():
     completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_handoff_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_compiler.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

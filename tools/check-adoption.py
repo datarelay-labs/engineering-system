@@ -13,6 +13,7 @@ from adopt import (
     AFFECTED_TEST_SELECTION_MANAGED,
     AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
+    CONTEXT_EPOCH_MANAGED,
     USER_ACCEPTANCE_MANAGED,
     canonical_execution_policy_line,
     canonical_managed_policy_lines,
@@ -37,6 +38,7 @@ MANAGED_ADOPTION_REQUIRED = (
     "tools/governance_floor.py",
     *AFFECTED_TEST_SELECTION_MANAGED,
     *EXECUTION_PROFILE_MANAGED,
+    *CONTEXT_EPOCH_MANAGED,
     *USER_ACCEPTANCE_MANAGED,
     *AGENT_RUNTIME_MANAGED,
 )
@@ -292,6 +294,7 @@ def main() -> int:
                 ".engineering/execution-profile.yaml",
                 "schemas/execution-profile.schema.json",
                 "tools/context_epoch.py",
+                "tools/handoff_contract.py",
                 "tools/engineering-context.py",
                 "tools/governance_floor.py",
                 "tools/work_packet_authority.py",
