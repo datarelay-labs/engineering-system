@@ -13,5 +13,3 @@ changed_surfaces:
   head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895
 - path: tools/adopt.py
   head_blob_sha: 330de4db6b30809d7b2679731f139038b2621c97
-- path: tools/handoff_contract.py
-  head_blob_sha: 7bac12af518693b6eef958148c44873354df162f
