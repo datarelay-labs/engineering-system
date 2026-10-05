@@ -1,13 +1,12 @@
 contract_version: 1
-base_sha: a0505c2edf2504c9bb6b0097d039eef61318f2ce
-from_policy_epoch: 12
-to_policy_epoch: 13
+base_sha: 37f7e4469bf3c923f9a98e0736beeb13ede0974f
+from_policy_epoch: 13
+to_policy_epoch: 14
 requires_exact_head_validate: true
 automation_eligible: false
 rationale: >-
-  Make targeted/affected validation the mandatory bug-fix convergence loop and defer
-  broad regression plus complete human-equivalent user-gate confirmation until affected
-  findings are clean, preserving exact-HEAD terminal release qualification.
+  Make next-chat handoff fail closed unless the authoritative Work Packet is compact,
+  canonical, freshly persisted and re-read before returning a continuation token.
 changed_surfaces:
-  - path: tools/adopt.py
-    head_blob_sha: ddec628d5ff03a339a51a30988a414c22c48779c
+  - path: tools/handoff_contract.py
+    head_blob_sha: 4d28c621229feb6fc5212b76021bd7cf95a6d870
