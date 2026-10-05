@@ -1,6 +1,7 @@
 engineering_system:
   version: "1.7.0"
-  policy_epoch: 15
+  policy_epoch: 18
+  governance_epoch: 0
   mode: adopted
   ci_mode: shared
   native_ci_workflows: []

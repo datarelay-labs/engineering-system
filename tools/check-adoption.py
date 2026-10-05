@@ -108,6 +108,8 @@ def main() -> int:
     mode = ""
     baseline = ""
     policy_epoch = 0
+    governance_epoch = 0
+    governance_epoch_present = False
     ci_mode = ""
     native_ci_workflows: list[str] = []
     merge_gate_status = ""
@@ -139,6 +141,8 @@ def main() -> int:
                 elif baseline != args.expected_baseline:
                     failures.append("engineering_system.baseline does not match expected baseline")
             policy_epoch = engineering.get("policy_epoch", 0)
+            governance_epoch_present = "governance_epoch" in engineering
+            governance_epoch = engineering.get("governance_epoch", 0)
             ci_mode = str(engineering.get("ci_mode") or "")
             native_ci_workflows = [str(item) for item in (engineering.get("native_ci_workflows") or [])]
             merge_gate_status = str(engineering.get("merge_gate_status") or "")
@@ -165,6 +169,14 @@ def main() -> int:
             if version_at_least(version, (1, 7, 0)):
                 if not isinstance(policy_epoch, int) or isinstance(policy_epoch, bool) or policy_epoch < 1:
                     failures.append("Engineering System >=1.7.0 requires engineering_system.policy_epoch>=1")
+                if not governance_epoch_present:
+                    failures.append("Engineering System >=1.7.0 requires explicit engineering_system.governance_epoch")
+                if (
+                    isinstance(governance_epoch, bool)
+                    or not isinstance(governance_epoch, int)
+                    or governance_epoch < 0
+                ):
+                    failures.append("Engineering System >=1.7.0 requires engineering_system.governance_epoch>=0")
                 if args.require_current_policy and mode == "adopted" and isinstance(canonical_policy_epoch, int) and policy_epoch != canonical_policy_epoch:
                     failures.append(
                         f"stale adoption policy_epoch: target={policy_epoch} canonical={canonical_policy_epoch}"
@@ -609,6 +621,8 @@ def main() -> int:
         print(f"ENGINEERING_SYSTEM_MODE={mode}")
     if baseline:
         print(f"ENGINEERING_SYSTEM_BASELINE={baseline}")
+    print(f"ENGINEERING_SYSTEM_POLICY_EPOCH={policy_epoch}")
+    print(f"ENGINEERING_SYSTEM_GOVERNANCE_EPOCH={governance_epoch}")
     if ci_mode:
         print(f"ENGINEERING_SYSTEM_CI_MODE={ci_mode}")
     if native_ci_workflows:

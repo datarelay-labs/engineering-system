@@ -31,15 +31,20 @@ Root-of-trust surfaces currently include:
 - `.engineering/requirements-engineering-system.txt`;
 - for the canonical repository, `.github/workflows/governance-floor.yml`.
 
-When any of those surfaces changes:
-- increment `engineering_system.policy_epoch` by exactly one;
-- add/update `.engineering/governance-migration.yaml` with `contract_version: 1`;
-- bind `base_sha` to the exact target-base commit and record matching `from_policy_epoch` / `to_policy_epoch`;
+`engineering_system.policy_epoch` represents canonical policy freshness. `engineering_system.governance_epoch` is repository-local root-migration generation and starts at zero.
+
+For a new root-of-trust migration:
+- keep `engineering_system.policy_epoch` equal to the canonical policy epoch for the selected baseline;
+- increment `engineering_system.governance_epoch` by exactly one;
+- add/update `.engineering/governance-migration.yaml` with `contract_version: 2`;
+- bind `base_sha` to the exact target-base commit and record matching `from_governance_epoch` / `to_governance_epoch`;
 - list the exact changed root surfaces with each candidate Git blob SHA;
 - set `requires_exact_head_validate: true` and `automation_eligible: false`;
 - record a bounded non-empty rationale.
 
-The base-owned governance floor reads the candidate manifest and candidate blobs as data only. The manifest normally binds the exact target-base SHA. If that target base advances after the manifest was created, the recorded base may be reconciled only when it is an ancestor of the current target base and the engineering_system authority state plus every epoch-guarded governance surface have identical Git blobs at both base commits. Any policy-epoch or governed-surface change keeps the stale base binding blocked. The floor also rejects an invalid base lineage, epoch jump, incomplete/extra surface set, or candidate blob mismatch. Candidate root-of-trust code is not used to authorize itself.
+Historical `contract_version: 1` manifests that bind `from_policy_epoch` / `to_policy_epoch` remain readable so existing repository history is not rewritten. The one cutover change that introduces governance generation into a repository whose base-owned floor only understands v1 must itself use the old v1 exact-`policy_epoch + 1` contract; after that base owns the v2-aware floor, new root migrations use v2. If that legacy exact +1 step would put an adopted repository above the canonical `policy_epoch`, the upgrade fails closed instead of creating a locally newer policy epoch.
+
+The base-owned governance floor reads the candidate manifest and candidate blobs as data only. The manifest normally binds the exact target-base SHA. If that target base advances after the manifest was created, the recorded base may be reconciled only when it is an ancestor of the current target base and the engineering_system authority state plus every guarded governance surface have identical Git blobs at both base commits. Any policy freshness, governance generation, or governed-surface change keeps the stale base binding blocked. The floor also rejects an invalid base lineage, generation jump, incomplete/extra surface set, or candidate blob mismatch. Candidate root-of-trust code is not used to authorize itself.
 
 The migration manifest is evidence, not authority. A root-of-trust migration additionally requires explicit current owner approval recorded in the trusted ACTIVE Work Packet for that migration. Root-of-trust migration evidence never grants merge authority and is never eligible for automatic merge.
 

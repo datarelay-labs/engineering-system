@@ -43,6 +43,7 @@ def write_managed(root: Path, epoch: int, baseline: str = "a" * 40) -> None:
         f"engineering_system:\n"
         f"  version: 1.7.0\n"
         f"  policy_epoch: {epoch}\n"
+        f"  governance_epoch: 0\n"
         f"  mode: adopted\n"
         f"  baseline: {baseline}\n"
         f"  ci_mode: shared\n",
@@ -149,6 +150,34 @@ def write_root_migration(
     )
 
 
+def write_root_migration_v2(
+    root: Path,
+    *,
+    base: str,
+    from_generation: int,
+    to_generation: int,
+    paths: list[str],
+) -> None:
+    entries = [
+        {"path": path, "head_blob_sha": git(root, "hash-object", path)}
+        for path in sorted(paths)
+    ]
+    payload = {
+        "contract_version": 2,
+        "base_sha": base,
+        "from_governance_epoch": from_generation,
+        "to_governance_epoch": to_generation,
+        "requires_exact_head_validate": True,
+        "automation_eligible": False,
+        "rationale": "test root-of-trust governance-generation migration",
+        "changed_surfaces": entries,
+    }
+    (root / ".engineering/governance-migration.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
 def fixture(root: Path) -> str:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "test@example.invalid")
@@ -159,6 +188,14 @@ def fixture(root: Path) -> str:
 
 def prebridge_fixture(root: Path) -> str:
     fixture(root)
+    helper = root / floor.GOVERNANCE_HELPER
+    helper.write_text(
+        helper.read_text(encoding="utf-8").replace(
+            "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
+            "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 1",
+        ),
+        encoding="utf-8",
+    )
     for rel in floor.EXECUTION_PROFILE_SURFACES:
         (root / rel).unlink()
     (root / "AGENTS.md").write_text(
@@ -357,17 +394,25 @@ def test_unrelated_database_cursor_language_is_allowed() -> None:
         assert status == "PASS", reasons
 
 
-def test_guard_change_requires_policy_epoch() -> None:
+def test_guard_change_supports_legacy_policy_epoch_v1() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        base = fixture(root)
+        fixture(root)
         helper = root / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8").replace(
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 1",
+            ),
+            encoding="utf-8",
+        )
+        base = commit(root, "legacy v1 governance floor")
         helper.write_text(helper.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
         head = commit(root, "guard drift")
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
         assert (
-            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
             "tools/governance_floor.py"
         ) in reasons
 
@@ -391,19 +436,193 @@ def test_guard_change_requires_policy_epoch() -> None:
         assert status3 == "PASS", reasons3
 
 
+def test_guard_change_uses_governance_generation_v2() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["governance_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8") + "\n# governance-generation-1\n",
+            encoding="utf-8",
+        )
+        write_root_migration_v2(
+            root,
+            base=base,
+            from_generation=0,
+            to_generation=1,
+            paths=["tools/governance_floor.py"],
+        )
+        head = commit(root, "governance generation migration")
+        status, reasons, base_epoch, head_epoch = floor.evaluate(root, base, head)
+        assert status == "PASS", reasons
+        assert (base_epoch, head_epoch) == (1, 1)
+
+
+def test_governance_generation_without_root_migration_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["governance_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        head = commit(root, "orphan governance generation")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_GENERATION_CHANGED_WITHOUT_ROOT_MIGRATION" in reasons
+
+
+def test_governance_generation_jump_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["governance_epoch"] = 2
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(helper.read_text(encoding="utf-8") + "\n# generation-jump\n", encoding="utf-8")
+        write_root_migration_v2(
+            root,
+            base=base,
+            from_generation=0,
+            to_generation=2,
+            paths=["tools/governance_floor.py"],
+        )
+        head = commit(root, "invalid governance generation jump")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_ROOT_MIGRATION_TO_GENERATION_INVALID" in reasons
+
+
+def test_one_step_policy_normalization_after_legacy_bridge_passes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        bridge_base = commit(root, "legacy bridge temporary policy epoch")
+
+        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        normalized = commit(root, "normalize canonical policy freshness")
+        status, reasons, base_epoch, head_epoch = floor.evaluate(
+            root, bridge_base, normalized
+        )
+        assert status == "PASS", reasons
+        assert (base_epoch, head_epoch) == (
+            floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1,
+            floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET,
+        )
+
+
+def test_policy_normalization_cannot_hide_governed_change() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        bridge_base = commit(root, "legacy bridge temporary policy epoch")
+
+        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8") + "\n# hidden-during-normalization\n",
+            encoding="utf-8",
+        )
+        head = commit(root, "attempt governed change during policy normalization")
+        status, reasons, _, _ = floor.evaluate(root, bridge_base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE" in reasons
+
+
+def test_v1_manifest_rejected_after_v2_cutover() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = fixture(root)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project["engineering_system"]["governance_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8") + "\n# v1-after-v2-cutover\n",
+            encoding="utf-8",
+        )
+        write_root_migration(
+            root,
+            base=base,
+            from_epoch=1,
+            to_epoch=2,
+            paths=["tools/governance_floor.py"],
+        )
+        head = commit(root, "reject v1 after v2 cutover")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_ROOT_MIGRATION_V1_AFTER_V2_CUTOVER" in reasons
+
+
+def test_v2_manifest_rejected_before_cutover() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fixture(root)
+        helper = root / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8").replace(
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 1",
+            ),
+            encoding="utf-8",
+        )
+        base = commit(root, "legacy governance floor")
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["policy_epoch"] = 2
+        project["engineering_system"]["governance_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        helper.write_text(
+            helper.read_text(encoding="utf-8") + "\n# v2-before-cutover\n",
+            encoding="utf-8",
+        )
+        write_root_migration_v2(
+            root,
+            base=base,
+            from_generation=0,
+            to_generation=1,
+            paths=["tools/governance_floor.py"],
+        )
+        head = commit(root, "reject v2 before cutover")
+        status, reasons, _, _ = floor.evaluate(root, base, head)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_ROOT_MIGRATION_V2_BEFORE_CUTOVER" in reasons
+
+
 def _make_root_migration_candidate(root: Path, base: str) -> str:
     git(root, "checkout", "-qb", "candidate")
-    write_managed(root, 2)
+    project_path = root / ".engineering/project.yaml"
+    project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+    project["engineering_system"]["governance_epoch"] = 1
+    project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
     helper = root / "tools/governance_floor.py"
     helper.write_text(
         helper.read_text(encoding="utf-8") + "\n# candidate root migration\n",
         encoding="utf-8",
     )
-    write_root_migration(
+    write_root_migration_v2(
         root,
         base=base,
-        from_epoch=1,
-        to_epoch=2,
+        from_generation=0,
+        to_generation=1,
         paths=["tools/governance_floor.py"],
     )
     return commit(root, "candidate root migration")
@@ -426,7 +645,7 @@ def test_root_migration_reconciles_unrelated_base_advance() -> None:
         )
         assert status == "PASS", reasons
         assert reasons == []
-        assert (base_epoch, head_epoch) == (1, 2)
+        assert (base_epoch, head_epoch) == (1, 1)
 
 
 def test_root_migration_base_advance_with_governance_change_blocks() -> None:
@@ -477,9 +696,9 @@ def test_root_migration_base_advance_with_epoch_change_blocks() -> None:
         git(root, "checkout", "-q", "main")
         project_path = root / ".engineering/project.yaml"
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = 2
+        project["engineering_system"]["governance_epoch"] = 1
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        advanced_base = commit(root, "epoch-changing base advance")
+        advanced_base = commit(root, "governance-generation-changing base advance")
         git(root, "merge", "--no-ff", "-qm", "merge candidate", candidate)
         merged = git(root, "rev-parse", "HEAD")
 
@@ -487,11 +706,11 @@ def test_root_migration_base_advance_with_epoch_change_blocks() -> None:
             root, advanced_base, merged
         )
         assert status == "BLOCK"
-        assert (base_epoch, head_epoch) == (2, 2)
+        assert (base_epoch, head_epoch) == (1, 1)
         assert (
-            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_GENERATION:"
             "tools/governance_floor.py"
-        ) in reasons
+        ) in reasons, reasons
 
 
 def test_workflow_self_preservation_blocks() -> None:
@@ -552,20 +771,23 @@ def test_dependency_manifest_requires_policy_epoch() -> None:
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
         assert (
-            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_GENERATION:"
             ".engineering/requirements-engineering-system.txt"
         ) in reasons
 
-        write_managed(root, 2)
+        project_path = root / ".engineering/project.yaml"
+        project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
+        project["engineering_system"]["governance_epoch"] = 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         (root / ".engineering/requirements-engineering-system.txt").write_text(
             "PyYAML==6.0.3\n",
             encoding="utf-8",
         )
-        write_root_migration(
+        write_root_migration_v2(
             root,
             base=base,
-            from_epoch=1,
-            to_epoch=2,
+            from_generation=0,
+            to_generation=1,
             paths=[".engineering/requirements-engineering-system.txt"],
         )
         head2 = commit(root, "change governance dependency with migration evidence")
@@ -600,18 +822,18 @@ def test_canonical_floor_change_requires_policy_epoch() -> None:
         status, reasons, _, _ = floor.evaluate(root, base, head)
         assert status == "BLOCK"
         assert (
-            "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:"
+            "GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_GENERATION:"
             ".github/workflows/governance-floor.yml"
         ) in reasons
 
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = 2
+        project["engineering_system"]["governance_epoch"] = 1
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        write_root_migration(
+        write_root_migration_v2(
             root,
             base=base,
-            from_epoch=1,
-            to_epoch=2,
+            from_generation=0,
+            to_generation=1,
             paths=[".github/workflows/governance-floor.yml"],
         )
         head2 = commit(root, "canonical floor migration")
@@ -790,7 +1012,14 @@ def main() -> int:
     test_workflow_comment_tokens_do_not_preserve_floor()
     test_filtered_pull_request_target_blocks()
     test_unrelated_database_cursor_language_is_allowed()
-    test_guard_change_requires_policy_epoch()
+    test_guard_change_supports_legacy_policy_epoch_v1()
+    test_guard_change_uses_governance_generation_v2()
+    test_governance_generation_without_root_migration_blocks()
+    test_governance_generation_jump_blocks()
+    test_one_step_policy_normalization_after_legacy_bridge_passes()
+    test_policy_normalization_cannot_hide_governed_change()
+    test_v1_manifest_rejected_after_v2_cutover()
+    test_v2_manifest_rejected_before_cutover()
     test_root_migration_reconciles_unrelated_base_advance()
     test_root_migration_base_advance_with_governance_change_blocks()
     test_root_migration_base_reconciliation_rejects_nonancestor()

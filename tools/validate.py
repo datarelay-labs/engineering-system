@@ -1169,7 +1169,12 @@ def validate_governance_floor_contract():
         "RETIRED_RUNTIME_REINTRODUCED",
         "RETIRED_RUNTIME_ARTIFACT_REINTRODUCED",
         "GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH",
+        "GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_GENERATION",
         "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING",
+        "GOVERNANCE_ROOT_MIGRATION_V1_AFTER_V2_CUTOVER",
+        "GOVERNANCE_ROOT_MIGRATION_V2_BEFORE_CUTOVER",
+        "GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE",
+        "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
         "ROOT_MIGRATION_MANIFEST",
         "requires_exact_head_validate",
         "automation_eligible",
@@ -1190,9 +1195,15 @@ def validate_governance_floor_contract():
         if token not in adopted:
             raise SystemExit(f"FAIL adopted workflow missing governance-floor token: {token}")
     canonical_project = load_yaml(ROOT / ".engineering/project.yaml")
-    expected_epoch = int((canonical_project.get("engineering_system") or {}).get("policy_epoch") or 0)
+    canonical_engineering = canonical_project.get("engineering_system") or {}
+    expected_epoch = int(canonical_engineering.get("policy_epoch") or 0)
+    expected_governance_epoch = int(canonical_engineering.get("governance_epoch") or 0)
+    if "LEGACY_V1_BRIDGE_NORMALIZATION_TARGET = 18" not in helper:
+        raise SystemExit("FAIL governance floor helper missing bounded v1 bridge normalization target")
     if f"POLICY_EPOCH = {expected_epoch}" not in adopt or "policy_epoch" not in check:
-        raise SystemExit("FAIL adoption tooling missing current governance-floor policy epoch")
+        raise SystemExit("FAIL adoption tooling missing current policy freshness epoch")
+    if f"GOVERNANCE_EPOCH = {expected_governance_epoch}" not in adopt or "governance_epoch" not in check:
+        raise SystemExit("FAIL adoption tooling missing governance generation contract")
     policy = (
         schema.get("properties", {})
         .get("engineering_system", {})
@@ -1201,6 +1212,14 @@ def validate_governance_floor_contract():
     )
     if policy.get("type") != "integer" or policy.get("minimum") != 1:
         raise SystemExit("FAIL project schema policy_epoch is not a positive integer")
+    governance = (
+        schema.get("properties", {})
+        .get("engineering_system", {})
+        .get("properties", {})
+        .get("governance_epoch", {})
+    )
+    if governance.get("type") != "integer" or governance.get("minimum") != 0:
+        raise SystemExit("FAIL project schema governance_epoch is not a non-negative integer")
     print("PASS base-branch governance floor contract")
 
 def validate_knowledge_contract():
