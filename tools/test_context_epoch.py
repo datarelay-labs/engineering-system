@@ -421,7 +421,7 @@ def test_projection_caps_large_current_state() -> None:
 
 
 def test_projection_preserves_required_sections_under_cap() -> None:
-    body = packet(current="x" * 3500).replace(
+    body = packet(current="x" * 3500).replace("STATUS=ACTIVE", "STATUS=PAUSED", 1).replace(
         "One bounded outcome.", "g" * 3500
     ).replace(
         "Implement and validate.", "n" * 3500
