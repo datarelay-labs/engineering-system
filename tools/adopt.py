@@ -110,6 +110,7 @@ EXECUTION_PROFILE_MANAGED = (
 # Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
+    "tools/handoff_contract.py",
 )
 
 # Exact-HEAD repository orientation is a provider-neutral managed helper.

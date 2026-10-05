@@ -2276,6 +2276,19 @@ def test_local_adoption_checker_profile_contract_is_not_target_version_gated() -
     assert "if version_at_least(version, (1, 6, 5)):" not in checker
 
 
+def test_adoption_checker_rejects_stale_policy_and_profile() -> None:
+    checker = CHECK.read_text(encoding="utf-8")
+    required = (
+        "stale adoption policy_epoch:",
+        "stale adoption execution profile:",
+        "canonical_policy_epoch",
+        "canonical_profile",
+        "--require-current-policy",
+    )
+    for token in required:
+        assert token in checker, token
+
+
 def test_adoption_compliance_workflow_checks_engineering_context_helper() -> None:
     workflow = (ROOT / ".github" / "workflows" / "adoption-compliance.yml").read_text(
         encoding="utf-8"
@@ -3412,6 +3425,7 @@ def main() -> int:
     test_context_epoch_helper_adoption_and_upgrade()
     test_engineering_context_helper_adoption_and_upgrade()
     test_local_adoption_checker_profile_contract_is_not_target_version_gated()
+    test_adoption_checker_rejects_stale_policy_and_profile()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_release_execution_context_is_bounded_and_upgradeable()
     test_managed_contract_dependency_failure_is_deterministic()
