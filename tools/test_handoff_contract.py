@@ -74,6 +74,11 @@ def main():
         assert verify(facts(body=body))["status"]=="PASS"
         body+="WAITING_FOR_CI=current-head"+chr(10)
         assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+    body=BODY.replace("## Current State","## Current State"+chr(10)+"- WAITING_FOR_CI",1)
+    assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+    assert verify(facts(body=body.replace("STATUS=ACTIVE","STATUS=PAUSED")))["status"]=="PASS"
+    body=BODY.replace("## Current State","## Current State"+chr(10)+chr(96)*3+chr(10)+"WAITING_FOR_CI"+chr(10)+chr(96)*3,1)
+    assert verify(facts(body=body))["status"]=="PASS"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")

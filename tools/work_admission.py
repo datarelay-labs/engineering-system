@@ -567,23 +567,24 @@ def packet_not_runnable_reason(packet: Any) -> tuple[str, str] | None:
             or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}
         ):
             return "WAITING", "packet records a pending condition in " + key
-    fence: tuple[str, int] | None = None
-    for line in packet.sections.get("Latest Evidence", "").splitlines():
-        stripped = line.lstrip()
-        if stripped[:1] in {chr(96), "~"}:
-            char = stripped[0]
-            count = len(stripped) - len(stripped.lstrip(char))
-            if count >= 3:
-                if fence is None:
-                    fence = (char, count)
-                elif char == fence[0] and count >= fence[1] and not stripped[count:].strip():
-                    fence = None
+    for section in ("Current State", "Latest Evidence"):
+        fence: tuple[str, int] | None = None
+        for line in packet.sections.get(section, "").splitlines():
+            stripped = line.lstrip()
+            if stripped[:1] in {chr(96), "~"}:
+                char = stripped[0]
+                count = len(stripped) - len(stripped.lstrip(char))
+                if count >= 3:
+                    if fence is None:
+                        fence = (char, count)
+                    elif char == fence[0] and count >= fence[1] and not stripped[count:].strip():
+                        fence = None
+                    continue
+            if fence is not None:
                 continue
-        if fence is not None:
-            continue
-        match = re.fullmatch(r"\s*(?:-\s*)?(WAITING_FOR_[A-Z0-9_]+)(?:=(.*))?\s*", line)
-        if match and (match.group(2) or "").strip().upper() not in resolved:
-            return "WAITING", "packet evidence records " + match.group(1) + "; reconcile observed readiness"
+            match = re.fullmatch(r"\s*(?:-\s*)?(WAITING_FOR_[A-Z0-9_]+)(?:=(.*))?\s*", line)
+            if match and (match.group(2) or "").strip().upper() not in resolved:
+                return "WAITING", "packet evidence records " + match.group(1) + "; reconcile observed readiness"
     action = packet.sections.get("Next Action", "").strip()
     if not action or action.upper() in {"NONE", "NONE.", "N/A"}:
         return "NO_NEXT_ACTION", "ACTIVE packet has no executable next outcome"
