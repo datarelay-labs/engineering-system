@@ -537,16 +537,16 @@ scenarios:
     timeout_seconds: 30
     agent_default: true
     scope: static
-    name: Mandatory terminal Telegram completion gate
+    name: Terminal notification transport contract
     level: static
     domains: [session-continuity, enforcement]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
     command: "python3 tools/test_terminal_completion_notify.py"
     invariants:
-      - "Terminal implementation test audit release and migration outcomes require verified Telegram COMPLETE before owner-facing COMPLETE/PASS"
+      - "Engineering completion follows exact-head evidence; terminal notification records delivery PASS or RETRY_PENDING independently"
       - "micro-steps and individual test invocations do not notify"
-      - "missing trusted helper or unverified delivery fails closed"
+      - "missing trusted helper or unverified delivery returns notification RETRY_PENDING without invalidating engineering completion"
     release_gate: true
 
   - id: ENG-TRUSTED-EXTERNAL-WRITE-001
