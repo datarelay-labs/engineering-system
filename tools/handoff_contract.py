@@ -19,8 +19,13 @@ def verify(facts: dict) -> dict:
         return {"status":"BLOCK","reason":"PERSISTED_PACKET_MISMATCH"}
     packet=parse_packet(body)
     lint=analyze_packet(packet, expected_target_repo=str(facts["target_repo"]))
-    if lint["status"]=="BLOCK":
-        return {"status":"BLOCK","reason":"PACKET_NOT_RUNNABLE","blocking":lint["blocking"]}
+    if lint["status"] != "PASS":
+        return {
+            "status":"BLOCK",
+            "reason":"PACKET_NOT_CLEAN",
+            "blocking":lint["blocking"],
+            "warnings":lint["warnings"],
+        }
     if packet.metadata.get("STATUS") != "ACTIVE":
         return {"status":"BLOCK","reason":"PACKET_NOT_ACTIVE"}
     token=str(facts["continuation_token"]).strip()

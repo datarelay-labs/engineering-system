@@ -35,7 +35,7 @@ def main():
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")
-    assert verify(facts(body=wrong,digest=hashlib.sha256(wrong.encode()).hexdigest()))["reason"]=="PACKET_NOT_RUNNABLE"
+    assert verify(facts(body=wrong,digest=hashlib.sha256(wrong.encode()).hexdigest()))["reason"]=="PACKET_NOT_CLEAN"
     print("HANDOFF_CONTRACT_TESTS=PASS")
     return 0
 if __name__=="__main__":
