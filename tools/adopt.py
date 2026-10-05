@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 16
+POLICY_EPOCH = 17
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -235,6 +235,7 @@ def rewrite_legacy_coordination_rules(text: str) -> str:
     # Match complete known sentences; a custom suffix is independent policy.
     # Unknown variants stay intact rather than losing project-specific limits.
     legacy_lines = {
+        '- Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.': '- Preserve machine-observable wait state and continue independent authorized work; use a watcher when useful.',
         "- Reconcile one Work Packet's next action with `python3 tools/coordinator.py plan --facts <facts.json>`. The planner is pure: one bounded decision, no worker launch, GitHub mutation, merge, notification send, or session stop.": '',
         '- Evaluate one bounded coordinator watch with `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator is pure: one re-entry result, no subprocess, network, GitHub mutation, merge, or Telegram send.': '',
         '- Run one coordinator watch host pass with `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. The host acquires one lock, calls the watch evaluator, and delivers at most one already-authorized typed action after a fresh reconciliation read. It does not accept caller commands or URLs, mint authority, merge, stop sessions, or busy-loop.': '',

@@ -43,7 +43,7 @@ Provider/model upgrades trigger an assumption review: remove or relax scaffoldin
 6. Full regression/lifecycle/platform/performance/operational E2E belongs at a meaningful integration or release-candidate confirmation boundary after affected convergence is clean, unless dependency/invalidation uncertainty or the change risk specifically requires earlier widening.
 7. Keep AI context small and high-signal; load only task-relevant standards/specifications.
 8. Use the minimum sufficient AI reasoning/context; do not request maximum reasoning by default. Escalate only when concrete evidence, a failed check, or an unresolved design question requires it.
-9. Do not spend coding-agent model time polling CI, review, deployment, or other machine-observable external waits. Persist state and hand waiting/re-entry to coordinator or automation.
+9. During machine-observable CI/review/deployment waits, persist the concrete condition and advance independent dependency-eligible authorized work. A coordinator or watcher is optional; waiting does not end repository-level continuation while other runnable work exists.
 10. Add tooling only when it removes repeated manual work or materially improves correctness.
 
 ## Universal rules

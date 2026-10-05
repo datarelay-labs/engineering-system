@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import posixpath
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -550,6 +551,23 @@ def evaluate_release(request: dict[str, Any]) -> dict[str, str]:
     )
 
 
+def packet_pending_condition(packet: Any) -> tuple[str, str] | None:
+    """One lifecycle invariant for selection and truthful persisted handoffs."""
+    blockers = packet.sections.get("Blockers", "").strip().upper()
+    if blockers not in {"NONE", "- NONE", "NONE."}:
+        return "PACKET_BLOCKER", "ACTIVE packet still records a blocker"
+    for key in ("QUEUE_STATE", "WAITING_FOR", "DEPENDENCY_STATUS"):
+        value = packet.metadata.get(key, "").upper()
+        if value and ("WAIT" in value or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}):
+            return "WAITING", "packet records a pending condition in " + key
+    resolved = {"NONE", "N/A", "PASS", "COMPLETE", "RESOLVED", "CLEARED", "NO", "FALSE", "0"}
+    for line in packet.sections.get("Latest Evidence", "").splitlines():
+        match = re.fullmatch(r"\s*(?:-\s*)?(WAITING_FOR_[A-Z0-9_]+)(?:=(.*))?\s*", line)
+        if match and (match.group(2) or "").strip().upper() not in resolved:
+            return "WAITING", "packet evidence records " + match.group(1) + "; reconcile observed readiness"
+    return None
+
+
 def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     """Evaluate fresh repository-bound packet facts; never mutate or launch work."""
     from context_epoch import analyze_packet, parse_packet
@@ -587,15 +605,9 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
         return deny("packet HEAD is stale; reconcile from current evidence", "STALE_HEAD")
     if not ready or waits:
         return deny("observed dependencies or external condition are pending", "WAITING")
-    blockers = packet.sections.get("Blockers", "").strip()
-    if blockers.upper() not in {"NONE", "- NONE", "NONE."}:
-        return deny("ACTIVE packet still records a blocker", "PACKET_BLOCKER")
-    # Legacy auxiliary metadata cannot make work runnable. Explicit wait facts
-    # exclude it, while a harmless IMPLEMENTATION label is not a new blocker.
-    for key in ("QUEUE_STATE", "WAITING_FOR", "DEPENDENCY_STATUS"):
-        value = packet.metadata.get(key, "").upper()
-        if value and ("WAIT" in value or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}):
-            return deny("packet records a pending condition in " + key, "WAITING")
+    pending = packet_pending_condition(packet)
+    if pending:
+        return deny(pending[1], pending[0])
     action = packet.sections.get("Next Action", "").strip()
     if not action or action.upper() in {"NONE", "NONE.", "N/A"}:
         return deny("packet has no executable next outcome", "NO_NEXT_ACTION")

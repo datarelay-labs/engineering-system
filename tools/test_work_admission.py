@@ -526,6 +526,12 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
     ):
         code, result = run_cli("eligible", {**facts, field: value})
         assert code == 2 and result["DENY_CLASS"] == expected
+    for value in ("WAITING_FOR_CI", "WAITING_FOR_CI=pending-head", "- WAITING_FOR_DEPENDENCY=core"):
+        body = facts["body"].replace("## Latest Evidence", "## Latest Evidence" + chr(10) + value, 1)
+        assert evaluate_eligible({**facts, "body": body})["DENY_CLASS"] == "WAITING"
+    for value in ("WAITING_FOR_CI=PASS", "WAITING_FOR_CI=NONE", "Historical WAITING_FOR_CI is resolved"):
+        body = facts["body"].replace("## Latest Evidence", "## Latest Evidence" + chr(10) + value, 1)
+        assert evaluate_eligible({**facts, "body": body})["DECISION"] == "ALLOW"
     # A CI-waiting lane must not serialize independent ready work.
     reports = [evaluate_eligible({**facts, "waiting_for": ["CI"]}), evaluate_eligible(facts)]
     assert [r["DECISION"] for r in reports] == ["DENY", "ALLOW"]
