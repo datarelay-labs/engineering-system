@@ -56,7 +56,7 @@ Do not assume one GitHub Issue equals one implementation job. Batch adjacent sma
 - Terminal evidence required (exact HEAD/runtime/CI as applicable):
 - Blocking finding classes for this packet:
 - Stop condition / sufficiency rule:
-- Depth budget: NORMAL (implementation -> independent audit -> corrective pass if needed -> verification -> stop)
+- Depth budget: NORMAL (implementation -> required terminal audit/review -> corrective pass if needed -> verification -> stop)
 
 ## Follow-up Discoveries
 

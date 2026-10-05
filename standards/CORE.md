@@ -13,7 +13,7 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 ## Roles
 
 - **Owner:** product requirements, scope, final decisions, release approval, human UX judgment.
-- **Independent AI reviewer:** architecture, requirements, test strategy, independent review, incident analysis.
+- **Reviewer / verifier:** architecture, requirements, test strategy, review, and incident analysis when required by the task/risk contract. Independence is optional unless explicitly required; provider identity is not a core role invariant.
 - **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. The authorized implementer is selected by the current execution profile plus the trusted Work Packet; provider identity is not a core invariant.
 - **Implementation path:** implementation runtime selection is owned only by the versioned execution profile. Optional review/runtime tools never create authority or weaken repository/packet gates; disabled runtimes remain non-runnable until an explicit profile revision is adopted.
 - **Automation:** deterministic validation, CI, security/performance checks, artifact verification.
