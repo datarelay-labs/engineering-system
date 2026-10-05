@@ -200,11 +200,11 @@ def test_packet_lint_binds_owner_selected_target_repo() -> None:
 
 
 def test_active_packet_must_be_runnable_now() -> None:
-    for queue_state in ("WAITING", "WAITING_CI", "DEPENDENCY_WAIT", "DEFERRED", "HUMAN_REQUIRED"):
+    for queue_state in ("WAITING", "WAIT_EXTERNAL", "WAIT_EXACT_HEAD_CI", "AWAITING_REVIEW"):
         body = packet().replace("STATUS=ACTIVE\n", f"STATUS=ACTIVE\nQUEUE_STATE={queue_state}\n", 1)
         audit = ce.analyze_packet(ce.parse_packet(body))
-        if "ACTIVE_PACKET_NOT_RUNNABLE" not in audit["blocking"]:
-            fail(f"ACTIVE packet with {queue_state} remained runnable: {audit}")
+        if "QUEUE_STATE_NONCANONICAL" not in audit["blocking"]:
+            fail(f"packet v3 accepted noncanonical QUEUE_STATE={queue_state}: {audit}")
 
     blocked = packet().replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for owner approval", 1)
     audit = ce.analyze_packet(ce.parse_packet(blocked))
