@@ -526,6 +526,28 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
     ):
         code, result = run_cli("eligible", {**facts, field: value})
         assert code == 2 and result["DENY_CLASS"] == expected
+    for value in ("WAITING_FOR_CI", "WAITING_FOR_CI=pending-head", "- WAITING_FOR_DEPENDENCY=core"):
+        body = facts["body"].replace("## Latest Evidence", "## Latest Evidence" + chr(10) + value, 1)
+        assert evaluate_eligible({**facts, "body": body})["DENY_CLASS"] == "WAITING"
+    for value in ("WAITING_FOR_CI=PASS", "WAITING_FOR_CI=NONE", "Historical WAITING_FOR_CI is resolved"):
+        body = facts["body"].replace("## Latest Evidence", "## Latest Evidence" + chr(10) + value, 1)
+        assert evaluate_eligible({**facts, "body": body})["DECISION"] == "ALLOW"
+    body = facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE"+chr(10)+"WAITING_FOR=CI", 1)
+    assert evaluate_eligible({**facts, "body": body})["DENY_CLASS"] == "WAITING"
+    body = facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE"+chr(10)+"WAITING_FOR=NONE", 1)
+    assert evaluate_eligible({**facts, "body": body})["DECISION"] == "ALLOW"
+    for field, value in (("WAITING_FOR","NONE"),("WAITING_FOR","NO_WAIT"),("QUEUE_STATE","NOT_WAITING")):
+        body = facts["body"].replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+field+"="+value,1)
+        assert evaluate_eligible({**facts,"body":body})["DECISION"]=="ALLOW"
+    for action in ("", "NONE", "N/A", "NONE."):
+        body = facts["body"].replace("Implement and validate.", action)
+        assert evaluate_eligible({**facts,"body":body})["DECISION"]=="DENY"
+    for fence in (chr(96)*3, "~"*3, chr(96)*4):
+        quoted = fence+"text"+chr(10)+"WAITING_FOR_CI=past-head"+chr(10)+fence+chr(10)
+        body = facts["body"].replace("## Latest Evidence", "## Latest Evidence"+chr(10)+quoted,1)
+        assert evaluate_eligible({**facts,"body":body})["DECISION"]=="ALLOW"
+        live = body.replace(quoted,quoted+"WAITING_FOR_CI=current-head"+chr(10),1)
+        assert evaluate_eligible({**facts,"body":live})["DENY_CLASS"]=="WAITING"
     # A CI-waiting lane must not serialize independent ready work.
     reports = [evaluate_eligible({**facts, "waiting_for": ["CI"]}), evaluate_eligible(facts)]
     assert [r["DECISION"] for r in reports] == ["DENY", "ALLOW"]

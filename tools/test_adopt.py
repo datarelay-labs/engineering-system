@@ -3414,6 +3414,11 @@ def test_legacy_rule_suffix_preserves_project_policy() -> None:
         assert product in cleaned
         assert legacy_line not in cleaned
         assert rewrite_legacy_coordination_rules(cleaned) == cleaned
+    for legacy_line in ['- Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.']:
+        cleaned = rewrite_legacy_coordination_rules(legacy_line + " " + product + chr(10))
+        assert legacy_line not in cleaned
+        assert product in cleaned and "continue independent authorized work" in cleaned
+        assert rewrite_legacy_coordination_rules(cleaned) == cleaned
     unknown = "- Reconcile one Work Packet's next action with custom product coordination; " + product
     assert unknown in rewrite_legacy_coordination_rules(unknown + chr(10))
 

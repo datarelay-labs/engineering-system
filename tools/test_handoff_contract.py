@@ -52,6 +52,28 @@ def main():
         assert verify(facts(body=blocked.replace("STATUS=ACTIVE","STATUS="+state)))["status"]=="PASS"
     waiting=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+"QUEUE_STATE=DEPENDENCY_WAIT")
     assert verify(facts(body=waiting))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+    for marker in ("WAITING_FOR_CI", "WAITING_FOR_CI=pending-head", "- WAITING_FOR_DEPENDENCY=core"):
+        body=BODY+"## Latest Evidence"+chr(10)+marker+chr(10)
+        assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+        assert verify(facts(body=body.replace("STATUS=ACTIVE","STATUS=PAUSED")))["status"]=="PASS"
+    body=BODY+"## Latest Evidence"+chr(10)+"WAITING_FOR_CI=PASS"+chr(10)
+    assert verify(facts(body=body))["status"]=="PASS"
+    body=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+"WAITING_FOR=CI")
+    assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+    body=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+"WAITING_FOR=NONE")
+    assert verify(facts(body=body))["status"]=="PASS"
+    for field, value in (("WAITING_FOR","NONE"),("WAITING_FOR","NO_WAIT"),("QUEUE_STATE","NOT_WAITING")):
+        body=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+field+"="+value)
+        assert verify(facts(body=body))["status"]=="PASS"
+    for action in ("", "NONE", "N/A", "NONE."):
+        body=BODY.replace("Continue implementation.",action)
+        assert verify(facts(body=body))["status"]=="BLOCK"
+    for fence in (chr(96)*3, "~"*3, chr(96)*4):
+        quoted=fence+"text"+chr(10)+"WAITING_FOR_CI=past-head"+chr(10)+fence+chr(10)
+        body=BODY+"## Latest Evidence"+chr(10)+quoted
+        assert verify(facts(body=body))["status"]=="PASS"
+        body+="WAITING_FOR_CI=current-head"+chr(10)
+        assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")

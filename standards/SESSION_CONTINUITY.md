@@ -365,7 +365,7 @@ The Engineering System exists to help one capable agent ship correct work using 
 
 The current explicit owner instruction is the first execution authority. A missing, stale or contradictory packet is repairable coordination data when the owner has clearly authorized the work. Reconcile it from current Git/GitHub/roadmap facts, lint the resulting body, then execute. Do not fabricate authority, bypass production/destructive/credential/permission/release boundaries, or modify unrelated dirty worktrees.
 
-Packet completion and repository-level continuation have different finish lines. Completing one packet closes that bounded workstream; it immediately returns the same runtime to the authorized roadmap. A CI wait pauses the affected lane and permits independent work. Record the concrete condition in Latest Evidence, for example `WAITING_FOR_CI`; do not invent a new packet status. If no independent work remains, persist the concrete wait and finish honestly; do not invent tasks to keep a session alive.
+Packet completion and repository-level continuation have different finish lines. Completing one packet closes that bounded workstream; it immediately returns the same runtime to the authorized roadmap. A CI wait pauses the affected lane and permits independent work. Record the concrete condition in Latest Evidence, for example `WAITING_FOR_CI=<subject>`, and keep that waiting lane PAUSED. Clear the marker or record a terminal value such as `WAITING_FOR_CI=PASS` when readiness is observed; selection and handoff share this pending-condition check. Do not invent a new packet status. If no independent work remains, persist the concrete wait and finish honestly; do not invent tasks to keep a session alive.
 
 ## Deterministic packet resolution
 

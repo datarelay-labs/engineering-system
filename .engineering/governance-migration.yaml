@@ -1,12 +1,13 @@
 contract_version: 1
-base_sha: 1e4fc5c58edc79630b223347b82aef9879f1e966
-from_policy_epoch: 15
-to_policy_epoch: 16
+base_sha: d8ed02612da4cac0eb861c83db048f12f6f5e7bb
+from_policy_epoch: 16
+to_policy_epoch: 17
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Preserve project-specific policy suffixes during obsolete-rule removal;
-  normalize truthful handoff lifecycle without changing evaluator or runtime/permission
-  authority. Current owner restoration directive authorizes this bounded correction.
+rationale: 'Complete the same owner-authorized autonomy restoration: preserve the
+  known historical polling rule variant with custom suffixes and share canonical pending-wait
+  evidence between selection and handoff. No evaluator/profile/permission authority
+  change.'
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 3ce09cd1957ee707e0a7b75db60686be1efbde7c
+  head_blob_sha: 9b6bd1689131041745b0fee38abaf53dbb23d7ae
