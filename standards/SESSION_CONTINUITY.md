@@ -683,6 +683,7 @@ understand -> implement a coherent small/medium batch -> affected local tests ->
 ```
 
 Guidance:
+- A next-chat handoff is a transaction, not prose generation. Before returning a continuation token, update the authoritative ACTIVE Work Packet with the current exact repository/workstream/HEAD/state/Next Action, re-read that GitHub Issue, and require `python3 tools/handoff_contract.py --request-json <facts.json>` PASS. A prompt-only/copy-paste handoff, an unverified Issue write, or a token returned before the authoritative re-read is incomplete and must not be reported as a successful handoff.
 - A progress update is not a handoff. Continue while a safe authorized next action exists. If a trusted runnable implementation packet is already selected, make measurable progress in the same turn instead of returning control after a statement of future intent. Reproduction, bounded investigation that resolves a material uncertainty, deterministic validation, repository mutation, or an authorized external state transition qualifies; do not force mutation when diagnosis or validation is the correct next action.
 - Prefer the cheapest relevant local tests during implementation. Fast CI is feedback, not release qualification; do not run expensive/full/release suites after every edit.
 - Batch related corrective findings before the next expensive qualification run.
@@ -725,6 +726,20 @@ P0b records verified exact-head outcomes against cost, time, rework, and human i
 - Default output is `engineering-system/telemetry/` under the repository's absolute Git directory (`git rev-parse --absolute-git-dir`). That location is Git metadata, so generated records stay outside the tracked worktree for canonical repositories, adopted repositories, and linked worktrees. The directory is bounded to 32 records and easy to disable with a `DISABLED` marker. A textual `.gitignore` rule is not the retention boundary. There is no automatic network export.
 - Capture provider, model, reasoning, and toolset at session start. A later change requires a recorded justification. Do not switch profiles silently.
 - Soft task budgets are optional. Exhaustion yields terminal `BLOCK` with disposition `YIELD`. Further retries fail closed.
+
+## Next-chat handoff transaction
+
+A request to move work to the next chat is a durable-state transaction, not a prompt-writing task.
+
+Required order:
+
+1. Freshly re-read the authoritative ACTIVE Work Packet and actual repository/branch/HEAD state.
+2. Replace stale diary/history with the bounded current Current State, Next Action, Latest Evidence, and Blockers needed to resume.
+3. Persist that exact Work Packet body to the repository-scoped GitHub Issue.
+4. Re-read the persisted Issue body and verify its SHA-256, target repository, ACTIVE status, execution-profile binding, and packet lint.
+5. Only after that verification succeeds, return the minimal repository/lane continuation token to the owner.
+
+Use `python3 tools/handoff_contract.py --facts <json>` for the final fail-closed transaction check. A prose prompt, continuation token, or chat summary emitted before the authoritative Issue update is verified is an incomplete handoff and must not be reported as success. The final user-visible handoff should be only the minimal continuation token unless the owner explicitly asks for more detail.
 
 ## GitHub marker and lifecycle
 

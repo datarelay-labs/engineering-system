@@ -91,6 +91,7 @@ def main() -> int:
     parser.add_argument("--root", default=".")
     parser.add_argument("--expected-baseline", default="")
     parser.add_argument("--expected-mode", choices=("canonical", "adopted"), default="")
+    parser.add_argument("--require-current-policy", action="store_true")
     args = parser.parse_args()
     root = Path(args.root).resolve()
 
@@ -113,6 +114,10 @@ def main() -> int:
     project_domains: set[str] = set()
     checker_version = canonical_checker_version()
     checker_managed_profile = version_at_least(checker_version, (1, 6, 5))
+    canonical_root = Path(__file__).resolve().parents[1]
+    canonical_project = load_yaml(canonical_root / ".engineering" / "project.yaml") or {}
+    canonical_engineering = canonical_project.get("engineering_system") or {}
+    canonical_policy_epoch = canonical_engineering.get("policy_epoch", 0)
 
     project_path = root / ".engineering/project.yaml"
     if project_path.is_file():
@@ -160,6 +165,10 @@ def main() -> int:
             if version_at_least(version, (1, 7, 0)):
                 if not isinstance(policy_epoch, int) or isinstance(policy_epoch, bool) or policy_epoch < 1:
                     failures.append("Engineering System >=1.7.0 requires engineering_system.policy_epoch>=1")
+                if args.require_current_policy and mode == "adopted" and isinstance(canonical_policy_epoch, int) and policy_epoch != canonical_policy_epoch:
+                    failures.append(
+                        f"stale adoption policy_epoch: target={policy_epoch} canonical={canonical_policy_epoch}"
+                    )
 
             if version_at_least(version, (1, 4, 0)):
                 if mode not in {"canonical", "adopted"}:
@@ -252,6 +261,22 @@ def main() -> int:
                 failures.append(
                     "engineering_system.version does not match canonical checker version"
                 )
+            if args.require_current_policy and mode == "adopted":
+                try:
+                    target_profile = load_yaml(root / ".engineering" / "execution-profile.yaml") or {}
+                    canonical_profile = load_yaml(canonical_root / ".engineering" / "execution-profile.yaml") or {}
+                    target_profile_id = str(target_profile.get("profile_id") or "")
+                    canonical_profile_id = str(canonical_profile.get("profile_id") or "")
+                    target_revision = target_profile.get("revision")
+                    canonical_revision = canonical_profile.get("revision")
+                    if target_profile_id != canonical_profile_id or target_revision != canonical_revision:
+                        failures.append(
+                            "stale adoption execution profile: "
+                            f"target={target_profile_id}@{target_revision} "
+                            f"canonical={canonical_profile_id}@{canonical_revision}"
+                        )
+                except Exception as exc:
+                    failures.append(f"cannot compare canonical execution profile: {exc}")
             packet_template = root / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
             if packet_template.is_file():
                 packet_text = packet_template.read_text(encoding="utf-8", errors="replace")
