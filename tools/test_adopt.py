@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from adopt import POLICY_EPOCH, REQUIRED_MANAGED
+from adopt import POLICY_EPOCH, REQUIRED_MANAGED, rewrite_legacy_coordination_rules
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
@@ -3389,8 +3389,26 @@ def test_same_baseline_partial_execution_profile_repair_records_manifest() -> No
         assert load_yaml(project_path)["engineering_system"]["policy_epoch"] == before_epoch + 1
 
 
+def test_obsolete_coordinator_gate_removed_without_weakening_product_approval() -> None:
+    legacy = (
+        "Before mutation, the external authenticated GitHub coordinator must verify the current Work Packet, "
+        "author permission, repository, worktree, branch, exact HEAD, intent revision, change risk, and "
+        "`IMPLEMENTER=CHATGPT_CHAT`. The worker-writable repository copy of "
+        "`python3 tools/implementation_preflight.py check` is never mutation authority. Use the helper source "
+        "from the immutable pinned Engineering System baseline through the isolated trusted launcher, "
+        "capture the no-follow worktree identity, and require `IMPLEMENTATION_LOCAL_BINDING=PASS` with "
+        "`MUTATION_AUTHORITY=NO`."
+    )
+    product = "Production writes require explicit owner approval; preserve user data and release gates."
+    cleaned = rewrite_legacy_coordination_rules(legacy + "\n\n" + product + "\n")
+    assert legacy not in cleaned
+    assert product in cleaned
+    assert rewrite_legacy_coordination_rules(cleaned) == cleaned
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
+    test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
     test_existing_ci_requires_mapping_when_ambiguous()

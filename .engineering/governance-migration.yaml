@@ -12,4 +12,4 @@ changed_surfaces:
 - path: tools/context_epoch.py
   head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895
 - path: tools/adopt.py
-  head_blob_sha: 330de4db6b30809d7b2679731f139038b2621c97
+  head_blob_sha: c032e4c29a6d1b7f79cf465ed4761504f3a4db3e
