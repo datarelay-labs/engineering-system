@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from adopt import POLICY_EPOCH, REQUIRED_MANAGED
+from adopt import POLICY_EPOCH, REQUIRED_MANAGED, rewrite_legacy_coordination_rules
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
@@ -445,18 +445,18 @@ def test_managed_upgrade_to_1_6() -> None:
             assert not (target / rel).exists(), rel
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
-        assert "does not serialize unrelated repository work behind a waiting packet" in upgraded_agents
-        assert "make measurable progress in the same turn" in upgraded_agents
-        assert "completed bounded Work Packet ends that workstream, not a repository-level continue/resume request" in upgraded_agents
+        assert "During machine-observable waits, preserve state and advance independent work" in upgraded_agents
+        assert "make measurable progress in the same turn" in upgraded_agents.lower()
+        assert "After a bounded packet/PR/test phase completes, immediately return to roadmap scheduling" in upgraded_agents
         assert "roadmap/release objective is complete" in upgraded_agents
-        assert "persist the accepted result in the smallest appropriate canonical spec/ADR/roadmap/contract" in upgraded_agents
-        assert "continue directly into implementation and deterministic validation" in upgraded_agents
+        assert "repair missing/stale/contradictory packet state from repository evidence" in upgraded_agents
+        assert "Implement, test and audit directly in coherent batches" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert ".engineering/execution-profile.yaml" in upgraded_agents
-        assert "selected execution profile" in upgraded_agents
+        assert "`.engineering/execution-profile.yaml` selects the runtime" in upgraded_agents
         assert "additional magic phrase" in upgraded_agents
         assert "ordinary authenticated GitHub Issue/PR coordination" in upgraded_agents
-        assert "high-risk external write" in upgraded_agents
+        assert "Stronger trusted boundaries apply only to effect classes" in upgraded_agents
         assert "Cursor" not in upgraded_agents
         assert "Before an external Issue/PR write, run `python3 tools/worker_adapter.py" not in upgraded_agents
         assert "IMPLEMENTER=CURSOR" not in upgraded_agents
@@ -3389,8 +3389,26 @@ def test_same_baseline_partial_execution_profile_repair_records_manifest() -> No
         assert load_yaml(project_path)["engineering_system"]["policy_epoch"] == before_epoch + 1
 
 
+def test_obsolete_coordinator_gate_removed_without_weakening_product_approval() -> None:
+    legacy = (
+        "Before mutation, the external authenticated GitHub coordinator must verify the current Work Packet, "
+        "author permission, repository, worktree, branch, exact HEAD, intent revision, change risk, and "
+        "`IMPLEMENTER=CHATGPT_CHAT`. The worker-writable repository copy of "
+        "`python3 tools/implementation_preflight.py check` is never mutation authority. Use the helper source "
+        "from the immutable pinned Engineering System baseline through the isolated trusted launcher, "
+        "capture the no-follow worktree identity, and require `IMPLEMENTATION_LOCAL_BINDING=PASS` with "
+        "`MUTATION_AUTHORITY=NO`."
+    )
+    product = "Production writes require explicit owner approval; preserve user data and release gates."
+    cleaned = rewrite_legacy_coordination_rules(legacy + "\n\n" + product + "\n")
+    assert legacy not in cleaned
+    assert product in cleaned
+    assert rewrite_legacy_coordination_rules(cleaned) == cleaned
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
+    test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
     test_existing_ci_requires_mapping_when_ambiguous()

@@ -198,27 +198,6 @@ def test_packet_lint_binds_owner_selected_target_repo() -> None:
             fail(f"CLI expected target binding did not block cross-project packet: {cli.stdout} {cli.stderr}")
 
 
-
-def test_packet_v3_rejects_noncanonical_queue_state() -> None:
-    for queue_state in ("IMPLEMENTATION", "WAITING", "WAIT_EXTERNAL", "WAIT_EXACT_HEAD_CI", "AWAITING_REVIEW"):
-        body = packet().replace("STATUS=ACTIVE\n", f"STATUS=ACTIVE\nQUEUE_STATE={queue_state}\n", 1)
-        audit = ce.analyze_packet(ce.parse_packet(body))
-        if "QUEUE_STATE_NONCANONICAL" not in audit["blocking"]:
-            fail(f"packet v3 accepted noncanonical QUEUE_STATE={queue_state}: {audit}")
-
-
-def test_active_packet_must_not_have_blockers() -> None:
-    blocked = packet().replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for owner approval", 1)
-    audit = ce.analyze_packet(ce.parse_packet(blocked))
-    if "ACTIVE_PACKET_HAS_BLOCKER" not in audit["blocking"]:
-        fail(f"ACTIVE packet with a blocker remained runnable: {audit}")
-
-    paused = packet().replace("STATUS=ACTIVE", "STATUS=PAUSED", 1).replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for CI", 1)
-    audit = ce.analyze_packet(ce.parse_packet(paused))
-    if audit["status"] != "PASS":
-        fail(f"PAUSED wait packet should remain structurally valid: {audit}")
-
-
 def test_template_placeholders_block_runnable_packet() -> None:
     template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
         encoding="utf-8"
@@ -421,7 +400,7 @@ def test_projection_caps_large_current_state() -> None:
 
 
 def test_projection_preserves_required_sections_under_cap() -> None:
-    body = packet(current="x" * 3500).replace("STATUS=ACTIVE", "STATUS=PAUSED", 1).replace(
+    body = packet(current="x" * 3500).replace(
         "One bounded outcome.", "g" * 3500
     ).replace(
         "Implement and validate.", "n" * 3500
@@ -678,8 +657,6 @@ def main() -> None:
         test_refetched_projection_identity_binding,
         test_packet_lint_binds_owner_selected_target_repo,
         test_template_placeholders_block_runnable_packet,
-        test_packet_v3_rejects_noncanonical_queue_state,
-        test_active_packet_must_not_have_blockers,
         test_packet_v3_requires_authority_metadata,
         test_packet_v2_legacy_profile_compatibility,
         test_nonstructural_authority_examples_do_not_change_metadata,

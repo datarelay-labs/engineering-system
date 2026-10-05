@@ -90,6 +90,15 @@ def test_paused_ci_wait_still_wakes_coordinator_when_condition_changes() -> None
     assert woken["wakes_coordinator"] is True
 
 
+def test_paused_worker_is_not_resumed_by_ci_reconciliation_override() -> None:
+    facts = load_fixture("06-worker-progress.json")
+    facts["packet"]["status"] = "PAUSED"
+    result = evaluate(facts, EMPTY)
+    assert_inert(result)
+    assert result["resumes_worker"] is False
+    assert result["coordinator_decision"] == "NOOP_PAUSED"
+
+
 def test_stale_ci_pass_does_not_wake_merge() -> None:
     pending = evaluate(load_fixture("01-ci-pending.json"), EMPTY)
     stale = evaluate(load_fixture("03-ci-pass-stale-head.json"), pending["next_watch_state"])
@@ -514,6 +523,8 @@ def test_cli_evaluate_roundtrip() -> None:
 def main() -> int:
     test_ci_pending_same_observation_rechecks_quietly()
     test_exact_head_ci_pass_wakes_coordinator()
+    test_paused_ci_wait_still_wakes_coordinator_when_condition_changes()
+    test_paused_worker_is_not_resumed_by_ci_reconciliation_override()
     test_stale_ci_pass_does_not_wake_merge()
     test_review_clear_on_exact_head_wakes_coordinator()
     test_liveness_without_progress_does_not_resume()

@@ -23,7 +23,7 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 14
+POLICY_EPOCH = 15
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -208,6 +208,42 @@ def canonical_managed_policy_lines() -> tuple[str, str, str]:
     )
 
 
+def rewrite_legacy_coordination_rules(text: str) -> str:
+    """Remove known obsolete normal-work gates; preserve product/risk policy."""
+    legacy_gate = (
+        "Before mutation, the external authenticated GitHub coordinator must verify the current Work Packet, "
+        "author permission, repository, worktree, branch, exact HEAD, intent revision, change risk, and "
+        "`IMPLEMENTER=CHATGPT_CHAT`. The worker-writable repository copy of "
+        "`python3 tools/implementation_preflight.py check` is never mutation authority. Use the helper source "
+        "from the immutable pinned Engineering System baseline through the isolated trusted launcher, "
+        "capture the no-follow worktree identity, and require `IMPLEMENTATION_LOCAL_BINDING=PASS` with "
+        "`MUTATION_AUTHORITY=NO`."
+    )
+    text = text.replace(legacy_gate, "")
+    text = text.replace(
+        "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet "
+        "authorizes the exact repository/worktree/branch/scope.", ""
+    )
+    text = text.replace("## ChatGPT implementation and audit contract", "## Implementation and audit contract")
+    text = text.replace("ChatGPT Chat performs implementation, deterministic testing, and terminal audit.",
+                        "The selected runtime performs implementation, deterministic testing, and terminal audit.")
+    for sentence in (
+        "When resuming a workstream, resolve this repository first, load only its single matching active AI Work Packet, verify actual branch/HEAD/state, and continue from the coherent Next Action.",
+        "When explicitly resuming work, resolve this repository and branch first, load exactly one matching active repository-scoped AI Work Packet, verify actual HEAD/dirty/PR/CI state, and continue only from its Next Action.",
+    ):
+        text = text.replace(sentence, "When resuming, reconcile current owner intent, priority, dependencies and branch context; select eligible work and verify actual repository state before acting.")
+    lines = []
+    for line in text.splitlines():
+        if line.startswith(("- Reconcile one Work Packet's next action with", "- Evaluate one bounded coordinator watch with", "- Run one coordinator watch host pass with")):
+            continue
+        if line == "- If mandatory engineering context is missing or contradictory, fail closed instead of guessing.":
+            line = "- Repair missing or contradictory coordination context within current owner scope; otherwise block only the affected action with concrete evidence."
+        if line.startswith(("- Do not keep a coding-agent session alive polling", "- Do not spend coding-agent model time polling")):
+            line = "- Preserve machine-observable wait state and continue independent authorized work; use a watcher when useful."
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
 def plan_execution_policy_sync(root: Path) -> str | None:
     """Synchronize canonical execution policy and remove known retired agent rules.
 
@@ -218,7 +254,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
     if not path.is_file():
         return None
     original = path.read_text(encoding="utf-8")
-    cleaned = rewrite_retired_agent_rules(original)
+    cleaned = rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(original))
     if retired_agent_rules_present(cleaned):
         raise SystemExit(
             "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"

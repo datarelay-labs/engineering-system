@@ -1,12 +1,15 @@
 contract_version: 1
-base_sha: 37f7e4469bf3c923f9a98e0736beeb13ede0974f
-from_policy_epoch: 13
-to_policy_epoch: 14
+base_sha: 6ebc5b74d78881038433191b39e07e76b3b09c97
+from_policy_epoch: 14
+to_policy_epoch: 15
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: >-
-  Make next-chat handoff fail closed unless the authoritative Work Packet is compact,
-  canonical, freshly persisted and re-read before returning a continuation token.
+rationale: Restore the pre-254 structural packet linter after the failed same-epoch
+  governance merge; separate runnable-now selection from structural lint and permit
+  truthful paused/blocked/completed handoffs. Simplify autonomous execution guidance
+  without changing security or runtime authority.
 changed_surfaces:
-  - path: tools/handoff_contract.py
-    head_blob_sha: 4d28c621229feb6fc5212b76021bd7cf95a6d870
+- path: tools/context_epoch.py
+  head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895
+- path: tools/adopt.py
+  head_blob_sha: c032e4c29a6d1b7f79cf465ed4761504f3a4db3e

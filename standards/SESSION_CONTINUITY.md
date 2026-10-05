@@ -66,7 +66,7 @@ Default handoff behavior:
 3. Keep one primary outcome; a small number of tightly coupled subgoals is preferred over either a single trivial edit or a broad multi-domain program.
 4. File count and LOC are advisory only. Structural coupling, independent verification, approval boundaries, rollback boundaries, and context budget determine size.
 5. Reserve context for implementation **and** testing/review. If implementation alone is expected to consume the reliable session context, split before handoff.
-6. If scope materially expands during execution, the implementer must stop absorbing unrelated work, update the Work Packet, and yield for coordinator re-sizing.
+6. If scope materially expands, update or split the Work Packet within the current owner scope and continue the coherent outcome. A separate coordinator or new owner confirmation is needed only for a genuine scope/authority decision, not routine re-sizing.
 7. Record the sizing decision in the packet’s current handoff state, for example:
 
 ```text
@@ -356,6 +356,17 @@ Folded UTF-8 bytes are retained only under the current worktree's absolute Git m
 The model-visible marker contains only version, store-local opaque handle, and original byte length. Fold telemetry is content-free aggregate data only and never includes raw text, reference/path, handle, digest, secret, or credential. Disabled mode writes no store state and preserves the input structure. This primitive performs no model/embedding/network call, does not change Context Compiler selection semantics, is not enabled by default, and does not claim provider token, cache, billing, or solved-task improvement from byte reduction alone. Promotion requires the #104/#106 measured canary gates.
 
 
+
+## Direct execution and coordination repair
+
+The Engineering System exists to help one capable agent ship correct work using durable repository state and evidence. It is not a second implementer or an approval queue for ordinary engineering. Packet sizing, context orientation, coordinator planning/watches, admission and derived context are tools; invoke them when they resolve a concrete need, rather than executing every tool as a resume checklist.
+
+`work_admission.py eligible --request-json <facts.json>` consumes the fresh authoritative packet body (`body`), local execution-profile root (`profile_root`), owner-bound `expected_target_repo`, observed `issue_state` (OPEN/CLOSED), `dependencies_ready` boolean and `waiting_for` array. It is a pure selection check, not execution authority or a live GitHub fetch. Re-fetch facts at selection and before mutable external writes. Optional orientation/coordinator tools do not gate an already verified ordinary command.
+
+The current explicit owner instruction is the first execution authority. A missing, stale or contradictory packet is repairable coordination data when the owner has clearly authorized the work. Reconcile it from current Git/GitHub/roadmap facts, lint the resulting body, then execute. Do not fabricate authority, bypass production/destructive/credential/permission/release boundaries, or modify unrelated dirty worktrees.
+
+Packet completion and repository-level continuation have different finish lines. Completing one packet closes that bounded workstream; it immediately returns the same runtime to the authorized roadmap. A CI wait pauses the affected lane and permits independent work. Record the concrete condition in Latest Evidence, for example `WAITING_FOR_CI`; do not invent a new packet status. If no independent work remains, persist the concrete wait and finish honestly; do not invent tasks to keep a session alive.
+
 ## Deterministic packet resolution
 
 When resuming work:
@@ -366,12 +377,12 @@ When resuming work:
 4. Read only open Issues whose title begins with `[AI Work]`. An `ai-work` label may be used as an optional search accelerator, but must not be required for correctness.
 5. Require exact `TARGET_REPO` match and lint with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>`; `TARGET_REPO_SCOPE_MISMATCH` is non-runnable.
 6. Prefer an exact `BRANCH` match when branch context exists.
-7. Require exactly one matching `STATUS=ACTIVE` packet. Reject non-canonical status values rather than treating them as aliases.
-8. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, stop with `WORK_PACKET_SCOPE_MISMATCH`; do not repair the mismatch by searching unrelated chats, Athena, or other repositories.
+7. Select one runnable `STATUS=ACTIVE` packet for the current action, using owner priority, dependencies, PRIORITY and branch context. Multiple independent lanes may coexist. Use `tools/work_admission.py eligible` with the fresh body, bound repository and observed wait/dependency facts; structural lint alone is not runnable eligibility.
+8. For packet v3, require `TASK_KIND`, `OWNER_INTENT`, `INTENT_REVISION`, `CHANGE_RISK`, and exact `EXECUTION_PROFILE` / `EXECUTION_PROFILE_REVISION` binding. Verify that `Next Action` directly advances the packet `Goal` and current owner intent. If they materially disagree, synchronize the packet from the current explicit owner instruction and repository evidence. Ask only when the intended scope itself is genuinely ambiguous; do not search unrelated chats or repositories to invent authority.
 9. For legacy packet v2, require its v2 identity/intent fields, require current execution-profile compatibility, and migrate it to v3 on the next meaningful update.
 10. Reject packet v1 and versionless packets as non-runnable; migrate them to v3 before implementation.
-11. Zero matches: report no active packet; do not reconstruct state from guesses.
-12. Multiple matches: fail closed and ask which workstream to use.
+11. Zero matches: reconcile paused/completed/stale packets and inspect the canonical roadmap for the next authorized dependency-eligible task. Under an explicit owner request, create or refresh its repository-scoped packet from current evidence and continue; do not stop solely because coordination state needs repair.
+12. Multiple matches: select by explicit owner priority, dependencies, PRIORITY and branch context. Ask only if competing intents or unsafe ownership conflicts remain after this reconciliation.
 13. Verify actual repository branch, HEAD, dirty state, PR/CI state, and relevant canonical files before acting.
 
 Never treat a stale packet HEAD as current truth.
@@ -388,7 +399,7 @@ After resolving Git identity and before ordinary work:
 6. Read only canonical references required by `Next Action`.
 7. Use minimum sufficient reasoning/context; do not request maximum reasoning by default.
 8. Do not preload all references named in the packet.
-9. Do not keep a coding-agent session alive polling CI, review, deployment, or another machine-observable external condition. Record a concise `WAITING_FOR_<CONDITION>` state and yield to coordinator/automation; the next resume re-checks the condition.
+9. Record CI/review/deploy waits concisely and continue independent authorized work in the same runtime. Use an available watcher for later re-entry when useful; coordinator/automation availability is not an ordinary execution prerequisite. If no runnable work remains, persist the wait and report it honestly.
 10. For an existing branch/PR, orient from the base diff first (`git diff --name-only`/`git diff --stat`) before broad repository search.
 11. When task-local files are not already obvious and the worktree is clean, use `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>"` before broad repo-wide grep/read. The orientation is bound to exact `HEAD`, ranks only Git-tracked relative paths plus declared canonical knowledge metadata, emits no file content, and is a JIT read hint rather than authority. `ORIENTATION_DECISION=NO_MATCH` or insufficient evidence permits bounded expansion; dirty worktrees fail closed rather than presenting a stale HEAD map. After canonical Work Packet and local repository context are resolved, an adopted DataRelay workflow may request bounded project/workstream-scoped JIT enrichment from DataRelay Atlas when cross-project, historical, or memory context would materially help. Atlas output is derived/non-authoritative and must never override current Git/GitHub/repository truth. Atlas unavailability does not block ordinary development; continue on canonical/local context and make the missing enrichment observable. Tela/Athena must not be queried as an active fallback.
 12. For a large optional text candidate, prefer `python3 tools/engineering-context.py --task "<bounded non-secret task phrase>" --slice-path <relative-path>` before a full read. Slice mode reads the exact-HEAD tracked UTF-8 blob and emits bounded JSON-encoded task-relevant line windows in source order. It is a context-reduction hint only: `SLICE_DECISION=NO_MATCH`, truncation, or insufficient evidence permits a bounded full read. Never use slicing as a substitute for mandatory `AGENTS.md`, `.engineering/project.yaml`, managed rules, protected Work Packet state, acceptance criteria, or a canonical reference the task requires in full.
@@ -418,12 +429,12 @@ For implementation, hardening, audit, refactor, cleanup, and optimization work:
 Use a soft default for ordinary bounded work:
 
 ```text
-implementation -> terminal audit/review required by the task/risk contract -> corrective pass when needed -> verification -> stop
+implementation -> task/risk-specific audit -> corrective pass when needed -> verification -> complete packet -> schedule next authorized roadmap task
 ```
 
 One implementation pass, one required terminal audit/review, and at most one ordinary corrective re-audit is the normal depth target. Independence is added only when the task/risk contract requires it. This is a **portfolio/attention budget**, not a safety waiver.
 
-- If the corrective re-audit finds no BLOCKING defect, stop and route remaining findings to follow-up work.
+- If the corrective re-audit finds no BLOCKING defect, complete that packet, record remaining findings as follow-up work, and schedule the next authorized roadmap task.
 - If a BLOCKING defect remains, continue only far enough to close that known blocker and verify its regression; do not restart an open-ended search for unrelated weaknesses in the same packet.
 - Critical security, data-integrity, incident, or release-blocking evidence may exceed the soft depth budget, but the exception must name the concrete blocker. “More hardening may exist” is not sufficient.
 - A packet that repeatedly discovers non-blocking improvements has reached diminishing returns for the current scope.
@@ -663,7 +674,7 @@ When the user asks to continue/resume an existing engineering workstream:
 - load only that bound repository's active Work Packet; cross-project handoffs/dependencies remain read-only context
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
 - lint the exact fresh authoritative packet body with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>` and require PASS; `TARGET_REPO_SCOPE_MISMATCH`, stale/mismatched execution-profile identity, or revision is non-runnable
-- immediately before any implementation adapter/session/process start or resume, re-read the authoritative packet and lint it again with the same bound expected repository; do not start or resume on WARN/BLOCK ambiguity and never treat a handoff comment as authority
+- on workstream selection or a material intent/profile change, validate the fresh packet once; re-read mutable identity before external writes. Routine shell/test commands in the same verified workstream do not require a new preflight ceremony. Never treat a handoff comment as authority
 - replace the bound expected repository only after a new explicit owner project/repository switch
 - verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence for packet v2/v3, and require exact profile identity/revision binding for v3
 - verify current GitHub/repository facts
@@ -683,7 +694,7 @@ understand -> implement a coherent small/medium batch -> affected local tests ->
 ```
 
 Guidance:
-- A next-chat handoff is a transaction, not prose generation. Before returning a continuation token, update the authoritative ACTIVE Work Packet with the current exact repository/workstream/HEAD/state/Next Action, re-read that GitHub Issue, and require `python3 tools/handoff_contract.py --facts <facts.json>` PASS. A prompt-only/copy-paste handoff, an unverified Issue write, or a token returned before the authoritative re-read is incomplete and must not be reported as a successful handoff.
+- A next-chat handoff is a transaction, not prose generation. Before returning a continuation token, update the authoritative Work Packet with its accurate ACTIVE/PAUSED/BLOCKED/COMPLETE state and current exact repository/workstream/HEAD/Next Action, re-read that GitHub Issue, and require `python3 tools/handoff_contract.py --facts <facts.json>` PASS. A handoff persists the actual lifecycle state; it must not reactivate waiting or blocked work just to obtain a continuation token. A prompt-only/copy-paste handoff, an unverified Issue write, or a token returned before the authoritative re-read is incomplete and must not be reported as a successful handoff.
 - A progress update is not a handoff. Continue while a safe authorized next action exists. If a trusted runnable implementation packet is already selected, make measurable progress in the same turn instead of returning control after a statement of future intent. Reproduction, bounded investigation that resolves a material uncertainty, deterministic validation, repository mutation, or an authorized external state transition qualifies; do not force mutation when diagnosis or validation is the correct next action.
 - Prefer the cheapest relevant local tests during implementation. Fast CI is feedback, not release qualification; do not run expensive/full/release suites after every edit.
 - Batch related corrective findings before the next expensive qualification run.
