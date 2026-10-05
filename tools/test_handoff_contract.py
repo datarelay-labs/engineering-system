@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+from pathlib import Path
 import hashlib
 from handoff_contract import verify
 
@@ -30,7 +31,13 @@ def facts(body=BODY,digest=None,token="Demo 계속"):
             "persisted_body_sha256":digest or hashlib.sha256(body.encode()).hexdigest(),
             "continuation_token":token}
 
+def test_documented_cli_flag_matches_parser():
+    session=(Path(__file__).resolve().parents[1]/"standards"/"SESSION_CONTINUITY.md").read_text()
+    assert "handoff_contract.py --request-json" not in session
+    assert "handoff_contract.py --facts <facts.json>" in session
+
 def main():
+    test_documented_cli_flag_matches_parser()
     assert verify(facts())["status"]=="PASS"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
