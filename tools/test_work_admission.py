@@ -548,6 +548,12 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
         assert evaluate_eligible({**facts,"body":body})["DECISION"]=="ALLOW"
         live = body.replace(quoted,quoted+"WAITING_FOR_CI=current-head"+chr(10),1)
         assert evaluate_eligible({**facts,"body":live})["DENY_CLASS"]=="WAITING"
+    for section in ("Current State", "Latest Evidence"):
+        for marker in ("WAITING_FOR_CI", "- WAITING_FOR_DEPENDENCY=core"):
+            body=facts["body"].replace("## "+section,"## "+section+chr(10)+marker,1)
+            assert evaluate_eligible({**facts,"body":body})["DENY_CLASS"]=="WAITING"
+            body=facts["body"].replace("## "+section,"## "+section+chr(10)+chr(96)*3+chr(10)+marker+chr(10)+chr(96)*3,1)
+            assert evaluate_eligible({**facts,"body":body})["DECISION"]=="ALLOW"
     # A CI-waiting lane must not serialize independent ready work.
     reports = [evaluate_eligible({**facts, "waiting_for": ["CI"]}), evaluate_eligible(facts)]
     assert [r["DECISION"] for r in reports] == ["DENY", "ALLOW"]
