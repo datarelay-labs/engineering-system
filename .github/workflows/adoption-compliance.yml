@@ -58,3 +58,4 @@ jobs:
           --root .
           --expected-baseline "$CALLED_WORKFLOW_SHA"
           --expected-mode adopted
+          --require-current-policy
