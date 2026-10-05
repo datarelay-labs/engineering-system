@@ -198,6 +198,27 @@ def test_packet_lint_binds_owner_selected_target_repo() -> None:
             fail(f"CLI expected target binding did not block cross-project packet: {cli.stdout} {cli.stderr}")
 
 
+
+def test_active_packet_must_be_runnable_now() -> None:
+    for queue_state in ("WAITING", "WAITING_CI", "DEPENDENCY_WAIT", "DEFERRED", "HUMAN_REQUIRED"):
+        body = packet().replace("STATUS=ACTIVE\n", f"STATUS=ACTIVE\nQUEUE_STATE={queue_state}\n", 1)
+        audit = ce.analyze_packet(ce.parse_packet(body))
+        if "ACTIVE_PACKET_NOT_RUNNABLE" not in audit["blocking"]:
+            fail(f"ACTIVE packet with {queue_state} remained runnable: {audit}")
+
+    blocked = packet().replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for owner approval", 1)
+    audit = ce.analyze_packet(ce.parse_packet(blocked))
+    if "ACTIVE_PACKET_HAS_BLOCKER" not in audit["blocking"]:
+        fail(f"ACTIVE packet with a blocker remained runnable: {audit}")
+
+    paused = packet().replace("STATUS=ACTIVE", "STATUS=PAUSED", 1).replace(
+        "## Blockers\n\nNONE", "## Blockers\n\nWaiting for CI", 1
+    )
+    audit = ce.analyze_packet(ce.parse_packet(paused))
+    if audit["status"] != "PASS":
+        fail(f"PAUSED wait packet should remain structurally valid: {audit}")
+
+
 def test_template_placeholders_block_runnable_packet() -> None:
     template = (ROOT / "templates/.github/ISSUE_TEMPLATE/ai-work-packet.md").read_text(
         encoding="utf-8"
@@ -657,6 +678,7 @@ def main() -> None:
         test_refetched_projection_identity_binding,
         test_packet_lint_binds_owner_selected_target_repo,
         test_template_placeholders_block_runnable_packet,
+        test_active_packet_must_be_runnable_now,
         test_packet_v3_requires_authority_metadata,
         test_packet_v2_legacy_profile_compatibility,
         test_nonstructural_authority_examples_do_not_change_metadata,
