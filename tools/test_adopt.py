@@ -3406,9 +3406,22 @@ def test_obsolete_coordinator_gate_removed_without_weakening_product_approval() 
     assert rewrite_legacy_coordination_rules(cleaned) == cleaned
 
 
+def test_legacy_rule_suffix_preserves_project_policy() -> None:
+    product = "Production writes require explicit owner approval; preserve user data."
+    lines = ["- Reconcile one Work Packet's next action with `python3 tools/coordinator.py plan --facts <facts.json>`. The planner is pure: one bounded decision, no worker launch, GitHub mutation, merge, notification send, or session stop.", '- Evaluate one bounded coordinator watch with `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator is pure: one re-entry result, no subprocess, network, GitHub mutation, merge, or Telegram send.', '- Run one coordinator watch host pass with `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. The host acquires one lock, calls the watch evaluator, and delivers at most one already-authorized typed action after a fresh reconciliation read. It does not accept caller commands or URLs, mint authority, merge, stop sessions, or busy-loop.', '- Do not keep a coding-agent session alive polling CI/review/external waits; persist concise state and yield to coordinator/automation.']
+    for legacy_line in lines:
+        cleaned = rewrite_legacy_coordination_rules(legacy_line + " " + product + chr(10))
+        assert product in cleaned
+        assert legacy_line not in cleaned
+        assert rewrite_legacy_coordination_rules(cleaned) == cleaned
+    unknown = "- Reconcile one Work Packet's next action with custom product coordination; " + product
+    assert unknown in rewrite_legacy_coordination_rules(unknown + chr(10))
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
+    test_legacy_rule_suffix_preserves_project_policy()
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
     test_existing_ci_requires_mapping_when_ambiguous()
