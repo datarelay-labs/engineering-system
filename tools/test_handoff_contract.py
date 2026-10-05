@@ -68,6 +68,12 @@ def main():
     for action in ("", "NONE", "N/A", "NONE."):
         body=BODY.replace("Continue implementation.",action)
         assert verify(facts(body=body))["status"]=="BLOCK"
+    for fence in (chr(96)*3, "~"*3, chr(96)*4):
+        quoted=fence+"text"+chr(10)+"WAITING_FOR_CI=past-head"+chr(10)+fence+chr(10)
+        body=BODY+"## Latest Evidence"+chr(10)+quoted
+        assert verify(facts(body=body))["status"]=="PASS"
+        body+="WAITING_FOR_CI=current-head"+chr(10)
+        assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")
