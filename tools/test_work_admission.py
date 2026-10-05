@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from work_admission import (  # noqa: E402
+    evaluate_eligible,
     evaluate_admit,
     evaluate_release,
     evaluate_size,
@@ -485,7 +486,46 @@ def test_source_does_not_mutate_sessions() -> None:
         assert token not in text, token
 
 
+def eligible_facts() -> dict:
+    from test_context_epoch import packet
+    return {"body": packet(), "expected_target_repo": "datarelay-labs/engineering-system",
+            "profile_root": str(ROOT), "issue_state": "OPEN",
+            "dependencies_ready": True, "waiting_for": []}
+
+
+def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> None:
+    facts = eligible_facts()
+    assert evaluate_eligible(facts)["DECISION"] == "ALLOW"
+    mutations = [
+        {"issue_state": "CLOSED"},
+        {"dependencies_ready": False},
+        {"waiting_for": ["exact-head CI"]},
+        {"expected_target_repo": "datarelay-labs/datarelay-link"},
+    ]
+    for state in ("PAUSED", "BLOCKED", "COMPLETE"):
+        mutations.append({"body": facts["body"].replace("STATUS=ACTIVE", "STATUS=" + state, 1)})
+    mutations.append({"body": facts["body"].replace("EXECUTION_PROFILE_REVISION=3", "EXECUTION_PROFILE_REVISION=2", 1)})
+    mutations.append({"body": facts["body"].replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for approval", 1)})
+    for state in ("DEPENDENCY_WAIT", "WAIT_EXACT_HEAD_CI", "DEFERRED", "HUMAN_REQUIRED"):
+        mutations.append({"body": facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE\nQUEUE_STATE=" + state, 1)})
+    for change in mutations:
+        assert evaluate_eligible({**facts, **change})["DECISION"] == "DENY", change
+    # A CI-waiting lane must not serialize independent ready work.
+    reports = [evaluate_eligible({**facts, "waiting_for": ["CI"]}), evaluate_eligible(facts)]
+    assert [r["DECISION"] for r in reports] == ["DENY", "ALLOW"]
+    # CI mentions in the completion contract are not observed wait conditions.
+    body = facts["body"].replace("Implement and validate.", "Implement and validate; run CI at integration.")
+    assert evaluate_eligible({**facts, "body": body})["DECISION"] == "ALLOW"
+    body = facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE\nQUEUE_STATE=IMPLEMENTATION", 1)
+    assert evaluate_eligible({**facts, "body": body})["DECISION"] == "ALLOW"
+    code, result = run_cli("eligible", facts)
+    assert code == 0 and result["DECISION"] == "ALLOW"
+    code, result = run_cli("eligible", {**facts, "waiting_for": ["CI"]})
+    assert code == 2 and result["DENY_CLASS"] == "WAITING"
+
+
 def main() -> int:
+    test_runnable_selection_excludes_stale_waiting_and_terminal_packets()
     test_paths_overlap()
     test_p1b_admission_001_cross_repo_unisolated_shared_runtime()
     test_p1b_admission_001_empty_ownership_fails_closed()

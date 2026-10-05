@@ -39,6 +39,11 @@ def test_documented_cli_flag_matches_parser():
 def main():
     test_documented_cli_flag_matches_parser()
     assert verify(facts())["status"]=="PASS"
+    for state in ("PAUSED", "BLOCKED", "COMPLETE"):
+        body=BODY.replace("STATUS=ACTIVE", "STATUS="+state)
+        assert verify(facts(body=body))["status"]=="PASS"
+    body=BODY.replace("STATUS=ACTIVE", "STATUS=WAITING")
+    assert verify(facts(body=body))["reason"]=="PACKET_NOT_CLEAN"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")

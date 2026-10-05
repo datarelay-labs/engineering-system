@@ -442,7 +442,10 @@ def validate_coordinator_contract():
         ("AGENTS.md", agents),
         ("templates/AGENTS.md", agents_template),
     ):
-        if "coordinator.py" not in text:
+        if label in {"AGENTS.md", "templates/AGENTS.md"}:
+            if "standards/SESSION_CONTINUITY.md" not in text or "optional orchestration" not in text:
+                raise SystemExit(f"FAIL {label} missing optional coordinator routing")
+        elif "coordinator.py" not in text:
             raise SystemExit(f"FAIL {label} missing coordinator planner command")
     for token in (
         "Pure coordinator planner",
@@ -500,7 +503,10 @@ def validate_coordinator_watch_contract():
         ("AGENTS.md", agents),
         ("templates/AGENTS.md", agents_template),
     ):
-        if "coordinator_watch.py" not in text:
+        if label in {"AGENTS.md", "templates/AGENTS.md"}:
+            if "standards/SESSION_CONTINUITY.md" not in text or "optional orchestration" not in text:
+                raise SystemExit(f"FAIL {label} missing optional coordinator routing")
+        elif "coordinator_watch.py" not in text:
             raise SystemExit(f"FAIL {label} missing coordinator watch command")
     for token in (
         "Bounded coordinator watch",
@@ -585,7 +591,10 @@ def validate_coordinator_watch_host_contract():
         ("AGENTS.md", agents),
         ("templates/AGENTS.md", agents_template),
     ):
-        if "coordinator_watch_host.py" not in text:
+        if label in {"AGENTS.md", "templates/AGENTS.md"}:
+            if "standards/SESSION_CONTINUITY.md" not in text or "optional orchestration" not in text:
+                raise SystemExit(f"FAIL {label} missing optional coordinator routing")
+        elif "coordinator_watch_host.py" not in text:
             raise SystemExit(f"FAIL {label} missing coordinator watch host command")
     for token in (
         "Coordinator watch host",
@@ -683,7 +692,7 @@ def validate_worker_adapter_contract():
             "roadmap/release objective is complete",
             "additional magic phrase",
             "ordinary authenticated GitHub Issue/PR coordination",
-            "high-risk external write",
+            "Stronger trusted boundaries apply only to effect classes",
         ):
             if token not in text:
                 raise SystemExit(f"FAIL {label} missing profile-bound execution authority token: {token}")
@@ -1627,8 +1636,8 @@ def validate_security_hardening():
             raise SystemExit(f"FAIL SECURITY.md missing security hardening token: {token}")
     for rel in ("AGENTS.md", "templates/AGENTS.md"):
         text = (ROOT / rel).read_text(encoding="utf-8")
-        if "tools/security-hardening.py plan|apply" not in text:
-            raise SystemExit(f"FAIL {rel} missing security hardening router")
+        if "standards/SECURITY.md" not in text:
+            raise SystemExit(f"FAIL {rel} missing task-relevant security standard router")
 
 
 def validate_security_profile():
@@ -1704,8 +1713,8 @@ def validate_security_profile():
             raise SystemExit(f"FAIL ADOPTION.md missing security profile token: {token}")
     for rel in ("AGENTS.md", "templates/AGENTS.md"):
         text = (ROOT / rel).read_text(encoding="utf-8")
-        if "tools/security-profile.py classify" not in text or "does not mutate GitHub settings" not in text:
-            raise SystemExit(f"FAIL {rel} missing security profile router")
+        if "standards/SECURITY.md" not in text or "canonical Engineering System checkout" not in text:
+            raise SystemExit(f"FAIL {rel} missing task-relevant canonical security router")
     if "security-profile" in (ROOT / "tools/check-adoption.py").read_text(encoding="utf-8"):
         raise SystemExit("FAIL security profile must not change adoption compliance")
     if "security-profile" in (ROOT / "tools/adopt.py").read_text(encoding="utf-8"):

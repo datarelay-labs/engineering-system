@@ -224,12 +224,6 @@ def analyze_packet(
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
         blocking.append("STATUS_INVALID")
-    if version == "3" and packet.metadata.get("QUEUE_STATE") is not None:
-        blocking.append("QUEUE_STATE_NONCANONICAL")
-    if status == "ACTIVE":
-        blockers = packet.sections.get("Blockers", "").strip()
-        if blockers and blockers.upper() not in {"NONE", "- NONE", "NONE."}:
-            blocking.append("ACTIVE_PACKET_HAS_BLOCKER")
     if version == "3":
         for key, sentinel in TEMPLATE_META_SENTINELS.items():
             if packet.metadata.get(key) == sentinel:

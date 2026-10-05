@@ -26,8 +26,6 @@ def verify(facts: dict) -> dict:
             "blocking":lint["blocking"],
             "warnings":lint["warnings"],
         }
-    if packet.metadata.get("STATUS") != "ACTIVE":
-        return {"status":"BLOCK","reason":"PACKET_NOT_ACTIVE"}
     token=str(facts["continuation_token"]).strip()
     if not token or "\n" in token or len(token)>120:
         return {"status":"BLOCK","reason":"CONTINUATION_TOKEN_INVALID"}
