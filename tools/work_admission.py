@@ -556,11 +556,15 @@ def packet_pending_condition(packet: Any) -> tuple[str, str] | None:
     blockers = packet.sections.get("Blockers", "").strip().upper()
     if blockers not in {"NONE", "- NONE", "NONE."}:
         return "PACKET_BLOCKER", "ACTIVE packet still records a blocker"
+    resolved = {"NONE", "N/A", "PASS", "COMPLETE", "RESOLVED", "CLEARED", "NO", "FALSE", "0"}
     for key in ("QUEUE_STATE", "WAITING_FOR", "DEPENDENCY_STATUS"):
         value = packet.metadata.get(key, "").upper()
-        if value and ("WAIT" in value or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}):
+        if value and (
+            (key == "WAITING_FOR" and value not in resolved)
+            or "WAIT" in value
+            or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}
+        ):
             return "WAITING", "packet records a pending condition in " + key
-    resolved = {"NONE", "N/A", "PASS", "COMPLETE", "RESOLVED", "CLEARED", "NO", "FALSE", "0"}
     for line in packet.sections.get("Latest Evidence", "").splitlines():
         match = re.fullmatch(r"\s*(?:-\s*)?(WAITING_FOR_[A-Z0-9_]+)(?:=(.*))?\s*", line)
         if match and (match.group(2) or "").strip().upper() not in resolved:
