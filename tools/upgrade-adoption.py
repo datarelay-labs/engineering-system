@@ -1426,7 +1426,10 @@ def main() -> int:
         **planned_context_epoch,
     }
     if planned_root_surfaces:
-        target_policy_epoch = max(POLICY_EPOCH, existing_policy_epoch + 1)
+        # A root-governance migration advances exactly one epoch. If the target is
+        # several canonical epochs behind, a subsequent repair pass advances the
+        # metadata-only epoch to the current floor after this root transition is durable.
+        target_policy_epoch = existing_policy_epoch + 1
         engineering["policy_epoch"] = target_policy_epoch
         project["engineering_system"] = engineering
     root_migration = build_root_migration_manifest(
