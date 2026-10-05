@@ -224,10 +224,9 @@ def analyze_packet(
     status = packet.metadata.get("STATUS")
     if status and status not in ALLOWED_STATUSES:
         blocking.append("STATUS_INVALID")
+    if version == "3" and packet.metadata.get("QUEUE_STATE") is not None:
+        blocking.append("QUEUE_STATE_NONCANONICAL")
     if status == "ACTIVE":
-        queue_state = (packet.metadata.get("QUEUE_STATE") or "").strip().upper()
-        if queue_state in {"WAITING", "WAITING_CI", "DEPENDENCY_WAIT", "DEFERRED", "HUMAN_REQUIRED"}:
-            blocking.append("ACTIVE_PACKET_NOT_RUNNABLE")
         blockers = packet.sections.get("Blockers", "").strip()
         if blockers and blockers.upper() not in {"NONE", "- NONE", "NONE."}:
             blocking.append("ACTIVE_PACKET_HAS_BLOCKER")
