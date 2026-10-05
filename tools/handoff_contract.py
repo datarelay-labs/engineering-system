@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse, hashlib, json, re
 from pathlib import Path
 from context_epoch import analyze_packet, parse_packet
-from work_admission import packet_pending_condition
+from work_admission import packet_not_runnable_reason
 
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -27,7 +27,7 @@ def verify(facts: dict) -> dict:
             "blocking":lint["blocking"],
             "warnings":lint["warnings"],
         }
-    if packet.metadata.get("STATUS") == "ACTIVE" and packet_pending_condition(packet):
+    if packet.metadata.get("STATUS") == "ACTIVE" and packet_not_runnable_reason(packet):
         return {"status":"BLOCK","reason":"ACTIVE_PACKET_NOT_RUNNABLE"}
     token=str(facts["continuation_token"]).strip()
     if not token or "\n" in token or len(token)>120:

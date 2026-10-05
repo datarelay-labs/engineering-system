@@ -62,6 +62,12 @@ def main():
     assert verify(facts(body=body))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
     body=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+"WAITING_FOR=NONE")
     assert verify(facts(body=body))["status"]=="PASS"
+    for field, value in (("WAITING_FOR","NONE"),("WAITING_FOR","NO_WAIT"),("QUEUE_STATE","NOT_WAITING")):
+        body=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+field+"="+value)
+        assert verify(facts(body=body))["status"]=="PASS"
+    for action in ("", "NONE", "N/A", "NONE."):
+        body=BODY.replace("Continue implementation.",action)
+        assert verify(facts(body=body))["status"]=="BLOCK"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")

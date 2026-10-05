@@ -551,14 +551,16 @@ def evaluate_release(request: dict[str, Any]) -> dict[str, str]:
     )
 
 
-def packet_pending_condition(packet: Any) -> tuple[str, str] | None:
+def packet_not_runnable_reason(packet: Any) -> tuple[str, str] | None:
     """One lifecycle invariant for selection and truthful persisted handoffs."""
     blockers = packet.sections.get("Blockers", "").strip().upper()
     if blockers not in {"NONE", "- NONE", "NONE."}:
         return "PACKET_BLOCKER", "ACTIVE packet still records a blocker"
-    resolved = {"NONE", "N/A", "PASS", "COMPLETE", "RESOLVED", "CLEARED", "NO", "FALSE", "0"}
+    resolved = {"NONE", "N/A", "PASS", "COMPLETE", "RESOLVED", "CLEARED", "NO", "FALSE", "0", "NO_WAIT", "NOT_WAITING", "READY", "SUCCESS", "SATISFIED"}
     for key in ("QUEUE_STATE", "WAITING_FOR", "DEPENDENCY_STATUS"):
         value = packet.metadata.get(key, "").upper()
+        if value in resolved:
+            continue
         if value and (
             (key == "WAITING_FOR" and value not in resolved)
             or "WAIT" in value
@@ -569,6 +571,9 @@ def packet_pending_condition(packet: Any) -> tuple[str, str] | None:
         match = re.fullmatch(r"\s*(?:-\s*)?(WAITING_FOR_[A-Z0-9_]+)(?:=(.*))?\s*", line)
         if match and (match.group(2) or "").strip().upper() not in resolved:
             return "WAITING", "packet evidence records " + match.group(1) + "; reconcile observed readiness"
+    action = packet.sections.get("Next Action", "").strip()
+    if not action or action.upper() in {"NONE", "NONE.", "N/A"}:
+        return "NO_NEXT_ACTION", "ACTIVE packet has no executable next outcome"
     return None
 
 
@@ -609,12 +614,9 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
         return deny("packet HEAD is stale; reconcile from current evidence", "STALE_HEAD")
     if not ready or waits:
         return deny("observed dependencies or external condition are pending", "WAITING")
-    pending = packet_pending_condition(packet)
+    pending = packet_not_runnable_reason(packet)
     if pending:
         return deny(pending[1], pending[0])
-    action = packet.sections.get("Next Action", "").strip()
-    if not action or action.upper() in {"NONE", "NONE.", "N/A"}:
-        return deny("packet has no executable next outcome", "NO_NEXT_ACTION")
     return allow("repository-bound current-profile packet is runnable now")
 
 
