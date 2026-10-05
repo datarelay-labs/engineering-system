@@ -915,6 +915,21 @@ def test_user_facing_contract_paths_fail_during_audit() -> None:
             assert not (root / ".engineering").exists()
 
 
+def test_commit_rollout_changes_sets_local_identity() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "repo"
+        root.mkdir()
+        init_repo(root)
+        (root / "a.txt").write_text("one\n", encoding="utf-8")
+        commit_all(root, "base")
+        run("git", "config", "--unset", "user.email", cwd=root)
+        run("git", "config", "--unset", "user.name", cwd=root)
+        (root / "a.txt").write_text("two\n", encoding="utf-8")
+        assert org_rollout.commit_rollout_changes(root, "rollout") is True
+        assert run("git", "config", "user.name", cwd=root).stdout.strip() == "DataRelay Engineering System"
+        assert run("git", "config", "user.email", cwd=root).stdout.strip() == "engineering-system@users.noreply.github.com"
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
     test_rollout_rejects_stale_canonical_checkout_for_real_baseline()
@@ -931,6 +946,7 @@ def main() -> int:
     test_attestation_repair_classification()
     test_user_gate_contract_review_override_propagates()
     test_user_facing_contract_paths_fail_during_audit()
+    test_commit_rollout_changes_sets_local_identity()
     print("ORG_ROLLOUT_TOOL_TESTS=PASS")
     return 0
 

@@ -556,6 +556,10 @@ def commit_rollout_changes(root: Path, message: str) -> bool:
     status = run_git(root, "status", "--porcelain")
     if not status.stdout.strip():
         return False
+    # Isolated rollout clones must not depend on ambient/global Git identity.
+    # Use a repository-local automation identity only for the rollout commit.
+    run_git(root, "config", "user.name", "DataRelay Engineering System")
+    run_git(root, "config", "user.email", "engineering-system@users.noreply.github.com")
     committed = run_git(root, "commit", "-qm", message)
     if committed.returncode != 0:
         raise SystemExit(f"FAIL commit rollout changes: {committed.stdout.strip()}")

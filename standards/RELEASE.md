@@ -38,7 +38,7 @@ For products whose public surface is not a CLI, `Feature/Scenario` means the equ
 
 ### Discovery / remediation / rerun semantics
 
-Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for ChatGPT's primary persona-led public-surface execution.
+Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for the execution-profile-selected runtime's primary persona-led public-surface execution.
 
 Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set, perform its mandatory final report/readback/offboarding, and then remediate in coherent batches rather than alternating one fix with one remote CI run.
 

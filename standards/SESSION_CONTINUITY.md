@@ -199,7 +199,7 @@ Coordinator scheduling rules:
 3. Within the same priority, prefer the oldest eligible packet unless a repository-specific policy says otherwise.
 4. Risk/severity may increase verification depth but must not silently become scheduling priority.
 5. When the owner raises another packet's priority or an incident/release blocker becomes explicitly prioritized, lower-priority work may be preempted at the next safe checkpoint.
-6. Preemption must preserve recoverable state: finish/abort the current atomic operation safely, persist current evidence, mark/yield the packet, and release worker claims when safe. Do not terminate in the middle of an irreversible/external mutation merely to switch tasks.
+6. Preemption must preserve recoverable state: finish/abort the current atomic operation safely, persist current evidence, set the packet to PAUSED when execution is intentionally deferred, or keep it ACTIVE with a named machine-observable wait when automatic re-entry is intended, and release worker claims when safe. Do not terminate in the middle of an irreversible/external mutation merely to switch tasks.
 7. Preempted work remains durable and resumable; it does not become COMPLETE or discarded.
 
 A non-empty follow-up backlog does not entitle the current theme to retain priority after sufficiency is reached.
@@ -418,10 +418,10 @@ For implementation, hardening, audit, refactor, cleanup, and optimization work:
 Use a soft default for ordinary bounded work:
 
 ```text
-implementation -> independent audit -> corrective pass when needed -> verification -> stop
+implementation -> terminal audit/review required by the task/risk contract -> corrective pass when needed -> verification -> stop
 ```
 
-One implementation pass, one independent audit, and at most one ordinary corrective re-audit is the normal depth target. This is a **portfolio/attention budget**, not a safety waiver.
+One implementation pass, one required terminal audit/review, and at most one ordinary corrective re-audit is the normal depth target. Independence is added only when the task/risk contract requires it. This is a **portfolio/attention budget**, not a safety waiver.
 
 - If the corrective re-audit finds no BLOCKING defect, stop and route remaining findings to follow-up work.
 - If a BLOCKING defect remains, continue only far enough to close that known blocker and verify its regression; do not restart an open-ended search for unrelated weaknesses in the same packet.
