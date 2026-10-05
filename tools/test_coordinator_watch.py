@@ -73,6 +73,23 @@ def test_exact_head_ci_pass_wakes_coordinator() -> None:
     assert woken["notification_disposition"] == "SEND"
 
 
+def test_paused_ci_wait_still_wakes_coordinator_when_condition_changes() -> None:
+    pending_facts = load_fixture("01-ci-pending.json")
+    pending_facts["packet"]["status"] = "PAUSED"
+    pending = evaluate(pending_facts, EMPTY)
+    assert_inert(pending)
+    assert pending["result"] == "RECHECK_LATER"
+    assert pending["coordinator_decision"] == "WAIT_EXACT_HEAD_CI"
+
+    passed_facts = load_fixture("02-ci-pass-exact.json")
+    passed_facts["packet"]["status"] = "PAUSED"
+    woken = evaluate(passed_facts, pending["next_watch_state"])
+    assert_inert(woken)
+    assert woken["result"] == "WAKE_COORDINATOR"
+    assert woken["coordinator_decision"] == "AUDIT_REVIEW"
+    assert woken["wakes_coordinator"] is True
+
+
 def test_stale_ci_pass_does_not_wake_merge() -> None:
     pending = evaluate(load_fixture("01-ci-pending.json"), EMPTY)
     stale = evaluate(load_fixture("03-ci-pass-stale-head.json"), pending["next_watch_state"])

@@ -199,7 +199,7 @@ Coordinator scheduling rules:
 3. Within the same priority, prefer the oldest eligible packet unless a repository-specific policy says otherwise.
 4. Risk/severity may increase verification depth but must not silently become scheduling priority.
 5. When the owner raises another packet's priority or an incident/release blocker becomes explicitly prioritized, lower-priority work may be preempted at the next safe checkpoint.
-6. Preemption must preserve recoverable state: finish/abort the current atomic operation safely, persist current evidence, set the packet to PAUSED when execution is intentionally deferred, or keep it ACTIVE with a named machine-observable wait when automatic re-entry is intended, and release worker claims when safe. Do not terminate in the middle of an irreversible/external mutation merely to switch tasks.
+6. Preemption must preserve recoverable state: finish/abort the current atomic operation safely, persist current evidence, set the packet to PAUSED whenever repository-level scheduling should move to another workstream, including CI/review/dependency waits. A machine-observable watcher/worker may retain its own wait state for automatic re-entry, but that wait does not make the Work Packet itself ACTIVE. Release worker claims when safe. Do not terminate in the middle of an irreversible/external mutation merely to switch tasks.
 7. Preempted work remains durable and resumable; it does not become COMPLETE or discarded.
 
 A non-empty follow-up backlog does not entitle the current theme to retain priority after sufficiency is reached.
@@ -251,8 +251,8 @@ research/discovery when warranted
 
 `STATUS` is deliberately small and fixed. Do not invent transient readiness values such as `WAITING` or `DONE`.
 
-- `ACTIVE` — work is runnable or waiting on a machine-observable condition that can be resumed automatically.
-- `PAUSED` — the owner intentionally paused the workstream.
+- `ACTIVE` — work is runnable now: dependencies and required execution environment are available and its `Next Action` can make measurable progress without waiting for another condition. Machine-observable CI/review/dependency waits belong to watcher/worker state, not packet `ACTIVE`.
+- `PAUSED` — execution is intentionally deferred, including repository-level scheduling waits such as CI, review, or incomplete dependencies. PAUSED does not imply cancellation or owner intervention.
 - `BLOCKED` — progress requires a human/external action or a required execution environment is unavailable.
 - `COMPLETE` — terminal; no executable `Next Action` remains.
 

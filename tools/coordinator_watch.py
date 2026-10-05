@@ -795,7 +795,16 @@ def evaluate(facts_payload: dict[str, Any], state_payload: dict[str, Any]) -> di
             {"decision": "RECONCILE_AMBIGUOUS", "reason": "ambiguous mutation"},
             subject,
         )
-    decision = plan(_bind_transient_retry(planner_payload, facts, state))
+    watch_planner_payload = _bind_transient_retry(planner_payload, facts, state)
+    # PAUSED removes a packet from repository-level runnable scheduling, but an
+    # already-authorized machine watch must still be able to reconcile CI/review
+    # completion. The override is local to this pure evaluator; it never mutates
+    # the authoritative Work Packet or grants implementation authority.
+    if packet["status"] == "PAUSED":
+        watch_planner_payload = dict(watch_planner_payload)
+        watch_planner_payload["packet"] = dict(watch_planner_payload["packet"])
+        watch_planner_payload["packet"]["status"] = "ACTIVE"
+    decision = plan(watch_planner_payload)
     return _map_decision(facts, watch, state, decision, subject)
 
 
