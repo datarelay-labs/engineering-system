@@ -744,10 +744,10 @@ A request to move work to the next chat is a durable-state transaction, not a pr
 
 Required order:
 
-1. Freshly re-read the authoritative ACTIVE Work Packet and actual repository/branch/HEAD state.
+1. Freshly re-read the authoritative Work Packet and actual repository/branch/HEAD state; retain its accurate ACTIVE/PAUSED/BLOCKED/COMPLETE lifecycle state.
 2. Replace stale diary/history with the bounded current Current State, Next Action, Latest Evidence, and Blockers needed to resume.
 3. Persist that exact Work Packet body to the repository-scoped GitHub Issue.
-4. Re-read the persisted Issue body and verify its SHA-256, target repository, ACTIVE status, execution-profile binding, and packet lint.
+4. Re-read the persisted Issue body and verify its SHA-256, target repository, accurate canonical lifecycle state, execution-profile binding, and packet lint. An ACTIVE packet with blockers or pending wait metadata is contradictory and must be normalized before handoff.
 5. Only after that verification succeeds, return the minimal repository/lane continuation token to the owner.
 
 Use `python3 tools/handoff_contract.py --facts <json>` for the final fail-closed transaction check. A prose prompt, continuation token, or chat summary emitted before the authoritative Issue update is verified is an incomplete handoff and must not be reported as success. The final user-visible handoff should be only the minimal continuation token unless the owner explicitly asks for more detail.

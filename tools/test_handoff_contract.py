@@ -35,6 +35,8 @@ def test_documented_cli_flag_matches_parser():
     session=(Path(__file__).resolve().parents[1]/"standards"/"SESSION_CONTINUITY.md").read_text()
     assert "handoff_contract.py --request-json" not in session
     assert "handoff_contract.py --facts <facts.json>" in session
+    assert "Freshly re-read the authoritative ACTIVE Work Packet" not in session
+    assert "accurate canonical lifecycle state" in session
 
 def main():
     test_documented_cli_flag_matches_parser()
@@ -44,6 +46,12 @@ def main():
         assert verify(facts(body=body))["status"]=="PASS"
     body=BODY.replace("STATUS=ACTIVE", "STATUS=WAITING")
     assert verify(facts(body=body))["reason"]=="PACKET_NOT_CLEAN"
+    blocked=BODY.replace("None.", "Waiting for owner approval.")
+    assert verify(facts(body=blocked))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
+    for state in ("PAUSED","BLOCKED","COMPLETE"):
+        assert verify(facts(body=blocked.replace("STATUS=ACTIVE","STATUS="+state)))["status"]=="PASS"
+    waiting=BODY.replace("STATUS=ACTIVE","STATUS=ACTIVE"+chr(10)+"QUEUE_STATE=DEPENDENCY_WAIT")
+    assert verify(facts(body=waiting))["reason"]=="ACTIVE_PACKET_NOT_RUNNABLE"
     assert verify(facts(digest="0"*64))["reason"]=="PERSISTED_PACKET_MISMATCH"
     assert verify(facts(token="prompt\nwith extra instructions"))["reason"]=="CONTINUATION_TOKEN_INVALID"
     wrong=BODY.replace("datarelay-labs/demo","datarelay-labs/other")

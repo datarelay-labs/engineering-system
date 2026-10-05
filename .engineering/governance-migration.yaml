@@ -1,15 +1,12 @@
 contract_version: 1
-base_sha: 6ebc5b74d78881038433191b39e07e76b3b09c97
-from_policy_epoch: 14
-to_policy_epoch: 15
+base_sha: 1e4fc5c58edc79630b223347b82aef9879f1e966
+from_policy_epoch: 15
+to_policy_epoch: 16
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Restore the pre-254 structural packet linter after the failed same-epoch
-  governance merge; separate runnable-now selection from structural lint and permit
-  truthful paused/blocked/completed handoffs. Simplify autonomous execution guidance
-  without changing security or runtime authority.
+rationale: Preserve project-specific policy suffixes during obsolete-rule removal;
+  normalize truthful handoff lifecycle without changing evaluator or runtime/permission
+  authority. Current owner restoration directive authorizes this bounded correction.
 changed_surfaces:
-- path: tools/context_epoch.py
-  head_blob_sha: b0d78d29fef99f14706389067be0f9c7bacc2895
 - path: tools/adopt.py
-  head_blob_sha: c032e4c29a6d1b7f79cf465ed4761504f3a4db3e
+  head_blob_sha: 3ce09cd1957ee707e0a7b75db60686be1efbde7c

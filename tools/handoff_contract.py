@@ -26,6 +26,15 @@ def verify(facts: dict) -> dict:
             "blocking":lint["blocking"],
             "warnings":lint["warnings"],
         }
+    if packet.metadata.get("STATUS") == "ACTIVE":
+        blockers=packet.sections.get("Blockers", "").strip().upper()
+        waiting=any(
+            "WAIT" in packet.metadata.get(key, "").upper()
+            or packet.metadata.get(key, "").upper() in {"BLOCKED","DEFERRED","HUMAN_REQUIRED","PENDING"}
+            for key in ("QUEUE_STATE","WAITING_FOR","DEPENDENCY_STATUS")
+        )
+        if blockers not in {"NONE","- NONE","NONE."} or waiting:
+            return {"status":"BLOCK","reason":"ACTIVE_PACKET_NOT_RUNNABLE"}
     token=str(facts["continuation_token"]).strip()
     if not token or "\n" in token or len(token)>120:
         return {"status":"BLOCK","reason":"CONTINUATION_TOKEN_INVALID"}
