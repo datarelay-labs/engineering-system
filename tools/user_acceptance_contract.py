@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from execution_profile import load_profile, ProfileError
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -96,9 +97,9 @@ def _structural_reasons(data: dict[str, Any]) -> list[str]:
     checks = (
         ("FINAL_STATUS_NOT_PASS", data.get("final_status") == "PASS"),
         ("HEAD_CHANGED", data.get("head_unchanged") is True),
-        ("EXECUTOR_CLAIM_INVALID", data.get("executor") == "CHATGPT"),
-        ("FINAL_AUDITOR_CLAIM_INVALID", data.get("final_auditor") == "CHATGPT"),
-        ("PERSONA_EXECUTION_CLAIM_INVALID", data.get("chatgpt_direct_persona_execution") is True),
+        ("EXECUTOR_CLAIM_INVALID", data.get("executor") == "EXECUTION_PROFILE"),
+        ("FINAL_AUDITOR_CLAIM_INVALID", data.get("final_auditor") == "EXECUTION_PROFILE"),
+        ("PERSONA_EXECUTION_CLAIM_INVALID", data.get("direct_persona_execution") is True),
         ("ACTUAL_USER_SURFACE_MISSING", data.get("actual_user_surface") is True),
         ("SCRIPTED_USER_SUBSTITUTION", data.get("scripted_user_substitution") is False),
         ("FINDING_ACCUMULATION_INCOMPLETE", data.get("finding_accumulation_complete") is True),
@@ -168,6 +169,12 @@ def validate_gate(
         raise ContractError("CONTRACT_DIRTY")
 
     reasons = _structural_reasons(data)
+    try:
+        selected_runtime = str(load_profile(root)["runtime"]["primary"])
+    except ProfileError as exc:
+        raise ContractError(f"EXECUTION_PROFILE_UNAVAILABLE:{exc}") from exc
+    if data.get("runtime") != selected_runtime:
+        reasons.append("EXECUTION_PROFILE_RUNTIME_MISMATCH")
     if reasons:
         raise ContractError("GATE_STRUCTURAL_BLOCK:" + ",".join(reasons))
     return data
@@ -182,7 +189,7 @@ def quality_close(surface_path: Path, e2e_path: Path, root: Path) -> None:
         raise ContractError("CANDIDATE_HEAD_MISMATCH")
     print("PRODUCT_QUALITY_CLOSURE_STRUCTURAL=PASS")
     print(f"STRUCTURALLY_READY_HEAD={current_head}")
-    print("EXECUTOR_CLAIM=CHATGPT")
+    print("EXECUTOR_CLAIM=EXECUTION_PROFILE")
     print("EXECUTOR_PROVENANCE=UNVERIFIED")
     print("TRUSTED_PERSONA_ATTESTATION=REQUIRED")
     print("PRODUCT_QUALITY_CLOSURE=BLOCK")

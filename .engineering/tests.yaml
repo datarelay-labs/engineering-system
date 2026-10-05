@@ -274,7 +274,7 @@ scenarios:
     platforms: [linux]
     command: "python3 tools/test_user_acceptance_contract.py"
     invariants:
-      - "ChatGPT direct persona execution is mandatory for both user gates"
+      - "Execution-profile-selected direct persona execution is mandatory for both user gates"
       - "Surface Reconciliation and Full User E2E must cleanly bind to one exact HEAD before candidate freeze"
       - "quality closure is evidence-only and does not authorize release"
     release_gate: true

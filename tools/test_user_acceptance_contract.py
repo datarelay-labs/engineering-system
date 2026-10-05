@@ -27,9 +27,10 @@ def evidence(gate: str) -> dict:
         "contract_dirty": False,
         "final_status": "PASS",
         "head_unchanged": True,
-        "executor": "CHATGPT",
-        "final_auditor": "CHATGPT",
-        "chatgpt_direct_persona_execution": True,
+        "executor": "EXECUTION_PROFILE",
+        "runtime": "CHATGPT_CHAT",
+        "final_auditor": "EXECUTION_PROFILE",
+        "direct_persona_execution": True,
         "actual_user_surface": True,
         "scripted_user_substitution": False,
         "finding_accumulation_complete": True,
@@ -87,7 +88,7 @@ class UserAcceptanceTests(unittest.TestCase):
     def test_chatgpt_direct_persona_is_mandatory(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             data = evidence("SURFACE_RECONCILIATION")
-            data["chatgpt_direct_persona_execution"] = False
+            data["direct_persona_execution"] = False
             path = self.write(Path(d), "surface.json", data)
             cp = self.run_tool("validate-gate", "--evidence", str(path))
             self.assertEqual(cp.returncode, 3)

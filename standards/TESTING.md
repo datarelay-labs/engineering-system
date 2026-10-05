@@ -139,7 +139,7 @@ changed feature
  -> cross-output terminology/parity
 ```
 
-This is L5 human-UX/change-closure evidence for the affected slice, not the exhaustive release gate. It may be represented as a stable `affected` scenario (normally cheap/medium) plus direct invalidation from all representations of that surface. ChatGPT should directly exercise the applicable public surface when human-equivalent interaction is available; deterministic tests remain supporting evidence.
+This is L5 human-UX/change-closure evidence for the affected slice, not the exhaustive release gate. It may be represented as a stable `affected` scenario (normally cheap/medium) plus direct invalidation from all representations of that surface. The selected runtime should directly exercise the applicable public surface when human-equivalent interaction is available; deterministic tests remain supporting evidence.
 
 A clean Surface Delta Reconciliation does **not** satisfy or reduce the mandatory release Surface Reconciliation scope. The release gate still reruns the complete product surface on the exact candidate HEAD.
 
@@ -171,21 +171,21 @@ Before either user gate starts, read the repository-local canonical gate contrac
 **Full User E2E** is depth-first. It executes complete realistic user missions through the real primary product surface, proves actual outcomes, injects realistic mistakes/failures, performs user-visible diagnosis and recovery, exercises live edits/destructive lifecycle, and verifies cleanup/orphan truth.
 
 Both gates:
-- are executed and finally audited by **ChatGPT itself**, directly acting as the applicable User/Operator/Admin persona;
+- are executed and finally audited by **the runtime selected by the current execution profile**, directly acting as the applicable User/Operator/Admin persona;
 - run on the same exact candidate HEAD;
 - are independently required and never substitute for each other;
 - require zero mandatory FAIL/PARTIAL/BLOCKED for release PASS;
-- may reuse machine evidence for verification but not to replace ChatGPT's real user action;
+- may reuse machine evidence for verification but not to replace the selected runtime's real user action;
 - forbid a coding agent, alternate model, wrapper, scripted scenario replay, test harness, or CI job from impersonating the acting user or declaring the gate PASS;
 - must continue safe independent scenarios after a failure so one defect does not hide others;
 - freeze the complete finding set before batched remediation;
 - must retain machine-readable ledger-derived run/evidence identity in the active release Work Packet.
 
-If ChatGPT cannot execute a mandatory user action because the real environment or required interaction capability is unavailable, that scenario is BLOCKED; do not delegate it to another agent merely to manufacture PASS.
+If the selected runtime cannot execute a mandatory user action because the real environment or required interaction capability is unavailable, that scenario is BLOCKED; do not delegate it to another agent merely to manufacture PASS.
 
-For browser products, ChatGPT MUST perform the user action through an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
+For browser products, The selected runtime MUST perform the user action through an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
 
-For CLI/desktop/mobile products, ChatGPT directly uses the actual supported public primary interface with the same human-equivalent principle. See `standards/USER_ACCEPTANCE.md` for the portable gate semantics and evidence contract.
+For CLI/desktop/mobile products, The selected runtime directly uses the actual supported public primary interface with the same human-equivalent principle. See `standards/USER_ACCEPTANCE.md` for the portable gate semantics and evidence contract.
 
 ## Performance/resilience
 
