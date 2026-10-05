@@ -8,7 +8,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from execution_profile import load_profile, ProfileError
+from execution_profile import load_profile_text, ProfileError, PROFILE_PATH
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -170,7 +170,8 @@ def validate_gate(
 
     reasons = _structural_reasons(data)
     try:
-        selected_runtime = str(load_profile(root)["runtime"]["primary"])
+        profile_text = str(_git(root, "show", f"{current_head}:{PROFILE_PATH}"))
+        selected_runtime = str(load_profile_text(profile_text)["runtime"]["primary"])
     except ProfileError as exc:
         raise ContractError(f"EXECUTION_PROFILE_UNAVAILABLE:{exc}") from exc
     if data.get("runtime") != selected_runtime:

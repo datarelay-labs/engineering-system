@@ -558,6 +558,13 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     body = _require_str(data.get("body"), "body")
     target = _require_str(data.get("expected_target_repo"), "expected_target_repo")
     root = _require_str(data.get("profile_root"), "profile_root")
+    observed_head = _require_str(data.get("observed_head"), "observed_head").lower()
+    observed_branch = _require_str(data.get("observed_branch"), "observed_branch")
+    worktree = _require_str(data.get("observed_worktree"), "observed_worktree")
+    if len(observed_head) != 40 or any(c not in "0123456789abcdef" for c in observed_head):
+        raise AdmissionFactsError("observed_head must be a full Git SHA")
+    if not Path(root).is_absolute() or not Path(worktree).is_absolute():
+        raise AdmissionFactsError("profile_root and observed_worktree must be absolute paths")
     issue_state = _require_str(data.get("issue_state"), "issue_state").upper()
     if issue_state not in {"OPEN", "CLOSED"}:
         raise AdmissionFactsError("issue_state must be OPEN or CLOSED")
@@ -572,6 +579,12 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
         return deny("closed Issue is not runnable", "CLOSED_ISSUE")
     if packet.metadata.get("STATUS") != "ACTIVE":
         return deny("packet is not ACTIVE", "NOT_ACTIVE")
+    if Path(root).resolve() != Path(worktree).resolve():
+        return deny("profile root is not the observed worktree", "WORKTREE_MISMATCH")
+    if packet.metadata.get("BRANCH") != observed_branch:
+        return deny("packet branch differs from observed checkout", "BRANCH_MISMATCH")
+    if packet.metadata.get("LAST_VERIFIED_HEAD", "").lower() != observed_head:
+        return deny("packet HEAD is stale; reconcile from current evidence", "STALE_HEAD")
     if not ready or waits:
         return deny("observed dependencies or external condition are pending", "WAITING")
     blockers = packet.sections.get("Blockers", "").strip()
