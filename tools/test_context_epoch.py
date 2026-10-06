@@ -566,6 +566,11 @@ def test_managed_instructions_bind_target_repository() -> None:
         "TARGET_REPO_SCOPE_MISMATCH",
         "Only a new explicit owner project/repository switch may replace the binding",
         "cross-project handoffs",
+        "control plane",
+        "not the default product execution plane",
+        "uncontrolled Issue/packet proliferation",
+        "return product implementation and routine Issue/PR lifecycle ownership",
+        "must not mutate its dirty worktree",
     ):
         if token not in standard:
             fail(f"session continuity missing target-repository boundary token: {token}")
