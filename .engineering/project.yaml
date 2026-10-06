@@ -1,46 +1,42 @@
 engineering_system:
-  version: "1.7.0"
+  version: 1.7.0
   policy_epoch: 19
-  governance_epoch: 2
+  governance_epoch: 3
   mode: canonical
   ci_mode: native
   native_ci_workflows:
-    - ".github/workflows/validate.yml"
+  - .github/workflows/validate.yml
   merge_gate_status: verified
-
 project:
-  name: "engineering-system"
-  type: "engineering-governance"
-  maturity: "development"
+  name: engineering-system
+  type: engineering-governance
+  maturity: development
   user_facing: false
   primary_user_surface: none
-
 domains:
-  - standards
-  - design
-  - ai
-  - adapters
-  - templates
-  - schemas
-  - workflows
-  - session-continuity
-  - adoption
-  - enforcement
-  - release-contract
-  - operations-contract
-  - adoption-upgrade
-
+- standards
+- design
+- ai
+- adapters
+- templates
+- schemas
+- workflows
+- session-continuity
+- adoption
+- enforcement
+- release-contract
+- operations-contract
+- adoption-upgrade
 platforms:
-  - github-actions
-
+- github-actions
 operations:
   production_oriented: false
   runbook_required: false
   incident_response_required: false
   persistent_state: false
   runbook_paths: []
-  health_command: ""
-  backup_command: ""
-  restore_test_command: ""
-  upgrade_command: ""
-  rollback_command: ""
+  health_command: ''
+  backup_command: ''
+  restore_test_command: ''
+  upgrade_command: ''
+  rollback_command: ''
