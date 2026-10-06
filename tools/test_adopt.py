@@ -446,6 +446,9 @@ def test_managed_upgrade_to_1_6() -> None:
             assert not (target / rel).exists(), rel
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
+        assert upgraded_agents.count("- **Product execution ownership / supervisor fallback:**") == 1
+        assert "uncontrolled Issue proliferation" in upgraded_agents
+        assert "Never mutate an actively progressing owner-authorized worker dirty worktree" in upgraded_agents
         assert "During machine-observable waits, preserve state and advance independent work" in upgraded_agents
         assert "make measurable progress in the same turn" in upgraded_agents.lower()
         assert "After a bounded packet/PR/test phase completes, immediately return to roadmap scheduling" in upgraded_agents

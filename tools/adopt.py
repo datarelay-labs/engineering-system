@@ -162,6 +162,7 @@ REQUIRED_MANAGED = (
 
 EXECUTION_PROFILE_MARKER = "- **Execution profile authority:**"
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
+SUPERVISOR_POLICY_MARKER = "- **Product execution ownership / supervisor fallback:**"
 EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
 EXECUTION_RULES_HEADING = "## Execution rules"
 
@@ -200,10 +201,11 @@ def canonical_execution_policy_line() -> str:
     return _canonical_policy_line(EXECUTION_POLICY_MARKER, "continuous-execution")
 
 
-def canonical_managed_policy_lines() -> tuple[str, str, str]:
+def canonical_managed_policy_lines() -> tuple[str, str, str, str]:
     return (
         _canonical_policy_line(EXECUTION_PROFILE_MARKER, "execution-profile"),
         canonical_execution_policy_line(),
+        _canonical_policy_line(SUPERVISOR_POLICY_MARKER, "product-supervisor-boundary"),
         _canonical_policy_line(EXTERNAL_WRITE_POLICY_MARKER, "external-write-scope"),
     )
 
@@ -287,7 +289,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"
         )
 
-    canonical_profile, canonical_execution, canonical_external_write = canonical_managed_policy_lines()
+    canonical_profile, canonical_execution, canonical_supervisor, canonical_external_write = canonical_managed_policy_lines()
     selected_profile = _selected_profile()
     legacy_profile_markers = tuple(selected_profile["policy_migration"]["legacy_execution_profile_markers"])
     legacy_write_markers = tuple(selected_profile["policy_migration"]["legacy_external_write_markers"])
@@ -302,6 +304,11 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             "continuous-execution",
             canonical_execution,
             (EXECUTION_POLICY_MARKER,),
+        ),
+        (
+            "product-supervisor-boundary",
+            canonical_supervisor,
+            (SUPERVISOR_POLICY_MARKER,),
         ),
         (
             "external-write-scope",
