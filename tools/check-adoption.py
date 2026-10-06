@@ -13,6 +13,8 @@ from adopt import (
     AFFECTED_TEST_SELECTION_MANAGED,
     AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
+    NEXT_CHAT_BOOTSTRAP_POLICY_MARKER,
+    VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER,
     USER_ACCEPTANCE_MANAGED,
     canonical_execution_policy_line,
     canonical_managed_policy_lines,
@@ -277,10 +279,21 @@ def main() -> int:
             else:
                 if execution_policy not in agents_text:
                     failures.append("AGENTS.md missing managed continuous-execution policy")
+                agents_lines = agents_text.splitlines()
+                exact_policy_markers = (
+                    NEXT_CHAT_BOOTSTRAP_POLICY_MARKER,
+                    VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER,
+                )
                 for managed_policy in managed_policy_lines:
                     if managed_policy == execution_policy:
                         continue
-                    if managed_policy not in agents_text:
+                    if managed_policy.startswith(exact_policy_markers):
+                        if managed_policy not in agents_lines:
+                            failures.append(
+                                "AGENTS.md customized or missing managed next-chat policy requires review"
+                            )
+                            break
+                    elif managed_policy not in agents_text:
                         failures.append("AGENTS.md missing managed execution-authority policy")
                         break
             if retired_agent_rules_present(agents_text):

@@ -337,7 +337,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             (EXTERNAL_WRITE_POLICY_MARKER,) + legacy_write_markers,
         ),
     )
-    suffix_preserving_labels = {
+    exact_managed_labels = {
         "next-chat-bootstrap",
         "verified-next-chat-resume",
     }
@@ -353,9 +353,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         if indexes:
             index = indexes[0]
             current = lines[index]
-            if label in suffix_preserving_labels:
-                if current.startswith(canonical):
-                    continue
+            if label in exact_managed_labels and current != canonical:
                 raise SystemExit(
                     f"FAIL AGENTS.md contains customized managed {label} policy line; review manually"
                 )

@@ -820,7 +820,7 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
 
 
-def test_managed_upgrade_preserves_stricter_next_chat_policy_suffixes() -> None:
+def test_managed_upgrade_rejects_unclassified_next_chat_policy_suffixes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "demo-next-chat-suffix"
         target.mkdir()
@@ -859,9 +859,20 @@ def test_managed_upgrade_preserves_stricter_next_chat_policy_suffixes() -> None:
         project["engineering_system"]["version"] = "1.6.4"
         project["engineering_system"]["baseline"] = BASELINE
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        commit_all(target, "stricter next-chat policy suffixes")
+        commit_all(target, "unclassified next-chat policy suffixes")
+        before = agents_path.read_bytes()
 
-        upgraded = run(
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert "customized or missing managed next-chat policy requires review" in checked.stdout
+
+        rejected = run(
             sys.executable,
             str(UPGRADE),
             "--root",
@@ -869,16 +880,11 @@ def test_managed_upgrade_preserves_stricter_next_chat_policy_suffixes() -> None:
             "--apply",
             "--baseline-sha",
             NEW_BASELINE,
+            check=False,
         )
-        assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
-
-        upgraded_agents = agents_path.read_text(encoding="utf-8")
-        for marker in (
-            "- **Next-chat bootstrap fast path:**",
-            "- **Verified next-chat resume:**",
-        ):
-            line = next(line for line in upgraded_agents.splitlines() if line.startswith(marker))
-            assert line.endswith(suffix), line
+        assert rejected.returncode != 0
+        assert "customized managed next-chat-bootstrap policy line" in rejected.stdout
+        assert agents_path.read_bytes() == before
 
 
 def test_managed_upgrade_rejects_ambiguous_next_chat_policy_edit() -> None:
@@ -3767,7 +3773,7 @@ def main() -> int:
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()
-    test_managed_upgrade_preserves_stricter_next_chat_policy_suffixes()
+    test_managed_upgrade_rejects_unclassified_next_chat_policy_suffixes()
     test_managed_upgrade_rejects_ambiguous_next_chat_policy_edit()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
