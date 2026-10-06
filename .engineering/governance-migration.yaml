@@ -1,18 +1,13 @@
 contract_version: 2
-base_sha: efcedfbe89d715a3d378519e449a20b7c0ad0a07
-from_governance_epoch: 0
-to_governance_epoch: 1
+from_governance_epoch: 1
+to_governance_epoch: 2
+base_sha: 5c053c382abe8cadc359ff4a88a8789525b634d4
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: >-
-  Owner-approved universal integration-boundary migration. Universal managed
-  adoption stops installing DataRelay Atlas helpers and keeps organization/
-  transport integrations behind optional adapters while preserving the
-  provider-neutral notification and derived-context contracts. Canonical
-  policy freshness advances to epoch 19; post-cutover adopted repositories
-  must not claim policy freshness newer than canonical.
+rationale: Fix legacy adopted-repository cutover so governance generation and root-surface
+  evidence remain valid.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 2a6bd216d288801ef7a5ee2651116fc96fbea159
+  head_blob_sha: b7a8781ea211164a50cdce885483f2fe966aee67
 - path: tools/upgrade-adoption.py
-  head_blob_sha: a1b2108000f5888b5efb6272b842fd05b39f56ad
+  head_blob_sha: f8d376a10ca0f7dd8ec4945d994976af46bdc091
