@@ -571,6 +571,8 @@ def test_managed_instructions_bind_target_repository() -> None:
         "uncontrolled Issue/packet proliferation",
         "return product implementation and routine Issue/PR lifecycle ownership",
         "must not mutate its dirty worktree",
+        "No-active-packet bootstrap fast path",
+        "absence of an ACTIVE packet is not itself a blocker",
     ):
         if token not in standard:
             fail(f"session continuity missing target-repository boundary token: {token}")

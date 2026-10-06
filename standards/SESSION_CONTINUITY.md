@@ -671,6 +671,7 @@ For an effect explicitly classified as high-risk by the core or a stricter proje
 When the user asks to continue/resume an existing engineering workstream:
 
 - resolve and bind the target repository from the owner's current explicit project/repository request
+- **No-active-packet bootstrap fast path:** after one bounded authenticated lookup, if the bound repository has no open `STATUS=ACTIVE` Work Packet, do not repeatedly search packets, reconstruct prior chat history, or remain in orientation/planning. Inspect the repository's durable roadmap/release Issues plus actual Git/PR state once. If a dependency-eligible runnable roadmap outcome exists, create or reactivate exactly one authoritative Work Packet for that outcome, lint/bind it, and make measurable execution progress in the same turn. If no runnable outcome exists, report that concrete terminal/waiting state; absence of an ACTIVE packet is not itself a blocker and must not cause an orientation loop.
 - load only that bound repository's active Work Packet; cross-project handoffs/dependencies remain read-only context
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
 - lint the exact fresh authoritative packet body with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>` and require PASS; `TARGET_REPO_SCOPE_MISMATCH`, stale/mismatched execution-profile identity, or revision is non-runnable
