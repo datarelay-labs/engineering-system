@@ -1,15 +1,10 @@
 contract_version: 2
-from_governance_epoch: 2
-to_governance_epoch: 3
-base_sha: 0e119e23f031105ae9bedab63767da69177ba39d
+from_governance_epoch: 3
+to_governance_epoch: 4
+base_sha: 0ac16308c91b0c0f7ef3cdbcd32ae17f8df85978
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Allow one validated staged adoption bridge so repositories can merge sequential
-  governance-root migrations without weakening current-policy enforcement.
+rationale: Sync the canonical product execution ownership and supervisor fallback boundary into adopted repositories.
 changed_surfaces:
-- path: .github/workflows/adoption-compliance.yml
-  head_blob_sha: a19e867c8f423ac8bdd2e1e1cffdd0d73704e877
 - path: tools/adopt.py
-  head_blob_sha: 13807c902d40df4f990d21aa8b3fffb38a1d8233
-- path: tools/check-adoption.py
-  head_blob_sha: 4af0537d888fce17a6aea43f2a698b67bff81120
+  head_blob_sha: 47eb3eaeddec39f1c956d1ea2b39a000af41cc82
