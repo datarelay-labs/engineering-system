@@ -1021,16 +1021,9 @@ def main() -> int:
         raise SystemExit("FAIL existing adoption has invalid policy_epoch")
     governance_epoch_present = "governance_epoch" in engineering
     if existing_policy_epoch > POLICY_EPOCH:
-        supports_normalization = base_governance_floor_supports_v2(
-            root,
-            base_head,
-            old_baseline,
+        raise SystemExit(
+            "FAIL existing adoption policy_epoch is newer than canonical policy"
         )
-        if existing_policy_epoch != POLICY_EPOCH + 1 or not supports_normalization:
-            raise SystemExit(
-                "FAIL existing adoption policy_epoch is newer than canonical policy "
-                "without a valid one-step v2 normalization base"
-            )
     existing_governance_epoch = engineering.get("governance_epoch", GOVERNANCE_EPOCH)
     if (
         isinstance(existing_governance_epoch, bool)

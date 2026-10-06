@@ -9,6 +9,6 @@ def main():
  assert run("--repository","datarelay-labs/engineering-system","--workstream","bad space","--head",h,"--summary","x").returncode==3
  assert run("--repository","datarelay-labs/engineering-system","--workstream","w","--head","short","--summary","x").returncode==3
  src=T.read_text()
- for token in ("/usr/lib/engineering-system/telegram-complete-notify","/usr/bin/sudo","OWNER_NOTIFICATION=RETRY_PENDING","OWNER_NOTIFICATION=PASS","TERMINAL_TELEGRAM=PASS","COMPLETE"):assert token in src
+ for token in ("/usr/lib/engineering-system/owner-notify","/usr/bin/sudo","OWNER_NOTIFICATION=RETRY_PENDING","OWNER_NOTIFICATION=PASS","OWNER_NOTIFICATION_RECEIPT=PASS","OWNER_NOTIFY=PASS","COMPLETE"):assert token in src
  print("TERMINAL_COMPLETION_NOTIFY_TESTS=PASS")
 if __name__=="__main__":main()

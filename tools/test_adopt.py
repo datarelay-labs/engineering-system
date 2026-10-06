@@ -673,7 +673,7 @@ def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
         assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
 
 
-def test_v2_same_baseline_normalizes_legacy_policy_plus_one() -> None:
+def test_v2_same_baseline_rejects_newer_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "normalize-legacy-policy"
         target.mkdir()
@@ -704,7 +704,7 @@ def test_v2_same_baseline_normalizes_legacy_policy_plus_one() -> None:
         if inflated_base is None:
             inflated_base = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
 
-        repaired = run(
+        rejected = run(
             sys.executable,
             str(UPGRADE),
             "--root",
@@ -712,29 +712,13 @@ def test_v2_same_baseline_normalizes_legacy_policy_plus_one() -> None:
             "--apply",
             "--baseline-sha",
             BASELINE,
-        )
-        assert f"POLICY_EPOCH_REPAIR={POLICY_EPOCH}" in repaired.stdout
-        assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" not in repaired.stdout
-        engineering = load_yaml(project_path)["engineering_system"]
-        assert engineering["policy_epoch"] == POLICY_EPOCH
-        assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
-
-        commit_all(target, "normalize policy freshness")
-        repaired_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
-        floor_check = run(
-            sys.executable,
-            str(target / "tools/governance_floor.py"),
-            "check",
-            "--root",
-            str(target),
-            "--base-ref",
-            str(inflated_base),
-            "--head-ref",
-            repaired_head,
             check=False,
         )
-        assert floor_check.returncode == 0, floor_check.stdout
-        assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
+        assert rejected.returncode != 0
+        assert "policy_epoch is newer than canonical policy" in rejected.stdout
+        engineering = load_yaml(project_path)["engineering_system"]
+        assert engineering["policy_epoch"] == POLICY_EPOCH + 1
+        assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
 
 
 def test_same_baseline_repairs_managed_execution_policy() -> None:
@@ -1370,6 +1354,11 @@ def test_optional_knowledge_contract_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         assert_installed_knowledge_contract(target)
         assert_absent_index_instructions(target)
+        assert not (target / "tools" / "atlas-context-contract.py").exists()
+        assert not (target / "tools" / "atlas-workflow.py").exists()
+        managed_rules = (target / "AGENTS.md").read_text(encoding="utf-8")
+        for organization_term in ("DataRelay Atlas", "Telegram", "Tela", "Athena"):
+            assert organization_term not in managed_rules
 
         for rel in ("tools/knowledge-contract.py", "schemas/knowledge-index.schema.json"):
             (target / rel).unlink()
@@ -3618,7 +3607,7 @@ def main() -> int:
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
     test_legacy_root_repair_cannot_exceed_canonical_policy()
-    test_v2_same_baseline_normalizes_legacy_policy_plus_one()
+    test_v2_same_baseline_rejects_newer_policy()
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()

@@ -781,14 +781,14 @@ scenarios:
     timeout_seconds: 60
     agent_default: true
     scope: static
-    name: Atlas derived context and write-back boundary
+    name: Optional derived-context adapter boundary
     level: static
     domains: [standards, workflows]
     triggers: [affected, pr, preflight, release]
     platforms: [linux]
     command: "python3 tools/test_atlas_context_contract.py"
     invariants:
-      - "Atlas remains derived/non-authoritative, candidate write-back is bounded/secret-safe, and M5 observations are content-free"
+      - "Optional derived context remains non-authoritative, candidate write-back is bounded/secret-safe, and M5 observations are content-free"
     release_gate: true
 
   - id: ENG-RUNTIME-001

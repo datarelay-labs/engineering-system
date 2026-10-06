@@ -23,6 +23,8 @@ Adapters translate the core into tool-specific instruction surfaces:
 
 Future tools may add adapters without changing the engineering lifecycle.
 
+Organization/product integrations are optional adapters, not universal managed-adoption requirements. DataRelay-specific mappings are documented in `adapters/datarelay.md`.
+
 Session continuity is defined by `standards/SESSION_CONTINUITY.md`; adapters retrieve repository-scoped current state without copying conversation history.
 
 Skills, hooks, and permission profiles are defined by `standards/SKILLS.md`. Provider adapters stay thin optional translations of the provider-neutral lifecycle and must not weaken trusted session binding.

@@ -15,7 +15,7 @@ Read only when relevant:
 - one task-relevant Engineering System standard plus only the product/spec/ADR/runbook material required by the change
 - `standards/PROVIDER_GUIDANCE.md` only when changing the agent harness/governance policy, evaluating provider-specific behavior, or reviewing scaffolding after a material provider/model change
 - Managed Engineering System Python dependencies are pinned in `.engineering/requirements-engineering-system.txt`. Install that exact file before running managed contract CLIs when the environment lacks PyYAML/jsonschema. Managed helpers never auto-install packages or use unpinned dependency versions.
-- `.engineering/knowledge.yaml` for domain routing: `python3 tools/knowledge-contract.py check` and `python3 tools/knowledge-contract.py route`. Read local canonical context first; Atlas enrichment is optional and non-authoritative. Unavailable enrichment does not block ordinary work.
+- `.engineering/knowledge.yaml` for domain routing: `python3 tools/knowledge-contract.py check` and `python3 tools/knowledge-contract.py route`. Read local canonical context first; optional derived-context enrichment is non-authoritative and must not block ordinary work.
 - `.engineering/runtime.yaml` when validating a running worktree. Resolve health, smoke, E2E, and additive capabilities with `python3 tools/runtime-contract.py check`.
 - `.engineering/skills.yaml` for skill/permission work (`python3 tools/skills-contract.py check`); see `standards/SKILLS.md`. Ordinary development does not depend on a production trust boundary.
 - `.engineering/verification.yaml` for verification-map work (`python3 tools/verification-contract.py check`); see `standards/QUALITY.md`. Optional trust assessment is not a universal development gate.

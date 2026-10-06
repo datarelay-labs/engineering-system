@@ -36,7 +36,7 @@ Do not:
 - copy an unpinned `main` snapshot into the product repository and call it the baseline
 - assume the target repository already has the adoption helper
 - modify the target merely to make the bootstrap tool available
-- treat handbook, retired knowledge-system, or derived Atlas content as a substitute for the canonical repository
+- treat handbook, retired knowledge-system, or optional derived-context content as a substitute for the canonical repository
 
 After adoption, the target repository's generated entrypoints and pinned baseline are sufficient for normal lifecycle work; the target does not need to vendor the whole Engineering System.
 

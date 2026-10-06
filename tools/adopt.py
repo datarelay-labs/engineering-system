@@ -23,8 +23,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 18
-GOVERNANCE_EPOCH = 0
+POLICY_EPOCH = 19
+GOVERNANCE_EPOCH = 1
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -32,12 +32,11 @@ RULE_SURFACES = (
     ".github/copilot-instructions.md",
 )
 
-# Optional knowledge-contract execution path. Installed when missing so adopted
-# AGENTS.md instructions resolve. The index itself is never created.
+# Provider-neutral knowledge-contract execution path. Optional organization/product
+# derived-context adapters are intentionally not installed by universal adoption.
+# The index itself is never created.
 KNOWLEDGE_CONTRACT_MANAGED = (
     "tools/knowledge-contract.py",
-    "tools/atlas-context-contract.py",
-    "tools/atlas-workflow.py",
     "schemas/knowledge-index.schema.json",
 )
 
@@ -235,15 +234,28 @@ def rewrite_legacy_coordination_rules(text: str) -> str:
         text = text.replace(sentence, "When resuming, reconcile current owner intent, priority, dependencies and branch context; select eligible work and verify actual repository state before acting.")
     # Match complete known sentences; a custom suffix is independent policy.
     # Unknown variants stay intact rather than losing project-specific limits.
+    legacy_watch_prefix = (
+        "- Evaluate one bounded coordinator watch with `python3 tools/coordinator_watch.py evaluate "
+        "--facts <facts.json> --watch-state <state.json>`. The evaluator is pure: one re-entry result, "
+        "no subprocess, network, GitHub mutation, merge, or "
+    )
     legacy_lines = {
         '- Do not spend coding-agent model time polling CI, review, or another machine-observable external wait. Persist concise waiting state and yield to coordinator/automation for re-entry.': '- Preserve machine-observable wait state and continue independent authorized work; use a watcher when useful.',
         "- Reconcile one Work Packet's next action with `python3 tools/coordinator.py plan --facts <facts.json>`. The planner is pure: one bounded decision, no worker launch, GitHub mutation, merge, notification send, or session stop.": '',
-        '- Evaluate one bounded coordinator watch with `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator is pure: one re-entry result, no subprocess, network, GitHub mutation, merge, or Telegram send.': '',
         '- Run one coordinator watch host pass with `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. The host acquires one lock, calls the watch evaluator, and delivers at most one already-authorized typed action after a fresh reconciliation read. It does not accept caller commands or URLs, mint authority, merge, stop sessions, or busy-loop.': '',
         '- Do not keep a coding-agent session alive polling CI/review/external waits; persist concise state and yield to coordinator/automation.': '- Preserve machine-observable wait state and continue independent authorized work; use a watcher when useful.',
     }
     lines = []
     for line in text.splitlines():
+        if line.startswith(legacy_watch_prefix):
+            remainder = line[len(legacy_watch_prefix):]
+            marker = " send."
+            marker_at = remainder.find(marker)
+            if marker_at > 0:
+                suffix = remainder[marker_at + len(marker):].strip()
+                line = ("- " + suffix) if suffix else None
+        if line is None:
+            continue
         for legacy_line, replacement in legacy_lines.items():
             if line == legacy_line or line.startswith(legacy_line + " "):
                 suffix = line[len(legacy_line):].strip()

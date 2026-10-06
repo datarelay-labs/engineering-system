@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Bounded GitHub and Telegram delivery for one already-authorized watch effect.
+"""Bounded GitHub and owner-notification delivery for one already-authorized watch effect.
 
-The production path posts one issue comment through ``gh api`` or one INFO
-Telegram message to api.telegram.org. It does not accept a caller command,
-URL, token, or chat id. Telegram credentials are host files.
+The production path posts one issue comment through ``gh api`` or one INFO notification through a fixed root-owned adapter. It accepts no caller command, URL, credential, or destination.
 """
 from __future__ import annotations
 
@@ -12,8 +10,6 @@ import os
 import re
 import stat
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -21,45 +17,33 @@ from coordinator_watch_collect import _bounded_env, resolve_trusted_gh
 
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 ISSUE_RE = re.compile(r"^[0-9]+$")
-TELEGRAM_TOKEN_PATH = Path("/etc/engineering-system/telegram-bot-token")
-TELEGRAM_CHAT_PATH = Path("/etc/engineering-system/telegram-chat-id")
-TELEGRAM_URL_PREFIX = "https://api.telegram.org/bot"
-# Test-only directory for host credential files. Production never reads the request or environment for it.
-_TEST_TELEGRAM_DIR: Path | None = None
+OWNER_NOTIFY_HELPER = Path("/usr/lib/engineering-system/owner-notify")
+SUDO = Path("/usr/bin/sudo")
+# Test-only helper override. Production always uses the fixed root-owned helper.
+_TEST_OWNER_NOTIFY_HELPER: Path | None = None
 
 
-def _host_file(path: Path) -> str | None:
+def _trusted(path: Path) -> bool:
     try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        st = path.stat()
-        if _TEST_TELEGRAM_DIR is None:
-            if st.st_uid != 0 or st.st_mode & 0o022:
-                return None
-            parent = path.parent
-            pst = parent.stat()
-            if parent.is_symlink() or pst.st_uid != 0 or pst.st_mode & 0o022:
-                return None
-        elif stat.S_ISLNK(st.st_mode):
-            return None
-        text = path.read_text(encoding="utf-8").strip()
+        st = path.lstat()
+        parent = path.parent.lstat()
+        if _TEST_OWNER_NOTIFY_HELPER is not None and path == _TEST_OWNER_NOTIFY_HELPER:
+            return stat.S_ISREG(st.st_mode) and not stat.S_ISLNK(st.st_mode)
+        return (
+            stat.S_ISREG(st.st_mode)
+            and not stat.S_ISLNK(st.st_mode)
+            and st.st_uid == 0
+            and not (st.st_mode & 0o022)
+            and parent.st_uid == 0
+            and not (parent.st_mode & 0o022)
+        )
     except OSError:
-        return None
-    if not text or "\n" in text or "\x00" in text or len(text) > 256:
-        return None
-    return text
+        return False
 
 
-def _telegram_paths() -> tuple[Path, Path]:
-    if _TEST_TELEGRAM_DIR is not None:
-        root = Path(_TEST_TELEGRAM_DIR)
-        return root / "telegram-bot-token", root / "telegram-chat-id"
-    return TELEGRAM_TOKEN_PATH, TELEGRAM_CHAT_PATH
-
-
-def telegram_configured() -> bool:
-    token_path, chat_path = _telegram_paths()
-    return _host_file(token_path) is not None and _host_file(chat_path) is not None
+def owner_notification_configured() -> bool:
+    helper = _TEST_OWNER_NOTIFY_HELPER or OWNER_NOTIFY_HELPER
+    return _trusted(helper) and (_TEST_OWNER_NOTIFY_HELPER is not None or _trusted(SUDO))
 
 
 def github_configured() -> bool:
@@ -117,39 +101,30 @@ def send_github_comment(repository: str, issue_id: str, body: str) -> dict[str, 
     return {"outcome": "SUCCEEDED", "receipt": f"github-comment:{comment_id}", "level": "NONE"}
 
 
-def send_telegram_info(text: str) -> dict[str, str]:
-    """Send one INFO message. COMPLETE is never sent. The URL host is fixed."""
+def send_owner_info(text: str) -> dict[str, str]:
+    """Send one INFO notification through the fixed host adapter. COMPLETE is never sent."""
     if not text or len(text) > 4000 or "\x00" in text or "COMPLETE" in text.split():
         return _not_sent()
-    token_path, chat_path = _telegram_paths()
-    token = _host_file(token_path)
-    chat = _host_file(chat_path)
-    if token is None or chat is None:
+    helper = _TEST_OWNER_NOTIFY_HELPER or OWNER_NOTIFY_HELPER
+    if not _trusted(helper) or (_TEST_OWNER_NOTIFY_HELPER is None and not _trusted(SUDO)):
         return _not_sent()
-    url = f"{TELEGRAM_URL_PREFIX}{token}/sendMessage"
-    if not url.startswith(TELEGRAM_URL_PREFIX):
-        return _not_sent()
-    data = json.dumps({"chat_id": chat, "text": text, "disable_web_page_preview": True}).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    argv = [str(helper), "INFO", text] if _TEST_OWNER_NOTIFY_HELPER is not None else [str(SUDO), "-n", str(helper), "INFO", text]
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read()
-    except (urllib.error.URLError, TimeoutError, OSError):
+        completed = subprocess.run(
+            argv, cwd="/", env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=False, timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return _ambiguous()
-    try:
-        document = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError):
+    if completed.returncode != 0:
         return _ambiguous()
-    result = document.get("result") if isinstance(document, dict) else None
-    message_id = result.get("message_id") if isinstance(result, dict) else None
-    if not isinstance(message_id, int) or isinstance(message_id, bool) or message_id < 1:
+    receipt = ""
+    for line in completed.stdout.splitlines():
+        if line.startswith("OWNER_NOTIFY_RECEIPT="):
+            receipt = line.split("=", 1)[1].strip()
+    if "OWNER_NOTIFY=PASS" not in completed.stdout or not receipt or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", receipt) is None:
         return _ambiguous()
-    return {"outcome": "SUCCEEDED", "receipt": f"telegram:{message_id}", "level": "INFO"}
+    return {"outcome": "SUCCEEDED", "receipt": f"owner-notify:{receipt}", "level": "INFO"}
 
 
 def send_effect(kind: str, effect: dict[str, Any]) -> dict[str, str]:
@@ -164,7 +139,7 @@ def send_effect(kind: str, effect: dict[str, Any]) -> dict[str, str]:
             f"INTENT_REVISION={effect.get('intent_revision')}",
             f"SUBJECT={effect.get('subject_version')}",
         ]
-        return send_telegram_info("\n".join(str(line) for line in lines) + "\n")
+        return send_owner_info("\n".join(str(line) for line in lines) + "\n")
     if kind not in {"WAKE_COORDINATOR", "RESUME_ADMITTED_WORKER"}:
         return _not_sent()
     repository = str(effect.get("target_repo") or "")

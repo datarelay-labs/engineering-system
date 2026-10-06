@@ -734,32 +734,14 @@ def test_owner_notice_is_verified_info() -> None:
             state = gh_state(base, facts, BRANCH)
             effect = signed_effect(base, facts, BRANCH, state)
             assert effect["level"] == "INFO"
-            token_dir = base / "telegram"
-            token_dir.mkdir()
-            (token_dir / "telegram-bot-token").write_text("host-token", encoding="utf-8")
-            (token_dir / "telegram-chat-id").write_text("host-chat", encoding="utf-8")
-            seen: dict[str, object] = {}
-
-            class Response:
-                def read(self) -> bytes:
-                    return b'{"ok":true,"result":{"message_id":77}}'
-
-                def __enter__(self) -> "Response":
-                    return self
-
-                def __exit__(self, *_args: object) -> bool:
-                    return False
-
-            def urlopen(request, timeout=0):  # noqa: ANN001
-                seen["url"] = request.full_url
-                seen["data"] = request.data
-                seen["timeout"] = timeout
-                return Response()
-
-            previous = coordinator_watch_effects._TEST_TELEGRAM_DIR
-            coordinator_watch_effects._TEST_TELEGRAM_DIR = token_dir
-            original = coordinator_watch_effects.urllib.request.urlopen
-            coordinator_watch_effects.urllib.request.urlopen = urlopen
+            helper = base / "owner-notify"
+            helper.write_text(
+                "#!/bin/sh\nprintf 'OWNER_NOTIFY=PASS\\nOWNER_NOTIFY_RECEIPT=test-receipt-77\\n'\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+            previous = coordinator_watch_effects._TEST_OWNER_NOTIFY_HELPER
+            coordinator_watch_effects._TEST_OWNER_NOTIFY_HELPER = helper
             try:
                 with SignedDispatch(base, effect, "watch-host-notice-1") as verification:
                     request = request_for(facts)
@@ -768,16 +750,12 @@ def test_owner_notice_is_verified_info() -> None:
                         first = run_once(request)
                         second = run_once(request)
             finally:
-                coordinator_watch_effects._TEST_TELEGRAM_DIR = previous
-                coordinator_watch_effects.urllib.request.urlopen = original
+                coordinator_watch_effects._TEST_OWNER_NOTIFY_HELPER = previous
             assert first["result"] == "DELIVERED"
             assert first["notifications"] == 1
             assert first["notification_level"] == "INFO"
             assert first["notification_delivery"] == "VERIFIED"
             assert first["mutates_github"] is False
-            assert str(seen["url"]).startswith("https://api.telegram.org/bot")
-            assert b"LEVEL=INFO" in bytes(seen["data"])
-            assert b"COMPLETE" not in bytes(seen["data"])
             assert second["result"] in {"DEDUP", "NO_ACTION"}
             assert second["notifications"] == 0
             assert send_effect("NOTIFY_OWNER", {**effect, "level": "COMPLETE"})["outcome"] == "NOT_SENT"
@@ -960,7 +938,8 @@ def test_source_boundaries() -> None:
     collector = (ROOT / "tools" / "coordinator_watch_collect.py").read_text(encoding="utf-8")
     for token in ("import subprocess", "subprocess.", "urllib", "socket", "time.sleep", "while ", "_TEST_EFFECT_EXECUTOR"):
         assert token not in host, token
-    assert "api.telegram.org" in effects
+    assert "/usr/lib/engineering-system/owner-notify" in effects
+    assert "api.telegram.org" not in effects
     assert "shell=False" in effects and "shell=True" not in effects
     assert "collect_authoritative" in collector
     assert "authoritative_facts_path" not in collector

@@ -39,7 +39,7 @@ from coordinator_watch import (
     load_json_file,
 )
 from coordinator_watch_collect import CollectError, collect_authoritative
-from coordinator_watch_effects import github_configured, send_effect, telegram_configured
+from coordinator_watch_effects import github_configured, owner_notification_configured, send_effect
 from worker_adapter import (
     AdapterFactsError,
     _authorize_concrete_effect,
@@ -818,7 +818,7 @@ def _record_applied(
     counts = _counts(name)
     github = name in WRITE_ACTIONS
     if name == "NOTIFY_OWNER":
-        reason = "telegram delivery receipt is durable for one INFO owner notice"
+        reason = "owner-notification delivery receipt is durable for one INFO owner notice"
         level = "INFO"
         delivery = "VERIFIED"
     else:
@@ -887,10 +887,10 @@ def _execute_authorized(
                 next_check=watch_result.get("next_eligible_check_at"),
             )
         return _record_applied(request, watch_result, entries, receipt=journal["receipt"])
-    if name == "NOTIFY_OWNER" and not telegram_configured():
+    if name == "NOTIFY_OWNER" and not owner_notification_configured():
         return _base_result(
             result="AUTHORITY_DENIED",
-            reason="telegram delivery boundary is unavailable; authorization is not delivery",
+            reason="owner-notification delivery boundary is unavailable; authorization is not delivery",
             watch_result=name,
             delivery="DENIED",
             next_check=watch_result.get("next_eligible_check_at"),
