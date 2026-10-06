@@ -676,6 +676,7 @@ When the user asks to continue/resume an existing engineering workstream:
 - synchronize the packet with the owner's latest explicit request before direct implementation or optional adapter handoff
 - lint the exact fresh authoritative packet body with `python3 tools/context_epoch.py packet-lint --expect-target-repo <bound-owner/repo>` and require PASS; `TARGET_REPO_SCOPE_MISMATCH`, stale/mismatched execution-profile identity, or revision is non-runnable
 - on workstream selection or a material intent/profile change, validate the fresh packet once; re-read mutable identity before external writes. Routine shell/test commands in the same verified workstream do not require a new preflight ceremony. Never treat a handoff comment as authority
+- **Verified next-chat resume:** when the previous handoff transaction already persisted and verified the authoritative packet, a fresh chat must not replay handoff validation, reconstruct the prior transcript, or rewrite an unchanged packet before starting. Re-read the current Issue body and mutable repository/worktree/HEAD/profile facts once, reject only an actual mismatch, then enter the verified Next Action immediately. Re-run packet lint or materially update the packet only when those fresh facts or owner intent changed.
 - replace the bound expected repository only after a new explicit owner project/repository switch
 - verify `TASK_KIND` / `OWNER_INTENT` / `Next Action` coherence for packet v2/v3, and require exact profile identity/revision binding for v3
 - verify current GitHub/repository facts

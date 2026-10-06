@@ -573,6 +573,8 @@ def test_managed_instructions_bind_target_repository() -> None:
         "must not mutate its dirty worktree",
         "No-active-packet bootstrap fast path",
         "absence of an ACTIVE packet is not itself a blocker",
+        "Verified next-chat resume",
+        "must not replay handoff validation",
     ):
         if token not in standard:
             fail(f"session continuity missing target-repository boundary token: {token}")
