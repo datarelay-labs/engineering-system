@@ -64,7 +64,7 @@ Dependency additions/upgrades must satisfy `SECURITY.md` and include compatibili
 Implementation and review frequently expose adjacent problems. Discovery does not automatically expand scope.
 
 - If the finding is required to satisfy the active outcome or its completion contract, keep it in the current Work Packet and re-size only when the change is material.
-- If it is independently releasable or has a different owner, approval boundary, rollback boundary, or validation oracle, create/update a linked follow-up Issue/Work Packet and continue the current outcome.
+- Create/update a linked follow-up Issue/Work Packet only when it is a genuinely independent durable scheduling outcome: independently releasable, a different owner/approval/rollback boundary, a separate completion oracle, or too large to fit the current bounded outcome after sizing. Otherwise keep findings/bugs/remediation in the current packet and batch them; never create one Issue per finding, test failure, phase transition, or micro-step. Reuse an existing matching roadmap/Work Packet instead of creating a duplicate.
 - Preserve concise reproduction/evidence and affected paths; do not dump raw conversation or logs into the follow-up.
 - Do not perform opportunistic refactors merely because the files are already open.
 - A growing list of follow-ups is a planning/backlog signal, not permission to turn the current packet into a multi-domain program.

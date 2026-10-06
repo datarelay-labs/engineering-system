@@ -170,7 +170,7 @@ The implementing agent's self-report is never the completion oracle by itself.
 
 ### Follow-up Discoveries
 
-Keep tangential discoveries out of the active scope unless the coordinator explicitly re-sizes the packet. Record meaningful out-of-scope bugs, refactors, security findings, or opportunities as linked follow-up Issues/Work Packets with enough evidence to reproduce or triage them. Do not silently absorb them into the current implementation merely because they were discovered nearby.
+Keep tangential discoveries out of the active scope unless the coordinator explicitly re-sizes the packet. Record a separate follow-up Issue/Work Packet only when the discovery is a genuinely independent durable scheduling outcome: it has a different owner/approval/rollback boundary, a separate completion oracle, or cannot safely fit the current bounded outcome after sizing. Findings, bugs, review comments, and remediation steps required by the current outcome stay in the current packet and are batch-remediated there; do not create one Issue per finding or micro-step. When a related follow-up already exists, update/reuse it instead of creating a duplicate. Do not silently absorb unrelated work merely because it was discovered nearby.
 
 ### Constraints
 
@@ -789,7 +789,7 @@ COMPLETE -> close Issue
 
 Do not introduce tool-specific lifecycle states. Tool readiness, CI waiting, or implementation phases belong in `Current State`, `TASK_KIND`, `OWNER_INTENT`, and `Latest Evidence`.
 
-A new independent workstream gets a new Issue rather than reusing an unrelated completed packet.
+A genuinely independent workstream gets a new Issue rather than reusing an unrelated completed packet. Before creating one, search the repository open/paused roadmap and Work Packets for the same durable outcome and update/reuse the existing canonical Issue when present. Never create a new Work Packet merely to record progress, a phase transition, one test finding, one bug-fix iteration, CI waiting, or the next micro-step of an existing outcome. When an outcome reaches COMPLETE, close its Issue in the same lifecycle reconciliation; do not leave completed packets open as scheduler input.
 
 ## Evidence and authority
 

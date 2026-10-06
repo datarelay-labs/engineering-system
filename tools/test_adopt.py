@@ -452,6 +452,8 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "roadmap/release objective is complete" in upgraded_agents
         assert "repair missing/stale/contradictory packet state from repository evidence" in upgraded_agents
         assert "Implement, test and audit directly in coherent batches" in upgraded_agents
+        assert "never create one Issue per finding" in upgraded_agents
+        assert "Close COMPLETE packets in the same lifecycle reconciliation" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert ".engineering/execution-profile.yaml" in upgraded_agents
         assert "`.engineering/execution-profile.yaml` selects the runtime" in upgraded_agents
