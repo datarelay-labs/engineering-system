@@ -24,7 +24,7 @@ from execution_profile import (
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 POLICY_EPOCH = 19
-GOVERNANCE_EPOCH = 4
+GOVERNANCE_EPOCH = 5
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -163,6 +163,8 @@ REQUIRED_MANAGED = (
 EXECUTION_PROFILE_MARKER = "- **Execution profile authority:**"
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
 SUPERVISOR_POLICY_MARKER = "- **Product execution ownership / supervisor fallback:**"
+NEXT_CHAT_BOOTSTRAP_POLICY_MARKER = "- **Next-chat bootstrap fast path:**"
+VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER = "- **Verified next-chat resume:**"
 EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
 EXECUTION_RULES_HEADING = "## Execution rules"
 
@@ -201,11 +203,13 @@ def canonical_execution_policy_line() -> str:
     return _canonical_policy_line(EXECUTION_POLICY_MARKER, "continuous-execution")
 
 
-def canonical_managed_policy_lines() -> tuple[str, str, str, str]:
+def canonical_managed_policy_lines() -> tuple[str, ...]:
     return (
         _canonical_policy_line(EXECUTION_PROFILE_MARKER, "execution-profile"),
         canonical_execution_policy_line(),
         _canonical_policy_line(SUPERVISOR_POLICY_MARKER, "product-supervisor-boundary"),
+        _canonical_policy_line(NEXT_CHAT_BOOTSTRAP_POLICY_MARKER, "next-chat-bootstrap"),
+        _canonical_policy_line(VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER, "verified-next-chat-resume"),
         _canonical_policy_line(EXTERNAL_WRITE_POLICY_MARKER, "external-write-scope"),
     )
 
@@ -289,7 +293,14 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"
         )
 
-    canonical_profile, canonical_execution, canonical_supervisor, canonical_external_write = canonical_managed_policy_lines()
+    (
+        canonical_profile,
+        canonical_execution,
+        canonical_supervisor,
+        canonical_next_chat_bootstrap,
+        canonical_verified_next_chat_resume,
+        canonical_external_write,
+    ) = canonical_managed_policy_lines()
     selected_profile = _selected_profile()
     legacy_profile_markers = tuple(selected_profile["policy_migration"]["legacy_execution_profile_markers"])
     legacy_write_markers = tuple(selected_profile["policy_migration"]["legacy_external_write_markers"])
@@ -309,6 +320,16 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             "product-supervisor-boundary",
             canonical_supervisor,
             (SUPERVISOR_POLICY_MARKER,),
+        ),
+        (
+            "next-chat-bootstrap",
+            canonical_next_chat_bootstrap,
+            (NEXT_CHAT_BOOTSTRAP_POLICY_MARKER,),
+        ),
+        (
+            "verified-next-chat-resume",
+            canonical_verified_next_chat_resume,
+            (VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER,),
         ),
         (
             "external-write-scope",
