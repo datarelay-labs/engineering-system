@@ -1,11 +1,10 @@
 contract_version: 2
-from_governance_epoch: 3
-to_governance_epoch: 4
-base_sha: 0ac16308c91b0c0f7ef3cdbcd32ae17f8df85978
+from_governance_epoch: 4
+to_governance_epoch: 5
+base_sha: e92971b44b3922dce371d2be6408b8ff3e6d1d37
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Sync the canonical product execution ownership and supervisor fallback
-  boundary into adopted repositories.
+rationale: Sync next-chat bootstrap and verified-resume policy into adopted repositories.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: e0b21c6b13320df99bd0deee41762fa4cc6c99d5
+  head_blob_sha: a0d7adc9bdbbc91424f664b55da4c666daef55e5

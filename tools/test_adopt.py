@@ -403,6 +403,14 @@ def test_managed_upgrade_to_1_6() -> None:
             line for line in agents_text.splitlines()
             if line.startswith("- **Execute useful work continuously.**")
         )
+        next_chat_bootstrap_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Next-chat bootstrap fast path:**")
+        )
+        verified_next_chat_resume_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Verified next-chat resume:**")
+        )
         external_write_line = next(
             line for line in agents_text.splitlines()
             if line.startswith("- For ordinary authenticated GitHub Issue/PR coordination,")
@@ -420,6 +428,8 @@ def test_managed_upgrade_to_1_6() -> None:
         agents_text = agents_text.replace(profile_line, legacy_profile, 1)
         agents_text = agents_text.replace(external_write_line, legacy_external_write, 1)
         agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text = agents_text.replace(next_chat_bootstrap_line + "\n", "", 1)
+        agents_text = agents_text.replace(verified_next_chat_resume_line + "\n", "", 1)
         agents_text = (
             f"Adoption baseline: Engineering System version 1.5.0 at immutable commit `{BASELINE}`.\n\n"
             + agents_text
@@ -447,6 +457,10 @@ def test_managed_upgrade_to_1_6() -> None:
         upgraded_agents = agents_path.read_text(encoding="utf-8")
         assert upgraded_agents.count("- **Execute useful work continuously.**") == 1
         assert upgraded_agents.count("- **Product execution ownership / supervisor fallback:**") == 1
+        assert upgraded_agents.count("- **Next-chat bootstrap fast path:**") == 1
+        assert upgraded_agents.count("- **Verified next-chat resume:**") == 1
+        assert "NO_ACTIVE_PACKET` is a scheduling input, not a blocker" in upgraded_agents
+        assert "enter the persisted Next Action immediately" in upgraded_agents
         assert "uncontrolled Issue proliferation" in upgraded_agents
         assert "Never mutate an actively progressing owner-authorized worker dirty worktree" in upgraded_agents
         assert "During machine-observable waits, preserve state and advance independent work" in upgraded_agents
@@ -755,7 +769,17 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
             line for line in agents_text.splitlines()
             if line.startswith("- **Execute useful work continuously.**")
         )
+        next_chat_bootstrap_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Next-chat bootstrap fast path:**")
+        )
+        verified_next_chat_resume_line = next(
+            line for line in agents_text.splitlines()
+            if line.startswith("- **Verified next-chat resume:**")
+        )
         agents_text = agents_text.replace(policy_line + "\n", "", 1)
+        agents_text = agents_text.replace(next_chat_bootstrap_line + "\n", "", 1)
+        agents_text = agents_text.replace(verified_next_chat_resume_line + "\n", "", 1)
         agents_text += "\n## Product-specific invariant\n\n- preserve-same-baseline-rule\n"
         agents_path.write_text(agents_text, encoding="utf-8")
         project_path = target / ".engineering/project.yaml"
@@ -789,6 +813,8 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         repaired_agents = agents_path.read_text(encoding="utf-8")
         assert repaired_agents.count("- **Execute useful work continuously.**") == 1
+        assert repaired_agents.count("- **Next-chat bootstrap fast path:**") == 1
+        assert repaired_agents.count("- **Verified next-chat resume:**") == 1
         assert "- preserve-same-baseline-rule" in repaired_agents
         repaired_project = load_yaml(project_path)
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
