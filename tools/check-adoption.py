@@ -288,9 +288,18 @@ def main() -> int:
                     if managed_policy == execution_policy:
                         continue
                     if managed_policy.startswith(exact_policy_markers):
-                        if managed_policy not in agents_lines:
+                        marker = next(
+                            candidate
+                            for candidate in exact_policy_markers
+                            if managed_policy.startswith(candidate)
+                        )
+                        matches = [
+                            line for line in agents_lines
+                            if line.startswith(marker)
+                        ]
+                        if matches != [managed_policy]:
                             failures.append(
-                                "AGENTS.md customized or missing managed next-chat policy requires review"
+                                "AGENTS.md customized, duplicate, or missing managed next-chat policy requires review"
                             )
                             break
                     elif managed_policy not in agents_text:
