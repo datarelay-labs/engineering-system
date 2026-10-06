@@ -101,6 +101,10 @@ def send_github_comment(repository: str, issue_id: str, body: str) -> dict[str, 
     return {"outcome": "SUCCEEDED", "receipt": f"github-comment:{comment_id}", "level": "NONE"}
 
 
+def _success_marker_present(output: str) -> bool:
+    return any(line.strip() == "OWNER_NOTIFY=PASS" for line in output.splitlines())
+
+
 def send_owner_info(text: str) -> dict[str, str]:
     """Send one INFO notification through the fixed host adapter. COMPLETE is never sent."""
     if not text or len(text) > 4000 or "\x00" in text or "COMPLETE" in text.split():
@@ -122,7 +126,7 @@ def send_owner_info(text: str) -> dict[str, str]:
     for line in completed.stdout.splitlines():
         if line.startswith("OWNER_NOTIFY_RECEIPT="):
             receipt = line.split("=", 1)[1].strip()
-    if "OWNER_NOTIFY=PASS" not in completed.stdout or not receipt or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", receipt) is None:
+    if not _success_marker_present(completed.stdout) or not receipt or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", receipt) is None:
         return _ambiguous()
     return {"outcome": "SUCCEEDED", "receipt": f"owner-notify:{receipt}", "level": "INFO"}
 

@@ -749,6 +749,11 @@ def test_owner_notice_is_verified_info() -> None:
                     with fake_gh(base, state), host_env(base):
                         first = run_once(request)
                         second = run_once(request)
+                helper.write_text(
+                    "#!/bin/sh\nprintf 'OWNER_NOTIFY=PASSIVE\\nOWNER_NOTIFY_RECEIPT=near-miss\\n'\n",
+                    encoding="utf-8",
+                )
+                near_miss = coordinator_watch_effects.send_owner_info("LEVEL=INFO\n")
             finally:
                 coordinator_watch_effects._TEST_OWNER_NOTIFY_HELPER = previous
             assert first["result"] == "DELIVERED"
@@ -756,6 +761,7 @@ def test_owner_notice_is_verified_info() -> None:
             assert first["notification_level"] == "INFO"
             assert first["notification_delivery"] == "VERIFIED"
             assert first["mutates_github"] is False
+            assert near_miss["outcome"] == "AMBIGUOUS"
             assert second["result"] in {"DEDUP", "NO_ACTION"}
             assert second["notifications"] == 0
             assert send_effect("NOTIFY_OWNER", {**effect, "level": "COMPLETE"})["outcome"] == "NOT_SENT"
