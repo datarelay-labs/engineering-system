@@ -703,6 +703,22 @@ Guidance:
 - Use `tools/work_admission.py` when conflict/resource ownership is ambiguous or multiple workers need machine-enforced claims; it is not mandatory ceremony for obviously independent single-runtime work.
 - Stop only for a genuine owner decision/credential, an irreconcilable blocker, or an explicit status-only request. Completing a bounded packet/PR/test phase is a scheduling boundary, not a repository-level continue/resume stop. For a repository-level continue request, immediately reschedule to the next dependency-eligible runnable roadmap/release workstream and continue until the roadmap/release objective is complete or no runnable work remains.
 
+## Product execution ownership and supervisor recovery
+
+Normal product engineering is owned by the product repository execution context. A repository-level continue/resume for DRLink, DR Control, DRAtlas, or another adopted product must be executed from that product repository's authoritative Work Packet, roadmap, worktree, and tests. The Engineering System repository is the **control plane**, not the default product execution plane: it owns shared policy, lifecycle/scheduling contracts, adoption tooling, watchdog/re-entry semantics, and recovery of systemic coordination defects.
+
+When a product execution context is healthy, the Engineering System context MUST NOT become a shadow product coordinator, duplicate its Work Packets, or routinely curate its product Issues/PRs. Product-local lifecycle cleanup belongs to the product context: update the existing authoritative packet while its bounded outcome remains coherent, close `COMPLETE` packets, close or supersede stale PRs, and create a new Issue only for a genuinely independent workstream that should survive the current packet. Findings discovered inside an active packet are not by themselves a reason to create more Work Packets.
+
+Supervisor fallback is appropriate when current evidence shows a systemic execution failure such as repeated plan/status-only returns under a continue request, repeated failure to enter a runnable packet, stale/contradictory packet state that the product context does not self-heal, retired-runtime selection, wrong-repository retargeting, uncontrolled Issue/packet proliferation, or repeated identical blocker loops. Supervisor recovery must use the smallest scope that restores product autonomy:
+
+1. diagnose whether the defect is canonical policy/tooling, adopted-policy drift, or product-local coordination state;
+2. fix canonical Engineering System policy/tooling first when the defect is systemic and add regression evidence;
+3. upgrade/repair the affected adopted repository metadata when required;
+4. repair only the minimum stale product coordination state needed to restore a single truthful runnable path;
+5. verify the product context can again select/execute its own current packet; then return product implementation and routine Issue/PR lifecycle ownership to that product context.
+
+Supervisor fallback MUST NOT be used merely because the supervisor can access the product repository. It does not authorize the Engineering System context to absorb product roadmap implementation, user-gate execution, or routine product backlog grooming. An actively progressing, owner-authorized product worker is observed rather than replaced; recovery must not mutate its dirty worktree or create a competing implementation lane. Runtime/session failure outside repository control may still require a new product execution context, so repository policy cannot guarantee chat-process liveness; durable Work Packet and Git state are the recovery boundary.
+
 Release qualification follows `standards/RELEASE.md` and the target repository release profile. Product-specific choreography belongs in that repository, not in this continuity standard.
 
 ## Optional independent verifier for additional terminal evidence
