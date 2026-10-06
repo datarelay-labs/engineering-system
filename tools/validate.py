@@ -551,7 +551,7 @@ def validate_coordinator_watch_host_contract():
             raise SystemExit(f"FAIL coordinator watch host missing token: {token}")
     effects = (ROOT / "tools/coordinator_watch_effects.py").read_text(encoding="utf-8")
     collector = (ROOT / "tools/coordinator_watch_collect.py").read_text(encoding="utf-8")
-    for token in ("api.telegram.org", "send_github_comment", "shell=False"):
+    for token in ("/usr/lib/engineering-system/owner-notify", "send_github_comment", "shell=False"):
         if token not in effects:
             raise SystemExit(f"FAIL coordinator watch effects missing token: {token}")
     if "shell=True" in effects or "shell=True" in collector:

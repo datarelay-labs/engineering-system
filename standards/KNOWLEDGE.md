@@ -34,15 +34,14 @@ Executable implementation and deterministic behavior evidence.
 ### Runbook / RCA
 Operational procedure and incident learning.
 
-### DataRelay Atlas
-DataRelay Atlas is the default derived knowledge, memory, cross-project context, and AI retrieval plane for adopted DataRelay engineering workflows. It is never a competing normative source and never establishes execution authority.
+### Optional derived-context adapter
+An organization or project may configure a derived knowledge, memory, cross-project context, or retrieval adapter. It is never a competing normative source and never establishes execution authority.
 
-Atlas retrieval is JIT and scoped to the current project/repository/workstream after canonical Work Packet and local repository context are resolved. Ordinary engineering remains runnable when Atlas is unavailable; the outage is observable and retrieval falls back to canonical/local context.
+Derived-context retrieval is JIT and scoped to the current project/repository/workstream after the canonical Work Packet and local repository context are resolved. Ordinary engineering remains runnable when the adapter is unavailable; the outage is observable and work continues from canonical/local context.
 
-Atlas write-back is bounded to approved non-authoritative candidate classes such as validated findings, lessons learned, owner preferences, run summaries, future ideas, and reference facts. Never write raw chat transcripts, raw logs, credentials/secrets, or automatically promote Atlas memory into canonical engineering truth.
+Derived write-back is bounded to approved non-authoritative candidate classes such as validated findings, lessons learned, owner preferences, run summaries, future ideas, and reference facts. Never write raw chat transcripts, raw logs, credentials/secrets, or automatically promote derived memory into canonical engineering truth.
 
-### Tela / Athena — retired
-Tela/Athena are not active Engineering System read, write, search, context, or workflow dependencies. Historical Tela material already migrated into Atlas may remain as provenance-bearing legacy snapshots only. New or resumed engineering work must use Atlas rather than Tela/Athena for derived knowledge/context.
+Retired or legacy knowledge systems are provenance-only and never active dependencies. Organization/product-specific mappings belong in optional adapter documentation rather than this universal standard.
 
 ## Default authority
 
@@ -51,13 +50,13 @@ Tela/Athena are not active Engineering System read, write, search, context, or w
 3. repository engineering metadata
 4. ADRs for durable architectural decisions
 5. runbooks/RCA for operations/incidents
-6. DataRelay Atlas for derived explanation/search/memory/context
+6. optional derived context for explanation/search/memory/context
 
 If derived knowledge conflicts with canonical Git content, canonical Git content wins.
 
 ## Context-efficiency rule
 
-Agents should retrieve only the knowledge needed for the current task. Do not load all Atlas knowledge, archived specifications, ADRs, or historical discussions into every task context. Resolve canonical/local context first; use Atlas only for bounded JIT enrichment that materially helps the current task.
+Agents should retrieve only the knowledge needed for the current task. Do not load all derived knowledge, archived specifications, ADRs, or historical discussions into every task context. Resolve canonical/local context first; use an optional derived-context adapter only for bounded JIT enrichment that materially helps the current task.
 
 ## Optional knowledge index
 

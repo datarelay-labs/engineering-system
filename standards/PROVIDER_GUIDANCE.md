@@ -85,4 +85,4 @@ Canonical `policy_epoch` is policy-freshness state. Repository-local root-of-tru
 
 ## Engineering truth vs notification
 
-Engineering completion is determined by the completion contract and evidence. Notification delivery is operational state. A failed Telegram/message transport may require retry and should be visible to the owner, but it does not retroactively make correct code or passing release evidence false.
+Engineering completion is determined by the completion contract and evidence. Notification delivery is operational state. A failed owner-notification transport may require retry and should be visible to the owner, but it does not retroactively make correct code or passing release evidence false.

@@ -1,7 +1,7 @@
 engineering_system:
   version: "1.7.0"
-  policy_epoch: 18
-  governance_epoch: 0
+  policy_epoch: 19
+  governance_epoch: 1
   mode: canonical
   ci_mode: native
   native_ci_workflows:
