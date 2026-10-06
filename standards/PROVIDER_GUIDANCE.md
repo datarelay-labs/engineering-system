@@ -81,7 +81,7 @@ Use `CHANGE_RISK`, task-specific contracts, and observed uncertainty to choose e
 
 Base-owned governance execution remains the trust boundary. Candidate PR code must never replace the helper/workflow that evaluates that same candidate.
 
-Governance helper, dependency-manifest, context-routing, and canonical floor-workflow changes require an explicit `policy_epoch` advance. Same-epoch byte drift fails closed. An epoch advance is a visible governance migration marker and still requires the normal exact-HEAD validation/review contract. This replaces permanent byte immutability and repeated bootstrap exceptions with a bounded migration rule while preserving base-owned evaluation.
+Canonical `policy_epoch` is policy-freshness state. Repository-local root-of-trust migrations use `governance_epoch`, which advances exactly once for each root migration while policy freshness remains pinned to the canonical value. The base-owned floor reads migration manifests as data and accepts historical contract-v1 policy-epoch migrations for backward compatibility; new contract-v2 migrations bind the governance generation. Same-generation root drift fails closed, and exact-HEAD validation/review plus current owner approval remain mandatory.
 
 ## Engineering truth vs notification
 

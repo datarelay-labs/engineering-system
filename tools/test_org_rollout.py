@@ -481,6 +481,18 @@ def test_current_baseline_with_managed_byte_drift_is_repairable() -> None:
 
 
 def test_repair_markers_match_checker_diagnostics() -> None:
+    assert "stale adoption policy_epoch:" in (
+        org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
+    assert "requires explicit engineering_system.governance_epoch" in (
+        org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL stale adoption policy_epoch: target=17 canonical=18"
+    )
+    assert org_rollout.repairable_structural_failure(
+        "FAIL Engineering System >=1.7.0 requires explicit engineering_system.governance_epoch"
+    )
     assert "retired runtime artifact must be removed:" in (
         org_rollout.REPAIRABLE_STRUCTURAL_FAILURE_MARKERS
     )
@@ -540,18 +552,24 @@ def test_repair_markers_match_checker_diagnostics() -> None:
 
 def test_structural_adoption_preserves_all_failures() -> None:
     original = org_rollout.run_cmd
+    calls: list[list[str]] = []
     try:
-        org_rollout.run_cmd = lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args,
-            returncode=1,
-            stdout=(
-                "FAIL AGENTS.md missing managed continuous-execution policy\n"
-                "FAIL managed-profile adoption missing required helper\n"
-                "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE\n"
-                "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md\n"
-            ),
-        )
+        def fake_run_cmd(args, *extra, **kwargs):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=1,
+                stdout=(
+                    "FAIL AGENTS.md missing managed continuous-execution policy\n"
+                    "FAIL managed-profile adoption missing required helper\n"
+                    "FAIL human-equivalent user tests executor must be EXECUTION_PROFILE\n"
+                    "FAIL human-equivalent surface_reconciliation contract missing: docs/SURFACE_RECONCILIATION.md\n"
+                ),
+            )
+
+        org_rollout.run_cmd = fake_run_cmd
         ok, detail = org_rollout.structural_adoption_ok(Path("/tmp/example"))
+        assert calls and "--require-current-policy" in calls[0]
         assert not ok
         assert detail.count("FAIL ") == 4
         assert "surface_reconciliation contract missing" in detail

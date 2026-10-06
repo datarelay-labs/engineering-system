@@ -23,6 +23,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "governance_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
         "mode": {
           "type": "string",
           "enum": ["canonical", "adopted"]

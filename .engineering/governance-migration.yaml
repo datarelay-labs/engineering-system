@@ -1,13 +1,20 @@
 contract_version: 1
-base_sha: d8ed02612da4cac0eb861c83db048f12f6f5e7bb
-from_policy_epoch: 16
-to_policy_epoch: 17
+base_sha: 411d5db1c94ab975f2e15fb5263ab6e8e56fd90b
+from_policy_epoch: 17
+to_policy_epoch: 18
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: 'Complete the same owner-authorized autonomy restoration: preserve the
-  known historical polling rule variant with custom suffixes and share canonical pending-wait
-  evidence between selection and handoff. No evaluator/profile/permission authority
-  change.'
+rationale: >-
+  Owner-approved cutover separating canonical policy freshness from
+  repository-local governance migration generation. The base-owned floor is
+  contract-v1, so this migration advances policy_epoch exactly once; after this
+  cutover, new root migrations use governance_epoch contract-v2.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 9b6bd1689131041745b0fee38abaf53dbb23d7ae
+  head_blob_sha: 78cc8f00b359aab2c5c70dec77d81573ab8b3c46
+- path: tools/check-adoption.py
+  head_blob_sha: f964f365bdf5d59fc3b37c9bd59b284fec0dd8f2
+- path: tools/governance_floor.py
+  head_blob_sha: e428a5db8579ce3acd2896e99d601b19df173796
+- path: tools/upgrade-adoption.py
+  head_blob_sha: 203a6e312c92e3caed5eb124f6a37b2d9b7b1de5

@@ -23,7 +23,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 17
+POLICY_EPOCH = 18
+GOVERNANCE_EPOCH = 0
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -829,6 +830,7 @@ def project_yaml(
         "engineering_system:",
         f"  version: {yaml_scalar(version)}",
         f"  policy_epoch: {POLICY_EPOCH}",
+        f"  governance_epoch: {GOVERNANCE_EPOCH}",
         "  mode: adopted",
         f"  baseline: {yaml_scalar(baseline)}",
         f"  ci_mode: {yaml_scalar(ci_mode)}",

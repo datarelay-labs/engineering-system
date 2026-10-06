@@ -21,6 +21,7 @@ from adopt import (
     ENGINEERING_SYSTEM_DEPENDENCIES_MANAGED,
     EXECUTION_PROFILE_MANAGED,
     GOVERNANCE_FLOOR_MANAGED,
+    GOVERNANCE_EPOCH,
     IMPLEMENTATION_PREFLIGHT_MANAGED,
     KNOWLEDGE_CONTRACT_MANAGED,
     POLICY_EPOCH,
@@ -732,11 +733,41 @@ def git_blob_sha(text: str) -> str:
     return hashlib.sha1(header + data).hexdigest()
 
 
+def base_governance_floor_supports_v2(
+    root: Path, base_sha: str, baseline_sha: str
+) -> bool:
+    pattern = r"(?m)^GOVERNANCE_MIGRATION_CONTRACT_VERSION\s*=\s*2\s*$"
+    candidates = [base_sha]
+    history = run_git(
+        root,
+        "rev-list",
+        "--max-count=32",
+        base_sha,
+        "--",
+        "tools/governance_floor.py",
+    )
+    candidates.extend(
+        item for item in history.splitlines()
+        if item and item != base_sha
+    )
+    for candidate in candidates:
+        text = run_git(root, "show", f"{candidate}:tools/governance_floor.py")
+        if text:
+            return bool(re.search(pattern, text))
+    baseline_text = run_git(
+        CANONICAL, "show", f"{baseline_sha}:tools/governance_floor.py"
+    )
+    return bool(baseline_text and re.search(pattern, baseline_text))
+
+
 def build_root_migration_manifest(
     *,
     base_sha: str,
-    from_epoch: int,
-    to_epoch: int,
+    from_policy_epoch: int,
+    to_policy_epoch: int,
+    from_governance_epoch: int,
+    to_governance_epoch: int,
+    legacy_policy_contract: bool,
     planned_root_surfaces: dict[str, str],
     old_baseline: str,
     new_baseline: str,
@@ -745,13 +776,25 @@ def build_root_migration_manifest(
         return None
     if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
         raise SystemExit("FAIL root migration base HEAD is unavailable")
-    if to_epoch != from_epoch + 1:
-        raise SystemExit("FAIL root migration policy_epoch must advance exactly once")
+    if legacy_policy_contract:
+        if to_policy_epoch != from_policy_epoch + 1:
+            raise SystemExit("FAIL legacy root migration policy_epoch must advance exactly once")
+        generation = {
+            "contract_version": 1,
+            "from_policy_epoch": from_policy_epoch,
+            "to_policy_epoch": to_policy_epoch,
+        }
+    else:
+        if to_governance_epoch != from_governance_epoch + 1:
+            raise SystemExit("FAIL root migration governance_epoch must advance exactly once")
+        generation = {
+            "contract_version": 2,
+            "from_governance_epoch": from_governance_epoch,
+            "to_governance_epoch": to_governance_epoch,
+        }
     return {
-        "contract_version": 1,
+        **generation,
         "base_sha": base_sha,
-        "from_policy_epoch": from_epoch,
-        "to_policy_epoch": to_epoch,
         "requires_exact_head_validate": True,
         "automation_eligible": False,
         "rationale": (
@@ -976,7 +1019,27 @@ def main() -> int:
         or existing_policy_epoch < 0
     ):
         raise SystemExit("FAIL existing adoption has invalid policy_epoch")
-    target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
+    governance_epoch_present = "governance_epoch" in engineering
+    if existing_policy_epoch > POLICY_EPOCH:
+        supports_normalization = base_governance_floor_supports_v2(
+            root,
+            base_head,
+            old_baseline,
+        )
+        if existing_policy_epoch != POLICY_EPOCH + 1 or not supports_normalization:
+            raise SystemExit(
+                "FAIL existing adoption policy_epoch is newer than canonical policy "
+                "without a valid one-step v2 normalization base"
+            )
+    existing_governance_epoch = engineering.get("governance_epoch", GOVERNANCE_EPOCH)
+    if (
+        isinstance(existing_governance_epoch, bool)
+        or not isinstance(existing_governance_epoch, int)
+        or existing_governance_epoch < 0
+    ):
+        raise SystemExit("FAIL existing adoption has invalid governance_epoch")
+    target_policy_epoch = POLICY_EPOCH
+    target_governance_epoch = existing_governance_epoch
     current_version = canonical_version()
     new_baseline = canonical_baseline(args.baseline_sha)
     retired_agent_artifacts = existing_retired_agent_artifacts(root)
@@ -1054,14 +1117,38 @@ def main() -> int:
             **planned_execution_profile,
             **planned_context_epoch,
         }
-        target_policy_epoch = max(existing_policy_epoch, POLICY_EPOCH)
-        if planned_root_surfaces:
-            target_policy_epoch = max(target_policy_epoch, existing_policy_epoch + 1)
+        legacy_root_contract = bool(
+            planned_root_surfaces
+            and not base_governance_floor_supports_v2(
+                root,
+                base_head,
+                old_baseline,
+            )
+        )
+        if planned_root_surfaces and legacy_root_contract:
+            target_policy_epoch = existing_policy_epoch + 1
+            if target_policy_epoch > POLICY_EPOCH:
+                raise SystemExit(
+                    "FAIL legacy root migration would advance policy_epoch beyond canonical policy"
+                )
+            target_governance_epoch = existing_governance_epoch
+        else:
+            target_policy_epoch = POLICY_EPOCH
+            target_governance_epoch = existing_governance_epoch + (
+                1 if planned_root_surfaces else 0
+            )
         policy_epoch_repair = target_policy_epoch != existing_policy_epoch
+        governance_epoch_repair = (
+            target_governance_epoch != existing_governance_epoch
+            or not governance_epoch_present
+        )
         root_migration = build_root_migration_manifest(
             base_sha=base_head,
-            from_epoch=existing_policy_epoch,
-            to_epoch=target_policy_epoch,
+            from_policy_epoch=existing_policy_epoch,
+            to_policy_epoch=target_policy_epoch,
+            from_governance_epoch=existing_governance_epoch,
+            to_governance_epoch=target_governance_epoch,
+            legacy_policy_contract=legacy_root_contract,
             planned_root_surfaces=planned_root_surfaces,
             old_baseline=old_baseline,
             new_baseline=new_baseline,
@@ -1085,6 +1172,7 @@ def main() -> int:
             and not planned_release_executor
             and not retired_agent_artifacts
             and not policy_epoch_repair
+            and not governance_epoch_repair
         ):
             print("ADOPTION_UPGRADE=NO_CHANGE")
             return 0
@@ -1120,6 +1208,8 @@ def main() -> int:
             print("EXECUTION_PROFILE_REPAIR=REQUIRED")
         if policy_epoch_repair:
             print(f"POLICY_EPOCH_REPAIR={target_policy_epoch}")
+        if governance_epoch_repair:
+            print(f"GOVERNANCE_EPOCH_REPAIR={target_governance_epoch}")
         if root_migration is not None:
             print("GOVERNANCE_ROOT_MIGRATION=REQUIRED")
         if planned_execution_policy is not None:
@@ -1134,8 +1224,9 @@ def main() -> int:
             print("ADOPTION_UPGRADE_AUDIT=PASS")
             if not args.apply:
                 return 0
-        if policy_epoch_repair:
+        if policy_epoch_repair or governance_epoch_repair:
             engineering["policy_epoch"] = target_policy_epoch
+            engineering["governance_epoch"] = target_governance_epoch
             project["engineering_system"] = engineering
             write_yaml(project_path, project)
         if write_root_migration_manifest(root, root_migration):
@@ -1332,6 +1423,7 @@ def main() -> int:
     engineering["version"] = current_version
     engineering["baseline"] = new_baseline
     engineering["policy_epoch"] = target_policy_epoch
+    engineering["governance_epoch"] = target_governance_epoch
     project["engineering_system"] = engineering
     operations["persistent_state"] = persistent_state
     operations["runbook_paths"] = runbook_paths
@@ -1425,17 +1517,38 @@ def main() -> int:
         **planned_execution_profile,
         **planned_context_epoch,
     }
+    legacy_root_contract = bool(
+        planned_root_surfaces
+        and not base_governance_floor_supports_v2(
+            root,
+            base_head,
+            old_baseline,
+        )
+    )
     if planned_root_surfaces:
-        # A root-governance migration advances exactly one epoch. If the target is
-        # several canonical epochs behind, a subsequent repair pass advances the
-        # metadata-only epoch to the current floor after this root transition is durable.
-        target_policy_epoch = existing_policy_epoch + 1
+        if legacy_root_contract:
+            # A pre-cutover base-owned floor understands only contract-v1 and
+            # requires one exact policy-epoch step. Once this transition lands,
+            # the new baseline owns the v2 governance-generation contract.
+            target_policy_epoch = existing_policy_epoch + 1
+            if target_policy_epoch > POLICY_EPOCH:
+                raise SystemExit(
+                    "FAIL legacy root migration would advance policy_epoch beyond canonical policy"
+                )
+            target_governance_epoch = existing_governance_epoch
+        else:
+            target_policy_epoch = POLICY_EPOCH
+            target_governance_epoch = existing_governance_epoch + 1
         engineering["policy_epoch"] = target_policy_epoch
+        engineering["governance_epoch"] = target_governance_epoch
         project["engineering_system"] = engineering
     root_migration = build_root_migration_manifest(
         base_sha=base_head,
-        from_epoch=existing_policy_epoch,
-        to_epoch=target_policy_epoch,
+        from_policy_epoch=existing_policy_epoch,
+        to_policy_epoch=target_policy_epoch,
+        from_governance_epoch=existing_governance_epoch,
+        to_governance_epoch=target_governance_epoch,
+        legacy_policy_contract=legacy_root_contract,
         planned_root_surfaces=planned_root_surfaces,
         old_baseline=old_baseline,
         new_baseline=new_baseline,

@@ -117,6 +117,8 @@ class RepoResult:
     version: str = ""
     baseline: str = ""
     mode: str = ""
+    policy_epoch: int | None = None
+    governance_epoch: int | None = None
     detail: str = ""
     branch: str = ""
     pr_url: str = ""
@@ -308,7 +310,15 @@ def load_override_manifest(path: Path) -> OverrideManifest:
 
 
 def structural_adoption_ok(root: Path) -> tuple[bool, str]:
-    completed = run_cmd([sys.executable, str(CHECK), "--root", str(root)])
+    completed = run_cmd(
+        [
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(root),
+            "--require-current-policy",
+        ]
+    )
     if completed.returncode == 0 and "ENGINEERING_SYSTEM_ADOPTION=PASS" in completed.stdout:
         return True, "structural adoption validation passed"
     detail = completed.stdout.strip().splitlines()
@@ -321,6 +331,8 @@ def structural_adoption_ok(root: Path) -> tuple[bool, str]:
 
 
 REPAIRABLE_STRUCTURAL_FAILURE_MARKERS = (
+    "stale adoption policy_epoch:",
+    "requires explicit engineering_system.governance_epoch",
     "AGENTS.md missing managed continuous-execution policy",
     "AGENTS.md contains retired runtime compatibility rules",
     "retired runtime artifact must be removed:",
@@ -750,6 +762,19 @@ def process_repo(
 
     result = classify_checkout(root, target_version, target_baseline)
     result.full_name = record.full_name
+    project_path = root / ".engineering" / "project.yaml"
+    if project_path.is_file():
+        try:
+            engineering = (load_yaml(project_path).get("engineering_system") or {})
+            policy_epoch = engineering.get("policy_epoch")
+            governance_epoch = engineering.get("governance_epoch")
+            if isinstance(policy_epoch, int) and not isinstance(policy_epoch, bool):
+                result.policy_epoch = policy_epoch
+            if isinstance(governance_epoch, int) and not isinstance(governance_epoch, bool):
+                result.governance_epoch = governance_epoch
+        except Exception:
+            # Classification already reports parse failures; freshness fields remain absent.
+            pass
 
     if record.archived:
         result.state = "ARCHIVED"
@@ -917,6 +942,18 @@ def print_result(result: RepoResult) -> None:
     print(f"VERSION={result.version or '<none>'}")
     print(f"BASELINE={result.baseline or '<none>'}")
     print(f"MODE={result.mode or '<none>'}")
+    print(
+        "POLICY_EPOCH="
+        + (str(result.policy_epoch) if result.policy_epoch is not None else "<none>")
+    )
+    print(
+        "GOVERNANCE_EPOCH="
+        + (
+            str(result.governance_epoch)
+            if result.governance_epoch is not None
+            else "<none>"
+        )
+    )
     print(f"BRANCH={result.branch or '<none>'}")
     print(f"PR_URL={result.pr_url or '<none>'}")
     detail = result.detail.replace("\n", "\\n") if result.detail else "<none>"

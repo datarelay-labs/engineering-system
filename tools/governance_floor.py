@@ -274,6 +274,10 @@ except ModuleNotFoundError as exc:
         )
 
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# One-time recovery target for policy epochs inflated by the legacy v1 root
+# migration contract. Future canonical freshness changes do not update this.
+LEGACY_V1_BRIDGE_NORMALIZATION_TARGET = 18
+GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2
 MANAGED_EXECUTION_SURFACES = (
     "AGENTS.md",
     "tools/context_epoch.py",
@@ -389,6 +393,30 @@ def _policy_epoch(profile: dict[str, object], label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{label} engineering_system.policy_epoch is invalid")
     return value
+
+
+def _governance_epoch(profile: dict[str, object], label: str) -> int:
+    engineering = profile.get("engineering_system") or {}
+    value = engineering.get("governance_epoch", 0) if isinstance(engineering, dict) else 0
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label} engineering_system.governance_epoch is invalid")
+    return value
+
+
+def _has_governance_epoch(profile: dict[str, object]) -> bool:
+    engineering = profile.get("engineering_system") or {}
+    return isinstance(engineering, dict) and "governance_epoch" in engineering
+
+
+def _governance_floor_supports_v2(root: Path, ref: str) -> bool:
+    text = _read_at(root, ref, GOVERNANCE_HELPER)
+    return bool(
+        text
+        and re.search(
+            r"(?m)^GOVERNANCE_MIGRATION_CONTRACT_VERSION\s*=\s*2\s*$",
+            text,
+        )
+    )
 
 
 def _has_durable_stage_a_bridge(
@@ -561,8 +589,11 @@ def _root_migration_reasons(
     root: Path,
     base: str,
     head: str,
-    base_epoch: int,
-    head_epoch: int,
+    base_policy_epoch: int,
+    head_policy_epoch: int,
+    base_governance_epoch: int,
+    head_governance_epoch: int,
+    base_supports_v2: bool,
     changed_paths: list[str],
     base_equivalence_paths: tuple[str, ...],
 ) -> list[str]:
@@ -578,8 +609,13 @@ def _root_migration_reasons(
         return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_INVALID"]
     if not isinstance(payload, dict):
         return ["GOVERNANCE_ROOT_MIGRATION_MANIFEST_INVALID"]
-    if payload.get("contract_version") != 1:
+    contract_version = payload.get("contract_version")
+    if contract_version not in {1, 2}:
         reasons.append("GOVERNANCE_ROOT_MIGRATION_VERSION_INVALID")
+    elif contract_version == 1 and base_supports_v2:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_V1_AFTER_V2_CUTOVER")
+    elif contract_version == 2 and not base_supports_v2:
+        reasons.append("GOVERNANCE_ROOT_MIGRATION_V2_BEFORE_CUTOVER")
     if not _root_migration_base_reconciles(
         root,
         payload.get("base_sha"),
@@ -587,10 +623,24 @@ def _root_migration_reasons(
         base_equivalence_paths,
     ):
         reasons.append("GOVERNANCE_ROOT_MIGRATION_BASE_MISMATCH")
-    if payload.get("from_policy_epoch") != base_epoch:
-        reasons.append("GOVERNANCE_ROOT_MIGRATION_FROM_EPOCH_MISMATCH")
-    if payload.get("to_policy_epoch") != head_epoch or head_epoch != base_epoch + 1:
-        reasons.append("GOVERNANCE_ROOT_MIGRATION_TO_EPOCH_INVALID")
+    if contract_version == 1:
+        if payload.get("from_policy_epoch") != base_policy_epoch:
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_FROM_EPOCH_MISMATCH")
+        if (
+            payload.get("to_policy_epoch") != head_policy_epoch
+            or head_policy_epoch != base_policy_epoch + 1
+        ):
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_TO_EPOCH_INVALID")
+        if head_governance_epoch != base_governance_epoch:
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_V1_GOVERNANCE_EPOCH_CHANGED")
+    elif contract_version == 2:
+        if payload.get("from_governance_epoch") != base_governance_epoch:
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_FROM_GENERATION_MISMATCH")
+        if (
+            payload.get("to_governance_epoch") != head_governance_epoch
+            or head_governance_epoch != base_governance_epoch + 1
+        ):
+            reasons.append("GOVERNANCE_ROOT_MIGRATION_TO_GENERATION_INVALID")
     if payload.get("requires_exact_head_validate") is not True:
         reasons.append("GOVERNANCE_ROOT_MIGRATION_VALIDATE_REQUIRED")
     if payload.get("automation_eligible") is not False:
@@ -972,6 +1022,11 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
     head_profile = _profile(_read_at(root, head, ".engineering/project.yaml"), "head")
     base_epoch = _policy_epoch(base_profile, "base")
     head_epoch = _policy_epoch(head_profile, "head")
+    base_governance_epoch = _governance_epoch(base_profile, "base")
+    head_governance_epoch = _governance_epoch(head_profile, "head")
+    base_has_governance_epoch = _has_governance_epoch(base_profile)
+    head_has_governance_epoch = _has_governance_epoch(head_profile)
+    base_supports_v2 = _governance_floor_supports_v2(root, base)
     mode = str(_profile_engineering(head_profile).get("mode") or "")
     reasons: list[str] = []
 
@@ -1022,8 +1077,22 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
 
     active_execution_profile = head_execution_profile or base_execution_profile
 
-    if head_epoch < base_epoch:
+    policy_normalization = (
+        mode == "adopted"
+        and base_supports_v2
+        and base_epoch == LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
+        and head_epoch == LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
+        and head_governance_epoch == base_governance_epoch
+    )
+    if head_epoch < base_epoch and not policy_normalization:
         reasons.append(f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}")
+    if head_governance_epoch < base_governance_epoch:
+        reasons.append(
+            "GOVERNANCE_GENERATION_REGRESSION:"
+            f"base={base_governance_epoch}:head={head_governance_epoch}"
+        )
+    if base_has_governance_epoch and not head_has_governance_epoch:
+        reasons.append("GOVERNANCE_EPOCH_HEAD_MISSING")
 
     epoch_guarded_surfaces = PROTECTED_GOVERNANCE_SURFACES + EPOCH_GUARDED_GOVERNANCE_SURFACES + (
         CANONICAL_EPOCH_GUARDED_GOVERNANCE_SURFACES if mode == "canonical" else ()
@@ -1043,6 +1112,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
         root_migration_surfaces.difference_update(pre_bridge_only)
 
     changed_root_surfaces: list[str] = []
+    changed_guarded_surfaces: list[str] = []
     for path in epoch_guarded_surfaces:
         base_content = _read_at(root, base, path)
         head_content = _read_at(root, head, path)
@@ -1050,23 +1120,60 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
             reasons.append(f"MANAGED_GOVERNANCE_PATH_MISSING:{path}")
             continue
         if base_content != head_content:
+            changed_guarded_surfaces.append(path)
             if path in root_migration_surfaces:
                 changed_root_surfaces.append(path)
-            if head_epoch == base_epoch:
+            elif head_epoch == base_epoch:
                 reasons.append(f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}")
 
-    if changed_root_surfaces and head_epoch > base_epoch:
-        reasons.extend(
-            _root_migration_reasons(
-                root,
-                base,
-                head,
-                base_epoch,
-                head_epoch,
-                changed_root_surfaces,
-                tuple(sorted(set(epoch_guarded_surfaces))),
-            )
-        )
+    if policy_normalization and changed_guarded_surfaces:
+        reasons.append("GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE")
+
+    if changed_root_surfaces:
+        if base_supports_v2:
+            if head_governance_epoch == base_governance_epoch:
+                for path in changed_root_surfaces:
+                    reasons.append(
+                        f"GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_GENERATION:{path}"
+                    )
+            else:
+                reasons.extend(
+                    _root_migration_reasons(
+                        root,
+                        base,
+                        head,
+                        base_epoch,
+                        head_epoch,
+                        base_governance_epoch,
+                        head_governance_epoch,
+                        base_supports_v2,
+                        changed_root_surfaces,
+                        tuple(sorted(set(epoch_guarded_surfaces))),
+                    )
+                )
+        else:
+            if head_epoch == base_epoch:
+                for path in changed_root_surfaces:
+                    reasons.append(
+                        f"GOVERNANCE_ROOT_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}"
+                    )
+            else:
+                reasons.extend(
+                    _root_migration_reasons(
+                        root,
+                        base,
+                        head,
+                        base_epoch,
+                        head_epoch,
+                        base_governance_epoch,
+                        head_governance_epoch,
+                        base_supports_v2,
+                        changed_root_surfaces,
+                        tuple(sorted(set(epoch_guarded_surfaces))),
+                    )
+                )
+    elif head_governance_epoch > base_governance_epoch:
+        reasons.append("GOVERNANCE_GENERATION_CHANGED_WITHOUT_ROOT_MIGRATION")
 
     if mode == "adopted":
         reasons.extend(_adopted_workflow_reasons(_read_at(root, head, ADOPTED_ENGINEERING_WORKFLOW), head_profile))

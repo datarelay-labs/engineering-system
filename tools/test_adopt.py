@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from adopt import POLICY_EPOCH, REQUIRED_MANAGED, rewrite_legacy_coordination_rules
+from adopt import GOVERNANCE_EPOCH, POLICY_EPOCH, REQUIRED_MANAGED, rewrite_legacy_coordination_rules
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = ROOT / "tools" / "adopt.py"
@@ -114,6 +114,7 @@ def test_clean_python_bootstrap() -> None:
         engineering = project["engineering_system"]
         assert engineering["version"] == "1.7.0"
         assert engineering["policy_epoch"] == POLICY_EPOCH
+        assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
         assert engineering["mode"] == "adopted"
         assert engineering["ci_mode"] == "shared"
         assert engineering["baseline"] == BASELINE
@@ -568,7 +569,9 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         project_path = target / ".engineering/project.yaml"
         before_project = load_yaml(project_path)
         before_epoch = before_project["engineering_system"]["policy_epoch"]
+        before_governance_epoch = before_project["engineering_system"]["governance_epoch"]
         assert before_epoch == POLICY_EPOCH
+        assert before_governance_epoch == GOVERNANCE_EPOCH
 
         (target / "tools/governance_floor.py").unlink()
         commit_all(target, "remove managed governance helper")
@@ -589,14 +592,18 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
 
         after_project = load_yaml(project_path)
-        assert after_project["engineering_system"]["policy_epoch"] == before_epoch + 1
+        assert after_project["engineering_system"]["policy_epoch"] == before_epoch
+        assert (
+            after_project["engineering_system"]["governance_epoch"]
+            == before_governance_epoch + 1
+        )
 
         migration_path = target / ".engineering/governance-migration.yaml"
         migration = load_yaml(migration_path)
-        assert migration["contract_version"] == 1
+        assert migration["contract_version"] == 2
         assert migration["base_sha"] == migration_base
-        assert migration["from_policy_epoch"] == before_epoch
-        assert migration["to_policy_epoch"] == before_epoch + 1
+        assert migration["from_governance_epoch"] == before_governance_epoch
+        assert migration["to_governance_epoch"] == before_governance_epoch + 1
         assert migration["requires_exact_head_validate"] is True
         assert migration["automation_eligible"] is False
         assert [item["path"] for item in migration["changed_surfaces"]] == [
@@ -609,6 +616,125 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
             cwd=target,
         ).stdout.strip()
         assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
+
+
+def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "legacy-root-over-canonical"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/legacy-root-over-canonical\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        helper = target / "tools/governance_floor.py"
+        helper.write_text(
+            helper.read_text(encoding="utf-8").replace(
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
+                "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 1",
+            ),
+            encoding="utf-8",
+        )
+        commit_all(target, "simulate legacy v1 floor")
+        helper.unlink()
+        commit_all(target, "remove legacy governance floor")
+
+        blocked = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            check=False,
+        )
+        assert blocked.returncode != 0
+        assert (
+            "legacy root migration would advance policy_epoch beyond canonical policy"
+            in blocked.stdout
+        )
+        engineering = load_yaml(target / ".engineering/project.yaml")["engineering_system"]
+        assert engineering["policy_epoch"] == POLICY_EPOCH
+        assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
+
+
+def test_v2_same_baseline_normalizes_legacy_policy_plus_one() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "normalize-legacy-policy"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/normalize-legacy-policy\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        commit_all(target, "adopt current baseline")
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["policy_epoch"] = POLICY_EPOCH + 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        inflated_base = commit_all(target, "simulate legacy over-canonical policy epoch")
+        if inflated_base is None:
+            inflated_base = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+
+        repaired = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+        )
+        assert f"POLICY_EPOCH_REPAIR={POLICY_EPOCH}" in repaired.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" not in repaired.stdout
+        engineering = load_yaml(project_path)["engineering_system"]
+        assert engineering["policy_epoch"] == POLICY_EPOCH
+        assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
+
+        commit_all(target, "normalize policy freshness")
+        repaired_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        floor_check = run(
+            sys.executable,
+            str(target / "tools/governance_floor.py"),
+            "check",
+            "--root",
+            str(target),
+            "--base-ref",
+            str(inflated_base),
+            "--head-ref",
+            repaired_head,
+            check=False,
+        )
+        assert floor_check.returncode == 0, floor_check.stdout
+        assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
 
 
 def test_same_baseline_repairs_managed_execution_policy() -> None:
@@ -759,7 +885,6 @@ def test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp() ->
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             "tools/implementation_preflight.py",
             "tools/context_epoch.py",
-            "tools/governance_floor.py",
         )
         for rel in stale_paths:
             historical = run(
@@ -786,7 +911,6 @@ def test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp() ->
             "WORK_PACKET_TEMPLATE_REPAIR=REQUIRED",
             "IMPLEMENTATION_PREFLIGHT_REPAIR=REQUIRED",
             "CONTEXT_EPOCH_REPAIR=REQUIRED",
-            "GOVERNANCE_FLOOR_REPAIR=REQUIRED",
             "GOVERNANCE_ROOT_MIGRATION=REQUIRED",
             "ADOPTION_UPGRADE=PASS",
         ):
@@ -806,7 +930,9 @@ def test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp() ->
             damaged_base,
             "--head-ref",
             repaired_head,
+            check=False,
         )
+        assert floor_check.returncode == 0, floor_check.stdout
         assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
 
 
@@ -838,7 +964,6 @@ def test_same_baseline_repairs_stage_a_managed_bytes_after_metadata_stamp() -> N
             ".github/ISSUE_TEMPLATE/ai-work-packet.md",
             ".engineering/execution-profile.yaml",
             "tools/context_epoch.py",
-            "tools/governance_floor.py",
         )
         for rel in stale_paths:
             historical_ref = (
@@ -870,7 +995,6 @@ def test_same_baseline_repairs_stage_a_managed_bytes_after_metadata_stamp() -> N
             "WORK_PACKET_TEMPLATE_REPAIR=REQUIRED",
             "EXECUTION_PROFILE_REPAIR=REQUIRED",
             "CONTEXT_EPOCH_REPAIR=REQUIRED",
-            "GOVERNANCE_FLOOR_REPAIR=REQUIRED",
             "GOVERNANCE_ROOT_MIGRATION=REQUIRED",
             "ADOPTION_UPGRADE=PASS",
         ):
@@ -2289,6 +2413,48 @@ def test_adoption_checker_rejects_stale_policy_and_profile() -> None:
         assert token in checker, token
 
 
+def test_adoption_checker_requires_explicit_governance_epoch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-missing-governance-epoch"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/missing-governance-epoch\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        del project["engineering_system"]["governance_epoch"]
+        project_path.write_text(
+            yaml.safe_dump(project, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert (
+            "requires explicit engineering_system.governance_epoch"
+            in checked.stdout
+        )
+
+
 def test_adoption_compliance_workflow_checks_engineering_context_helper() -> None:
     workflow = (ROOT / ".github" / "workflows" / "adoption-compliance.yml").read_text(
         encoding="utf-8"
@@ -3282,7 +3448,9 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
         commit_all(target, "adopt current baseline")
 
         project_path = target / ".engineering/project.yaml"
-        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        before_engineering = load_yaml(project_path)["engineering_system"]
+        before_epoch = before_engineering["policy_epoch"]
+        before_governance_epoch = before_engineering["governance_epoch"]
         for rel in (
             ".engineering/execution-profile.yaml",
             "tools/execution_profile.py",
@@ -3302,10 +3470,11 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
             BASELINE,
         )
         assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
-        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        assert f"GOVERNANCE_EPOCH_REPAIR={before_governance_epoch + 1}" in repaired.stdout
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
-        after_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
-        assert after_epoch == before_epoch + 1
+        after_engineering = load_yaml(project_path)["engineering_system"]
+        assert after_engineering["policy_epoch"] == before_epoch
+        assert after_engineering["governance_epoch"] == before_governance_epoch + 1
         expected_profile_surfaces = {
             ".engineering/execution-profile.yaml",
             "tools/execution_profile.py",
@@ -3314,6 +3483,9 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
         for rel in expected_profile_surfaces:
             assert (target / rel).is_file(), rel
         migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        assert migration["contract_version"] == 2
+        assert migration["from_governance_epoch"] == before_governance_epoch
+        assert migration["to_governance_epoch"] == before_governance_epoch + 1
         assert expected_profile_surfaces.issubset(
             {entry["path"] for entry in migration["changed_surfaces"]}
         )
@@ -3329,7 +3501,9 @@ def test_same_baseline_execution_profile_repair_advances_epoch() -> None:
             damaged_base,
             "--head-ref",
             repaired_head,
+            check=False,
         )
+        assert floor_check.returncode == 0, floor_check.stdout
         assert "GOVERNANCE_FLOOR=PASS" in floor_check.stdout
 
 
@@ -3357,7 +3531,9 @@ def test_same_baseline_partial_execution_profile_repair_records_manifest() -> No
         commit_all(target, "adopt current baseline")
 
         project_path = target / ".engineering/project.yaml"
-        before_epoch = load_yaml(project_path)["engineering_system"]["policy_epoch"]
+        before_engineering = load_yaml(project_path)["engineering_system"]
+        before_epoch = before_engineering["policy_epoch"]
+        before_governance_epoch = before_engineering["governance_epoch"]
         (target / "tools/execution_profile.py").unlink()
         commit_all(target, "remove managed execution profile helper only")
         base_head = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
@@ -3373,8 +3549,11 @@ def test_same_baseline_partial_execution_profile_repair_records_manifest() -> No
         )
         assert "EXECUTION_PROFILE_REPAIR=REQUIRED" in repaired.stdout
         assert "GOVERNANCE_ROOT_MIGRATION=REQUIRED" in repaired.stdout
-        assert f"POLICY_EPOCH_REPAIR={before_epoch + 1}" in repaired.stdout
+        assert f"GOVERNANCE_EPOCH_REPAIR={before_governance_epoch + 1}" in repaired.stdout
         migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        assert migration["contract_version"] == 2
+        assert migration["from_governance_epoch"] == before_governance_epoch
+        assert migration["to_governance_epoch"] == before_governance_epoch + 1
         surfaces = {entry["path"] for entry in migration["changed_surfaces"]}
         assert "tools/execution_profile.py" in surfaces
         assert migration["base_sha"] == base_head
@@ -3386,7 +3565,9 @@ def test_same_baseline_partial_execution_profile_repair_records_manifest() -> No
             if item["path"] == "tools/execution_profile.py"
         )
         assert entry["head_blob_sha"] == helper_blob
-        assert load_yaml(project_path)["engineering_system"]["policy_epoch"] == before_epoch + 1
+        repaired_engineering = load_yaml(project_path)["engineering_system"]
+        assert repaired_engineering["policy_epoch"] == before_epoch
+        assert repaired_engineering["governance_epoch"] == before_governance_epoch + 1
 
 
 def test_obsolete_coordinator_gate_removed_without_weakening_product_approval() -> None:
@@ -3436,6 +3617,8 @@ def main() -> int:
     test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
+    test_legacy_root_repair_cannot_exceed_canonical_policy()
+    test_v2_same_baseline_normalizes_legacy_policy_plus_one()
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()
@@ -3462,6 +3645,7 @@ def main() -> int:
     test_engineering_context_helper_adoption_and_upgrade()
     test_local_adoption_checker_profile_contract_is_not_target_version_gated()
     test_adoption_checker_rejects_stale_policy_and_profile()
+    test_adoption_checker_requires_explicit_governance_epoch()
     test_adoption_compliance_workflow_checks_engineering_context_helper()
     test_release_execution_context_is_bounded_and_upgradeable()
     test_managed_contract_dependency_failure_is_deterministic()
