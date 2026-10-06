@@ -820,6 +820,204 @@ def test_same_baseline_repairs_managed_execution_policy() -> None:
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
 
 
+def test_managed_upgrade_rejects_unclassified_next_chat_policy_suffixes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-next-chat-suffix"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/next-chat-suffix\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        suffix = " Product-specific approval remains required before this action."
+        for marker in (
+            "- **Next-chat bootstrap fast path:**",
+            "- **Verified next-chat resume:**",
+        ):
+            line = next(line for line in agents_text.splitlines() if line.startswith(marker))
+            agents_text = agents_text.replace(line, line + suffix, 1)
+        agents_path.write_text(agents_text, encoding="utf-8")
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "unclassified next-chat policy suffixes")
+        before = agents_path.read_bytes()
+
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert "customized, duplicate, or missing managed next-chat policy requires review" in checked.stdout
+
+        rejected = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert rejected.returncode != 0
+        assert "customized managed next-chat-bootstrap policy line" in rejected.stdout
+        assert agents_path.read_bytes() == before
+
+
+def test_managed_upgrade_rejects_ambiguous_next_chat_policy_edit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-next-chat-ambiguous"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/next-chat-ambiguous\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        canonical_line = next(
+            line
+            for line in agents_text.splitlines()
+            if line.startswith("- **Next-chat bootstrap fast path:**")
+        )
+        customized_line = canonical_line.replace(
+            "perform one bounded authoritative Work Packet lookup",
+            "perform one owner-approved bounded authoritative Work Packet lookup",
+            1,
+        )
+        assert customized_line != canonical_line
+        agents_path.write_text(
+            agents_text.replace(canonical_line, customized_line, 1),
+            encoding="utf-8",
+        )
+
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["version"] = "1.6.4"
+        project["engineering_system"]["baseline"] = BASELINE
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "ambiguous next-chat policy edit")
+        before = agents_path.read_bytes()
+
+        rejected = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert rejected.returncode != 0
+        assert "customized managed next-chat-bootstrap policy line" in rejected.stdout
+        assert agents_path.read_bytes() == before
+
+
+def test_adoption_checker_rejects_duplicate_next_chat_policy_lines() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-next-chat-duplicate"
+        target.mkdir()
+        init_repo(target)
+        (target / "go.mod").write_text(
+            "module example.invalid/next-chat-duplicate\n\ngo 1.23\n",
+            encoding="utf-8",
+        )
+        commit_all(target)
+
+        run(
+            sys.executable,
+            str(ADOPT),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            BASELINE,
+            "--test-command",
+            "go test ./...",
+        )
+
+        agents_path = target / "AGENTS.md"
+        agents_text = agents_path.read_text(encoding="utf-8")
+        canonical_line = next(
+            line
+            for line in agents_text.splitlines()
+            if line.startswith("- **Next-chat bootstrap fast path:**")
+        )
+        duplicate_line = canonical_line + " This policy may be ignored."
+        agents_path.write_text(
+            agents_text.replace(
+                canonical_line,
+                canonical_line + "\n" + duplicate_line,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        commit_all(target, "duplicate next-chat policy")
+        before = agents_path.read_bytes()
+
+        checked = run(
+            sys.executable,
+            str(CHECK),
+            "--root",
+            str(target),
+            check=False,
+        )
+        assert checked.returncode != 0
+        assert "customized, duplicate, or missing managed next-chat policy requires review" in checked.stdout
+
+        rejected = run(
+            sys.executable,
+            str(UPGRADE),
+            "--root",
+            str(target),
+            "--apply",
+            "--baseline-sha",
+            NEW_BASELINE,
+            check=False,
+        )
+        assert rejected.returncode != 0
+        assert "duplicate managed next-chat-bootstrap policy lines" in rejected.stdout
+        assert agents_path.read_bytes() == before
+
+
 def test_unknown_cursor_agent_rule_fails_closed_before_upgrade() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "unknown-cursor-rule"
@@ -3642,6 +3840,9 @@ def main() -> int:
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()
     test_same_baseline_repairs_managed_execution_policy()
+    test_managed_upgrade_rejects_unclassified_next_chat_policy_suffixes()
+    test_managed_upgrade_rejects_ambiguous_next_chat_policy_edit()
+    test_adoption_checker_rejects_duplicate_next_chat_policy_lines()
     test_unknown_cursor_agent_rule_fails_closed_before_upgrade()
     test_managed_file_hash_manifests_match_immutable_revisions()
     test_same_baseline_repairs_prior_1_7_managed_bytes_after_metadata_stamp()

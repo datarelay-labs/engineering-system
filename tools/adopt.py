@@ -337,6 +337,10 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             (EXTERNAL_WRITE_POLICY_MARKER,) + legacy_write_markers,
         ),
     )
+    exact_managed_labels = {
+        "next-chat-bootstrap",
+        "verified-next-chat-resume",
+    }
     missing: list[str] = []
     for label, canonical, markers in specs:
         indexes = [
@@ -347,7 +351,13 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         if len(indexes) > 1:
             raise SystemExit(f"FAIL AGENTS.md contains duplicate managed {label} policy lines")
         if indexes:
-            lines[indexes[0]] = canonical
+            index = indexes[0]
+            current = lines[index]
+            if label in exact_managed_labels and current != canonical:
+                raise SystemExit(
+                    f"FAIL AGENTS.md contains customized managed {label} policy line; review manually"
+                )
+            lines[index] = canonical
         else:
             missing.append(canonical)
 
