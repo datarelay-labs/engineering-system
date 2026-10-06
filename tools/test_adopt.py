@@ -463,12 +463,12 @@ def test_managed_upgrade_to_1_6() -> None:
         assert "enter the persisted Next Action immediately" in upgraded_agents
         assert "uncontrolled Issue proliferation" in upgraded_agents
         assert "Never mutate an actively progressing owner-authorized worker dirty worktree" in upgraded_agents
-        assert "During machine-observable waits, preserve state and advance independent work" in upgraded_agents
+        assert "advance independent work during machine-observable waits" in upgraded_agents
         assert "make measurable progress in the same turn" in upgraded_agents.lower()
-        assert "After a bounded packet/PR/test phase completes, immediately return to roadmap scheduling" in upgraded_agents
+        assert "after a bounded task return to roadmap priority" in upgraded_agents
         assert "roadmap/release objective is complete" in upgraded_agents
-        assert "repair missing/stale/contradictory packet state from repository evidence" in upgraded_agents
-        assert "Implement, test and audit directly in coherent batches" in upgraded_agents
+        assert "Repair stale coordination state within owner scope instead of stopping" in upgraded_agents
+        assert "Implement, test and audit in coherent batches" in upgraded_agents
         assert "never create one Issue per finding" in upgraded_agents
         assert "Close COMPLETE packets in the same lifecycle reconciliation" in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
