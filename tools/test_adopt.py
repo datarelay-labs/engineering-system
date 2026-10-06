@@ -637,7 +637,7 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
 
 
-def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
+def test_legacy_root_repair_converges_to_canonical_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "legacy-root-over-canonical"
         target.mkdir()
@@ -660,6 +660,12 @@ def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
         )
         commit_all(target, "adopt current baseline")
 
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["policy_epoch"] = POLICY_EPOCH - 9
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "simulate stale adopted policy epoch")
+
         helper = target / "tools/governance_floor.py"
         helper.write_text(
             helper.read_text(encoding="utf-8").replace(
@@ -672,7 +678,7 @@ def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
         helper.unlink()
         commit_all(target, "remove legacy governance floor")
 
-        blocked = run(
+        repaired = run(
             sys.executable,
             str(UPGRADE),
             "--root",
@@ -682,11 +688,7 @@ def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
             BASELINE,
             check=False,
         )
-        assert blocked.returncode != 0
-        assert (
-            "legacy root migration would advance policy_epoch beyond canonical policy"
-            in blocked.stdout
-        )
+        assert repaired.returncode == 0, repaired.stdout
         engineering = load_yaml(target / ".engineering/project.yaml")["engineering_system"]
         assert engineering["policy_epoch"] == POLICY_EPOCH
         assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
@@ -3835,7 +3837,7 @@ def main() -> int:
     test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
-    test_legacy_root_repair_cannot_exceed_canonical_policy()
+    test_legacy_root_repair_converges_to_canonical_policy()
     test_v2_same_baseline_rejects_newer_policy()
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()

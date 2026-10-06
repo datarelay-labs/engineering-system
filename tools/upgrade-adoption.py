@@ -777,8 +777,8 @@ def build_root_migration_manifest(
     if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
         raise SystemExit("FAIL root migration base HEAD is unavailable")
     if legacy_policy_contract:
-        if to_policy_epoch != from_policy_epoch + 1:
-            raise SystemExit("FAIL legacy root migration policy_epoch must advance exactly once")
+        if not (from_policy_epoch < to_policy_epoch <= POLICY_EPOCH):
+            raise SystemExit("FAIL legacy root migration policy_epoch must advance to a valid canonical epoch")
         generation = {
             "contract_version": 1,
             "from_policy_epoch": from_policy_epoch,
@@ -1122,11 +1122,7 @@ def main() -> int:
             )
         )
         if planned_root_surfaces and legacy_root_contract:
-            target_policy_epoch = existing_policy_epoch + 1
-            if target_policy_epoch > POLICY_EPOCH:
-                raise SystemExit(
-                    "FAIL legacy root migration would advance policy_epoch beyond canonical policy"
-                )
+            target_policy_epoch = POLICY_EPOCH
             target_governance_epoch = existing_governance_epoch
         else:
             target_policy_epoch = POLICY_EPOCH
@@ -1529,11 +1525,7 @@ def main() -> int:
             # A pre-cutover base-owned floor understands only contract-v1 and
             # requires one exact policy-epoch step. Once this transition lands,
             # the new baseline owns the v2 governance-generation contract.
-            target_policy_epoch = existing_policy_epoch + 1
-            if target_policy_epoch > POLICY_EPOCH:
-                raise SystemExit(
-                    "FAIL legacy root migration would advance policy_epoch beyond canonical policy"
-                )
+            target_policy_epoch = POLICY_EPOCH
             target_governance_epoch = existing_governance_epoch
         else:
             target_policy_epoch = POLICY_EPOCH
