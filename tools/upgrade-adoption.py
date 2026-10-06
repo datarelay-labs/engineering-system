@@ -1024,7 +1024,7 @@ def main() -> int:
         raise SystemExit(
             "FAIL existing adoption policy_epoch is newer than canonical policy"
         )
-    existing_governance_epoch = engineering.get("governance_epoch", GOVERNANCE_EPOCH)
+    existing_governance_epoch = engineering.get("governance_epoch", 0)
     if (
         isinstance(existing_governance_epoch, bool)
         or not isinstance(existing_governance_epoch, int)
@@ -1108,7 +1108,10 @@ def main() -> int:
             **planned_dependencies,
             **planned_governance_floor,
             **planned_execution_profile,
-            **planned_context_epoch,
+            **{
+                rel: text for rel, text in planned_context_epoch.items()
+                if rel == "tools/context_epoch.py"
+            },
         }
         legacy_root_contract = bool(
             planned_root_surfaces
@@ -1508,7 +1511,10 @@ def main() -> int:
         **planned_dependencies,
         **planned_governance_floor,
         **planned_execution_profile,
-        **planned_context_epoch,
+        **{
+            rel: text for rel, text in planned_context_epoch.items()
+            if rel == "tools/context_epoch.py"
+        },
     }
     legacy_root_contract = bool(
         planned_root_surfaces
