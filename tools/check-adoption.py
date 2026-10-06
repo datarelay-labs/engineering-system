@@ -92,6 +92,7 @@ def main() -> int:
     parser.add_argument("--expected-baseline", default="")
     parser.add_argument("--expected-mode", choices=("canonical", "adopted"), default="")
     parser.add_argument("--require-current-policy", action="store_true")
+    parser.add_argument("--allow-staged-policy-bridge", action="store_true")
     args = parser.parse_args()
     root = Path(args.root).resolve()
 
@@ -178,9 +179,30 @@ def main() -> int:
                 ):
                     failures.append("Engineering System >=1.7.0 requires engineering_system.governance_epoch>=0")
                 if args.require_current_policy and mode == "adopted" and isinstance(canonical_policy_epoch, int) and policy_epoch != canonical_policy_epoch:
-                    failures.append(
-                        f"stale adoption policy_epoch: target={policy_epoch} canonical={canonical_policy_epoch}"
-                    )
+                    staged_bridge = False
+                    if (
+                        args.allow_staged_policy_bridge
+                        and args.expected_baseline
+                        and baseline == args.expected_baseline
+                        and policy_epoch == canonical_policy_epoch - 1
+                    ):
+                        migration_path = root / ".engineering/governance-migration.yaml"
+                        try:
+                            migration = load_yaml(migration_path) or {}
+                        except (OSError, yaml.YAMLError):
+                            migration = {}
+                        staged_bridge = (
+                            isinstance(migration, dict)
+                            and migration.get("contract_version") == 1
+                            and migration.get("from_policy_epoch") == policy_epoch - 1
+                            and migration.get("to_policy_epoch") == policy_epoch
+                            and migration.get("requires_exact_head_validate") is True
+                            and migration.get("automation_eligible") is False
+                        )
+                    if not staged_bridge:
+                        failures.append(
+                            f"stale adoption policy_epoch: target={policy_epoch} canonical={canonical_policy_epoch}"
+                        )
 
             if version_at_least(version, (1, 4, 0)):
                 if mode not in {"canonical", "adopted"}:

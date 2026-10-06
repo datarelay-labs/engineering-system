@@ -1,13 +1,15 @@
 contract_version: 2
-from_governance_epoch: 1
-to_governance_epoch: 2
-base_sha: 5c053c382abe8cadc359ff4a88a8789525b634d4
+from_governance_epoch: 2
+to_governance_epoch: 3
+base_sha: 0e119e23f031105ae9bedab63767da69177ba39d
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Fix legacy adopted-repository cutover so governance generation and root-surface
-  evidence remain valid.
+rationale: Allow one validated staged adoption bridge so repositories can merge sequential
+  governance-root migrations without weakening current-policy enforcement.
 changed_surfaces:
+- path: .github/workflows/adoption-compliance.yml
+  head_blob_sha: a19e867c8f423ac8bdd2e1e1cffdd0d73704e877
 - path: tools/adopt.py
-  head_blob_sha: b7a8781ea211164a50cdce885483f2fe966aee67
-- path: tools/upgrade-adoption.py
-  head_blob_sha: f8d376a10ca0f7dd8ec4945d994976af46bdc091
+  head_blob_sha: 13807c902d40df4f990d21aa8b3fffb38a1d8233
+- path: tools/check-adoption.py
+  head_blob_sha: 4af0537d888fce17a6aea43f2a698b67bff81120
