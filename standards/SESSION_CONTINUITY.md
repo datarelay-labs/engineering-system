@@ -288,7 +288,7 @@ After meaningful progress:
 - replace `Latest Evidence`
 - replace `Blockers`
 - update `LAST_VERIFIED_HEAD`
-- after every ACTIVE packet create or material update, lint the exact resulting authoritative body with `python3 tools/context_epoch.py packet-lint --body-file <file> --expect-target-repo <bound-owner/repo>` using the owner/project-bound expected repository; a `TARGET_REPO_SCOPE_MISMATCH` or other BLOCK means the packet is non-runnable and must be corrected before implementation, handoff, or any implementation session/process start or resume
+- after ACTIVE packet creation/material updates, validate the packet before using it for durable handoff or ambiguous/concurrent scheduling; `packet-lint` is the deterministic helper for that validation, not a prerequisite for every ordinary command when owner scope and repository state are already clear
 
 Do not keep accumulating old phase text in the Issue body.
 
@@ -363,7 +363,7 @@ The Engineering System exists to help one capable agent ship correct work using 
 
 `work_admission.py eligible --request-json <facts.json>` consumes the fresh authoritative packet body (`body`), local execution-profile root (`profile_root`), owner-bound `expected_target_repo`, observed checkout `observed_head` (full SHA), `observed_branch` and absolute `observed_worktree` matching `profile_root`, observed `issue_state` (OPEN/CLOSED), `dependencies_ready` boolean and `waiting_for` array. It is a pure selection check, not execution authority or a live GitHub fetch. Re-fetch facts at selection and before mutable external writes. Optional orientation/coordinator tools do not gate an already verified ordinary command.
 
-The current explicit owner instruction is the first execution authority. A missing, stale or contradictory packet is repairable coordination data when the owner has clearly authorized the work. Reconcile it from current Git/GitHub/roadmap facts, lint the resulting body, then execute. Do not fabricate authority, bypass production/destructive/credential/permission/release boundaries, or modify unrelated dirty worktrees.
+The current explicit owner instruction is the first execution authority. A missing, stale or contradictory packet is repairable coordination data when the owner has clearly authorized the work. Reconcile it from current Git/GitHub/roadmap facts and continue execution; lint it when the repaired packet will be relied on for durable handoff, ambiguous scheduling, or recovery. Do not fabricate authority, bypass production/destructive/credential/permission/release boundaries, or modify unrelated dirty worktrees.
 
 Packet completion and repository-level continuation have different finish lines. Completing one packet closes that bounded workstream; it immediately returns the same runtime to the authorized roadmap. A CI wait pauses the affected lane and permits independent work. Record the concrete condition in Latest Evidence, for example `WAITING_FOR_CI=<subject>`, and keep that waiting lane PAUSED. Clear the marker or record a terminal value such as `WAITING_FOR_CI=PASS` when readiness is observed; selection and handoff share this pending-condition check. Do not invent a new packet status. If no independent work remains, persist the concrete wait and finish honestly; do not invent tasks to keep a session alive.
 

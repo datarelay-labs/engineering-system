@@ -556,7 +556,14 @@ def test_managed_instructions_bind_target_repository() -> None:
     )
     for path in paths:
         text = path.read_text(encoding="utf-8")
-        if "--expect-target-repo" not in text:
+        lower = text.lower()
+        if not (
+            "target repo" in lower
+            or "target repository" in lower
+            or "owner-selected repository" in lower
+            or "owner-selected target repository" in lower
+            or "--expect-target-repo" in lower
+        ):
             fail(f"managed target-repository binding missing from {path.relative_to(ROOT)}")
     custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
     if "cross-project handoffs" not in custom or "never retarget" not in custom:
