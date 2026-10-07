@@ -73,6 +73,14 @@ A runnable packet should make measurable progress rather than stop after a plan/
 
 Do not force repository mutation solely to satisfy an execution ritual.
 
+## Continuation and terminal responses
+
+Completion of one coherent implementation or validation batch is a checkpoint, not by itself a reason to return a terminal response. When the owner's requested roadmap/release objective is still incomplete and safe runnable work remains, the selected runtime should choose and execute the next runnable action in the same turn.
+
+A terminal response is appropriate only when the requested objective is complete, no safe runnable work remains, genuine owner input is required, or an irreconcilable blocker has been observed. Durable Work Packet state exists so work can recover across a real platform turn/session boundary; it is not a substitute for continuing runnable work now. Persistence is recovery, not a reason to yield.
+
+Static policy/eval checks can verify that this contract is present and internally consistent, but they are not proof of live-model obedience. Representative fresh-chat execution remains the evidence for runtime behavior.
+
 ## Verification depth
 
 Use `CHANGE_RISK`, task-specific contracts, and observed uncertainty to choose evidence depth. Deterministic tests and exact subject identity are the base. Add wider qualification, independent review, runtime evidence, rollback proof, or human approval only when the risk/contract calls for them.
