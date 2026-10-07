@@ -1044,11 +1044,8 @@ def test_managed_upgrade_rejects_ambiguous_next_chat_policy_edit() -> None:
             for line in agents_text.splitlines()
             if line.startswith("- **Next-chat bootstrap fast path:**")
         )
-        customized_line = canonical_line.replace(
-            "perform one bounded authoritative Work Packet lookup",
-            "perform one owner-approved bounded authoritative Work Packet lookup",
-            1,
-        )
+        marker = "- **Next-chat bootstrap fast path:**"
+        customized_line = marker + " Require an extra approval before each lookup." + canonical_line[len(marker):]
         assert customized_line != canonical_line
         agents_path.write_text(
             agents_text.replace(canonical_line, customized_line, 1),
