@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from work_admission import (  # noqa: E402
     evaluate_eligible,
+    evaluate_disposition,
     evaluate_admit,
     evaluate_release,
     evaluate_size,
@@ -568,7 +569,134 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
     assert code == 2 and result["DENY_CLASS"] == "WAITING"
 
 
+def test_turn_disposition_policy_surfaces() -> None:
+    required = (
+        "AGENTS.md",
+        "templates/AGENTS.md",
+        "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
+        "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
+        "standards/SESSION_CONTINUITY.md",
+        "ai/AGENT_BASE.md",
+    )
+    for rel in required:
+        body = (ROOT / rel).read_text(encoding="utf-8")
+        assert "work_admission.py disposition" in body, rel
+        assert "FINAL_ALLOWED=YES" in body, rel
+    session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
+    assert "repository instructions alone cannot create that platform capability" in session
+
+
+def test_turn_disposition_prevents_premature_final() -> None:
+    facts = eligible_facts()
+
+    status = evaluate_disposition({"request_scope": "status-only"})
+    assert status["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert status["FINAL_ALLOWED"] == "YES"
+
+    runnable = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [facts],
+        }
+    )
+    assert runnable["TURN_DISPOSITION"] == "CONTINUE"
+    assert runnable["FINAL_ALLOWED"] == "NO"
+    assert runnable["RUNNABLE_CANDIDATE_COUNT"] == "1"
+    assert runnable["SCHEDULER_RECONCILED"] == "NO"
+
+    waiting = {**facts, "waiting_for": ["exact-head CI"]}
+    mixed = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [waiting, facts],
+        }
+    )
+    assert mixed["TURN_DISPOSITION"] == "CONTINUE"
+    assert mixed["RUNNABLE_CANDIDATE_COUNT"] == "1"
+
+    unreconciled = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [waiting],
+            "scheduler_reconciled": False,
+            "remaining_state": "UNKNOWN",
+        }
+    )
+    assert unreconciled["TURN_DISPOSITION"] == "RECONCILE"
+    assert unreconciled["FINAL_ALLOWED"] == "NO"
+
+    unknown = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [],
+            "scheduler_reconciled": True,
+            "remaining_state": "UNKNOWN",
+        }
+    )
+    assert unknown["TURN_DISPOSITION"] == "RECONCILE"
+
+    for state in ("COMPLETE", "NO_SAFE_RUNNABLE"):
+        report = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [waiting],
+                "scheduler_reconciled": True,
+                "remaining_state": state,
+            }
+        )
+        assert report["TURN_DISPOSITION"] == "ALLOW_FINAL", state
+        assert report["FINAL_ALLOWED"] == "YES"
+
+    for state in ("OWNER_REQUIRED", "IRRECONCILABLE"):
+        report = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [waiting],
+                "scheduler_reconciled": True,
+                "remaining_state": state,
+            }
+        )
+        assert report["TURN_DISPOSITION"] == "BLOCKED", state
+        assert report["FINAL_ALLOWED"] == "YES"
+
+    independent = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [waiting, facts],
+            "scheduler_reconciled": True,
+            "remaining_state": "OWNER_REQUIRED",
+        }
+    )
+    assert independent["TURN_DISPOSITION"] == "CONTINUE"
+    assert independent["FINAL_ALLOWED"] == "NO"
+
+    code, fields = run_cli(
+        "disposition",
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [facts],
+        },
+    )
+    assert code == 0
+    assert fields["TURN_DISPOSITION"] == "CONTINUE"
+    assert fields["FINAL_ALLOWED"] == "NO"
+
+    code, fields = run_cli(
+        "disposition",
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [],
+            "scheduler_reconciled": True,
+            "remaining_state": "NOT_A_STATE",
+        },
+    )
+    assert code == 3
+    assert fields["DECISION"] == "DENY"
+
+
 def main() -> int:
+    test_turn_disposition_policy_surfaces()
+    test_turn_disposition_prevents_premature_final()
     test_runnable_selection_excludes_stale_waiting_and_terminal_packets()
     test_paths_overlap()
     test_p1b_admission_001_cross_repo_unisolated_shared_runtime()
