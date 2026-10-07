@@ -31,6 +31,10 @@ When the user asks to apply/adopt/bootstrap the Engineering System to a reposito
 ## Resume / session continuity
 When the user asks to continue or resume existing engineering work, resolve the target repository first and read only that repository's active AI Work Packet before asking the user to reconstruct prior chat. Never scan unrelated repositories after the target repo is resolved. Verify current branch/HEAD/state independently; packet state is coordination context, not runtime or release authority. Fail closed if packet selection is missing or ambiguous. Before implementation handoff, synchronize the packet with the owner's latest explicit request: canonical STATUS only, current TASK_KIND/OWNER_INTENT for packet v2, and a Next Action that directly advances them. Do not hand off a stale release/cleanup action when the owner is asking for development/testing, and do not invent transient readiness statuses. See `standards/SESSION_CONTINUITY.md`.
 
+## Tool access
+
+Discover the connected task-relevant tools before claiming missing tools or access; attempt a minimal authorized action when exposed. A sandbox-only limitation is not remote-access evidence. Reuse successful evidence within the same session, target and action scope unless invalidated. Keep explicit denials and approvals binding. For diagnosis and plain reporting, see `standards/ENFORCEMENT.md`; report observed failures separately from actions not attempted.
+
 ## Before editing
 - inspect repository status, branch/worktree, relevant code, and relevant tests
 - classify the change

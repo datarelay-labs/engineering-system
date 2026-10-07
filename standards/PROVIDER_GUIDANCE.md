@@ -97,3 +97,7 @@ Engineering completion is determined by the completion contract and evidence. No
 - MIGRATION: a legacy contract-v1 base accepts exactly one policy-epoch increment. Land and verify that bridge first; only its v2 successor may converge policy freshness in a separate change. Already-merged invalid historical transitions cannot be retroactively labelled PASS by a newer checker; retain the discrepancy and verify forward changes honestly.
 
 The official references above inform these decisions; they do not mandate this repository's packet format, helper stack or two user-gate names. Review/remove remaining scaffolding only with evidence, not an arbitrary deletion percentage.
+
+## Access-diagnosis scaffold review
+
+The access-discovery/reporting guidance addresses observed unsupported tool/permission-denial claims and sandbox-only substitution. It adds no permission cache, preflight service, approval bypass, or claim of permanent connectivity. Reassess the added wording after representative fresh-chat tasks: keep it only while it reduces unsupported blockage without extra routine probes or weakened boundaries. Static policy and adoption tests establish propagation, not model obedience.

@@ -109,6 +109,18 @@ Tools intended for AI agents should be designed for reliable selection and bound
 
 Do not add another tool when an existing task-relevant tool already provides the same authority and oracle.
 
+## Evidence-based access diagnosis and reporting
+
+Before claiming missing tools or access, discover the connected task-relevant integration. Invoke a minimal authorized operation when an applicable action is exposed; use the first real repository read, status check, or requested edit rather than inventing a separate permission preflight. Do not create test Issues, probe unrelated hosts, enumerate every connector, expose credentials, or request wider permissions just to prove access.
+
+Distinguish not yet discovered, no applicable action exposed, invalid arguments, transport/authentication failure, an observed permission denial, and an explicit platform/tool block. If discovery exposes no applicable action, report that discovery result; do not fabricate an attempted action. A sandbox-only limitation does not establish remote unavailability. Successful reads prove reads, not writes; one path/account/repository result does not cover another.
+
+Reuse successful same-session, same-target, same-action evidence unless a fresh failure or scope change invalidates it. A new chat verifies access with its first necessary operation, not a remembered guarantee or an assertion that the previous chat lacked tools. Honor existing approvals and technical boundaries. Never route around an explicit denial. One failed effect does not block independent authorized actions.
+
+Report plainly: what actually completed; what was attempted and failed, including tool/action, target and sanitized error; what was not attempted; and the specific user action genuinely required, if any. Never attribute a failure to platform safety, missing tools, or account permissions without an observed result supporting that cause. Do not conflate local excerpt/unit tests with development-server regression, GUI execution, remote changes, or delivered GitHub writes. A list of unfinished work is not itself a blocker diagnosis. When a necessary action is available and authorized, execute it instead of ending with a disclaimer.
+
+Repository templates are not installed ChatGPT settings. Editing them does not update existing chats or the user's project/custom instructions. Deterministic policy/migration checks are not live-agent compliance evidence. Confirm rollout in each target and report those boundaries separately.
+
 ## Repository entrypoint
 
 Every adopted repository must contain:
