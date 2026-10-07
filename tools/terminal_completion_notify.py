@@ -73,7 +73,7 @@ def main() -> int:
         print("OWNER_NOTIFICATION=RETRY_PENDING reason=delivery_ambiguous")
         return 3
     receipt = receipt_from(cp.stdout)
-    if cp.returncode != 0 or "OWNER_NOTIFY=PASS" not in cp.stdout or receipt is None:
+    if cp.returncode != 0 or "OWNER_NOTIFY=PASS" not in cp.stdout.splitlines() or receipt is None:
         print("OWNER_NOTIFICATION=RETRY_PENDING reason=delivery_unverified")
         return 3
     print(f"OWNER_NOTIFICATION=PASS OWNER_NOTIFICATION_RECEIPT=PASS status={a.status} receipt={receipt}")

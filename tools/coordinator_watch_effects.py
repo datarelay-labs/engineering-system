@@ -122,7 +122,7 @@ def send_owner_info(text: str) -> dict[str, str]:
     for line in completed.stdout.splitlines():
         if line.startswith("OWNER_NOTIFY_RECEIPT="):
             receipt = line.split("=", 1)[1].strip()
-    if "OWNER_NOTIFY=PASS" not in completed.stdout or not receipt or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", receipt) is None:
+    if "OWNER_NOTIFY=PASS" not in completed.stdout.splitlines() or not receipt or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", receipt) is None:
         return _ambiguous()
     return {"outcome": "SUCCEEDED", "receipt": f"owner-notify:{receipt}", "level": "INFO"}
 
