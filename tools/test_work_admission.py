@@ -586,7 +586,7 @@ def test_turn_disposition_policy_surfaces() -> None:
     assert "repository instructions alone cannot create that platform capability" in session
     assert "roadmap_runnable_work" in session
     base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
-    assert "Missing an ACTIVE packet is a scheduling input, not a blocker" in base
+    assert "Missing an ACTIVE packet is not a blocker" in base
     assert "Fail closed if packet selection is missing or ambiguous." not in base
 
 
