@@ -37,6 +37,7 @@ REQUIRED_SCENARIO_IDS = (
     "BEH-ADOPTION-008",
     "BEH-PERM-009",
     "BEH-TRUST-010",
+    "BEH-CONTINUE-011",
 )
 PROHIBITED_RESULT_KEYS = frozenset(
     {
@@ -715,6 +716,39 @@ def check_trust(root: Path) -> dict[str, str]:
     return _outcome("PASS", "TRUST_EVIDENCE_FAIL_CLOSED")
 
 
+def check_continuity(root: Path) -> dict[str, str]:
+    agents = _read(root, "AGENTS.md")
+    template = _read(root, "templates/AGENTS.md")
+    base = _read(root, "ai/AGENT_BASE.md")
+    provider = _read(root, "standards/PROVIDER_GUIDANCE.md")
+    required = (
+        "A completed execution batch is a checkpoint, not a terminal condition.",
+        "do not summarize and stop",
+        "persistence is not a reason to yield voluntarily",
+    )
+    _require_tokens(agents, required)
+    _require_tokens(template, required)
+    _require_tokens(
+        base,
+        (
+            "Missing an ACTIVE packet is not a blocker",
+            "A completed execution batch is a checkpoint, not a terminal condition",
+            "immediately continue with the next runnable action",
+        ),
+    )
+    _require_tokens(
+        provider,
+        (
+            "Continuation and terminal responses",
+            "Persistence is recovery, not a reason to yield.",
+            "not proof of live-model obedience",
+        ),
+    )
+    if "Fail closed if packet selection is missing or ambiguous." in base:
+        return _outcome("FAIL", "CONTINUATION_PACKET_CONFLICT")
+    return _outcome("PASS", "CONTINUATION_POLICY_OK")
+
+
 CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "context": check_context,
     "work_packet": check_work_packet,
@@ -723,6 +757,7 @@ CHECKERS: dict[str, Callable[[Path], dict[str, str]]] = {
     "adoption": check_adoption,
     "permissions": check_permissions,
     "trust": check_trust,
+    "continuity": check_continuity,
 }
 
 
