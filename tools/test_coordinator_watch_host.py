@@ -13,6 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
@@ -763,6 +764,45 @@ def test_owner_notice_is_verified_info() -> None:
 
 
 
+def test_owner_notice_requires_exact_success_marker() -> None:
+    """A receipt cannot turn a diagnostic substring into delivery success."""
+    with patch.object(coordinator_watch_effects, "_trusted", return_value=True):
+        for marker in (
+            "", "OWNER_NOTIFY=PASSIVE", "NOT_OWNER_NOTIFY=PASS",
+            "diagnostic: OWNER_NOTIFY=PASS", "OWNER_NOTIFY=PASS suffix",
+            " OWNER_NOTIFY=PASS", "OWNER_NOTIFY=PASS ",
+            "OWNER_NOTIFY=PASS=unexpected", "OWNER_NOTIFY=FAIL",
+        ):
+            completed = subprocess.CompletedProcess([], 0, marker + "\nOWNER_NOTIFY_RECEIPT=test-receipt\n")
+            with patch.object(coordinator_watch_effects.subprocess, "run", return_value=completed):
+                result = coordinator_watch_effects.send_owner_info("bounded test")
+            assert result == {"outcome": "AMBIGUOUS", "receipt": "", "level": "NONE"}, (marker, result)
+        for output in (
+            "OWNER_NOTIFY=PASS\nOWNER_NOTIFY_RECEIPT=test-receipt\n",
+            "diagnostic\nOWNER_NOTIFY=PASS\nOWNER_NOTIFY_RECEIPT=test-receipt\ntrailing log",
+            "OWNER_NOTIFY=PASS\r\nOWNER_NOTIFY_RECEIPT=test-receipt\r\n",
+        ):
+            completed = subprocess.CompletedProcess([], 0, output)
+            with patch.object(coordinator_watch_effects.subprocess, "run", return_value=completed):
+                result = coordinator_watch_effects.send_owner_info("bounded test")
+            assert result == {"outcome": "SUCCEEDED", "receipt": "owner-notify:test-receipt", "level": "INFO"}
+        for output, code in (
+            ("OWNER_NOTIFY=PASS\nOWNER_NOTIFY_RECEIPT=test-receipt\n", 1),
+            ("OWNER_NOTIFY=PASS\n", 0),
+            ("OWNER_NOTIFY=PASS\nOWNER_NOTIFY_RECEIPT=bad receipt\n", 0),
+        ):
+            completed = subprocess.CompletedProcess([], code, output)
+            with patch.object(coordinator_watch_effects.subprocess, "run", return_value=completed):
+                result = coordinator_watch_effects.send_owner_info("bounded test")
+            assert result["outcome"] == "AMBIGUOUS", result
+    with (
+        patch.object(coordinator_watch_effects, "_trusted", return_value=False),
+        patch.object(coordinator_watch_effects.subprocess, "run") as delivery,
+    ):
+        assert coordinator_watch_effects.send_owner_info("bounded test")["outcome"] == "NOT_SENT"
+        delivery.assert_not_called()
+
+
 def test_unconfirmed_send_is_not_delivery() -> None:
     facts = load_fixture("02-ci-pass-exact.json")
     with tempfile.TemporaryDirectory() as tmp:
@@ -976,6 +1016,7 @@ def main_tests() -> int:
     test_pre_send_crash_is_retryable_once()
     test_post_send_crash_is_not_retried()
     test_owner_notice_is_verified_info()
+    test_owner_notice_requires_exact_success_marker()
     test_unconfirmed_send_is_not_delivery()
     test_path_shadow_gh_is_never_executed()
     test_packet_text_cannot_falsify_machine_facts()
