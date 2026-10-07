@@ -84,6 +84,17 @@ TURN_REQUEST_SCOPES = frozenset({"repository", "workstream", "status-only"})
 TURN_REMAINING_STATES = frozenset(
     {"COMPLETE", "NO_SAFE_RUNNABLE", "OWNER_REQUIRED", "IRRECONCILABLE", "UNKNOWN"}
 )
+TURN_RECONCILE_DENY_CLASSES = frozenset(
+    {
+        "INVALID_PACKET",
+        "CLOSED_ISSUE",
+        "NOT_ACTIVE",
+        "WORKTREE_MISMATCH",
+        "BRANCH_MISMATCH",
+        "STALE_HEAD",
+        "NO_NEXT_ACTION",
+    }
+)
 
 
 class AdmissionFactsError(Exception):
@@ -717,24 +728,57 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
     candidates_raw = _require_list(
         data.get("runnable_candidates", []), "runnable_candidates"
     )
-    runnable = 0
+    roadmap_raw = _require_list(
+        data.get("roadmap_runnable_work", []), "roadmap_runnable_work"
+    )
+    roadmap_work: list[str] = []
+    for index, item in enumerate(roadmap_raw):
+        workstream = _require_str(item, f"roadmap_runnable_work[{index}]")
+        if workstream in roadmap_work:
+            raise AdmissionFactsError(
+                f"roadmap_runnable_work contains duplicate workstream {workstream!r}"
+            )
+        roadmap_work.append(workstream)
+
+    runnable = len(roadmap_work)
+    reconcile_required = False
     for index, item in enumerate(candidates_raw):
         candidate = _require_mapping(item, f"runnable_candidates[{index}]")
         result = evaluate_eligible(candidate)
         if result.get("DECISION") == "ALLOW":
             runnable += 1
+        elif result.get("DENY_CLASS") in TURN_RECONCILE_DENY_CLASSES:
+            reconcile_required = True
+
+    candidate_count = len(candidates_raw) + len(roadmap_work)
 
     # Independent runnable work always wins over a blocked/waiting lane.
+    # Packetless roadmap work is intentionally representable: packet creation is
+    # continuity bookkeeping, not a prerequisite for clear owner-authorized work.
     if runnable:
         return _turn_disposition(
             "CONTINUE",
             final_allowed=False,
-            reason="dependency-eligible runnable work remains",
+            reason="dependency-eligible packet or roadmap work remains",
             request_scope=request_scope,
             scheduler_reconciled=scheduler_hint,
             remaining_state="UNKNOWN",
-            candidate_count=len(candidates_raw),
+            candidate_count=candidate_count,
             runnable_candidate_count=runnable,
+        )
+
+    # A supplied candidate whose identity/HEAD/lifecycle facts are stale cannot
+    # be collapsed into "no runnable work". Reconcile before any terminal state.
+    if reconcile_required:
+        return _turn_disposition(
+            "RECONCILE",
+            final_allowed=False,
+            reason="candidate facts require reconciliation before terminal disposition",
+            request_scope=request_scope,
+            scheduler_reconciled=False,
+            remaining_state="UNKNOWN",
+            candidate_count=candidate_count,
+            runnable_candidate_count=0,
         )
 
     if scheduler_value is None:
@@ -759,7 +803,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             request_scope=request_scope,
             scheduler_reconciled=scheduler_reconciled,
             remaining_state=remaining_state,
-            candidate_count=len(candidates_raw),
+            candidate_count=candidate_count,
             runnable_candidate_count=0,
         )
 
@@ -771,7 +815,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             request_scope=request_scope,
             scheduler_reconciled=True,
             remaining_state=remaining_state,
-            candidate_count=len(candidates_raw),
+            candidate_count=candidate_count,
             runnable_candidate_count=0,
         )
 
@@ -783,7 +827,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             request_scope=request_scope,
             scheduler_reconciled=True,
             remaining_state=remaining_state,
-            candidate_count=len(candidates_raw),
+            candidate_count=candidate_count,
             runnable_candidate_count=0,
         )
 
@@ -798,7 +842,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
         request_scope=request_scope,
         scheduler_reconciled=True,
         remaining_state=remaining_state,
-        candidate_count=len(candidates_raw),
+        candidate_count=candidate_count,
         runnable_candidate_count=0,
     )
 
