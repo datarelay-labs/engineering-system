@@ -107,6 +107,7 @@ class RepoRecord:
     default_branch: str = "main"
     local_path: str = ""
     clone_url: str = ""
+    ssh_url: str = ""
 
 
 @dataclass
@@ -258,6 +259,7 @@ def inventory_from_org(org: str) -> list[RepoRecord]:
                 archived=bool(item.get("archived")),
                 default_branch=str(item.get("default_branch") or "main"),
                 clone_url=str(item.get("clone_url") or ""),
+                ssh_url=str(item.get("ssh_url") or ""),
             )
         )
     return sorted(records, key=lambda row: row.full_name)
@@ -281,6 +283,7 @@ def inventory_from_file(path: Path) -> list[RepoRecord]:
                 default_branch=str(item.get("default_branch") or "main"),
                 local_path=str(item.get("local_path") or "").strip(),
                 clone_url=str(item.get("clone_url") or "").strip(),
+                ssh_url=str(item.get("ssh_url") or "").strip(),
             )
         )
     return sorted(records, key=lambda row: row.full_name)
@@ -545,8 +548,9 @@ def ensure_checkout(record: RepoRecord, workdir: Path) -> Path:
             raise CheckoutError(f"local_path missing for {record.full_name}: {path}")
         return path
 
-    if not record.clone_url:
-        raise CheckoutError(f"no clone_url or local_path for {record.full_name}")
+    remote_url = record.ssh_url or record.clone_url
+    if not remote_url:
+        raise CheckoutError(f"no ssh_url, clone_url, or local_path for {record.full_name}")
 
     dest = workdir / record.full_name.replace("/", "__")
     if dest.exists():
@@ -559,7 +563,7 @@ def ensure_checkout(record: RepoRecord, workdir: Path) -> Path:
             "1",
             "--branch",
             record.default_branch,
-            record.clone_url,
+            remote_url,
             str(dest),
         ]
     )
