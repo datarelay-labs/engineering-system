@@ -31,7 +31,8 @@
               "review",
               "adoption",
               "permissions",
-              "trust"
+              "trust",
+              "continuity"
             ]
           }
         }
