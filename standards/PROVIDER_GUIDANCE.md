@@ -4,7 +4,7 @@
 
 Provider guidance is an upstream design input for the Engineering System, not execution authority. The system periodically reviews official guidance from the AI providers it actually uses and converts only durable, evidenced lessons into canonical policy.
 
-Current reference set, reviewed 2026-10-01:
+Current reference set, reviewed 2026-10-07:
 - OpenAI, *Harness engineering* — repository knowledge as system of record, progressive disclosure, mechanical enforcement of architecture/invariants, autonomy inside boundaries.
 - OpenAI Developers, *Rethinking skills and prompts for GPT-6 Astra* — revisit accumulated prompts/skills/AGENTS scaffolding as models improve; avoid bloated context and stale hand-holding.
 - Anthropic, *Harness design for long-running application development* — start from the simplest effective harness and remove components methodically while measuring outcome impact.
@@ -56,9 +56,9 @@ After a material provider/model/harness change:
 Do not use provider release notes alone as proof that a guard is obsolete.
 ## Current execution profile
 
-The current runtime selection is defined only by `.engineering/execution-profile.yaml`; provider/runtime names are deliberately not repeated here. New Work Packets bind `EXECUTION_PROFILE` plus `EXECUTION_PROFILE_REVISION`. Legacy packet fields are accepted only through compatibility declared by that profile.
+The current runtime defaults are defined by `.engineering/execution-profile.yaml` under explicit owner intent; provider/runtime names are deliberately not repeated here. New Work Packets bind `EXECUTION_PROFILE` plus `EXECUTION_PROFILE_REVISION`. Legacy packet fields are accepted only through compatibility declared by that profile.
 
-A continue/resume request that resolves to one runnable packet bound to the selected execution profile authorizes the selected runtime to continue implementation directly; no additional magic phrase and no alternate-runtime handoff is required. Moving another provider/runtime into an implementation role requires an explicit execution-profile revision with deterministic regression evidence; historical adapter text or provider availability never activates it.
+Clear current owner intent authorizes ordinary work by the selected runtime after repository/scope verification; a Work Packet is not a mandatory permission object. Authenticate/validate packets when deriving instructions or relying on them for handoff, conflicting scheduling or recovery. Runtime defaults remain profile data; historical adapter text or provider availability never activates another runtime. Persistent default changes require a reviewed execution-profile migration.
 
 The selected implementation runtime performs terminal review directly. A distinct reviewer is introduced only when a specific risk/task contract explicitly requires independent perspective; reviewer-provider availability or quota is never a universal completion dependency.
 
@@ -86,3 +86,14 @@ Canonical `policy_epoch` is policy-freshness state. Repository-local root-of-tru
 ## Engineering truth vs notification
 
 Engineering completion is determined by the completion contract and evidence. Notification delivery is operational state. A failed owner-notification transport may require retry and should be visible to the owner, but it does not retroactively make correct code or passing release evidence false.
+
+## 2026-10-07 cleanup decisions and evidence limits
+
+- KEEP: owner scope, target/worktree isolation, high-risk approval and existing base-owned verification; these are not scaffolding to relax for a green check.
+- MAKE_CONDITIONAL: packet lint, admission, coordinator/watch and independent-review helpers. Use the concrete ambiguity, continuity, concurrency or risk trigger; ordinary commands do not run the whole toolchain.
+- RELAX: root instructions become a task-specific context map; user-gate details stay in the actual contracts. Contract-first, direct-persona, same-candidate and final complete confirmation remain mandatory when those gates are requested.
+- DELETE: portable human-hour/file-count sizing heuristics and runtime-specific reset recipes. Use coupling, completion oracles and observed context capacity.
+- EVIDENCE: document/routing lint is not live-agent behavior. Deterministic wait checks exercise the optional planner's state transitions, not a model's obedience. Source byte counts are not provider token/cost savings. No live A/B autonomy improvement is claimed without observed comparable runs.
+- MIGRATION: a legacy contract-v1 base accepts exactly one policy-epoch increment. Land and verify that bridge first; only its v2 successor may converge policy freshness in a separate change. Already-merged invalid historical transitions cannot be retroactively labelled PASS by a newer checker; retain the discrepancy and verify forward changes honestly.
+
+The official references above inform these decisions; they do not mandate this repository's packet format, helper stack or two user-gate names. Review/remove remaining scaffolding only with evidence, not an arbitrary deletion percentage.

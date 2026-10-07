@@ -948,10 +948,28 @@ def test_commit_rollout_changes_sets_local_identity() -> None:
         assert run("git", "config", "user.email", cwd=root).stdout.strip() == "engineering-system@users.noreply.github.com"
 
 
+def test_intermediate_rollout_is_not_current_completion() -> None:
+    import contextlib
+    import io
+    result = org_rollout.RepoResult(full_name="example/legacy", state="INCOMPLETE", action="UPGRADE", outcome="APPLIED")
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        rc = org_rollout.summarize([result], True)
+    assert rc == 2
+    assert "ORG_ROLLOUT=PARTIAL" in output.getvalue()
+    assert "CURRENT_POLICY_COMPLETE=BLOCK" in output.getvalue()
+    result.state = "CURRENT"
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        rc = org_rollout.summarize([result], False)
+    assert rc == 0 and "CURRENT_POLICY_COMPLETE=PASS" in output.getvalue()
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
     test_rollout_rejects_stale_canonical_checkout_for_real_baseline()
     test_flatten_paginated_inventory()
+    test_intermediate_rollout_is_not_current_completion()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()
     test_incomplete_surfaces_not_reported_current()

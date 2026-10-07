@@ -337,3 +337,11 @@ A repository is adopted when:
 - no required gate is claimed from unexecuted or different-HEAD evidence
 
 The target is automatic preparation with explicit fail-closed boundaries, not blind automation.
+
+## Legacy governance bridge and truthful completion
+
+When the actual base-owned verifier uses migration contract v1, root changes must increment policy_epoch by exactly one. The managed helper emits ADOPTION_UPGRADE=INTERMEDIATE / ADOPTION_MIGRATION_STAGE=LEGACY_BRIDGE, not current-policy completion. Validate the bridge with the original base's verifier and land it first. Then, in a separate PR whose base already owns the v2 verifier, rerun the same-baseline upgrade and require current-policy validation. Do not combine both stages in one PR or relax the old verifier. A second apply against an uncommitted bridge is rejected even with --allow-dirty.
+
+A baseline/freshness check and an old-to-new migration check prove different facts. Neither a current checker nor a recently merged PR retrospectively proves a historical transition complied. Preserve discrepancies in the existing workstream, verify subsequent changes from the real current base, and do not downgrade production safety or rewrite historical evidence to obtain PASS.
+
+Instruction cleanup also needs propagation evidence: a template edit alone is not rollout. The helper may replace a complete byte-identical prior managed template block while preserving added product sections, or synchronize recognized policy lines. Customized user-gate/next-chat wording requires review instead of silent deletion. Check the resulting AGENTS.md and preserve stricter local constraints.

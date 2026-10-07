@@ -21,8 +21,8 @@ scenarios:
   - id: BEH-WAIT-005
     mandatory: true
     safety: true
-    title: Yield instead of polling
-    invariant: Coding agents yield on CI, review, and deployment waits instead of polling.
+    title: Deterministic wait/yield planner contract
+    invariant: The optional planner yields on pending exact-HEAD CI, suppresses duplicate wait notifications, and has no side effects. This is not evidence of live-model behavior.
     checker: wait
   - id: BEH-ADOPTION-008
     mandatory: true

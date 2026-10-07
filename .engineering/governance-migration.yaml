@@ -1,10 +1,15 @@
 contract_version: 2
-from_governance_epoch: 4
-to_governance_epoch: 5
-base_sha: e92971b44b3922dce371d2be6408b8ff3e6d1d37
+from_governance_epoch: 5
+to_governance_epoch: 6
+base_sha: 2c73cdd52b98db4143b379730ee0c69d284f80e8
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Sync next-chat bootstrap and verified-resume policy into adopted repositories.
+rationale: Restore base-verifier-compatible legacy bridging and safely propagate scoped
+  autonomy instructions; preserve production and user-acceptance boundaries.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: a0d7adc9bdbbc91424f664b55da4c666daef55e5
+  head_blob_sha: b083512bc60ce99b83f65a6331c3e6c3879aaf2b
+- path: tools/check-adoption.py
+  head_blob_sha: 1cbec8195d5ff044bc47988b563598ae1e1577ea
+- path: tools/upgrade-adoption.py
+  head_blob_sha: 44bda1b83697406ffa264b37eb2624fb17d2f12b

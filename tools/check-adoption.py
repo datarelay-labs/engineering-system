@@ -18,6 +18,7 @@ from adopt import (
     USER_ACCEPTANCE_MANAGED,
     canonical_execution_policy_line,
     canonical_managed_policy_lines,
+    canonical_user_gate_policy_line,
     retired_agent_artifact_paths,
     retired_agent_rules_present,
 )
@@ -273,7 +274,7 @@ def main() -> int:
         if mode == "adopted":
             try:
                 execution_policy = canonical_execution_policy_line()
-                managed_policy_lines = canonical_managed_policy_lines()
+                managed_policy_lines = (*canonical_managed_policy_lines(), canonical_user_gate_policy_line())
             except SystemExit as exc:
                 failures.append(str(exc))
             else:

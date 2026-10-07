@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from functools import lru_cache
 
 from execution_profile import (
     load_profile,
@@ -23,8 +24,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 19
-GOVERNANCE_EPOCH = 5
+POLICY_EPOCH = 20
+GOVERNANCE_EPOCH = 6
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -166,6 +167,7 @@ SUPERVISOR_POLICY_MARKER = "- **Product execution ownership / supervisor fallbac
 NEXT_CHAT_BOOTSTRAP_POLICY_MARKER = "- **Next-chat bootstrap fast path:**"
 VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER = "- **Verified next-chat resume:**"
 EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
+USER_GATE_POLICY_MARKER = "- For `project.user_facing: true`,"
 EXECUTION_RULES_HEADING = "## Execution rules"
 
 
@@ -212,6 +214,44 @@ def canonical_managed_policy_lines() -> tuple[str, ...]:
         _canonical_policy_line(VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER, "verified-next-chat-resume"),
         _canonical_policy_line(EXTERNAL_WRITE_POLICY_MARKER, "external-write-scope"),
     )
+
+
+def canonical_user_gate_policy_line() -> str:
+    return _canonical_policy_line(USER_GATE_POLICY_MARKER, "user-gate")
+
+
+@lru_cache(maxsize=32)
+def _baseline_agents_templates(baseline: str) -> tuple[str, ...]:
+    """Bounded, read-only migration provenance; never execute historical tools."""
+    if FULL_SHA_RE.fullmatch(baseline) is None:
+        return ()
+    history = subprocess.run(
+        ["git", "-C", str(CANONICAL), "log", "-32", "--format=%H", baseline,
+         "--", "templates/AGENTS.md"], text=True, capture_output=True, check=False,
+    )
+    refs = [baseline]
+    if history.returncode == 0:
+        refs.extend(ref for ref in history.stdout.splitlines() if FULL_SHA_RE.fullmatch(ref))
+    templates = []
+    for ref in dict.fromkeys(refs):
+        result = subprocess.run(
+            ["git", "-C", str(CANONICAL), "show", f"{ref}:templates/AGENTS.md"],
+            text=True, capture_output=True, check=False,
+        )
+        if result.returncode == 0 and result.stdout not in templates:
+            templates.append(result.stdout)
+    return tuple(templates)
+
+
+def prior_agents_templates(root: Path) -> tuple[str, ...]:
+    """Only the adopted immutable baseline and its canonical ancestors qualify."""
+    import yaml
+    try:
+        project = yaml.safe_load((root / ".engineering/project.yaml").read_text()) or {}
+        baseline = str((project.get("engineering_system") or {}).get("baseline") or "")
+    except (OSError, ValueError, AttributeError, yaml.YAMLError):
+        return ()
+    return _baseline_agents_templates(baseline)
 
 
 def rewrite_legacy_coordination_rules(text: str) -> str:
@@ -287,7 +327,28 @@ def plan_execution_policy_sync(root: Path) -> str | None:
     if not path.is_file():
         return None
     original = path.read_text(encoding="utf-8")
-    cleaned = rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(original))
+    previous_templates = prior_agents_templates(root)
+    current_template = (CANONICAL / "templates/AGENTS.md").read_text(encoding="utf-8")
+    source = original
+    # Replace only a complete, byte-identical old managed block. Added product
+    # sections remain untouched; customized/interleaved documents use line sync.
+    for previous_template in previous_templates:
+        if source.count(previous_template) == 1:
+            source = source.replace(previous_template, current_template, 1)
+            break
+    cleaned = rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(source))
+    known_managed_lines = {
+        line for template in previous_templates
+        for line in rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(template)).splitlines()
+        if line.strip()
+    }
+    # Past upgrades mixed old template body with newer managed policy lines.
+    # Compact only when every nonblank line has known canonical provenance.
+    # Even one unknown/custom line prevents this whole-document replacement.
+    if known_managed_lines and all(
+        not line.strip() or line in known_managed_lines for line in cleaned.splitlines()
+    ):
+        cleaned = current_template
     if retired_agent_rules_present(cleaned):
         raise SystemExit(
             "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"
@@ -336,10 +397,12 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             canonical_external_write,
             (EXTERNAL_WRITE_POLICY_MARKER,) + legacy_write_markers,
         ),
+        ("user-gate", canonical_user_gate_policy_line(), (USER_GATE_POLICY_MARKER,)),
     )
     exact_managed_labels = {
         "next-chat-bootstrap",
         "verified-next-chat-resume",
+        "user-gate",
     }
     missing: list[str] = []
     for label, canonical, markers in specs:
@@ -353,11 +416,26 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         if indexes:
             index = indexes[0]
             current = lines[index]
-            if label in exact_managed_labels and current != canonical:
+            known_previous = {
+                line for template in previous_templates for line in template.splitlines()
+                if any(line.startswith(marker) for marker in markers)
+            }
+            if label in exact_managed_labels and current != canonical and current not in known_previous:
                 raise SystemExit(
                     f"FAIL AGENTS.md contains customized managed {label} policy line; review manually"
                 )
-            lines[index] = canonical
+            suffix = ""
+            if label not in exact_managed_labels and current != canonical and current not in known_previous:
+                # Preserve additive local constraints on a known managed line.
+                for known in sorted({canonical, *known_previous}, key=len, reverse=True):
+                    if current.startswith(known + " "):
+                        suffix = current[len(known):].strip()
+                        break
+                if not suffix and current.startswith(markers[0]):
+                    raise SystemExit(
+                        f"FAIL AGENTS.md contains customized managed {label} policy line; review manually"
+                    )
+            lines[index] = canonical + (("\n- " + suffix) if suffix else "")
         else:
             missing.append(canonical)
 

@@ -527,7 +527,7 @@ scenarios:
     invariants:
       - "feature and integration branches cannot regress the base policy epoch"
       - "retired implementation semantics and retired agent artifacts fail closed"
-      - "the governance helper cannot change without a policy epoch increment"
+      - "root changes require a base-owned migration manifest and the applicable v1 policy or v2 governance increment"
       - "the pull_request_target governance workflow remains structurally present"
     release_gate: true
 

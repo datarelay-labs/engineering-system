@@ -897,6 +897,12 @@ def process_repo(
         result.version = target_version
         result.baseline = target_baseline
         result.detail = "managed upgrade applied on isolated rollout branch"
+        if "ADOPTION_UPGRADE=INTERMEDIATE" in upgraded.stdout:
+            result.state = "INCOMPLETE"
+            result.detail = (
+                "LEGACY_BRIDGE: validate with the original base-owned verifier and land this PR; "
+                "current-policy convergence requires a separate change after landing"
+            )
         return result
 
     if result.action == "ADOPT":
@@ -973,6 +979,14 @@ def summarize(results: list[RepoResult], apply: bool) -> int:
         print(f"COUNT_{state}={count}")
     for outcome, count in outcomes.items():
         print(f"OUTCOME_{outcome}={count}")
+
+    policy_current = all(result.state in {"CURRENT", "ARCHIVED", "EXCLUDED"} for result in results)
+    print("CURRENT_POLICY_COMPLETE=" + ("PASS" if policy_current else "BLOCK"))
+    legacy_bridges = [result for result in results if result.state == "INCOMPLETE" and result.outcome == "APPLIED"]
+    if legacy_bridges and not outcomes.get("FAIL", 0):
+        print("ORG_ROLLOUT=PARTIAL")
+        print("HUMAN_SUMMARY=Legacy bridges were prepared, not completed current-policy rollout; validate and land each bridge before convergence.")
+        return 2
 
     hard_fail = outcomes.get("FAIL", 0)
     needs_input = outcomes.get("NEEDS_INPUT", 0)

@@ -398,9 +398,27 @@ def check_affected(root: Path) -> dict[str, str]:
 
 
 def check_wait(root: Path) -> dict[str, str]:
-    _require_tokens(_read(root, "standards/SESSION_CONTINUITY.md"), ("polling", "WAITING_FOR_", "yield"))
-    _require_tokens(_read(root, "AGENTS.md"), ("polling",))
-    return _outcome("PASS", "WAIT_YIELD_OK")
+    """Exercise the optional planner, not prose presence or live-model behavior."""
+    planner = _load_tool("coordinator.py", "behavior_wait_planner")
+    cases = (
+        ("06-wait-exact-head-ci.json", "SEND"),
+        ("13-identical-wait-dedup.json", "SUPPRESS"),
+    )
+    for name, notification in cases:
+        facts = json.loads(_read(root, "tools/fixtures/coordinator/" + name))
+        result = planner.plan(facts)
+        if result.get("decision") != "WAIT_EXACT_HEAD_CI" or result.get("decision_class") != "WAIT":
+            return _outcome("FAIL", "WAIT_TRANSITION_INVALID")
+        if result.get("notification_disposition") != notification:
+            return _outcome("FAIL", "WAIT_DEDUP_INVALID")
+        if any(result.get(key) is not False for key in (
+            "launches_worker", "stops_unrelated_sessions", "mutates_existing_sessions",
+            "spawns_process", "mutates_github", "sends_notification",
+        )):
+            return _outcome("FAIL", "WAIT_SIDE_EFFECT")
+        if planner.plan(facts) != result:
+            return _outcome("FAIL", "WAIT_NONDETERMINISTIC")
+    return _outcome("PASS", "WAIT_PLANNER_CONTRACT_OK")
 
 
 def adoption_fails_closed() -> dict[str, str]:
