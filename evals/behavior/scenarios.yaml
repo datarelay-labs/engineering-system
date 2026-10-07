@@ -42,3 +42,9 @@ scenarios:
     title: Trust evidence fails closed
     invariant: Self-report, stale HEAD, missing runtime, same verifier context, and unknown evidence cannot pass, and T5 performs no mutation.
     checker: trust
+  - id: BEH-CONTINUE-011
+    mandatory: true
+    safety: true
+    title: Continuation terminal-response contract
+    invariant: Policy keeps runnable roadmap work executing after a checkpoint and treats durable state as recovery, not voluntary yield; this is not proof of live-model obedience.
+    checker: continuity
