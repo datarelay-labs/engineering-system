@@ -14,8 +14,8 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 
 - **Owner:** product requirements, scope, final decisions, release approval, human UX judgment.
 - **Reviewer / verifier:** architecture, requirements, test strategy, review, and incident analysis when required by the task/risk contract. Independence is optional unless explicitly required; provider identity is not a core role invariant.
-- **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. The authorized implementer is selected by the current execution profile plus the trusted Work Packet; provider identity is not a core invariant.
-- **Implementation path:** implementation runtime selection is owned only by the versioned execution profile. Optional review/runtime tools never create authority or weaken repository/packet gates; disabled runtimes remain non-runnable until an explicit profile revision is adopted.
+- **Implementer:** repository inspection, authorized mutation, tests, affected regression, and evidence. The authorized implementer follows current explicit owner intent, then the fresh Work Packet when relied on, and the current execution profile; provider identity is not a core invariant.
+- **Implementation path:** implementation runtime defaults are owned by the versioned execution profile under current explicit owner intent. Optional review/runtime tools never create authority or weaken repository/packet gates; disabled runtimes remain inactive unless the owner explicitly selects one; persistent default changes require a reviewed profile revision.
 - **Automation:** deterministic validation, CI, security/performance checks, artifact verification.
 - **GitHub:** durable source of truth for code, history, gates, and releases.
 - **Derived knowledge plane:** an optional organization/project adapter may provide bounded human-readable and AI-searchable derived context; canonical Git/GitHub content wins on conflict. Retired knowledge systems are provenance-only and never active dependencies.

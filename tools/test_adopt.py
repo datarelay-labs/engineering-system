@@ -459,18 +459,10 @@ def test_managed_upgrade_to_1_6() -> None:
         assert upgraded_agents.count("- **Product execution ownership / supervisor fallback:**") == 1
         assert upgraded_agents.count("- **Next-chat bootstrap fast path:**") == 1
         assert upgraded_agents.count("- **Verified next-chat resume:**") == 1
-        assert "NO_ACTIVE_PACKET` is a scheduling input, not a blocker" in upgraded_agents
-        assert "enter the persisted Next Action immediately" in upgraded_agents
-        assert "uncontrolled Issue proliferation" in upgraded_agents
-        assert "Never mutate an actively progressing owner-authorized worker dirty worktree" in upgraded_agents
-        assert "advance independent work during machine-observable waits" in upgraded_agents
-        assert "make measurable progress in the same turn" in upgraded_agents.lower()
-        assert "after a bounded task return to roadmap priority" in upgraded_agents
-        assert "roadmap/release objective is complete" in upgraded_agents
-        assert "Repair stale coordination state within owner scope instead of stopping" in upgraded_agents
-        assert "Implement, test and audit in coherent batches" in upgraded_agents
-        assert "never create one Issue per finding" in upgraded_agents
-        assert "Close COMPLETE packets in the same lifecycle reconciliation" in upgraded_agents
+        # These assertions prove managed propagation, not model obedience.
+        from adopt import canonical_managed_policy_lines, canonical_user_gate_policy_line
+        for policy in (*canonical_managed_policy_lines(), canonical_user_gate_policy_line()):
+            assert policy in upgraded_agents
         assert "- preserve-project-rule" in upgraded_agents
         assert ".engineering/execution-profile.yaml" in upgraded_agents
         assert "`.engineering/execution-profile.yaml` selects the runtime" in upgraded_agents
@@ -637,7 +629,7 @@ def test_same_baseline_governance_floor_repair_emits_root_migration() -> None:
         assert migration["changed_surfaces"][0]["head_blob_sha"] == helper_blob
 
 
-def test_legacy_root_repair_converges_to_canonical_policy() -> None:
+def test_legacy_root_repair_cannot_exceed_canonical_policy() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "legacy-root-over-canonical"
         target.mkdir()
@@ -660,12 +652,6 @@ def test_legacy_root_repair_converges_to_canonical_policy() -> None:
         )
         commit_all(target, "adopt current baseline")
 
-        project_path = target / ".engineering/project.yaml"
-        project = load_yaml(project_path)
-        project["engineering_system"]["policy_epoch"] = POLICY_EPOCH - 9
-        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        commit_all(target, "simulate stale adopted policy epoch")
-
         helper = target / "tools/governance_floor.py"
         helper.write_text(
             helper.read_text(encoding="utf-8").replace(
@@ -678,7 +664,7 @@ def test_legacy_root_repair_converges_to_canonical_policy() -> None:
         helper.unlink()
         commit_all(target, "remove legacy governance floor")
 
-        repaired = run(
+        blocked = run(
             sys.executable,
             str(UPGRADE),
             "--root",
@@ -688,10 +674,134 @@ def test_legacy_root_repair_converges_to_canonical_policy() -> None:
             BASELINE,
             check=False,
         )
-        assert repaired.returncode == 0, repaired.stdout
+        assert blocked.returncode != 0
+        assert (
+            "legacy root migration would advance policy_epoch beyond canonical policy"
+            in blocked.stdout
+        )
         engineering = load_yaml(target / ".engineering/project.yaml")["engineering_system"]
         assert engineering["policy_epoch"] == POLICY_EPOCH
         assert engineering["governance_epoch"] == GOVERNANCE_EPOCH
+
+
+def test_legacy_bridge_with_original_verifier() -> None:
+    """The actual epoch-10 floor, not the candidate's checker, approves stage A."""
+    import io
+    import tarfile
+
+    frozen = "713d6f9123ddfddf1ed7bb6829603dd3f740bbec"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        old = root / "frozen-canonical"
+        old.mkdir()
+        archive = subprocess.check_output(["git", "-C", str(ROOT), "archive", frozen])
+        with tarfile.open(fileobj=io.BytesIO(archive)) as package:
+            package.extractall(old, filter="data")
+        target = root / "legacy-project"
+        target.mkdir()
+        init_repo(target)
+        product = target / "go.mod"
+        product.write_text("module example.invalid/legacy-bridge\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target, "product")
+        run(sys.executable, str(old / "tools/adopt.py"), "--root", str(target),
+            "--apply", "--baseline-sha", frozen, "--test-command", "go test ./...")
+        commit_all(target, "epoch-10 adoption")
+        before = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        product_before = product.read_bytes()
+
+        applied = run(sys.executable, str(UPGRADE), "--root", str(target),
+                      "--apply", "--baseline-sha", NEW_BASELINE)
+        assert "ADOPTION_UPGRADE=INTERMEDIATE" in applied.stdout, applied.stdout
+        assert "ADOPTION_POLICY_CURRENT=NO" in applied.stdout
+        assert "ADOPTION_UPGRADE=PASS" not in applied.stdout
+        assert load_yaml(target / ".engineering/project.yaml")["engineering_system"]["policy_epoch"] == 11
+        migration = load_yaml(target / ".engineering/governance-migration.yaml")
+        assert migration["contract_version"] == 1
+        assert migration["from_policy_epoch"] == 10 and migration["to_policy_epoch"] == 11
+        current = run(sys.executable, str(CHECK), "--root", str(target),
+                      "--require-current-policy", check=False)
+        assert current.returncode != 0 and "stale adoption policy_epoch" in current.stdout
+
+        # An unlanded bridge must not be skipped by a second --allow-dirty apply.
+        snapshot = {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*")
+                    if p.is_file() and ".git" not in p.relative_to(target).parts}
+        rejected = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply",
+                       "--allow-dirty", "--baseline-sha", NEW_BASELINE, check=False)
+        assert rejected.returncode != 0 and "bridge must land" in rejected.stdout, rejected.stdout
+        assert snapshot == {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*")
+                            if p.is_file() and ".git" not in p.relative_to(target).parts}
+
+        commit_all(target, "stage A legacy bridge")
+        bridge = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        verified = run(sys.executable, str(old / "tools/governance_floor.py"), "check",
+                       "--root", str(target), "--base-ref", before, "--head-ref", bridge)
+        assert "GOVERNANCE_FLOOR=PASS" in verified.stdout, verified.stdout
+        # The next PR's base owns this verifier. Keep a separate immutable copy.
+        stage_b_floor = root / "stage-b-floor"
+        stage_b_floor.mkdir()
+        for rel in ("governance_floor.py", "execution_profile.py"):
+            (stage_b_floor / rel).write_bytes((target / "tools" / rel).read_bytes())
+        completed = run(sys.executable, str(UPGRADE), "--root", str(target),
+                        "--apply", "--baseline-sha", NEW_BASELINE)
+        assert "ADOPTION_MIGRATION_STAGE=CURRENT" in completed.stdout
+        assert "ADOPTION_UPGRADE=PASS" in completed.stdout
+        commit_all(target, "stage B current policy")
+        final = run("git", "rev-parse", "HEAD", cwd=target).stdout.strip()
+        verified = run(sys.executable, str(stage_b_floor / "governance_floor.py"), "check",
+                       "--root", str(target), "--base-ref", bridge, "--head-ref", final)
+        assert "GOVERNANCE_FLOOR=PASS" in verified.stdout
+        run(sys.executable, str(CHECK), "--root", str(target), "--require-current-policy")
+        # Collapsing the stages into the original PR is forbidden by its old floor.
+        invalid = run(sys.executable, str(old / "tools/governance_floor.py"), "check",
+                      "--root", str(target), "--base-ref", before, "--head-ref", final, check=False)
+        assert invalid.returncode != 0, invalid.stdout
+        assert "GOVERNANCE_ROOT_MIGRATION_TO_EPOCH_INVALID" in invalid.stdout
+        assert product.read_bytes() == product_before
+
+
+def test_managed_template_cleanup_preserves_project_rules() -> None:
+    from adopt import plan_execution_policy_sync, canonical_user_gate_policy_line
+    frozen = "713d6f9123ddfddf1ed7bb6829603dd3f740bbec"
+    previous = run("git", "show", f"{frozen}:templates/AGENTS.md", cwd=ROOT).stdout
+    current = (ROOT / "templates/AGENTS.md").read_text(encoding="utf-8")
+    suffix = "\n## Project safety\n\n- Production still requires explicit owner approval.\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / ".engineering").mkdir()
+        (root / ".engineering/project.yaml").write_text(
+            yaml.safe_dump({"engineering_system": {"baseline": frozen}}), encoding="utf-8")
+        agents = root / "AGENTS.md"
+        agents.write_text(previous + suffix, encoding="utf-8")
+        result = plan_execution_policy_sync(root)
+        assert result == current + suffix
+        assert canonical_user_gate_policy_line() in result
+        assert agents.read_text() == previous + suffix  # planning is read-only
+        # Customized/interleaved user-gate instructions are not discarded.
+        gate = next(line for line in previous.splitlines() if line.startswith("- For `project.user_facing: true`,"))
+        customized = previous.replace(gate, gate + " Production approval is also mandatory.") + suffix
+        agents.write_text(customized, encoding="utf-8")
+        try:
+            plan_execution_policy_sync(root)
+        except SystemExit as exc:
+            assert "customized managed user-gate" in str(exc), str(exc)
+        else:
+            raise AssertionError("custom user-gate rule was silently replaced")
+        assert agents.read_text() == customized
+        execution = next(line for line in previous.splitlines() if line.startswith("- **Execute useful work continuously.**"))
+        stronger = " Production deployment still requires owner approval."
+        agents.write_text(previous.replace(execution, execution + stronger) + suffix, encoding="utf-8")
+        result = plan_execution_policy_sync(root)
+        assert "- Production deployment still requires owner approval." in result
+        assert result.endswith(suffix)
+        unknown = previous.replace(execution, "- **Execute useful work continuously.** Unknown local execution contract.")
+        agents.write_text(unknown, encoding="utf-8")
+        try:
+            plan_execution_policy_sync(root)
+        except SystemExit as exc:
+            assert "customized managed continuous-execution" in str(exc)
+        else:
+            raise AssertionError("unknown execution policy was overwritten")
+        assert agents.read_text() == unknown
 
 
 def test_v2_same_baseline_rejects_newer_policy() -> None:
@@ -3837,7 +3947,9 @@ def main() -> int:
     test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
-    test_legacy_root_repair_converges_to_canonical_policy()
+    test_legacy_root_repair_cannot_exceed_canonical_policy()
+    test_legacy_bridge_with_original_verifier()
+    test_managed_template_cleanup_preserves_project_rules()
     test_v2_same_baseline_rejects_newer_policy()
     test_same_baseline_execution_profile_repair_advances_epoch()
     test_same_baseline_partial_execution_profile_repair_records_manifest()

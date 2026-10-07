@@ -237,23 +237,32 @@ def test_affected_parser_fails_closed() -> None:
 
 
 
-def test_wait_contract_tokens() -> None:
-    try:
-        behavior_eval._require_tokens("polling only", ("polling", "WAITING_FOR_", "yield"))
-    except behavior_eval.EvalError as exc:
-        if exc.code != "MISSING_CONTRACT":
-            _fail(f"wait regression returned {exc.code}")
-    else:
-        _fail("incomplete wait contract was accepted")
+def test_wait_state_transitions() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import shutil
+    import tempfile
+
     outcome = behavior_eval.check_wait(ROOT)
-    if outcome["status"] != "PASS":
-        _fail("canonical wait/yield contract did not pass")
-
-
-
-
-
-
+    assert outcome == {"status": "PASS", "evidence": "WAIT_PLANNER_CONTRACT_OK"}, outcome
+    # No AGENTS/prose file is needed to prove deterministic planner behavior.
+    with tempfile.TemporaryDirectory() as tmp:
+        isolated = Path(tmp)
+        shutil.copytree(ROOT / "tools/fixtures/coordinator", isolated / "tools/fixtures/coordinator")
+        assert behavior_eval.check_wait(isolated) == outcome
+    real = behavior_eval._load_tool("coordinator.py", "wait_negative_control")
+    def duplicate_notification(facts):
+        result = real.plan(facts)
+        result["notification_disposition"] = "SEND"
+        return result
+    with patch.object(behavior_eval, "_load_tool", return_value=SimpleNamespace(plan=duplicate_notification)):
+        assert behavior_eval.check_wait(ROOT)["status"] == "FAIL"
+    def side_effect(facts):
+        result = real.plan(facts)
+        result["mutates_github"] = True
+        return result
+    with patch.object(behavior_eval, "_load_tool", return_value=SimpleNamespace(plan=side_effect)):
+        assert behavior_eval.check_wait(ROOT)["status"] == "FAIL"
 
 
 def test_trust_checker_does_not_import_verification_fixtures() -> None:
@@ -292,7 +301,7 @@ def main() -> None:
     test_context_fails_without_unrelated_repository_rule()
     test_work_packet_boundaries()
     test_affected_parser_fails_closed()
-    test_wait_contract_tokens()
+    test_wait_state_transitions()
     test_trust_checker_does_not_import_verification_fixtures()
     test_deterministic_run_passes()
     print("PASS behavior eval framework")

@@ -777,8 +777,10 @@ def build_root_migration_manifest(
     if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
         raise SystemExit("FAIL root migration base HEAD is unavailable")
     if legacy_policy_contract:
-        if not (from_policy_epoch < to_policy_epoch <= POLICY_EPOCH):
-            raise SystemExit("FAIL legacy root migration policy_epoch must advance to a valid canonical epoch")
+        if to_policy_epoch != from_policy_epoch + 1:
+            raise SystemExit("FAIL legacy root migration policy_epoch must advance exactly once")
+        if to_policy_epoch > POLICY_EPOCH:
+            raise SystemExit("FAIL legacy root migration would advance policy_epoch beyond canonical policy")
         generation = {
             "contract_version": 1,
             "from_policy_epoch": from_policy_epoch,
@@ -960,6 +962,20 @@ def coalesce(arg_value: str, current: object) -> str:
     return str(current or "").strip()
 
 
+def report_upgrade_stage(policy_epoch: int) -> None:
+    """A compatible bridge is an intermediate result, not current-policy PASS."""
+    if policy_epoch < POLICY_EPOCH:
+        print("ADOPTION_MIGRATION_STAGE=LEGACY_BRIDGE")
+        print("ADOPTION_POLICY_CURRENT=NO")
+        print("ADOPTION_UPGRADE=INTERMEDIATE")
+        print("NEXT_ACTION=Validate with the original base-owned floor, land this bridge, "
+              "then rerun the same-baseline upgrade in a separate PR")
+    else:
+        print("ADOPTION_MIGRATION_STAGE=CURRENT")
+        print("ADOPTION_POLICY_CURRENT=YES")
+        print("ADOPTION_UPGRADE=PASS")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit or upgrade a managed Engineering System adoption")
     parser.add_argument("--root", required=True)
@@ -1122,12 +1138,23 @@ def main() -> int:
             )
         )
         if planned_root_surfaces and legacy_root_contract:
-            target_policy_epoch = POLICY_EPOCH
+            target_policy_epoch = existing_policy_epoch + 1
+            if target_policy_epoch > POLICY_EPOCH:
+                raise SystemExit("FAIL legacy root migration would advance policy_epoch beyond canonical policy")
             target_governance_epoch = existing_governance_epoch
         else:
             target_policy_epoch = POLICY_EPOCH
             target_governance_epoch = existing_governance_epoch + (
                 1 if planned_root_surfaces else 0
+            )
+        if (
+            not planned_root_surfaces
+            and existing_policy_epoch < POLICY_EPOCH
+            and not base_governance_floor_supports_v2(root, base_head, old_baseline)
+        ):
+            raise SystemExit(
+                "FAIL legacy bridge must land before current-policy convergence; "
+                "validate and merge the bridge with the original base-owned verifier first"
             )
         policy_epoch_repair = target_policy_epoch != existing_policy_epoch
         governance_epoch_repair = (
@@ -1299,7 +1326,7 @@ def main() -> int:
         result = subprocess.run([sys.executable, str(checker), "--root", str(root)])
         if result.returncode:
             raise SystemExit(result.returncode)
-        print("ADOPTION_UPGRADE=PASS")
+        report_upgrade_stage(target_policy_epoch)
         return 0
 
     old_workflow = workflow_path.read_text(encoding="utf-8")
@@ -1525,7 +1552,9 @@ def main() -> int:
             # A pre-cutover base-owned floor understands only contract-v1 and
             # requires one exact policy-epoch step. Once this transition lands,
             # the new baseline owns the v2 governance-generation contract.
-            target_policy_epoch = POLICY_EPOCH
+            target_policy_epoch = existing_policy_epoch + 1
+            if target_policy_epoch > POLICY_EPOCH:
+                raise SystemExit("FAIL legacy root migration would advance policy_epoch beyond canonical policy")
             target_governance_epoch = existing_governance_epoch
         else:
             target_policy_epoch = POLICY_EPOCH
@@ -1683,7 +1712,7 @@ def main() -> int:
     if result.returncode:
         raise SystemExit(result.returncode)
 
-    print("ADOPTION_UPGRADE=PASS")
+    report_upgrade_stage(target_policy_epoch)
     return 0
 
 

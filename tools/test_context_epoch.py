@@ -554,17 +554,15 @@ def test_managed_instructions_bind_target_repository() -> None:
         ROOT / "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
         ROOT / "standards/SESSION_CONTINUITY.md",
     )
+    # This is documentation routing lint only. Actual target mismatch rejection
+    # is exercised by test_packet_lint_binds_owner_selected_target_repo above.
     for path in paths:
         text = path.read_text(encoding="utf-8")
-        lower = text.lower()
-        if not (
-            "target repo" in lower
-            or "target repository" in lower
-            or "owner-selected repository" in lower
-            or "owner-selected target repository" in lower
-            or "--expect-target-repo" in lower
-        ):
-            fail(f"managed target-repository binding missing from {path.relative_to(ROOT)}")
+        if path.name in {"AGENTS.md", "CHATGPT_CUSTOM_INSTRUCTION.txt", "CHATGPT_PROJECT_INSTRUCTION.txt"}:
+            if "standards/SESSION_CONTINUITY.md" not in text:
+                fail(f"target-binding procedure route missing from {path.relative_to(ROOT)}")
+        elif "--expect-target-repo" not in text:
+            fail("conditional packet procedure must pass the bound expected repository")
     custom = (ROOT / "templates/CHATGPT_CUSTOM_INSTRUCTION.txt").read_text(encoding="utf-8")
     if "cross-project handoffs" not in custom or "never retarget" not in custom:
         fail("custom instruction does not keep cross-project references read-only")

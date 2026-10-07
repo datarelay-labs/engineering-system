@@ -653,7 +653,10 @@ def validate_worker_adapter_contract():
         ("AGENTS.md", agents),
         ("templates/AGENTS.md", agents_template),
     ):
-        if "worker_adapter.py" not in text:
+        if label in {"AGENTS.md", "templates/AGENTS.md"}:
+            if "standards/SECURITY.md" not in text:
+                raise SystemExit(f"FAIL {label} missing conditional high-risk routing")
+        elif "worker_adapter.py" not in text:
             raise SystemExit(f"FAIL {label} missing worker adapter command")
     for token in (
         "Trusted worker external-write adapter",
@@ -699,14 +702,14 @@ def validate_worker_adapter_contract():
     for label, text in (("session continuity", session), ("enforcement", enforcement)):
         if "Ordinary authenticated" not in text or "high-risk" not in text or "worker_adapter.py" not in text:
             raise SystemExit(f"FAIL {label} does not scope trusted external-write machinery to high-risk effects")
-    for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction), ("provider guidance", provider_guidance)):
-        if (
-            "execution profile" not in text.lower()
-            or ("magic phrase" not in text.lower() and "directly edit" not in text)
-        ):
-            raise SystemExit(f"FAIL {label} missing profile-bound no-magic-phrase guard")
-    if "every runnable packet v2/v3" not in custom_instruction:
-        raise SystemExit("FAIL custom instruction does not synchronize owner intent for packet v3")
+    # Entry points route to the conditional procedure. Packet identity and
+    # no-authority-on-mismatch are tested by executable contract regressions,
+    # not the spelling of a sentence in a custom-instruction template.
+    for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction)):
+        if "standards/SESSION_CONTINUITY.md" not in text:
+            raise SystemExit(f"FAIL {label} missing conditional continuity routing")
+    if ".engineering/execution-profile.yaml" not in provider_guidance:
+        raise SystemExit("FAIL provider guidance missing selected-profile routing")
     print("PASS trusted worker external-write adapter contract")
 
 def validate_context_fold_contract():
