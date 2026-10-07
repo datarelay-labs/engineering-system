@@ -8,7 +8,7 @@ rationale: Restore base-verifier-compatible legacy bridging and safely propagate
   autonomy instructions; preserve production and user-acceptance boundaries.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 5aaa5a9196b2e9382af030b1498c30c9dba8fcdd
+  head_blob_sha: b083512bc60ce99b83f65a6331c3e6c3879aaf2b
 - path: tools/check-adoption.py
   head_blob_sha: 1cbec8195d5ff044bc47988b563598ae1e1577ea
 - path: tools/upgrade-adoption.py

@@ -9,10 +9,10 @@ Always read `AGENTS.md` and `.engineering/project.yaml` first. Read only what th
 
 - Implementation/debugging/testing: `.engineering/tests.yaml`, affected code/tests, and `standards/TESTING.md` when test selection needs clarification.
 - Release or named user gates: `.engineering/release.yaml` and its repository-local contracts; `standards/USER_ACCEPTANCE.md` and `standards/RELEASE.md` hold portable requirements.
-- Material design: `standards/DESIGN.md`. Production incidents: `standards/OPERATIONS.md`. Security/permissions: `standards/SECURITY.md`.
+- Material design: `standards/DESIGN.md`. Production incidents: `standards/OPERATIONS.md`. Security/permissions: `standards/SECURITY.md`. For incident evidence, the canonical Engineering System checkout provides `tools/incident-evidence.py` and `tools/runtime_evidence.py collect`; `SAFETY_FREEZE=ON` narrows authority and never grants it.
 - Durable handoff, competing work or recovery: `standards/SESSION_CONTINUITY.md`. Coordinator/watch helpers are optional orchestration, not the ordinary execution path.
 - Managed upgrades: `standards/ADOPTION.md`. Harness changes: `standards/PROVIDER_GUIDANCE.md`.
-- Optional knowledge/runtime/skills/verification profiles: read the relevant `.engineering/*.yaml` only when needed; unavailable derived context never blocks ordinary work.
+- Optional profiles: `.engineering/knowledge.yaml`, `.engineering/runtime.yaml`, `.engineering/skills.yaml`, and `.engineering/verification.yaml` (validated by `tools/verification-contract.py`). Read only the relevant profile; unavailable derived context never blocks ordinary work.
 
 Use minimum sufficient context. Do not preload all standards, archives, histories or transcripts. Install missing managed Python dependencies from `.engineering/requirements-engineering-system.txt`, never unpinned versions.
 

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from functools import lru_cache
 
 from execution_profile import (
     load_profile,
@@ -219,21 +220,38 @@ def canonical_user_gate_policy_line() -> str:
     return _canonical_policy_line(USER_GATE_POLICY_MARKER, "user-gate")
 
 
-def prior_agents_template(root: Path) -> str:
-    """Read known managed wording from the immutable adopted baseline only."""
+@lru_cache(maxsize=32)
+def _baseline_agents_templates(baseline: str) -> tuple[str, ...]:
+    """Bounded, read-only migration provenance; never execute historical tools."""
+    if FULL_SHA_RE.fullmatch(baseline) is None:
+        return ()
+    history = subprocess.run(
+        ["git", "-C", str(CANONICAL), "log", "-32", "--format=%H", baseline,
+         "--", "templates/AGENTS.md"], text=True, capture_output=True, check=False,
+    )
+    refs = [baseline]
+    if history.returncode == 0:
+        refs.extend(ref for ref in history.stdout.splitlines() if FULL_SHA_RE.fullmatch(ref))
+    templates = []
+    for ref in dict.fromkeys(refs):
+        result = subprocess.run(
+            ["git", "-C", str(CANONICAL), "show", f"{ref}:templates/AGENTS.md"],
+            text=True, capture_output=True, check=False,
+        )
+        if result.returncode == 0 and result.stdout not in templates:
+            templates.append(result.stdout)
+    return tuple(templates)
+
+
+def prior_agents_templates(root: Path) -> tuple[str, ...]:
+    """Only the adopted immutable baseline and its canonical ancestors qualify."""
     import yaml
     try:
         project = yaml.safe_load((root / ".engineering/project.yaml").read_text()) or {}
         baseline = str((project.get("engineering_system") or {}).get("baseline") or "")
     except (OSError, ValueError, AttributeError, yaml.YAMLError):
-        return ""
-    if FULL_SHA_RE.fullmatch(baseline) is None:
-        return ""
-    result = subprocess.run(
-        ["git", "-C", str(CANONICAL), "show", f"{baseline}:templates/AGENTS.md"],
-        text=True, capture_output=True, check=False,
-    )
-    return result.stdout if result.returncode == 0 else ""
+        return ()
+    return _baseline_agents_templates(baseline)
 
 
 def rewrite_legacy_coordination_rules(text: str) -> str:
@@ -309,14 +327,28 @@ def plan_execution_policy_sync(root: Path) -> str | None:
     if not path.is_file():
         return None
     original = path.read_text(encoding="utf-8")
-    previous_template = prior_agents_template(root)
+    previous_templates = prior_agents_templates(root)
     current_template = (CANONICAL / "templates/AGENTS.md").read_text(encoding="utf-8")
     source = original
     # Replace only a complete, byte-identical old managed block. Added product
     # sections remain untouched; customized/interleaved documents use line sync.
-    if previous_template and source.count(previous_template) == 1:
-        source = source.replace(previous_template, current_template, 1)
+    for previous_template in previous_templates:
+        if source.count(previous_template) == 1:
+            source = source.replace(previous_template, current_template, 1)
+            break
     cleaned = rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(source))
+    known_managed_lines = {
+        line for template in previous_templates
+        for line in rewrite_legacy_coordination_rules(rewrite_retired_agent_rules(template)).splitlines()
+        if line.strip()
+    }
+    # Past upgrades mixed old template body with newer managed policy lines.
+    # Compact only when every nonblank line has known canonical provenance.
+    # Even one unknown/custom line prevents this whole-document replacement.
+    if known_managed_lines and all(
+        not line.strip() or line in known_managed_lines for line in cleaned.splitlines()
+    ):
+        cleaned = current_template
     if retired_agent_rules_present(cleaned):
         raise SystemExit(
             "FAIL AGENTS.md contains unrecognized retired runtime rules; review manually"
@@ -385,7 +417,7 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             index = indexes[0]
             current = lines[index]
             known_previous = {
-                line for line in previous_template.splitlines()
+                line for template in previous_templates for line in template.splitlines()
                 if any(line.startswith(marker) for marker in markers)
             }
             if label in exact_managed_labels and current != canonical and current not in known_previous:

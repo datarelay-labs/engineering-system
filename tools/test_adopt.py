@@ -802,6 +802,21 @@ def test_managed_template_cleanup_preserves_project_rules() -> None:
         else:
             raise AssertionError("unknown execution policy was overwritten")
         assert agents.read_text() == unknown
+        latest = "2c73cdd52b98db4143b379730ee0c69d284f80e8"
+        latest_template = run("git", "show", f"{latest}:templates/AGENTS.md", cwd=ROOT).stdout
+        (root / ".engineering/project.yaml").write_text(
+            yaml.safe_dump({"engineering_system": {"baseline": latest}}), encoding="utf-8")
+        from adopt import rewrite_legacy_coordination_rules
+        mixed = rewrite_legacy_coordination_rules(previous)
+        for marker in ("- **Execution profile authority:**", "- **Execute useful work continuously.**"):
+            replacement = next(line for line in latest_template.splitlines() if line.startswith(marker))
+            original_line = next(line for line in mixed.splitlines() if line.startswith(marker))
+            mixed = mixed.replace(original_line, replacement)
+        agents.write_text(mixed, encoding="utf-8")
+        assert plan_execution_policy_sync(root) == current
+        custom_tail = "\n## Local production policy\n\n- Never remove local customer snapshots.\n"
+        agents.write_text(mixed + custom_tail, encoding="utf-8")
+        assert custom_tail in plan_execution_policy_sync(root)
 
 
 def test_v2_same_baseline_rejects_newer_policy() -> None:
