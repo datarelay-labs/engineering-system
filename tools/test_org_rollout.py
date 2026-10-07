@@ -133,6 +133,34 @@ def test_flatten_paginated_inventory() -> None:
     assert len(org_rollout.flatten_paginated_payload(page_one)) == 100
 
 
+def test_org_inventory_uses_legacy_compatible_paginated_json_lines() -> None:
+    original = org_rollout.run_cmd
+    seen: list[str] = []
+
+    def fake_run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        del cwd
+        seen.extend(args)
+        payload = "\n".join(
+            (
+                json.dumps({"full_name": "org/a", "archived": False, "default_branch": "main", "clone_url": "https://example.invalid/a.git"}),
+                json.dumps({"full_name": "org/b", "archived": True, "default_branch": "stable", "clone_url": "https://example.invalid/b.git"}),
+            )
+        )
+        return subprocess.CompletedProcess(args, 0, stdout=payload + "\n")
+
+    try:
+        org_rollout.run_cmd = fake_run_cmd
+        records = org_rollout.inventory_from_org("org")
+    finally:
+        org_rollout.run_cmd = original
+
+    assert "--paginate" in seen
+    assert "--jq" in seen and ".[]" in seen
+    assert "--slurp" not in seen
+    assert [item.full_name for item in records] == ["org/a", "org/b"]
+    assert records[1].archived is True and records[1].default_branch == "stable"
+
+
 def test_org_rollout_matrix() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -969,6 +997,7 @@ def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ROLLOUT), str(ADOPT), str(UPGRADE))
     test_rollout_rejects_stale_canonical_checkout_for_real_baseline()
     test_flatten_paginated_inventory()
+    test_org_inventory_uses_legacy_compatible_paginated_json_lines()
     test_intermediate_rollout_is_not_current_completion()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()

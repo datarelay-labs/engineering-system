@@ -215,16 +215,36 @@ def gh_json(args: list[str]) -> Any:
         raise SystemExit(f"FAIL gh returned invalid JSON: {exc}") from exc
 
 
+def gh_json_lines(args: list[str]) -> list[Any]:
+    """Parse one JSON value per output line from a gh command.
+
+    `gh api --paginate --jq '.[]'` works on GitHub CLI releases that predate
+    the later `--slurp` flag while still preserving pagination.
+    """
+    completed = run_cmd(["gh", *args])
+    if completed.returncode != 0:
+        raise SystemExit(f"FAIL authenticated gh inventory failed: {completed.stdout.strip()}")
+    values: list[Any] = []
+    for number, line in enumerate(completed.stdout.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            values.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"FAIL gh returned invalid JSON line {number}: {exc}") from exc
+    return values
+
+
 def inventory_from_org(org: str) -> list[RepoRecord]:
-    payload = gh_json(
+    items = gh_json_lines(
         [
             "api",
             "--paginate",
-            "--slurp",
+            "--jq",
+            ".[]",
             f"/orgs/{org}/repos?per_page=100&type=all",
         ]
     )
-    items = flatten_paginated_payload(payload)
     records: list[RepoRecord] = []
     for item in items:
         if not isinstance(item, dict):
