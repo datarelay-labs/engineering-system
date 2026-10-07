@@ -629,6 +629,30 @@ def test_turn_disposition_prevents_premature_final() -> None:
     assert packetless["CANDIDATE_COUNT"] == "1"
     assert packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
 
+    malformed = dict(facts)
+    malformed.pop("observed_head")
+    malformed_with_packetless = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [malformed],
+            "roadmap_runnable_work": ["roadmap-independent"],
+        }
+    )
+    assert malformed_with_packetless["TURN_DISPOSITION"] == "CONTINUE"
+    assert malformed_with_packetless["FINAL_ALLOWED"] == "NO"
+    assert malformed_with_packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
+
+    malformed_only = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [malformed],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert malformed_only["TURN_DISPOSITION"] == "RECONCILE"
+    assert malformed_only["FINAL_ALLOWED"] == "NO"
+
     stale = {**facts, "observed_head": "b" * 40}
     stale_terminal_claim = evaluate_disposition(
         {
