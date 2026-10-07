@@ -265,6 +265,24 @@ def test_wait_state_transitions() -> None:
         assert behavior_eval.check_wait(ROOT)["status"] == "FAIL"
 
 
+def test_continuation_policy_contract() -> None:
+    outcome = behavior_eval.check_continuity(ROOT)
+    if outcome != {"status": "PASS", "evidence": "CONTINUATION_POLICY_OK"}:
+        _fail("continuation policy contract did not pass")
+    base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
+    regressed = base.replace(
+        "Missing an ACTIVE packet is not a blocker",
+        "Fail closed if packet selection is missing or ambiguous.",
+    )
+    try:
+        behavior_eval._require_tokens(regressed, ("Missing an ACTIVE packet is not a blocker",))
+    except behavior_eval.EvalError as exc:
+        if exc.code != "MISSING_CONTRACT":
+            _fail(f"continuation regression returned {exc.code}")
+    else:
+        _fail("continuation packet regression was accepted")
+
+
 def test_trust_checker_does_not_import_verification_fixtures() -> None:
     text = TOOL.read_text(encoding="utf-8")
     if "test_verification_contract" in text:
@@ -304,6 +322,7 @@ def main() -> None:
     test_work_packet_boundaries()
     test_affected_parser_fails_closed()
     test_wait_state_transitions()
+    test_continuation_policy_contract()
     test_trust_checker_does_not_import_verification_fixtures()
     test_deterministic_run_passes()
     print("PASS behavior eval framework")
