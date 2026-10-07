@@ -717,6 +717,11 @@ def validate_worker_adapter_contract():
     ):
         if "work_admission.py disposition" not in text or "FINAL_ALLOWED=YES" not in text:
             raise SystemExit(f"FAIL {label} missing deterministic turn-closure gate")
+    agent_base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
+    if "Missing an ACTIVE packet is not a blocker" not in agent_base:
+        raise SystemExit("FAIL AI agent base reintroduced missing-packet blocker")
+    if "Fail closed if packet selection is missing or ambiguous." in agent_base:
+        raise SystemExit("FAIL AI agent base retains blanket packet-selection fail-closed rule")
     if ".engineering/execution-profile.yaml" not in provider_guidance:
         raise SystemExit("FAIL provider guidance missing selected-profile routing")
     print("PASS trusted worker external-write adapter contract")
