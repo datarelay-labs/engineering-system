@@ -711,6 +711,23 @@ scenarios:
       - "mandatory behavior failures block rollout and eval results omit prompt or source content"
     release_gate: true
 
+  - id: ENG-ACCESS-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Evidence-based access reporting and policy propagation
+    level: static
+    domains: [standards, templates, adoption]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_access_reporting_policy.py"
+    invariants:
+      - "access claims require discovery and scoped observed outcomes, never inferred permission denial"
+      - "managed policy propagation preserves local approvals and reports no live-agent compliance claim"
+    release_gate: true
+
   - id: ENG-BENCH-FIXTURE-001
     cost: cheap
     estimated_seconds: 3

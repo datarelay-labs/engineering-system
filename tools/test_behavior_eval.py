@@ -292,6 +292,8 @@ def test_deterministic_run_passes() -> None:
 
 
 def main() -> None:
+    from test_access_reporting_policy import run_checks
+    run_checks()
     test_catalog_rejects_missing_id()
     test_catalog_rejects_prompt_field()
     test_catalog_requires_the_benchmark_set()
