@@ -744,7 +744,13 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
     reconcile_required = False
     for index, item in enumerate(candidates_raw):
         candidate = _require_mapping(item, f"runnable_candidates[{index}]")
-        result = evaluate_eligible(candidate)
+        try:
+            result = evaluate_eligible(candidate)
+        except AdmissionFactsError:
+            # One malformed/stale dependency must not suppress independent
+            # runnable work. Preserve it as reconciliation evidence instead.
+            reconcile_required = True
+            continue
         if result.get("DECISION") == "ALLOW":
             runnable += 1
         elif result.get("DENY_CLASS") in TURN_RECONCILE_DENY_CLASSES:
