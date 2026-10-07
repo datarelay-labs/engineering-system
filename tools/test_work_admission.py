@@ -584,6 +584,9 @@ def test_turn_disposition_policy_surfaces() -> None:
         assert "FINAL_ALLOWED=YES" in body, rel
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     assert "repository instructions alone cannot create that platform capability" in session
+    base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
+    assert "Missing an ACTIVE packet is a scheduling input, not a blocker" in base
+    assert "Fail closed if packet selection is missing or ambiguous." not in base
 
 
 def test_turn_disposition_prevents_premature_final() -> None:
