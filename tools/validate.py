@@ -708,6 +708,15 @@ def validate_worker_adapter_contract():
     for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction)):
         if "standards/SESSION_CONTINUITY.md" not in text:
             raise SystemExit(f"FAIL {label} missing conditional continuity routing")
+    for label, text in (
+        ("AGENTS.md", agents),
+        ("templates/AGENTS.md", agents_template),
+        ("session continuity", session),
+        ("project instruction", project_instruction),
+        ("custom instruction", custom_instruction),
+    ):
+        if "work_admission.py disposition" not in text or "FINAL_ALLOWED=YES" not in text:
+            raise SystemExit(f"FAIL {label} missing deterministic turn-closure gate")
     if ".engineering/execution-profile.yaml" not in provider_guidance:
         raise SystemExit("FAIL provider guidance missing selected-profile routing")
     print("PASS trusted worker external-write adapter contract")

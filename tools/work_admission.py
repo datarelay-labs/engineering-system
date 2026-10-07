@@ -6,10 +6,11 @@ pure functions over packet/claim/worktree/resource facts. This tool never
 stops, kills, attaches to, or otherwise mutates existing worker sessions.
 
 Commands:
-  eligible ALLOW/DENY runnable packet selection from fresh packet and observed facts
-  admit   ALLOW/DENY starting a proposed worker claim
-  size    BATCH/KEEP/SPLIT handoff sizing from structured signals
-  release ALLOW/DENY claim release or worktree cleanup reconciliation
+  eligible    ALLOW/DENY runnable packet selection from fresh packet and observed facts
+  disposition CONTINUE/RECONCILE/ALLOW_FINAL/BLOCKED before ending continue/resume work
+  admit       ALLOW/DENY starting a proposed worker claim
+  size        BATCH/KEEP/SPLIT handoff sizing from structured signals
+  release     ALLOW/DENY claim release or worktree cleanup reconciliation
 
 Exit status:
   0  ALLOW (or sizing decision emitted)
@@ -65,6 +66,23 @@ REPORT_KEYS_RELEASE = (
     "ACTION",
     "CLAIM_ID",
     "MUTATES_EXISTING_SESSIONS",
+)
+
+REPORT_KEYS_DISPOSITION = (
+    "TURN_DISPOSITION",
+    "FINAL_ALLOWED",
+    "REASON",
+    "REQUEST_SCOPE",
+    "SCHEDULER_RECONCILED",
+    "REMAINING_STATE",
+    "CANDIDATE_COUNT",
+    "RUNNABLE_CANDIDATE_COUNT",
+    "MUTATES_EXISTING_SESSIONS",
+)
+
+TURN_REQUEST_SCOPES = frozenset({"repository", "workstream", "status-only"})
+TURN_REMAINING_STATES = frozenset(
+    {"COMPLETE", "NO_SAFE_RUNNABLE", "OWNER_REQUIRED", "IRRECONCILABLE", "UNKNOWN"}
 )
 
 
@@ -634,6 +652,157 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     return allow("repository-bound current-profile packet is runnable now")
 
 
+def _turn_disposition(
+    disposition: str,
+    *,
+    final_allowed: bool,
+    reason: str,
+    request_scope: str,
+    scheduler_reconciled: bool,
+    remaining_state: str,
+    candidate_count: int,
+    runnable_candidate_count: int,
+) -> dict[str, str]:
+    if disposition not in {"CONTINUE", "RECONCILE", "ALLOW_FINAL", "BLOCKED"}:
+        raise AdmissionFactsError("unknown turn disposition")
+    if final_allowed != (disposition in {"ALLOW_FINAL", "BLOCKED"}):
+        raise AdmissionFactsError("turn disposition final_allowed mismatch")
+    return {
+        "TURN_DISPOSITION": disposition,
+        "FINAL_ALLOWED": "YES" if final_allowed else "NO",
+        "REASON": reason,
+        "REQUEST_SCOPE": request_scope,
+        "SCHEDULER_RECONCILED": "YES" if scheduler_reconciled else "NO",
+        "REMAINING_STATE": remaining_state,
+        "CANDIDATE_COUNT": str(candidate_count),
+        "RUNNABLE_CANDIDATE_COUNT": str(runnable_candidate_count),
+        "MUTATES_EXISTING_SESSIONS": "NO",
+    }
+
+
+def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
+    """Decide whether a continue/resume turn may return control to the owner.
+
+    This is a pure pre-final oracle. It does not discover GitHub state itself,
+    launch work, or keep a chat alive. The caller must first reconcile fresh
+    repository/work-packet facts and supply each candidate through the same
+    eligible contract used for normal runnable selection.
+    """
+    data = _require_mapping(request, "request")
+    request_scope = _require_str(data.get("request_scope"), "request_scope").lower()
+    if request_scope not in TURN_REQUEST_SCOPES:
+        raise AdmissionFactsError(
+            "request_scope must be repository, workstream, or status-only"
+        )
+
+    # A status-only request never implied execution continuation.
+    if request_scope == "status-only":
+        return _turn_disposition(
+            "ALLOW_FINAL",
+            final_allowed=True,
+            reason="owner requested status only; no execution continuation is implied",
+            request_scope=request_scope,
+            scheduler_reconciled=False,
+            remaining_state="COMPLETE",
+            candidate_count=0,
+            runnable_candidate_count=0,
+        )
+
+    scheduler_value = data.get("scheduler_reconciled")
+    scheduler_hint = (
+        False
+        if scheduler_value is None
+        else _require_bool(scheduler_value, "scheduler_reconciled")
+    )
+    candidates_raw = _require_list(
+        data.get("runnable_candidates", []), "runnable_candidates"
+    )
+    runnable = 0
+    for index, item in enumerate(candidates_raw):
+        candidate = _require_mapping(item, f"runnable_candidates[{index}]")
+        result = evaluate_eligible(candidate)
+        if result.get("DECISION") == "ALLOW":
+            runnable += 1
+
+    # Independent runnable work always wins over a blocked/waiting lane.
+    if runnable:
+        return _turn_disposition(
+            "CONTINUE",
+            final_allowed=False,
+            reason="dependency-eligible runnable work remains",
+            request_scope=request_scope,
+            scheduler_reconciled=scheduler_hint,
+            remaining_state="UNKNOWN",
+            candidate_count=len(candidates_raw),
+            runnable_candidate_count=runnable,
+        )
+
+    if scheduler_value is None:
+        raise AdmissionFactsError(
+            "scheduler_reconciled is required when no runnable candidate was supplied"
+        )
+    scheduler_reconciled = scheduler_hint
+    remaining_state = _require_str(
+        data.get("remaining_state"), "remaining_state"
+    ).upper()
+    if remaining_state not in TURN_REMAINING_STATES:
+        raise AdmissionFactsError(
+            "remaining_state must be COMPLETE, NO_SAFE_RUNNABLE, OWNER_REQUIRED, "
+            "IRRECONCILABLE, or UNKNOWN"
+        )
+
+    if not scheduler_reconciled or remaining_state == "UNKNOWN":
+        return _turn_disposition(
+            "RECONCILE",
+            final_allowed=False,
+            reason="repository-level scheduling is not yet reconciled to a terminal state",
+            request_scope=request_scope,
+            scheduler_reconciled=scheduler_reconciled,
+            remaining_state=remaining_state,
+            candidate_count=len(candidates_raw),
+            runnable_candidate_count=0,
+        )
+
+    if remaining_state == "COMPLETE":
+        return _turn_disposition(
+            "ALLOW_FINAL",
+            final_allowed=True,
+            reason="requested execution objective is complete after fresh reconciliation",
+            request_scope=request_scope,
+            scheduler_reconciled=True,
+            remaining_state=remaining_state,
+            candidate_count=len(candidates_raw),
+            runnable_candidate_count=0,
+        )
+
+    if remaining_state == "NO_SAFE_RUNNABLE":
+        return _turn_disposition(
+            "ALLOW_FINAL",
+            final_allowed=True,
+            reason="fresh reconciliation found no safe dependency-eligible runnable work",
+            request_scope=request_scope,
+            scheduler_reconciled=True,
+            remaining_state=remaining_state,
+            candidate_count=len(candidates_raw),
+            runnable_candidate_count=0,
+        )
+
+    return _turn_disposition(
+        "BLOCKED",
+        final_allowed=True,
+        reason=(
+            "genuine owner input/credential/approval is required"
+            if remaining_state == "OWNER_REQUIRED"
+            else "an irreconcilable blocker remains after fresh reconciliation"
+        ),
+        request_scope=request_scope,
+        scheduler_reconciled=True,
+        remaining_state=remaining_state,
+        candidate_count=len(candidates_raw),
+        runnable_candidate_count=0,
+    )
+
+
 def format_report(fields: dict[str, str], keys: tuple[str, ...]) -> str:
     lines = []
     for key in keys:
@@ -666,6 +835,9 @@ def run_command(command: str, payload: dict[str, Any]) -> tuple[str, int]:
     if command == "eligible":
         report = evaluate_eligible(payload)
         return format_report(report, REPORT_KEYS_ADMIT), int(report["EXIT_CODE"])
+    if command == "disposition":
+        report = evaluate_disposition(payload)
+        return format_report(report, REPORT_KEYS_DISPOSITION), 0
     if command == "admit":
         report = evaluate_admit(payload)
         return format_report(report, REPORT_KEYS_ADMIT), int(report["EXIT_CODE"])
@@ -682,8 +854,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("eligible", "admit", "size", "release"),
-        help="Admission decision, handoff sizing, or claim release/cleanup",
+        choices=("eligible", "disposition", "admit", "size", "release"),
+        help="Runnable/turn disposition, admission, sizing, or claim release/cleanup",
     )
     parser.add_argument(
         "--request-json",

@@ -415,6 +415,23 @@ For implementation, hardening, audit, refactor, cleanup, and optimization work:
 4. A new audit round after sufficiency requires a new explicit trigger: a regression/failing oracle, incident evidence, a newly demonstrated exploit/path, a release requirement, or an explicit owner request.
 5. Completion of one workstream returns control to roadmap/portfolio priority. Under a repository-level continue request, this return is an internal scheduling transition, not a user-visible stop: select and execute the next dependency-eligible runnable roadmap/release workstream. Stop only when the roadmap/release objective is complete, no dependency-eligible runnable work remains, or genuine owner input/credentials/approval is required. Do not immediately reopen the same theme merely because its follow-up backlog is non-empty.
 
+## Turn closure disposition gate
+
+A repository-level continue/resume request has a stronger turn-closure condition than an ordinary bounded task. Completing one packet, PR, test phase, or implementation batch does not by itself permit the runtime to return control to the owner.
+
+Immediately before a final response to a continue/resume request:
+
+1. Reconcile fresh repository-level scheduling facts: current Work Packets, dependencies/waits, branch/HEAD/PR state, and the canonical roadmap/release state needed to decide whether safe runnable work remains.
+2. Represent each dependency-eligible candidate with the same fresh facts used by `tools/work_admission.py eligible`.
+3. Run `python3 tools/work_admission.py disposition --request-json <facts.json>`.
+4. Obey the result:
+   - `TURN_DISPOSITION=CONTINUE` or `RECONCILE`: `FINAL_ALLOWED=NO`; do not return a progress report as the final response. Continue the next runnable work or finish reconciliation.
+   - `TURN_DISPOSITION=ALLOW_FINAL`: `FINAL_ALLOWED=YES`; the requested objective is complete or fresh reconciliation found no safe runnable work.
+   - `TURN_DISPOSITION=BLOCKED`: `FINAL_ALLOWED=YES`; report the exact owner input/credential/approval or irreconcilable blocker. Independent runnable work would have produced `CONTINUE` instead.
+5. A status-only request is exempt because it does not authorize or imply execution continuation.
+
+The disposition helper is a pure oracle over supplied fresh facts. It does not launch workers, query GitHub, keep a ChatGPT response alive, or create background execution. Its purpose is to make premature turn termination deterministic and testable inside the existing Chat execution model. Durable Work Packet and Git/GitHub state remain the recovery boundary if the platform itself ends a response or context. A true autonomous outer loop that survives response boundaries requires a runtime/harness with lifecycle control; repository instructions alone cannot create that platform capability.
+
 ### Default depth budget
 
 Use a soft default for ordinary bounded work:
