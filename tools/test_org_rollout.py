@@ -142,8 +142,8 @@ def test_org_inventory_uses_legacy_compatible_paginated_json_lines() -> None:
         seen.extend(args)
         payload = "\n".join(
             (
-                json.dumps({"full_name": "org/a", "archived": False, "default_branch": "main", "clone_url": "https://example.invalid/a.git"}),
-                json.dumps({"full_name": "org/b", "archived": True, "default_branch": "stable", "clone_url": "https://example.invalid/b.git"}),
+                json.dumps({"full_name": "org/a", "archived": False, "default_branch": "main", "clone_url": "https://example.invalid/a.git", "ssh_url": "git@example.invalid:org/a.git"}),
+                json.dumps({"full_name": "org/b", "archived": True, "default_branch": "stable", "clone_url": "https://example.invalid/b.git", "ssh_url": "git@example.invalid:org/b.git"}),
             )
         )
         return subprocess.CompletedProcess(args, 0, stdout=payload + "\n")
@@ -159,6 +159,38 @@ def test_org_inventory_uses_legacy_compatible_paginated_json_lines() -> None:
     assert "--slurp" not in seen
     assert [item.full_name for item in records] == ["org/a", "org/b"]
     assert records[1].archived is True and records[1].default_branch == "stable"
+    assert records[0].ssh_url == "git@example.invalid:org/a.git"
+
+
+def test_checkout_prefers_ssh_remote_for_rollout_writes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        workdir = Path(tmp)
+        original = org_rollout.run_cmd
+        seen: list[str] = []
+
+        def fake_run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+            del cwd
+            seen.extend(args)
+            Path(args[-1]).mkdir(parents=True, exist_ok=True)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+
+        try:
+            org_rollout.run_cmd = fake_run_cmd
+            path = org_rollout.ensure_checkout(
+                org_rollout.RepoRecord(
+                    full_name="org/a",
+                    default_branch="main",
+                    clone_url="https://github.com/org/a.git",
+                    ssh_url="git@github.com:org/a.git",
+                ),
+                workdir,
+            )
+        finally:
+            org_rollout.run_cmd = original
+
+        assert path == workdir / "org__a"
+        assert "git@github.com:org/a.git" in seen
+        assert "https://github.com/org/a.git" not in seen
 
 
 def test_org_rollout_matrix() -> None:
@@ -998,6 +1030,7 @@ def main() -> int:
     test_rollout_rejects_stale_canonical_checkout_for_real_baseline()
     test_flatten_paginated_inventory()
     test_org_inventory_uses_legacy_compatible_paginated_json_lines()
+    test_checkout_prefers_ssh_remote_for_rollout_writes()
     test_intermediate_rollout_is_not_current_completion()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()
