@@ -415,22 +415,38 @@ For implementation, hardening, audit, refactor, cleanup, and optimization work:
 4. A new audit round after sufficiency requires a new explicit trigger: a regression/failing oracle, incident evidence, a newly demonstrated exploit/path, a release requirement, or an explicit owner request.
 5. Completion of one workstream returns control to roadmap/portfolio priority. Under a repository-level continue request, this return is an internal scheduling transition, not a user-visible stop: select and execute the next dependency-eligible runnable roadmap/release workstream. Stop only when the roadmap/release objective is complete, no dependency-eligible runnable work remains, or genuine owner input/credentials/approval is required. Do not immediately reopen the same theme merely because its follow-up backlog is non-empty.
 
-## Turn closure disposition gate
+## Turn continuation and actual runtime boundaries
 
-A repository-level continue/resume request has a stronger turn-closure condition than an ordinary bounded task. Completing one packet, PR, test phase, or implementation batch does not by itself permit the runtime to return control to the owner.
+Within an active owner-authorized continue/resume turn, do useful tool work first.
+After each verified batch, select the next safe runnable roadmap outcome rather than
+ending at a progress report. Do not add packet/admission ceremony to every command;
+status-only requests do not imply implementation.
 
-Immediately before a final response to a continue/resume request:
+If runtime, context, tool, safety, or owner boundaries stop execution while the roadmap
+remains incomplete, record the exact branch/HEAD, verified change/test result and
+next runnable action in the current workstream when durable continuity is needed.
+Return a truthful incomplete status. Do not say implementation continues in the
+background or treat completing a packet as completing the repository roadmap.
 
-1. Reconcile fresh repository-level scheduling facts: current Work Packets, dependencies/waits, branch/HEAD/PR state, and the canonical roadmap/release state needed to decide whether safe runnable work remains.
-2. Represent packet-backed candidates with the same fresh facts used by `tools/work_admission.py eligible`. If safe owner-authorized roadmap work is dependency-eligible but no ACTIVE packet exists yet, include its stable workstream name in `roadmap_runnable_work`; packet creation/repair is continuity bookkeeping and is not a prerequisite for recognizing runnable work.
-3. Treat stale/invalid candidate identity, HEAD, branch, lifecycle, or missing Next Action as reconciliation evidence, never as proof that no runnable work remains. Run `python3 tools/work_admission.py disposition --request-json <facts.json>`.
-4. Obey the result:
-   - `TURN_DISPOSITION=CONTINUE` or `RECONCILE`: `FINAL_ALLOWED=NO`; do not return a progress report as the final response. Continue the next runnable work or finish reconciliation.
-   - `TURN_DISPOSITION=ALLOW_FINAL`: `FINAL_ALLOWED=YES`; the requested objective is complete or fresh reconciliation found no safe runnable work.
-   - `TURN_DISPOSITION=BLOCKED`: `FINAL_ALLOWED=YES`; report the exact owner input/credential/approval or irreconcilable blocker. Independent runnable work would have produced `CONTINUE` instead.
-5. A status-only request is exempt because it does not authorize or imply execution continuation.
+For diagnostic scheduling, a collector may represent packet-backed candidates
+using the current `tools/work_admission.py eligible` facts. Safe authorized work
+without an ACTIVE packet may be represented by its workstream name under
+`roadmap_runnable_work`. Treat malformed or stale candidate facts as a need to
+reconcile that dependency, not as permission to discard independent runnable work.
 
-The disposition helper is a pure oracle over supplied fresh facts. It does not launch workers, query GitHub, keep a ChatGPT response alive, or create background execution. Its purpose is to make premature turn termination deterministic and testable inside the existing Chat execution model. Durable Work Packet and Git/GitHub state remain the recovery boundary if the platform itself ends a response or context. A true autonomous outer loop that survives response boundaries requires a runtime/harness with lifecycle control; repository instructions alone cannot create that platform capability.
+`tools/work_admission.py disposition --request-json <facts.json>` is an **optional
+pure scheduling diagnostic** when a caller has already collected fresh facts. Its
+`CONTINUE`, `RECONCILE` and `FINAL_ALLOWED` labels describe those supplied
+facts, **not** execution of any next action or authority over ChatGPT's final
+response. It does not query GitHub, launch a worker, schedule another model turn,
+or keep a ChatGPT turn alive. Unit tests of its classification cannot prove
+model obedience or autonomous continuation; repository instructions alone cannot
+create that platform capability.
+
+Unattended execution across ChatGPT response boundaries needs an actual authorized
+runtime/harness with lifecycle control and a tool-execution/checkpoint loop.
+Do not silently switch the execution profile or start another implementation
+runtime to simulate such a loop.
 
 ### Default depth budget
 

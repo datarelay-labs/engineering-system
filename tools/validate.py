@@ -708,16 +708,26 @@ def validate_worker_adapter_contract():
     for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction)):
         if "standards/SESSION_CONTINUITY.md" not in text:
             raise SystemExit(f"FAIL {label} missing conditional continuity routing")
-    for label, text in (
-        ("AGENTS.md", agents),
-        ("templates/AGENTS.md", agents_template),
-        ("session continuity", session),
-        ("project instruction", project_instruction),
-        ("custom instruction", custom_instruction),
-    ):
-        if "work_admission.py disposition" not in text or "FINAL_ALLOWED=YES" not in text:
-            raise SystemExit(f"FAIL {label} missing deterministic turn-closure gate")
+    # A classifier cannot enforce the platform turn lifecycle. Require the
+    # *specific* optional disposition guidance in each managed policy surface;
+    # unrelated uses of "optional" are not evidence of correct routing.
     agent_base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
+    expected_optional = (
+        ("AGENTS.md", agents, "`tools/work_admission.py disposition` is an optional pure scheduling diagnostic"),
+        ("templates/AGENTS.md", agents_template, "`tools/work_admission.py disposition` is an optional pure scheduling diagnostic"),
+        ("session continuity", session, "`tools/work_admission.py disposition --request-json <facts.json>` is an **optional pure scheduling diagnostic**"),
+        ("project instruction", project_instruction, "`tools/work_admission.py disposition` is optional scheduling analysis"),
+        ("custom instruction", custom_instruction, "`tools/work_admission.py disposition` is optional scheduling analysis"),
+        ("AI agent base", agent_base, "`tools/work_admission.py disposition` is optional scheduling analysis"),
+    )
+    for label, text, phrase in expected_optional:
+        compact = " ".join(text.split())
+        if compact.count("work_admission.py disposition") != 1 or phrase not in compact:
+            raise SystemExit(f"FAIL {label} missing precise optional disposition guidance")
+        if "FINAL_ALLOWED" not in text:
+            raise SystemExit(f"FAIL {label} missing disposition lifecycle limitation")
+        if "only `FINAL_ALLOWED=YES`" in text or "forbids a final response" in text:
+            raise SystemExit(f"FAIL {label} falsely claims pure oracle controls chat final response")
     if "Missing an ACTIVE packet is not a blocker" not in agent_base:
         raise SystemExit("FAIL AI agent base reintroduced missing-packet blocker")
     if "Fail closed if packet selection is missing or ambiguous." in agent_base:

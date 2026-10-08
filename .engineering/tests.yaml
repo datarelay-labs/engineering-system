@@ -574,7 +574,7 @@ scenarios:
     timeout_seconds: 60
     agent_default: true
     scope: static
-    name: Work admission, turn closure, and handoff sizing
+    name: Work admission, optional turn disposition, and handoff sizing
     level: static
     domains: [session-continuity]
     triggers: [affected, pr, preflight, release]
@@ -583,7 +583,7 @@ scenarios:
     invariants:
       - "second workers fail closed on ownership overlap or host budget pressure"
       - "handoff sizing chooses BATCH KEEP or SPLIT deterministically"
-      - "turn closure forbids final response while dependency-eligible runnable work remains"
+      - "optional disposition classifies supplied scheduling facts but cannot control ChatGPT final responses"
       - "unrelated sessions are never mutated to create capacity"
     release_gate: true
 

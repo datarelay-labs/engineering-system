@@ -24,8 +24,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 20
-GOVERNANCE_EPOCH = 6
+POLICY_EPOCH = 21
+GOVERNANCE_EPOCH = 7
 
 RULE_SURFACES = (
     "AGENTS.md",
