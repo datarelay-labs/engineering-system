@@ -422,8 +422,8 @@ A repository-level continue/resume request has a stronger turn-closure condition
 Immediately before a final response to a continue/resume request:
 
 1. Reconcile fresh repository-level scheduling facts: current Work Packets, dependencies/waits, branch/HEAD/PR state, and the canonical roadmap/release state needed to decide whether safe runnable work remains.
-2. Represent each dependency-eligible candidate with the same fresh facts used by `tools/work_admission.py eligible`.
-3. Run `python3 tools/work_admission.py disposition --request-json <facts.json>`.
+2. Represent packet-backed candidates with the same fresh facts used by `tools/work_admission.py eligible`. If safe owner-authorized roadmap work is dependency-eligible but no ACTIVE packet exists yet, include its stable workstream name in `roadmap_runnable_work`; packet creation/repair is continuity bookkeeping and is not a prerequisite for recognizing runnable work.
+3. Treat stale/invalid candidate identity, HEAD, branch, lifecycle, or missing Next Action as reconciliation evidence, never as proof that no runnable work remains. Run `python3 tools/work_admission.py disposition --request-json <facts.json>`.
 4. Obey the result:
    - `TURN_DISPOSITION=CONTINUE` or `RECONCILE`: `FINAL_ALLOWED=NO`; do not return a progress report as the final response. Continue the next runnable work or finish reconciliation.
    - `TURN_DISPOSITION=ALLOW_FINAL`: `FINAL_ALLOWED=YES`; the requested objective is complete or fresh reconciliation found no safe runnable work.

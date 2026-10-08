@@ -584,6 +584,10 @@ def test_turn_disposition_policy_surfaces() -> None:
         assert "FINAL_ALLOWED=YES" in body, rel
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     assert "repository instructions alone cannot create that platform capability" in session
+    assert "roadmap_runnable_work" in session
+    base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
+    assert "Missing an ACTIVE packet is not a blocker" in base
+    assert "Fail closed if packet selection is missing or ambiguous." not in base
 
 
 def test_turn_disposition_prevents_premature_final() -> None:
@@ -613,6 +617,85 @@ def test_turn_disposition_prevents_premature_final() -> None:
     )
     assert mixed["TURN_DISPOSITION"] == "CONTINUE"
     assert mixed["RUNNABLE_CANDIDATE_COUNT"] == "1"
+
+    packetless = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "roadmap_runnable_work": ["roadmap-next"],
+        }
+    )
+    assert packetless["TURN_DISPOSITION"] == "CONTINUE"
+    assert packetless["FINAL_ALLOWED"] == "NO"
+    assert packetless["CANDIDATE_COUNT"] == "1"
+    assert packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
+
+    # Non-mapping collector values must be isolated like malformed packet
+    # fields; they cannot suppress other safe runnable work.
+    for non_object in (None, "invalid", 123, [], False):
+        with_roadmap = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object],
+                "roadmap_runnable_work": ["roadmap-independent"],
+            }
+        )
+        assert with_roadmap["TURN_DISPOSITION"] == "CONTINUE"
+        assert with_roadmap["RUNNABLE_CANDIDATE_COUNT"] == "1"
+        with_packet = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object, facts],
+            }
+        )
+        assert with_packet["TURN_DISPOSITION"] == "CONTINUE"
+        assert with_packet["RUNNABLE_CANDIDATE_COUNT"] == "1"
+        only_invalid = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object],
+                "scheduler_reconciled": True,
+                "remaining_state": "COMPLETE",
+            }
+        )
+        assert only_invalid["TURN_DISPOSITION"] == "RECONCILE"
+        assert only_invalid["FINAL_ALLOWED"] == "NO"
+
+    malformed = dict(facts)
+    malformed.pop("observed_head")
+    malformed_with_packetless = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [malformed],
+            "roadmap_runnable_work": ["roadmap-independent"],
+        }
+    )
+    assert malformed_with_packetless["TURN_DISPOSITION"] == "CONTINUE"
+    assert malformed_with_packetless["FINAL_ALLOWED"] == "NO"
+    assert malformed_with_packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
+
+    malformed_only = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [malformed],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert malformed_only["TURN_DISPOSITION"] == "RECONCILE"
+    assert malformed_only["FINAL_ALLOWED"] == "NO"
+
+    stale = {**facts, "observed_head": "b" * 40}
+    stale_terminal_claim = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "runnable_candidates": [stale],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert stale_terminal_claim["TURN_DISPOSITION"] == "RECONCILE"
+    assert stale_terminal_claim["FINAL_ALLOWED"] == "NO"
+    assert stale_terminal_claim["SCHEDULER_RECONCILED"] == "NO"
 
     unreconciled = evaluate_disposition(
         {
@@ -688,6 +771,16 @@ def test_turn_disposition_prevents_premature_final() -> None:
             "runnable_candidates": [],
             "scheduler_reconciled": True,
             "remaining_state": "NOT_A_STATE",
+        },
+    )
+    assert code == 3
+    assert fields["DECISION"] == "DENY"
+
+    code, fields = run_cli(
+        "disposition",
+        {
+            "request_scope": "repository",
+            "roadmap_runnable_work": ["same", "same"],
         },
     )
     assert code == 3
