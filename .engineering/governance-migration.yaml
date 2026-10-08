@@ -9,4 +9,4 @@ rationale: Keep the canonical policy-freshness increment and adoption helper syn
   base-owned governance, security and user-acceptance boundaries.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 4f20cfb579d5e8a3cb5884d92be74b14c61ffb1a
+  head_blob_sha: bb38f78c861a77f007073b0643ef93ab994aff58
