@@ -629,6 +629,37 @@ def test_turn_disposition_prevents_premature_final() -> None:
     assert packetless["CANDIDATE_COUNT"] == "1"
     assert packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
 
+    # Non-mapping collector values must be isolated like malformed packet
+    # fields; they cannot suppress other safe runnable work.
+    for non_object in (None, "invalid", 123, [], False):
+        with_roadmap = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object],
+                "roadmap_runnable_work": ["roadmap-independent"],
+            }
+        )
+        assert with_roadmap["TURN_DISPOSITION"] == "CONTINUE"
+        assert with_roadmap["RUNNABLE_CANDIDATE_COUNT"] == "1"
+        with_packet = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object, facts],
+            }
+        )
+        assert with_packet["TURN_DISPOSITION"] == "CONTINUE"
+        assert with_packet["RUNNABLE_CANDIDATE_COUNT"] == "1"
+        only_invalid = evaluate_disposition(
+            {
+                "request_scope": "repository",
+                "runnable_candidates": [non_object],
+                "scheduler_reconciled": True,
+                "remaining_state": "COMPLETE",
+            }
+        )
+        assert only_invalid["TURN_DISPOSITION"] == "RECONCILE"
+        assert only_invalid["FINAL_ALLOWED"] == "NO"
+
     malformed = dict(facts)
     malformed.pop("observed_head")
     malformed_with_packetless = evaluate_disposition(

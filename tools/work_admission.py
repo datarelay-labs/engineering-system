@@ -743,8 +743,8 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
     runnable = len(roadmap_work)
     reconcile_required = False
     for index, item in enumerate(candidates_raw):
-        candidate = _require_mapping(item, f"runnable_candidates[{index}]")
         try:
+            candidate = _require_mapping(item, f"runnable_candidates[{index}]")
             result = evaluate_eligible(candidate)
         except AdmissionFactsError:
             # One malformed/stale dependency must not suppress independent
