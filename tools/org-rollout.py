@@ -46,6 +46,8 @@ STATES = (
 OVERRIDE_MANIFEST_VERSION = 1
 # A remote clone must never keep an audit or rollout process waiting indefinitely.
 CLONE_TIMEOUT_SECONDS = 60
+PR_DISCOVERY_TIMEOUT_SECONDS = 20
+PR_DISCOVERY_LIMIT = 1000
 
 # Scalar CLI flags shared by adopt/upgrade helpers.
 ADOPT_SCALAR_FLAGS = {
@@ -102,6 +104,14 @@ UPGRADE_SCALAR_FLAGS = {
 
 class CheckoutError(RuntimeError):
     """Per-repository checkout/clone failure that must not abort the org run."""
+
+
+class RolloutPRConflict(RuntimeError):
+    """An existing or unverified rollout PR blocks duplicate publication."""
+
+    def __init__(self, reason: str, urls: tuple[str, ...] = ()):
+        super().__init__(reason)
+        self.urls = urls
 
 
 @dataclass
@@ -191,14 +201,20 @@ def run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedPro
                 stdout=(output or "") + f"\nclone timed out after {CLONE_TIMEOUT_SECONDS}s",
             )
         return subprocess.CompletedProcess(args, proc.returncode, stdout=output)
-    return subprocess.run(
-        args,
-        cwd=str(cwd) if cwd else None,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=PR_DISCOVERY_TIMEOUT_SECONDS if args[:3] == ["gh", "pr", "list"] else None,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args, 124, stdout="open PR discovery timed out; not safe to publish a new rollout PR"
+        )
 
 
 def require_canonical_checkout_matches_baseline(target_baseline: str) -> None:
@@ -652,9 +668,58 @@ def commit_rollout_changes(root: Path, message: str) -> bool:
     return True
 
 
+def require_no_open_rollout_pr(root: Path, branch_name: str) -> None:
+    """Read-only discovery; an existing rollout must be reconciled, not duplicated."""
+    args = [
+        "gh", "pr", "list", "--state", "open",
+        "--limit", str(PR_DISCOVERY_LIMIT),
+        "--json", "title,url,headRefName",
+    ]
+    try:
+        result = run_cmd(args, cwd=root)
+    except OSError as exc:
+        raise RolloutPRConflict(
+            f"Cannot verify existing open rollout PRs: CLI unavailable ({exc})"
+        ) from exc
+    if result.returncode != 0:
+        raise RolloutPRConflict(
+            "Cannot verify existing open rollout PRs; refusing duplicate publication: "
+            + (result.stdout.strip() or f"gh exit {result.returncode}")
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RolloutPRConflict(f"Cannot verify existing open rollout PRs: invalid JSON ({exc})") from exc
+    if not isinstance(payload, list) or len(payload) >= PR_DISCOVERY_LIMIT:
+        raise RolloutPRConflict("Open PR inventory invalid or truncated; refusing duplicate publication")
+    matched: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise RolloutPRConflict("Open PR inventory includes invalid records")
+        title = item.get("title")
+        head = item.get("headRefName")
+        if not isinstance(title, str) or not isinstance(head, str):
+            raise RolloutPRConflict("Open PR inventory is missing title/branch")
+        if (
+            title.startswith(("Upgrade Engineering System to ", "Adopt Engineering System "))
+            or head == branch_name
+        ):
+            url = item.get("url")
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise RolloutPRConflict("Matched open rollout PR lacks a valid URL")
+            matched.append(url)
+    if matched:
+        urls = tuple(dict.fromkeys(matched))
+        raise RolloutPRConflict(
+            "Existing open Engineering System rollout PR(s) require reconciliation: "
+            + ", ".join(urls), urls
+        )
+
+
 def maybe_create_pr(root: Path, branch_name: str, title: str, body: str, create_pr: bool) -> str:
     if not create_pr:
         return ""
+    require_no_open_rollout_pr(root, branch_name)
     push = run_git(root, "push", "-u", "origin", branch_name)
     if push.returncode != 0:
         raise SystemExit(f"FAIL push rollout branch: {push.stdout.strip()}")
@@ -924,6 +989,16 @@ def process_repo(
         return result
 
     branch_name = f"{branch_prefix}{target_version.replace('.', '-')}"
+    if create_pr:
+        # Before modifying the temporary clone, reconcile existing rollout PRs.
+        try:
+            require_no_open_rollout_pr(root, branch_name)
+        except RolloutPRConflict as exc:
+            result.action = "NEEDS_INPUT"
+            result.outcome = "NEEDS_INPUT"
+            result.detail = str(exc)
+            result.pr_url = exc.urls[0] if exc.urls else ""
+            return result
     try:
         create_rollout_branch(root, record.default_branch, branch_name)
     except SystemExit as exc:
@@ -956,17 +1031,24 @@ def process_repo(
             root,
             f"chore: upgrade Engineering System adoption to {target_version}",
         )
-        result.pr_url = maybe_create_pr(
-            root,
-            branch_name,
-            f"Upgrade Engineering System to {target_version}",
-            (
-                f"Automated org-wide rollout upgrade for `{record.full_name}`.\n\n"
-                f"Target version: `{target_version}`\n"
-                f"Baseline: `{target_baseline}`\n"
-            ),
-            create_pr,
-        )
+        try:
+            result.pr_url = maybe_create_pr(
+                root,
+                branch_name,
+                f"Upgrade Engineering System to {target_version}",
+                (
+                    f"Automated org-wide rollout upgrade for `{record.full_name}`.\n\n"
+                    f"Target version: `{target_version}`\n"
+                    f"Baseline: `{target_baseline}`\n"
+                ),
+                create_pr,
+            )
+        except RolloutPRConflict as exc:
+            result.action = "NEEDS_INPUT"
+            result.outcome = "NEEDS_INPUT"
+            result.detail = str(exc)
+            result.pr_url = exc.urls[0] if exc.urls else ""
+            return result
         result.outcome = "APPLIED"
         result.version = target_version
         result.baseline = target_baseline
@@ -991,17 +1073,24 @@ def process_repo(
             root,
             f"chore: adopt Engineering System {target_version}",
         )
-        result.pr_url = maybe_create_pr(
-            root,
-            branch_name,
-            f"Adopt Engineering System {target_version}",
-            (
-                f"Automated org-wide rollout adoption for `{record.full_name}`.\n\n"
-                f"Target version: `{target_version}`\n"
-                f"Baseline: `{target_baseline}`\n"
-            ),
-            create_pr,
-        )
+        try:
+            result.pr_url = maybe_create_pr(
+                root,
+                branch_name,
+                f"Adopt Engineering System {target_version}",
+                (
+                    f"Automated org-wide rollout adoption for `{record.full_name}`.\n\n"
+                    f"Target version: `{target_version}`\n"
+                    f"Baseline: `{target_baseline}`\n"
+                ),
+                create_pr,
+            )
+        except RolloutPRConflict as exc:
+            result.action = "NEEDS_INPUT"
+            result.outcome = "NEEDS_INPUT"
+            result.detail = str(exc)
+            result.pr_url = exc.urls[0] if exc.urls else ""
+            return result
         result.state = "CURRENT"
         result.action = "ADOPT"
         result.outcome = "APPLIED"

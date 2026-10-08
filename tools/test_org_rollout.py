@@ -289,6 +289,179 @@ def test_read_only_checkout_timeout_is_reported_per_repository() -> None:
         assert "clone timed out" in outcome.detail
 
 
+def test_existing_rollout_prs_block_duplicate_publication() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_cmd = org_rollout.run_cmd
+        original_git = org_rollout.run_git
+        seen: list[str] = []
+        payload = [
+            {"title": "Upgrade Engineering System to 1.7.0",
+             "url": "https://github.com/example/demo/pull/10",
+             "headRefName": "upgrade/old"},
+            {"title": "Upgrade Engineering System to 1.7.0",
+             "url": "https://github.com/example/demo/pull/11",
+             "headRefName": "upgrade/other"},
+        ]
+
+        def fake_cmd(args, cwd=None):
+            del cwd
+            seen.append(" ".join(args[:3]))
+            assert args[:3] == ["gh", "pr", "list"], args
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(payload))
+
+        def forbidden_git(*args, **kwargs):
+            raise AssertionError("conflict must be detected before remote push")
+
+        try:
+            org_rollout.run_cmd = fake_cmd
+            org_rollout.run_git = forbidden_git
+            try:
+                org_rollout.maybe_create_pr(
+                    root, "chore/engineering-system-rollout-1-7-0",
+                    "Upgrade Engineering System to 1.7.0", "baseline", True,
+                )
+            except org_rollout.RolloutPRConflict as exc:
+                assert len(exc.urls) == 2
+                assert "pull/10" in str(exc) and "pull/11" in str(exc)
+            else:
+                raise AssertionError("older open rollout PRs must block a new one")
+            assert seen == ["gh pr list"]
+        finally:
+            org_rollout.run_cmd = original_cmd
+            org_rollout.run_git = original_git
+
+
+def test_pr_discovery_failure_is_per_repository_needs_input() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        record = org_rollout.RepoRecord(full_name="example/demo", local_path=str(root))
+        original_guard = org_rollout.require_no_open_rollout_pr
+        original_classify = org_rollout.classify_checkout
+        original_branch = org_rollout.create_rollout_branch
+
+        def existing(*args):
+            raise org_rollout.RolloutPRConflict(
+                "Existing rollout requires reconciliation",
+                ("https://github.com/example/demo/pull/10",),
+            )
+
+        def no_branch(*args):
+            raise AssertionError("conflicting repo must not create a rollout branch")
+
+        try:
+            org_rollout.require_no_open_rollout_pr = existing
+            org_rollout.classify_checkout = lambda *args: org_rollout.RepoResult(
+                full_name="", state="OUTDATED", action="UPGRADE",
+                version="1.7.0", baseline=BASELINE, mode="adopted",
+            )
+            org_rollout.create_rollout_branch = no_branch
+            result = org_rollout.process_repo(
+                record, apply=True, include_archived=False,
+                target_version="1.7.0", target_baseline=NEW_BASELINE,
+                branch_prefix="chore/engineering-system-rollout-",
+                workdir=root, create_pr=True, override={},
+            )
+        finally:
+            org_rollout.require_no_open_rollout_pr = original_guard
+            org_rollout.classify_checkout = original_classify
+            org_rollout.create_rollout_branch = original_branch
+        assert result.state == "OUTDATED"
+        assert result.action == "NEEDS_INPUT"
+        assert result.outcome == "NEEDS_INPUT"
+        assert result.pr_url.endswith("/pull/10")
+        assert not result.branch
+
+
+def test_empty_and_invalid_pr_inventory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_cmd = org_rollout.run_cmd
+        original_git = org_rollout.run_git
+        seen: list[str] = []
+        response = {"code": 0, "body": "[]"}
+
+        def fake_cmd(args, cwd=None):
+            del cwd
+            seen.append(" ".join(args[:3]))
+            if args[:3] == ["gh", "pr", "list"]:
+                return subprocess.CompletedProcess(args, response["code"], stdout=response["body"])
+            if args[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(
+                    args, 0, stdout="https://github.com/example/demo/pull/12"
+                )
+            raise AssertionError(args)
+
+        def fake_git(root, *args):
+            assert args[:3] == ("push", "-u", "origin"), args
+            seen.append("push")
+            return subprocess.CompletedProcess(args, 0, stdout="")
+
+        try:
+            org_rollout.run_cmd = fake_cmd
+            org_rollout.run_git = fake_git
+            url = org_rollout.maybe_create_pr(
+                root, "chore/engineering-system-rollout-1-7-0",
+                "Upgrade Engineering System to 1.7.0", "baseline", True,
+            )
+            assert url.endswith("/pull/12")
+            assert seen == ["gh pr list", "push", "gh pr create"]
+            seen.clear()
+
+            for code, output in ((124, "timeout"), (0, "not json"), (0, "{}")):
+                response.update(code=code, body=output)
+                try:
+                    org_rollout.maybe_create_pr(
+                        root, "chore/engineering-system-rollout-1-7-0",
+                        "Upgrade Engineering System to 1.7.0", "baseline", True,
+                    )
+                except org_rollout.RolloutPRConflict:
+                    pass
+                else:
+                    raise AssertionError("unsafe/unverified PR discovery must fail closed")
+                assert seen == ["gh pr list"], seen
+                seen.clear()
+            def missing_gh(args, cwd=None):
+                raise FileNotFoundError("gh tool not present")
+            org_rollout.run_cmd = missing_gh
+            try:
+                org_rollout.maybe_create_pr(
+                    root, "chore/engineering-system-rollout-1-7-0",
+                    "Upgrade Engineering System to 1.7.0", "baseline", True,
+                )
+            except org_rollout.RolloutPRConflict as exc:
+                assert "CLI unavailable" in str(exc)
+            else:
+                raise AssertionError("missing GitHub CLI must fail closed")
+            assert not seen
+        finally:
+            org_rollout.run_cmd = original_cmd
+            org_rollout.run_git = original_git
+
+
+def test_pr_list_timeout_is_bounded() -> None:
+    import os
+    import time
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp) / "gh"
+        fake.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
+        fake.chmod(0o755)
+        previous = os.environ.get("PATH", "")
+        timeout = org_rollout.PR_DISCOVERY_TIMEOUT_SECONDS
+        try:
+            os.environ["PATH"] = str(tmp) + os.pathsep + previous
+            org_rollout.PR_DISCOVERY_TIMEOUT_SECONDS = 0.2
+            started = time.monotonic()
+            report = org_rollout.run_cmd(["gh", "pr", "list", "--state", "open"])
+            duration = time.monotonic() - started
+        finally:
+            org_rollout.PR_DISCOVERY_TIMEOUT_SECONDS = timeout
+            os.environ["PATH"] = previous
+        assert report.returncode == 124
+        assert "timed out" in report.stdout
+        assert duration < 3, duration
+
+
 def test_org_rollout_matrix() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -1130,6 +1303,10 @@ def main() -> int:
     test_read_only_checkout_prefers_https_and_can_fallback()
     test_clone_timeout_is_bounded_without_an_interactive_prompt()
     test_read_only_checkout_timeout_is_reported_per_repository()
+    test_existing_rollout_prs_block_duplicate_publication()
+    test_pr_discovery_failure_is_per_repository_needs_input()
+    test_empty_and_invalid_pr_inventory()
+    test_pr_list_timeout_is_bounded()
     test_intermediate_rollout_is_not_current_completion()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()

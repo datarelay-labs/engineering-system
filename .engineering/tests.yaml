@@ -694,6 +694,7 @@ scenarios:
     command: "python3 tools/test_org_rollout.py"
     invariants:
       - "org rollout defaults to audit and reuses adopt/upgrade helpers"
+      - "existing rollout PRs block duplicate publication, preserving per-repo NEEDS_INPUT and no-remote-write behavior"
     release_gate: true
 
   - id: ENG-BEHAVIOR-001
