@@ -1,15 +1,12 @@
 contract_version: 2
-from_governance_epoch: 5
-to_governance_epoch: 6
-base_sha: 2c73cdd52b98db4143b379730ee0c69d284f80e8
+from_governance_epoch: 6
+to_governance_epoch: 7
+base_sha: e3f5ec50ae16b229b62363a50e1c74ac33727b04
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Restore base-verifier-compatible legacy bridging and safely propagate scoped
-  autonomy instructions; preserve production and user-acceptance boundaries.
+rationale: Keep the canonical policy-freshness increment and adoption helper synchronized
+  while correcting misleading Chat turn-closure enforcement claims; preserve the
+  base-owned governance, security and user-acceptance boundaries.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: b083512bc60ce99b83f65a6331c3e6c3879aaf2b
-- path: tools/check-adoption.py
-  head_blob_sha: 1cbec8195d5ff044bc47988b563598ae1e1577ea
-- path: tools/upgrade-adoption.py
-  head_blob_sha: 44bda1b83697406ffa264b37eb2624fb17d2f12b
+  head_blob_sha: 4f20cfb579d5e8a3cb5884d92be74b14c61ffb1a

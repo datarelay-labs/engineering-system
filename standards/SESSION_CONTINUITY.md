@@ -428,13 +428,20 @@ next runnable action in the current workstream when durable continuity is needed
 Return a truthful incomplete status. Do not say implementation continues in the
 background or treat completing a packet as completing the repository roadmap.
 
+For diagnostic scheduling, a collector may represent packet-backed candidates
+using the current `tools/work_admission.py eligible` facts. Safe authorized work
+without an ACTIVE packet may be represented by its workstream name under
+`roadmap_runnable_work`. Treat malformed or stale candidate facts as a need to
+reconcile that dependency, not as permission to discard independent runnable work.
+
 `tools/work_admission.py disposition --request-json <facts.json>` is an **optional
 pure scheduling diagnostic** when a caller has already collected fresh facts. Its
 `CONTINUE`, `RECONCILE` and `FINAL_ALLOWED` labels describe those supplied
 facts, **not** execution of any next action or authority over ChatGPT's final
 response. It does not query GitHub, launch a worker, schedule another model turn,
 or keep a ChatGPT turn alive. Unit tests of its classification cannot prove
-model obedience or autonomous continuation.
+model obedience or autonomous continuation; repository instructions alone cannot
+create that platform capability.
 
 Unattended execution across ChatGPT response boundaries needs an actual authorized
 runtime/harness with lifecycle control and a tool-execution/checkpoint loop.
