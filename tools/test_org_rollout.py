@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import time
 import subprocess
 import sys
 import tempfile
@@ -191,6 +193,100 @@ def test_checkout_prefers_ssh_remote_for_rollout_writes() -> None:
         assert path == workdir / "org__a"
         assert "git@github.com:org/a.git" in seen
         assert "https://github.com/org/a.git" not in seen
+
+
+def test_read_only_checkout_prefers_https_and_can_fallback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        workdir = Path(tmp)
+        record = org_rollout.RepoRecord(
+            full_name="org/a",
+            default_branch="main",
+            clone_url="https://github.com/org/a.git",
+            ssh_url="git@github.com:org/a.git",
+        )
+        original = org_rollout.run_cmd
+        urls: list[str] = []
+        https_fails = False
+
+        def fake_clone(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+            del cwd
+            urls.append(args[-2])
+            if https_fails and args[-2].startswith("https://"):
+                Path(args[-1]).mkdir(parents=True, exist_ok=True)
+                return subprocess.CompletedProcess(args, 128, stdout="read-only HTTPS auth unavailable")
+            Path(args[-1]).mkdir(parents=True, exist_ok=True)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+
+        try:
+            org_rollout.run_cmd = fake_clone
+            dest = org_rollout.ensure_checkout(record, workdir, read_only=True)
+            assert dest == workdir / "org__a"
+            assert urls == ["https://github.com/org/a.git"]
+            https_fails = True
+            urls.clear()
+            dest = org_rollout.ensure_checkout(record, workdir, read_only=True)
+            assert dest == workdir / "org__a"
+            assert urls == ["https://github.com/org/a.git", "git@github.com:org/a.git"]
+            urls.clear()
+            org_rollout.ensure_checkout(record, workdir, read_only=False)
+            assert urls == ["git@github.com:org/a.git"]
+        finally:
+            org_rollout.run_cmd = original
+
+
+def test_clone_timeout_is_bounded_without_an_interactive_prompt() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_git = Path(tmp) / "git"
+        fake_git.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
+        fake_git.chmod(0o755)
+        before_path = os.environ.get("PATH", "")
+        before_limit = org_rollout.CLONE_TIMEOUT_SECONDS
+        try:
+            os.environ["PATH"] = str(tmp) + os.pathsep + before_path
+            org_rollout.CLONE_TIMEOUT_SECONDS = 0.2
+            started = time.monotonic()
+            completed = org_rollout.run_cmd(
+                ["git", "clone", "--depth", "1", "git@github.com:org/hung.git", str(Path(tmp) / "clone")]
+            )
+            duration = time.monotonic() - started
+        finally:
+            org_rollout.CLONE_TIMEOUT_SECONDS = before_limit
+            os.environ["PATH"] = before_path
+        assert completed.returncode == 124, completed
+        assert "clone timed out" in completed.stdout, completed.stdout
+        assert duration < 3, duration
+
+
+def test_read_only_checkout_timeout_is_reported_per_repository() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        original = org_rollout.run_cmd
+
+        def failed_clone(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+            del cwd
+            return subprocess.CompletedProcess(args, 124, stdout="clone timed out after 60s")
+
+        try:
+            org_rollout.run_cmd = failed_clone
+            outcome = org_rollout.process_repo(
+                org_rollout.RepoRecord(
+                    full_name="org/hung",
+                    clone_url="https://github.com/org/hung.git",
+                ),
+                apply=False,
+                include_archived=False,
+                target_version="1.7.0",
+                target_baseline=BASELINE,
+                branch_prefix="chore/rollout-",
+                workdir=Path(tmp),
+                create_pr=False,
+                override={},
+            )
+        finally:
+            org_rollout.run_cmd = original
+        assert outcome.state == "ERROR"
+        assert outcome.action == "NEEDS_INPUT"
+        assert outcome.outcome == "FAIL"
+        assert "clone timed out" in outcome.detail
 
 
 def test_org_rollout_matrix() -> None:
@@ -1031,6 +1127,9 @@ def main() -> int:
     test_flatten_paginated_inventory()
     test_org_inventory_uses_legacy_compatible_paginated_json_lines()
     test_checkout_prefers_ssh_remote_for_rollout_writes()
+    test_read_only_checkout_prefers_https_and_can_fallback()
+    test_clone_timeout_is_bounded_without_an_interactive_prompt()
+    test_read_only_checkout_timeout_is_reported_per_repository()
     test_intermediate_rollout_is_not_current_completion()
     test_org_rollout_matrix()
     test_same_version_different_baseline_is_outdated()

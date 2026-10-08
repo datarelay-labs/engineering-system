@@ -12,7 +12,9 @@ reviewed organization while preserving per-repository fail-closed behavior.
 from __future__ import annotations
 
 import argparse
+import os
 import json
+import signal
 import re
 import shutil
 import subprocess
@@ -42,6 +44,8 @@ STATES = (
 )
 
 OVERRIDE_MANIFEST_VERSION = 1
+# A remote clone must never keep an audit or rollout process waiting indefinitely.
+CLONE_TIMEOUT_SECONDS = 60
 
 # Scalar CLI flags shared by adopt/upgrade helpers.
 ADOPT_SCALAR_FLAGS = {
@@ -152,6 +156,41 @@ def run_git(root: Path, *args: str, check: bool = False) -> subprocess.Completed
 
 
 def run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    if args[:2] == ["git", "clone"]:
+        # Both the git process and its SSH child must be bounded.  Use a new
+        # process group so a timed-out SSH cannot outlive the failed checkout.
+        environment = os.environ.copy()
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment.setdefault(
+            "GIT_SSH_COMMAND",
+            "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10",
+        )
+        try:
+            proc = subprocess.Popen(
+                args,
+                cwd=str(cwd) if cwd else None,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return subprocess.CompletedProcess(args, 127, stdout=f"clone start failed: {exc}")
+        try:
+            output, _ = proc.communicate(timeout=CLONE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            output, _ = proc.communicate()
+            return subprocess.CompletedProcess(
+                args, 124,
+                stdout=(output or "") + f"\nclone timed out after {CLONE_TIMEOUT_SECONDS}s",
+            )
+        return subprocess.CompletedProcess(args, proc.returncode, stdout=output)
     return subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
@@ -541,35 +580,46 @@ def classify_checkout(root: Path, target_version: str, target_baseline: str) -> 
     )
 
 
-def ensure_checkout(record: RepoRecord, workdir: Path) -> Path:
+def ensure_checkout(record: RepoRecord, workdir: Path, *, read_only: bool = False) -> Path:
     if record.local_path:
         path = Path(record.local_path).expanduser().resolve()
         if not path.is_dir():
             raise CheckoutError(f"local_path missing for {record.full_name}: {path}")
         return path
 
-    remote_url = record.ssh_url or record.clone_url
-    if not remote_url:
+    # Audits prefer HTTPS to avoid interactive SSH host-key prompts, but may
+    # use an independently configured SSH remote if HTTPS auth fails. Write
+    # rollouts keep the SSH-first route needed for workflow file updates.
+    remote_urls = (
+        [record.clone_url, record.ssh_url]
+        if read_only
+        else [record.ssh_url or record.clone_url]
+    )
+    remote_urls = [url for url in remote_urls if url]
+    if not remote_urls:
         raise CheckoutError(f"no ssh_url, clone_url, or local_path for {record.full_name}")
 
     dest = workdir / record.full_name.replace("/", "__")
-    if dest.exists():
-        shutil.rmtree(dest)
-    completed = run_cmd(
-        [
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            record.default_branch,
-            remote_url,
-            str(dest),
-        ]
-    )
-    if completed.returncode != 0:
-        raise CheckoutError(f"clone {record.full_name}: {completed.stdout.strip()}")
-    return dest
+    failures: list[str] = []
+    for remote_url in remote_urls:
+        if dest.exists():
+            shutil.rmtree(dest)
+        completed = run_cmd(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                record.default_branch,
+                remote_url,
+                str(dest),
+            ]
+        )
+        if completed.returncode == 0:
+            return dest
+        failures.append(completed.stdout.strip() or f"exit code {completed.returncode}")
+    raise CheckoutError(f"clone {record.full_name}: " + "; ".join(failures))
 
 
 def create_rollout_branch(root: Path, default_branch: str, branch_name: str) -> None:
@@ -774,7 +824,7 @@ def process_repo(
         )
 
     try:
-        root = ensure_checkout(record, workdir)
+        root = ensure_checkout(record, workdir, read_only=not apply)
     except CheckoutError as exc:
         return RepoResult(
             full_name=record.full_name,
