@@ -581,12 +581,16 @@ def test_turn_disposition_policy_surfaces() -> None:
     for rel in required:
         body = (ROOT / rel).read_text(encoding="utf-8")
         assert "work_admission.py disposition" in body, rel
-        assert "FINAL_ALLOWED=YES" in body, rel
+        assert "optional" in body.lower(), rel
+        assert "FINAL_ALLOWED" in body, rel
+        assert "only `FINAL_ALLOWED=YES`" not in body, rel
+        assert "forbids a final response" not in body, rel
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
-    assert "repository instructions alone cannot create that platform capability" in session
+    assert "keep a ChatGPT turn alive" in session
+    assert "Unit tests of its classification cannot prove" in session
 
 
-def test_turn_disposition_prevents_premature_final() -> None:
+def test_turn_disposition_classifies_supplied_facts() -> None:
     facts = eligible_facts()
 
     status = evaluate_disposition({"request_scope": "status-only"})
@@ -696,7 +700,7 @@ def test_turn_disposition_prevents_premature_final() -> None:
 
 def main() -> int:
     test_turn_disposition_policy_surfaces()
-    test_turn_disposition_prevents_premature_final()
+    test_turn_disposition_classifies_supplied_facts()
     test_runnable_selection_excludes_stale_waiting_and_terminal_packets()
     test_paths_overlap()
     test_p1b_admission_001_cross_repo_unisolated_shared_runtime()
