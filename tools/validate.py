@@ -708,6 +708,8 @@ def validate_worker_adapter_contract():
     for label, text in (("project instruction", project_instruction), ("custom instruction", custom_instruction)):
         if "standards/SESSION_CONTINUITY.md" not in text:
             raise SystemExit(f"FAIL {label} missing conditional continuity routing")
+    # A pure disposition helper cannot enforce the ChatGPT platform's turn
+    # lifecycle. Keep its optional diagnostic routing without fake final gates.
     for label, text in (
         ("AGENTS.md", agents),
         ("templates/AGENTS.md", agents_template),
@@ -715,8 +717,12 @@ def validate_worker_adapter_contract():
         ("project instruction", project_instruction),
         ("custom instruction", custom_instruction),
     ):
-        if "work_admission.py disposition" not in text or "FINAL_ALLOWED=YES" not in text:
-            raise SystemExit(f"FAIL {label} missing deterministic turn-closure gate")
+        if "work_admission.py disposition" not in text or "optional" not in text.lower():
+            raise SystemExit(f"FAIL {label} missing optional disposition routing")
+        if "FINAL_ALLOWED" not in text:
+            raise SystemExit(f"FAIL {label} missing disposition lifecycle limitation")
+        if "only `FINAL_ALLOWED=YES`" in text or "forbids a final response" in text:
+            raise SystemExit(f"FAIL {label} falsely claims pure oracle controls chat final response")
     agent_base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
     if "Missing an ACTIVE packet is not a blocker" not in agent_base:
         raise SystemExit("FAIL AI agent base reintroduced missing-packet blocker")

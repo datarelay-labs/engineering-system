@@ -7,7 +7,7 @@ stops, kills, attaches to, or otherwise mutates existing worker sessions.
 
 Commands:
   eligible    ALLOW/DENY runnable packet selection from fresh packet and observed facts
-  disposition CONTINUE/RECONCILE/ALLOW_FINAL/BLOCKED before ending continue/resume work
+  disposition Optional CONTINUE/RECONCILE/ALLOW_FINAL/BLOCKED scheduling classification
   admit       ALLOW/DENY starting a proposed worker claim
   size        BATCH/KEEP/SPLIT handoff sizing from structured signals
   release     ALLOW/DENY claim release or worktree cleanup reconciliation
@@ -692,10 +692,10 @@ def _turn_disposition(
 
 
 def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
-    """Decide whether a continue/resume turn may return control to the owner.
+    """Classify supplied continue/resume scheduling facts, not a ChatGPT response.
 
-    This is a pure pre-final oracle. It does not discover GitHub state itself,
-    launch work, or keep a chat alive. The caller must first reconcile fresh
+    This optional pure oracle does not discover GitHub state itself, launch
+    work, prevent model final answers, or keep a chat alive. The caller must first reconcile fresh
     repository/work-packet facts and supply each candidate through the same
     eligible contract used for normal runnable selection.
     """
