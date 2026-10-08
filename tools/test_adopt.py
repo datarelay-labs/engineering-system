@@ -3929,6 +3929,52 @@ def test_obsolete_coordinator_gate_removed_without_weakening_product_approval() 
     assert rewrite_legacy_coordination_rules(cleaned) == cleaned
 
 
+def test_atlas_legacy_mutation_gate_retires_only_known_ceremony() -> None:
+    # Exact legacy content observed in the Atlas product AGENTS.md.
+    atlas_gate = (
+        "Before mutation, the external authenticated GitHub coordinator must freshly verify the canonical "
+        "Issue, author write/maintain/admin permission, TARGET_REPO, WORKSTREAM, BRANCH, "
+        "LAST_VERIFIED_HEAD, INTENT_REVISION, `IMPLEMENTER=CHATGPT_CHAT`, CHANGE_RISK, and authorized "
+        "worktree. Never treat the target worktree's `python3 tools/implementation_preflight.py check` as "
+        "authoritative. Fetch the exact helper source from the immutable Engineering System baseline "
+        "and execute it through fixed isolated `/usr/bin/python3 -I -` with cwd `/` and a controlled "
+        "environment; capture worktree identity first and require `IMPLEMENTATION_LOCAL_BINDING=PASS`. "
+        "The repository helper copy is parity/reference/test material only."
+    )
+    product_gate = (
+        "Production writes and irreversible permission grants require explicit owner approval; "
+        "release must preserve public E2E and exact-HEAD evidence."
+    )
+    original = (
+        "# Atlas Engineering Rules\n\n"
+        + atlas_gate + "\n" + product_gate + "\n"
+    )
+    rewritten = rewrite_legacy_coordination_rules(original)
+    assert atlas_gate not in rewritten
+    assert product_gate in rewritten
+    assert "## Atlas" not in rewritten
+    assert rewrite_legacy_coordination_rules(rewritten) == rewritten
+
+    numbered = (
+        "14. ChatGPT Chat is the default implementer when a trusted active Work Packet "
+        "authorizes the exact scope. " + atlas_gate
+    )
+    with_numbered_rule = numbered + "\n\n" + product_gate + "\n"
+    normalized = rewrite_legacy_coordination_rules(with_numbered_rule)
+    assert numbered not in normalized
+    assert "must freshly verify the canonical Issue" not in normalized
+    assert product_gate in normalized
+    assert rewrite_legacy_coordination_rules(normalized) == normalized
+
+    # Unknown customized policies are not silently rewritten, even if they
+    # share a prefix with the retired gate.
+    variant = atlas_gate + " This project requires owner approval for privileged operations."
+    assert variant in rewrite_legacy_coordination_rules(variant)
+    assert numbered + " Product-specific approval required." in rewrite_legacy_coordination_rules(
+        numbered + " Product-specific approval required."
+    )
+
+
 def test_legacy_rule_suffix_preserves_project_policy() -> None:
     product = "Production writes require explicit owner approval; preserve user data."
     lines = ["- Reconcile one Work Packet's next action with `python3 tools/coordinator.py plan --facts <facts.json>`. The planner is pure: one bounded decision, no worker launch, GitHub mutation, merge, notification send, or session stop.", '- Evaluate one bounded coordinator watch with `python3 tools/coordinator_watch.py evaluate --facts <facts.json> --watch-state <state.json>`. The evaluator is pure: one re-entry result, no subprocess, network, GitHub mutation, merge, or Telegram send.', '- Run one coordinator watch host pass with `python3 tools/coordinator_watch_host.py run-once --request <request.json>`. The host acquires one lock, calls the watch evaluator, and delivers at most one already-authorized typed action after a fresh reconciliation read. It does not accept caller commands or URLs, mint authority, merge, stop sessions, or busy-loop.', '- Do not keep a coding-agent session alive polling CI/review/external waits; persist concise state and yield to coordinator/automation.']
@@ -3949,6 +3995,7 @@ def test_legacy_rule_suffix_preserves_project_policy() -> None:
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
+    test_atlas_legacy_mutation_gate_retires_only_known_ceremony()
     test_legacy_rule_suffix_preserves_project_policy()
     test_clean_python_bootstrap()
     test_rule_review_is_fail_closed()
