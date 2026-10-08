@@ -570,26 +570,30 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
 
 
 def test_turn_disposition_policy_surfaces() -> None:
-    required = (
-        "AGENTS.md",
-        "templates/AGENTS.md",
-        "templates/CHATGPT_PROJECT_INSTRUCTION.txt",
-        "templates/CHATGPT_CUSTOM_INSTRUCTION.txt",
-        "standards/SESSION_CONTINUITY.md",
-        "ai/AGENT_BASE.md",
-    )
-    for rel in required:
+    guidance = {
+        "AGENTS.md": "`tools/work_admission.py disposition` is an optional pure scheduling diagnostic",
+        "templates/AGENTS.md": "`tools/work_admission.py disposition` is an optional pure scheduling diagnostic",
+        "templates/CHATGPT_PROJECT_INSTRUCTION.txt": "`tools/work_admission.py disposition` is optional scheduling analysis",
+        "templates/CHATGPT_CUSTOM_INSTRUCTION.txt": "`tools/work_admission.py disposition` is optional scheduling analysis",
+        "standards/SESSION_CONTINUITY.md": "`tools/work_admission.py disposition --request-json <facts.json>` is an **optional pure scheduling diagnostic**",
+        "ai/AGENT_BASE.md": "`tools/work_admission.py disposition` is optional scheduling analysis",
+    }
+    for rel, phrase in guidance.items():
         body = (ROOT / rel).read_text(encoding="utf-8")
-        assert "work_admission.py disposition" in body, rel
-        assert "optional" in body.lower(), rel
+        compact = " ".join(body.split())
+        assert compact.count("work_admission.py disposition") == 1, rel
+        assert phrase in compact, rel
         assert "FINAL_ALLOWED" in body, rel
         assert "only `FINAL_ALLOWED=YES`" not in body, rel
         assert "forbids a final response" not in body, rel
+        # A mandatory restatement must not masquerade as optional merely
+        # because the document contains unrelated optional features.
+        assert phrase not in compact.replace(phrase, "must run disposition before returning"), rel
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     assert "roadmap_runnable_work" in session
     assert "keep a ChatGPT turn alive" in session
     assert "Unit tests of its classification cannot prove" in session
-    assert "repository instructions alone cannot create that platform capability" in session
+    assert "repository instructions alone cannot create that platform capability" in " ".join(session.split())
     base = (ROOT / "ai/AGENT_BASE.md").read_text(encoding="utf-8")
     assert "Missing an ACTIVE packet is not a blocker" in base
     assert "Fail closed if packet selection is missing or ambiguous." not in base
