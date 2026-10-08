@@ -24,8 +24,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 21
-GOVERNANCE_EPOCH = 7
+POLICY_EPOCH = 22
+GOVERNANCE_EPOCH = 8
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -265,6 +265,24 @@ def rewrite_legacy_coordination_rules(text: str) -> str:
         "capture the no-follow worktree identity, and require `IMPLEMENTATION_LOCAL_BINDING=PASS` with "
         "`MUTATION_AUTHORITY=NO`."
     )
+    # Historical Atlas adopted a different *complete* coordinator ceremony.
+    # Remove this known retired ordinary-implementation requirement verbatim.
+    # An unknown/customized policy variant must remain intact for review, not
+    # be deleted by a broad substring or regular expression.
+    atlas_legacy_gate = (
+        "Before mutation, the external authenticated GitHub coordinator must freshly verify the canonical "
+        "Issue, author write/maintain/admin permission, TARGET_REPO, WORKSTREAM, BRANCH, "
+        "LAST_VERIFIED_HEAD, INTENT_REVISION, `IMPLEMENTER=CHATGPT_CHAT`, CHANGE_RISK, and authorized "
+        "worktree. Never treat the target worktree's `python3 tools/implementation_preflight.py check` as "
+        "authoritative. Fetch the exact helper source from the immutable Engineering System baseline "
+        "and execute it through fixed isolated `/usr/bin/python3 -I -` with cwd `/` and a controlled "
+        "environment; capture worktree identity first and require `IMPLEMENTATION_LOCAL_BINDING=PASS`. "
+        "The repository helper copy is parity/reference/test material only."
+    )
+    atlas_legacy_numbered_rule = (
+        "14. ChatGPT Chat is the default implementer when a trusted active Work Packet "
+        "authorizes the exact scope. " + atlas_legacy_gate
+    )
     text = text.replace(legacy_gate, "")
     text = text.replace(
         "ChatGPT Chat is the default implementer for this repository when the authenticated active Work Packet "
@@ -293,6 +311,10 @@ def rewrite_legacy_coordination_rules(text: str) -> str:
     }
     lines = []
     for line in text.splitlines():
+        # Exact known legacy line only; preserve custom suffixes and local
+        # privilege/release rules for explicit product-owner review.
+        if line in (atlas_legacy_gate, atlas_legacy_numbered_rule):
+            continue
         if line.startswith(legacy_watch_prefix):
             remainder = line[len(legacy_watch_prefix):]
             marker = " send."

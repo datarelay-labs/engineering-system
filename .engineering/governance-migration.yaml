@@ -1,12 +1,12 @@
 contract_version: 2
-from_governance_epoch: 6
-to_governance_epoch: 7
-base_sha: e3f5ec50ae16b229b62363a50e1c74ac33727b04
+from_governance_epoch: 7
+to_governance_epoch: 8
+base_sha: 5b5d2ca8dd37f9823c7f2412cdaf121a786cf437
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Keep the canonical policy-freshness increment and adoption helper synchronized
-  while correcting misleading Chat turn-closure enforcement claims; preserve the
-  base-owned governance, security and user-acceptance boundaries.
+rationale: Remove the known retired Atlas normal-implementation coordinator gate
+  through exact-line managed adoption cleanup while retaining product-specific
+  approval, trusted high-risk effects and release/user-acceptance boundaries.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: bb38f78c861a77f007073b0643ef93ab994aff58
+  head_blob_sha: 79bdd89ba23c1baedf1eb50b16c95c017a33585c
