@@ -1,12 +1,14 @@
 contract_version: 2
-from_governance_epoch: 7
-to_governance_epoch: 8
-base_sha: 5b5d2ca8dd37f9823c7f2412cdaf121a786cf437
+from_governance_epoch: 8
+to_governance_epoch: 9
+base_sha: d41b4cf5d47b47c25c0d7b7520a8f1262d19923c
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Remove the known retired Atlas normal-implementation coordinator gate
-  through exact-line managed adoption cleanup while retaining product-specific
-  approval, trusted high-risk effects and release/user-acceptance boundaries.
+rationale: Make the optional DataRelay Atlas integration execute one bounded context
+  bootstrap on DataRelay repository resume or workstream entry when the named MCP is
+  available, while preserving canonical authority and fail-open continuation.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 79bdd89ba23c1baedf1eb50b16c95c017a33585c
+  head_blob_sha: b5ed25775d2b2f02ca07a0e64343bb0f4267168a
+- path: tools/check-adoption.py
+  head_blob_sha: d4c9d8f9583c7e31ec61d667cc7a8201d6208881

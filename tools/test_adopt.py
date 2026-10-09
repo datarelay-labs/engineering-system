@@ -3992,12 +3992,51 @@ def test_legacy_rule_suffix_preserves_project_policy() -> None:
     assert unknown in rewrite_legacy_coordination_rules(unknown + chr(10))
 
 
+
+def test_datarelay_atlas_bootstrap_policy_is_managed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "demo-atlas-bootstrap"
+        target.mkdir()
+        init_repo(target)
+        run("git", "remote", "add", "origin", "https://github.com/datarelay-labs/demo-atlas-bootstrap.git", cwd=target)
+        (target / "go.mod").write_text("module example.invalid/atlas-bootstrap\n\ngo 1.23\n", encoding="utf-8")
+        commit_all(target)
+        run(sys.executable, str(ADOPT), "--root", str(target), "--apply", "--baseline-sha", BASELINE, "--test-command", "go test ./...")
+        agents = target / "AGENTS.md"
+        marker = "- **DataRelay Atlas context bootstrap:**"
+        text = agents.read_text(encoding="utf-8")
+        assert text.count(marker) == 1
+        assert "MCP/app named `DataRelay Atlas`" in text
+        assert "bootstrap_datarelay_context" in text
+        assert "do not repeat per turn, commit, or status check" in text
+        assert "continue immediately from canonical Git/GitHub/local evidence" in text
+
+        line = next(line for line in text.splitlines() if line.startswith(marker))
+        agents.write_text(text.replace(line + "\n", "", 1), encoding="utf-8")
+        project_path = target / ".engineering/project.yaml"
+        project = load_yaml(project_path)
+        project["engineering_system"]["policy_epoch"] = POLICY_EPOCH - 1
+        project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
+        commit_all(target, "simulate missing Atlas bootstrap policy")
+
+        checked = run(sys.executable, str(CHECK), "--root", str(target), check=False)
+        assert checked.returncode != 0
+        assert "DataRelay Atlas bootstrap policy requires review" in checked.stdout
+        repaired = run(sys.executable, str(UPGRADE), "--root", str(target), "--apply", "--baseline-sha", BASELINE)
+        assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
+        assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
+        repaired_text = agents.read_text(encoding="utf-8")
+        assert repaired_text.count(marker) == 1
+        repaired_project = load_yaml(project_path)
+        assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
     test_atlas_legacy_mutation_gate_retires_only_known_ceremony()
     test_legacy_rule_suffix_preserves_project_policy()
     test_clean_python_bootstrap()
+    test_datarelay_atlas_bootstrap_policy_is_managed()
     test_rule_review_is_fail_closed()
     test_existing_ci_requires_mapping_when_ambiguous()
     test_operations_signals_fail_closed_then_production_profile()

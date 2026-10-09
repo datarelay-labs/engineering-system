@@ -14,6 +14,9 @@ from adopt import (
     AGENT_RUNTIME_MANAGED,
     EXECUTION_PROFILE_MANAGED,
     NEXT_CHAT_BOOTSTRAP_POLICY_MARKER,
+    DATARELAY_ATLAS_BOOTSTRAP_POLICY_MARKER,
+    DATARELAY_ATLAS_BOOTSTRAP_POLICY,
+    github_repo_slug,
     VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER,
     USER_ACCEPTANCE_MANAGED,
     canonical_execution_policy_line,
@@ -306,6 +309,15 @@ def main() -> int:
                     elif managed_policy not in agents_text:
                         failures.append("AGENTS.md missing managed execution-authority policy")
                         break
+            if github_repo_slug(root).startswith("datarelay-labs/"):
+                atlas_matches = [
+                    line for line in agents_lines
+                    if line.startswith(DATARELAY_ATLAS_BOOTSTRAP_POLICY_MARKER)
+                ]
+                if atlas_matches != [DATARELAY_ATLAS_BOOTSTRAP_POLICY]:
+                    failures.append(
+                        "AGENTS.md customized, duplicate, or missing DataRelay Atlas bootstrap policy requires review"
+                    )
             if retired_agent_rules_present(agents_text):
                 failures.append("AGENTS.md contains retired runtime compatibility rules")
         if version_at_least(version, (1, 5, 0)):

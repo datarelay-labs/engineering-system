@@ -24,8 +24,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 22
-GOVERNANCE_EPOCH = 8
+POLICY_EPOCH = 23
+GOVERNANCE_EPOCH = 9
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -165,6 +165,8 @@ EXECUTION_PROFILE_MARKER = "- **Execution profile authority:**"
 EXECUTION_POLICY_MARKER = "- **Execute useful work continuously.**"
 SUPERVISOR_POLICY_MARKER = "- **Product execution ownership / supervisor fallback:**"
 NEXT_CHAT_BOOTSTRAP_POLICY_MARKER = "- **Next-chat bootstrap fast path:**"
+DATARELAY_ATLAS_BOOTSTRAP_POLICY_MARKER = "- **DataRelay Atlas context bootstrap:**"
+DATARELAY_ATLAS_BOOTSTRAP_POLICY = "- **DataRelay Atlas context bootstrap:** When the bound repository is under `datarelay-labs/` and a connected MCP/app named `DataRelay Atlas` exposes `bootstrap_datarelay_context`, perform one bounded bootstrap after resolving the exact repository and any current Work Packet relied on, before substantive implementation on a repository-level continue/resume or first entry into a durable workstream. Pass the exact repository and the workstream only when known. Reuse a fresh same-repository/workstream result in the current chat; do not repeat per turn, commit, or status check. Atlas is derived context only and never grants execution, permission, completion, or release authority. If the connector/tool is absent, authentication fails, the result is stale/`UNKNOWN`, or the call fails, continue immediately from canonical Git/GitHub/local evidence without retry loops, runtime switching, or asking the owner to repair Atlas. Direct Atlas/MCP-only questions may call the requested scoped tool without this bootstrap."
 VERIFIED_NEXT_CHAT_RESUME_POLICY_MARKER = "- **Verified next-chat resume:**"
 EXTERNAL_WRITE_POLICY_MARKER = "- For ordinary authenticated GitHub Issue/PR coordination,"
 USER_GATE_POLICY_MARKER = "- For `project.user_facing: true`,"
@@ -460,6 +462,25 @@ def plan_execution_policy_sync(root: Path) -> str | None:
             lines[index] = canonical + (("\n- " + suffix) if suffix else "")
         else:
             missing.append(canonical)
+
+    if github_repo_slug(root).startswith("datarelay-labs/"):
+        atlas_indexes = [
+            i for i, line in enumerate(lines)
+            if line.startswith(DATARELAY_ATLAS_BOOTSTRAP_POLICY_MARKER)
+        ]
+        if len(atlas_indexes) > 1:
+            raise SystemExit("FAIL AGENTS.md contains duplicate DataRelay Atlas bootstrap policy lines")
+        if atlas_indexes:
+            if lines[atlas_indexes[0]] != DATARELAY_ATLAS_BOOTSTRAP_POLICY:
+                raise SystemExit("FAIL AGENTS.md contains customized DataRelay Atlas bootstrap policy line; review manually")
+        else:
+            next_indexes = [
+                i for i, line in enumerate(lines)
+                if line.startswith(NEXT_CHAT_BOOTSTRAP_POLICY_MARKER)
+            ]
+            if len(next_indexes) != 1:
+                raise SystemExit("FAIL AGENTS.md requires one managed next-chat policy before DataRelay Atlas policy synchronization")
+            lines.insert(next_indexes[0] + 1, DATARELAY_ATLAS_BOOTSTRAP_POLICY)
 
     if missing:
         heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
@@ -1778,6 +1799,8 @@ def main() -> int:
     skipped: list[str] = []
 
     write_missing(root, "AGENTS.md", (CANONICAL / "templates" / "AGENTS.md").read_text(encoding="utf-8"), written, skipped)
+    if planned_execution_policy is None:
+        planned_execution_policy = plan_execution_policy_sync(root)
     execution_policy_synced = apply_execution_policy_sync(root, planned_execution_policy)
     for rel in (
         *KNOWLEDGE_CONTRACT_MANAGED,
