@@ -274,9 +274,8 @@ except ModuleNotFoundError as exc:
         )
 
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# One-time recovery target for policy epochs inflated by the legacy v1 root
-# migration contract. Future canonical freshness changes do not update this.
-LEGACY_V1_BRIDGE_NORMALIZATION_TARGET = 18
+# Policy epochs are strictly monotonic. Historical v1 bridge normalization is retired;
+# current managed upgrades converge forward to the canonical policy epoch.
 GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2
 MANAGED_EXECUTION_SURFACES = (
     "AGENTS.md",
@@ -1077,14 +1076,7 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
 
     active_execution_profile = head_execution_profile or base_execution_profile
 
-    policy_normalization = (
-        mode == "adopted"
-        and base_supports_v2
-        and base_epoch == LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
-        and head_epoch == LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
-        and head_governance_epoch == base_governance_epoch
-    )
-    if head_epoch < base_epoch and not policy_normalization:
+    if head_epoch < base_epoch:
         reasons.append(f"GOVERNANCE_POLICY_EPOCH_REGRESSION:base={base_epoch}:head={head_epoch}")
     if head_governance_epoch < base_governance_epoch:
         reasons.append(
@@ -1125,9 +1117,6 @@ def evaluate(root: Path, base_ref: str, head_ref: str) -> tuple[str, list[str], 
                 changed_root_surfaces.append(path)
             elif head_epoch == base_epoch:
                 reasons.append(f"GOVERNANCE_SURFACE_CHANGED_WITHOUT_POLICY_EPOCH:{path}")
-
-    if policy_normalization and changed_guarded_surfaces:
-        reasons.append("GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE")
 
     if changed_root_surfaces:
         if base_supports_v2:

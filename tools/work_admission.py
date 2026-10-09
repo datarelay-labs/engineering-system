@@ -593,7 +593,7 @@ def packet_not_runnable_reason(packet: Any) -> tuple[str, str] | None:
         if value and (
             (key == "WAITING_FOR" and value not in resolved)
             or "WAIT" in value
-            or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING"}
+            or value in {"BLOCKED", "DEFERRED", "HUMAN_REQUIRED", "PENDING", "YIELD", "YIELDED"}
         ):
             return "WAITING", "packet records a pending condition in " + key
     for section in ("Current State", "Latest Evidence"):
@@ -751,7 +751,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
     reconcile_required = False
     pending_candidate_count = 0
     scoped_candidate_count = 0
-    from context_epoch import parse_packet
+    from context_epoch import SAFE_WORKSTREAM_RE, parse_packet
     for index, item in enumerate(candidates_raw):
         try:
             candidate = _require_mapping(item, f"runnable_candidates[{index}]")
@@ -766,7 +766,19 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
                     candidate.get("body"), f"runnable_candidates[{index}].body"
                 )
                 packet = parse_packet(body)
-                if packet.metadata.get("WORKSTREAM") != target_workstream:
+                candidate_workstream = packet.metadata.get("WORKSTREAM", "")
+                if (
+                    "WORKSTREAM" in packet.duplicate_metadata
+                    or not candidate_workstream
+                    or SAFE_WORKSTREAM_RE.fullmatch(candidate_workstream) is None
+                ):
+                    # Workstream identity is the scope boundary. If it is missing,
+                    # duplicated, or invalid, the candidate cannot be safely
+                    # classified as out-of-scope; require reconciliation.
+                    scoped_candidate_count += 1
+                    reconcile_required = True
+                    continue
+                if candidate_workstream != target_workstream:
                     continue
             scoped_candidate_count += 1
             result = evaluate_eligible(candidate)
