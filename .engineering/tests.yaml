@@ -157,8 +157,6 @@ paths:
     domains: [release-contract, workflows]
   "tools/test_user_acceptance_contract.py":
     domains: [release-contract]
-  "tools/owner_runtime_override.py":
-    domains: [release-contract, workflows]
   "tools/test_owner_runtime_override.py":
     domains: [release-contract]
   "schemas/user-acceptance-evidence.schema.json":

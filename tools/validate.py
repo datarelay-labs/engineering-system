@@ -119,7 +119,6 @@ REQUIRED_METHOD_FILES = (
     "tools/test_trusted_production_installed_layout.py",
     "tools/user_acceptance_contract.py",
     "tools/test_user_acceptance_contract.py",
-    "tools/owner_runtime_override.py",
     "tools/test_owner_runtime_override.py",
     "schemas/user-acceptance-evidence.schema.json",
     "schemas/worker-adapter-result.schema.json",

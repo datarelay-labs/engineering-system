@@ -17,8 +17,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-import owner_runtime_override as override  # noqa: E402
 import user_acceptance_contract as gate  # noqa: E402
+override = gate
 from test_user_acceptance_contract import evidence  # noqa: E402
 
 CONTRACT_REL = "standards/USER_ACCEPTANCE.md"
@@ -236,9 +236,9 @@ class OwnerRuntimeOverrideTests(unittest.TestCase):
         self.expect_block(data, "EVIDENCE_SCHEMA_INVALID")
         data["owner_runtime_override"] = self.sign(self.make_receipt(data))
         with mock.patch.object(override, "ANCHOR", self.pub):
-            # An agent-provided/untrusted key file can never become the host anchor.
-            self.expect_block(data, "OWNER_RUNTIME_OVERRIDE_TRUST_UNAVAILABLE",
-                              anchor=None)
+            # The real resolver refuses a user-owned temporary public key.
+            self.assertIsNone(override._trusted_anchor())
+        self.expect_block(data, "OWNER_RUNTIME_OVERRIDE_TRUST_UNAVAILABLE", None)
 
 
 if __name__ == "__main__":
