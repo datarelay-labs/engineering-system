@@ -1,14 +1,11 @@
 contract_version: 2
-from_governance_epoch: 8
-to_governance_epoch: 9
-base_sha: d41b4cf5d47b47c25c0d7b7520a8f1262d19923c
+from_governance_epoch: 9
+to_governance_epoch: 10
+base_sha: 9c3fa71a92e12ae5541b75c4f31003a7dccbccc7
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Make the optional DataRelay Atlas integration execute one bounded context
-  bootstrap on DataRelay repository resume or workstream entry when the named MCP is
-  available, while preserving canonical authority and fail-open continuation.
+rationale: Bind optional disposition diagnostics to the owner-requested repository and
+  workstream scope, and prevent pending packet evidence from being misreported as COMPLETE.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: b5ed25775d2b2f02ca07a0e64343bb0f4267168a
-- path: tools/check-adoption.py
-  head_blob_sha: d4c9d8f9583c7e31ec61d667cc7a8201d6208881
+  head_blob_sha: 12945262e426fd8f44d58c433da8057a78ee6711
