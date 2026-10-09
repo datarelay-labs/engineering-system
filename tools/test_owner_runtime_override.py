@@ -123,6 +123,25 @@ class OwnerRuntimeOverrideTests(unittest.TestCase):
         primary["owner_override"] = True
         self.expect_block(primary, "EVIDENCE_SCHEMA_INVALID")
 
+    def test_candidate_head_change_during_validation_blocks(self) -> None:
+        """Both the normal and signed selection must remain bound to live HEAD."""
+        for alternate in (False, True):
+            with self.subTest(alternate=alternate):
+                data = self.case()
+                if alternate:
+                    data["owner_runtime_override"] = self.sign(self.make_receipt(data))
+                else:
+                    data["runtime"] = "CHATGPT_CHAT"
+                original = gate._current_head
+                calls = [0]
+
+                def moving_head(root: Path) -> str:
+                    calls[0] += 1
+                    return "f" * 40 if calls[0] > 1 else original(root)
+
+                with mock.patch.object(gate, "_current_head", side_effect=moving_head):
+                    self.expect_block(data, "CANDIDATE_HEAD_CHANGED_DURING_VALIDATION")
+
     def test_signed_alternate_runtime_with_direct_persona_both_gates(self) -> None:
         for name in ("SURFACE_RECONCILIATION", "FULL_USER_E2E"):
             with self.subTest(gate=name):
@@ -149,6 +168,28 @@ class OwnerRuntimeOverrideTests(unittest.TestCase):
         self.assertIn("PRODUCT_QUALITY_CLOSURE=BLOCK", stdout.getvalue())
         self.assertIn("TRUSTED_PERSONA_ATTESTATION=REQUIRED", stdout.getvalue())
         self.assertIn("AUTHORIZES_RELEASE=NO", stdout.getvalue())
+
+    def test_quality_close_rechecks_head_after_both_gates(self) -> None:
+        surface = self.case("SURFACE_RECONCILIATION")
+        e2e = self.case("FULL_USER_E2E")
+        surface["runtime"] = e2e["runtime"] = "CHATGPT_CHAT"
+        surface_path = self.tmp / "moving_surface.json"
+        e2e_path = self.tmp / "moving_e2e.json"
+        surface_path.write_text(json.dumps(surface), encoding="utf-8")
+        e2e_path.write_text(json.dumps(e2e), encoding="utf-8")
+
+        original = gate._current_head
+        calls = [0]
+
+        def moving_head(root: Path) -> str:
+            calls[0] += 1
+            # Initial closure HEAD + twice per gate = five reads; move before success.
+            return "f" * 40 if calls[0] > 5 else original(root)
+
+        with mock.patch.object(gate, "_current_head", side_effect=moving_head):
+            with self.assertRaises(gate.ContractError) as ctx:
+                gate.quality_close(surface_path, e2e_path, self.repo)
+        self.assertIn("CANDIDATE_HEAD_CHANGED_DURING_VALIDATION", str(ctx.exception))
 
     def test_invalid_signature_wrong_key_and_missing_trust(self) -> None:
         data = self.case()

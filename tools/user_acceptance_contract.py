@@ -362,6 +362,10 @@ def validate_gate(
         reasons.append("OWNER_RUNTIME_OVERRIDE_NOT_NEEDED")
     if reasons:
         raise ContractError("GATE_STRUCTURAL_BLOCK:" + ",".join(reasons))
+    # The candidate can move while profile and signed evidence are verified.
+    # Recheck immediately before issuing structural success, not only at entry.
+    if _current_head(root) != current_head:
+        raise ContractError("CANDIDATE_HEAD_CHANGED_DURING_VALIDATION")
     return data
 
 
@@ -372,6 +376,8 @@ def quality_close(surface_path: Path, e2e_path: Path, root: Path) -> None:
     e2e = validate_gate(e2e_path, root, "FULL_USER_E2E")
     if surface["candidate_head"] != e2e["candidate_head"]:
         raise ContractError("CANDIDATE_HEAD_MISMATCH")
+    if _current_head(root) != current_head:
+        raise ContractError("CANDIDATE_HEAD_CHANGED_DURING_VALIDATION")
     print("PRODUCT_QUALITY_CLOSURE_STRUCTURAL=PASS")
     print(f"STRUCTURALLY_READY_HEAD={current_head}")
     print("EXECUTOR_CLAIM=EXECUTION_PROFILE")
