@@ -1,11 +1,11 @@
 contract_version: 2
-from_governance_epoch: 9
-to_governance_epoch: 10
-base_sha: 9c3fa71a92e12ae5541b75c4f31003a7dccbccc7
+from_governance_epoch: 10
+to_governance_epoch: 11
+base_sha: 90b6c8290ed212efbf6fba70a74eee550f6edcb5
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Bind optional disposition diagnostics to the owner-requested repository and
-  workstream scope, and prevent pending packet evidence from being misreported as COMPLETE.
+rationale: Allow older DataRelay adoptions to repair generic managed next-chat policy before
+  inserting the DataRelay Atlas bootstrap policy, so one managed upgrade can converge safely.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 12945262e426fd8f44d58c433da8057a78ee6711
+  head_blob_sha: 9e59970d579cfb7b7730418407b890652a7c221f

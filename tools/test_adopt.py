@@ -4011,8 +4011,12 @@ def test_datarelay_atlas_bootstrap_policy_is_managed() -> None:
         assert "do not repeat per turn, commit, or status check" in text
         assert "continue immediately from canonical Git/GitHub/local evidence" in text
 
-        line = next(line for line in text.splitlines() if line.startswith(marker))
-        agents.write_text(text.replace(line + "\n", "", 1), encoding="utf-8")
+        atlas_line = next(line for line in text.splitlines() if line.startswith(marker))
+        next_chat_marker = "- **Next-chat bootstrap fast path:**"
+        next_chat_line = next(line for line in text.splitlines() if line.startswith(next_chat_marker))
+        text = text.replace(atlas_line + "\n", "", 1)
+        text = text.replace(next_chat_line + "\n", "", 1)
+        agents.write_text(text, encoding="utf-8")
         project_path = target / ".engineering/project.yaml"
         project = load_yaml(project_path)
         project["engineering_system"]["policy_epoch"] = POLICY_EPOCH - 1
@@ -4026,6 +4030,7 @@ def test_datarelay_atlas_bootstrap_policy_is_managed() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         assert "EXECUTION_POLICY_SYNCED=YES" in repaired.stdout
         repaired_text = agents.read_text(encoding="utf-8")
+        assert repaired_text.count(next_chat_marker) == 1
         assert repaired_text.count(marker) == 1
         repaired_project = load_yaml(project_path)
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH

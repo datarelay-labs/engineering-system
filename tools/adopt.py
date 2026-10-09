@@ -24,8 +24,8 @@ from execution_profile import (
 
 CANONICAL = Path(__file__).resolve().parents[1]
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-POLICY_EPOCH = 24
-GOVERNANCE_EPOCH = 10
+POLICY_EPOCH = 25
+GOVERNANCE_EPOCH = 11
 
 RULE_SURFACES = (
     "AGENTS.md",
@@ -463,6 +463,22 @@ def plan_execution_policy_sync(root: Path) -> str | None:
         else:
             missing.append(canonical)
 
+    if missing:
+        heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
+        if len(heading_indexes) != 1:
+            raise SystemExit(
+                "FAIL AGENTS.md must contain exactly one '## Execution rules' heading "
+                "before managed execution policy synchronization"
+            )
+        insert_at = heading_indexes[0] + 1
+        if insert_at < len(lines) and lines[insert_at] == "":
+            insert_at += 1
+        for canonical in reversed(missing):
+            lines.insert(insert_at, canonical)
+
+    # DataRelay-specific policy depends on the generic managed next-chat line.
+    # Insert it only after generic policy repair so older adopted repositories
+    # can converge in one managed upgrade instead of failing ordering checks.
     if github_repo_slug(root).startswith("datarelay-labs/"):
         atlas_indexes = [
             i for i, line in enumerate(lines)
@@ -482,18 +498,6 @@ def plan_execution_policy_sync(root: Path) -> str | None:
                 raise SystemExit("FAIL AGENTS.md requires one managed next-chat policy before DataRelay Atlas policy synchronization")
             lines.insert(next_indexes[0] + 1, DATARELAY_ATLAS_BOOTSTRAP_POLICY)
 
-    if missing:
-        heading_indexes = [i for i, line in enumerate(lines) if line == EXECUTION_RULES_HEADING]
-        if len(heading_indexes) != 1:
-            raise SystemExit(
-                "FAIL AGENTS.md must contain exactly one '## Execution rules' heading "
-                "before managed execution policy synchronization"
-            )
-        insert_at = heading_indexes[0] + 1
-        if insert_at < len(lines) and lines[insert_at] == "":
-            insert_at += 1
-        for canonical in reversed(missing):
-            lines.insert(insert_at, canonical)
     rewritten = "\n".join(lines)
     if original.endswith("\n"):
         rewritten += "\n"
