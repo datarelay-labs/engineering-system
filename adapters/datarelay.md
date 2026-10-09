@@ -6,23 +6,28 @@ These mappings are optional DataRelay organization adapters. They are not univer
 
 DataRelay Atlas may implement the optional derived-context role described by `standards/KNOWLEDGE.md`. Canonical Git/GitHub state remains authoritative; Atlas retrieval/write-back is bounded, non-authoritative, and unavailable Atlas service must not block ordinary engineering.
 
-### Normal development usage (optional)
+### Normal development usage
 
-For DataRelay continuation, prior decisions/lessons, or an explicitly scoped
-cross-project question, use Atlas proactively **when current canonical/local
-context leaves a meaningful gap**. Resolve the owner-selected repository and
-relevant current Git/GitHub facts first. No special "use Atlas" prompt is needed.
-Reuse sufficient context; no mandatory startup, per-turn, per-commit, or duplicate
-bootstrap query. Query only the missing project/workstream context and useful
-provenance. Unknown project IDs must be resolved, not guessed; ambiguous
-repository matches must not retarget the task.
+For a repository under `datarelay-labs/`, repository-level continue/resume or
+first entry into a durable workstream performs one bounded Atlas bootstrap when
+the connected MCP/app named `DataRelay Atlas` exposes
+`bootstrap_datarelay_context`. Resolve the owner-selected repository and any
+current Work Packet relied on first, then pass the exact repository and only a
+known workstream. No special "use Atlas" prompt is needed.
 
-Canonical facts win over derived results. Atlas unavailable, timed out, stale or
-`UNKNOWN` means continue ordinary engineering from canonical/local context, not
-wait/retry, invent a completion/permission result, or switch runtime/mode.
-An explicit MCP-only data request must report a failed native read honestly,
-not silently substitute SSH/CLI or cached text. Continue the actual task after
-retrieval rather than stopping at an Atlas status report.
+Reuse a fresh same-repository/workstream result in the current chat. Do not query
+Atlas on every turn, commit, status check, or after every tool call. Other prior
+decision/lesson or explicitly scoped cross-project questions remain JIT: query
+only the missing context and useful provenance. Unknown project IDs must be
+resolved, not guessed; ambiguous repository matches must not retarget the task.
+
+Canonical facts win over derived results. Atlas unavailable, timed out,
+authentication-failed, stale or `UNKNOWN` means continue ordinary engineering
+immediately from canonical/local context, not wait/retry, ask the owner to repair
+Atlas, invent a completion/permission result, or switch runtime/mode. An explicit
+MCP-only data request must report a failed native read honestly, not silently
+substitute SSH/CLI or cached text. Continue the actual task after retrieval rather
+than stopping at an Atlas status report.
 
 The maintained tool-level instructions and package live in the Atlas repository:
 [integrations/chatgpt-plugin/skills/use-atlas/SKILL.md](https://github.com/datarelay-labs/datarelay-atlas/blob/main/integrations/chatgpt-plugin/skills/use-atlas/SKILL.md).
