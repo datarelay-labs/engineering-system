@@ -1200,7 +1200,6 @@ def validate_governance_floor_contract():
         "GOVERNANCE_ROOT_MIGRATION_MANIFEST_MISSING",
         "GOVERNANCE_ROOT_MIGRATION_V1_AFTER_V2_CUTOVER",
         "GOVERNANCE_ROOT_MIGRATION_V2_BEFORE_CUTOVER",
-        "GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE",
         "GOVERNANCE_MIGRATION_CONTRACT_VERSION = 2",
         "ROOT_MIGRATION_MANIFEST",
         "requires_exact_head_validate",
@@ -1225,8 +1224,8 @@ def validate_governance_floor_contract():
     canonical_engineering = canonical_project.get("engineering_system") or {}
     expected_epoch = int(canonical_engineering.get("policy_epoch") or 0)
     expected_governance_epoch = int(canonical_engineering.get("governance_epoch") or 0)
-    if "LEGACY_V1_BRIDGE_NORMALIZATION_TARGET = 18" not in helper:
-        raise SystemExit("FAIL governance floor helper missing bounded v1 bridge normalization target")
+    if 'if head_epoch < base_epoch:' not in helper or 'policy_normalization =' in helper:
+        raise SystemExit("FAIL governance floor helper does not enforce strict policy-epoch monotonicity")
     if f"POLICY_EPOCH = {expected_epoch}" not in adopt or "policy_epoch" not in check:
         raise SystemExit("FAIL adoption tooling missing current policy freshness epoch")
     if f"GOVERNANCE_EPOCH = {expected_governance_epoch}" not in adopt or "governance_epoch" not in check:

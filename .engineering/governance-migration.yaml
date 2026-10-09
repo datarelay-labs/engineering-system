@@ -1,11 +1,13 @@
 contract_version: 2
-from_governance_epoch: 10
-to_governance_epoch: 11
-base_sha: 90b6c8290ed212efbf6fba70a74eee550f6edcb5
+from_governance_epoch: 11
+to_governance_epoch: 12
+base_sha: be3c44c421738c1510cca0e9e2fd076279db0f63
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Allow older DataRelay adoptions to repair generic managed next-chat policy before
-  inserting the DataRelay Atlas bootstrap policy, so one managed upgrade can converge safely.
+rationale: Restore strict policy-epoch monotonicity and prevent yielded Work Packets from
+  becoming runnable again during repository scheduling.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 9e59970d579cfb7b7730418407b890652a7c221f
+  head_blob_sha: f4fca3b902f4af820f71d8a30a2b02221efa0d36
+- path: tools/governance_floor.py
+  head_blob_sha: 6a0db72bda73f16f7105dbb1f088be85150d496c

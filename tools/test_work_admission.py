@@ -512,7 +512,7 @@ def test_runnable_selection_excludes_stale_waiting_and_terminal_packets() -> Non
         mutations.append({"body": facts["body"].replace("STATUS=ACTIVE", "STATUS=" + state, 1)})
     mutations.append({"body": facts["body"].replace("EXECUTION_PROFILE_REVISION=3", "EXECUTION_PROFILE_REVISION=2", 1)})
     mutations.append({"body": facts["body"].replace("## Blockers\n\nNONE", "## Blockers\n\nWaiting for approval", 1)})
-    for state in ("DEPENDENCY_WAIT", "WAIT_EXACT_HEAD_CI", "DEFERRED", "HUMAN_REQUIRED"):
+    for state in ("DEPENDENCY_WAIT", "WAIT_EXACT_HEAD_CI", "DEFERRED", "HUMAN_REQUIRED", "YIELD", "YIELDED"):
         mutations.append({"body": facts["body"].replace("STATUS=ACTIVE", "STATUS=ACTIVE\nQUEUE_STATE=" + state, 1)})
     for change in mutations:
         assert evaluate_eligible({**facts, **change})["DECISION"] == "DENY", change
@@ -814,6 +814,43 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     )
     assert mismatched_workstream["TURN_DISPOSITION"] == "ALLOW_FINAL"
     assert mismatched_workstream["CANDIDATE_COUNT"] == "0"
+
+    # Workstream identity must be trustworthy before scope filtering. Missing,
+    # duplicate, or invalid WORKSTREAM metadata is reconciliation evidence, not
+    # permission to silently discard the candidate as out-of-scope.
+    missing_workstream = {
+        **facts,
+        "body": facts["body"].replace("WORKSTREAM=context-epoch-packet-projection\n", "", 1),
+    }
+    duplicate_workstream = {
+        **facts,
+        "body": facts["body"].replace(
+            "WORKSTREAM=context-epoch-packet-projection",
+            "WORKSTREAM=other-workstream\nWORKSTREAM=context-epoch-packet-projection",
+            1,
+        ),
+    }
+    invalid_workstream = {
+        **facts,
+        "body": facts["body"].replace(
+            "WORKSTREAM=context-epoch-packet-projection",
+            "WORKSTREAM=../invalid",
+            1,
+        ),
+    }
+    for malformed_scope in (missing_workstream, duplicate_workstream, invalid_workstream):
+        report = evaluate_disposition(
+            {
+                "request_scope": "workstream",
+                "target_repository": "datarelay-labs/engineering-system",
+                "target_workstream": "different-workstream",
+                "runnable_candidates": [malformed_scope],
+                "scheduler_reconciled": True,
+                "remaining_state": "COMPLETE",
+            }
+        )
+        assert report["TURN_DISPOSITION"] == "RECONCILE", report
+        assert report["FINAL_ALLOWED"] == "NO", report
 
     independent = evaluate_disposition(
         {

@@ -499,50 +499,47 @@ def test_governance_generation_jump_blocks() -> None:
         assert "GOVERNANCE_ROOT_MIGRATION_TO_GENERATION_INVALID" in reasons
 
 
-def test_one_step_policy_normalization_after_legacy_bridge_passes() -> None:
+def test_policy_epoch_regression_after_legacy_bridge_blocks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         fixture(root)
         project_path = root / ".engineering/project.yaml"
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
+        project["engineering_system"]["policy_epoch"] = 19
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         bridge_base = commit(root, "legacy bridge temporary policy epoch")
 
-        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
+        project["engineering_system"]["policy_epoch"] = 18
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
-        normalized = commit(root, "normalize canonical policy freshness")
-        status, reasons, base_epoch, head_epoch = floor.evaluate(
-            root, bridge_base, normalized
-        )
-        assert status == "PASS", reasons
-        assert (base_epoch, head_epoch) == (
-            floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1,
-            floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET,
-        )
+        regressed = commit(root, "attempt policy epoch rollback")
+        status, reasons, base_epoch, head_epoch = floor.evaluate(root, bridge_base, regressed)
+        assert status == "BLOCK"
+        assert "GOVERNANCE_POLICY_EPOCH_REGRESSION:base=19:head=18" in reasons
+        assert (base_epoch, head_epoch) == (19, 18)
 
 
-def test_policy_normalization_cannot_hide_governed_change() -> None:
+def test_policy_epoch_regression_with_governed_change_still_blocks() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         fixture(root)
         project_path = root / ".engineering/project.yaml"
         project = yaml.safe_load(project_path.read_text(encoding="utf-8"))
-        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET + 1
+        project["engineering_system"]["policy_epoch"] = 19
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         bridge_base = commit(root, "legacy bridge temporary policy epoch")
 
-        project["engineering_system"]["policy_epoch"] = floor.LEGACY_V1_BRIDGE_NORMALIZATION_TARGET
+        project["engineering_system"]["policy_epoch"] = 18
         project_path.write_text(yaml.safe_dump(project, sort_keys=False), encoding="utf-8")
         helper = root / "tools/governance_floor.py"
         helper.write_text(
-            helper.read_text(encoding="utf-8") + "\n# hidden-during-normalization\n",
+            helper.read_text(encoding="utf-8") + "\n# governed-change-during-regression\n",
             encoding="utf-8",
         )
-        head = commit(root, "attempt governed change during policy normalization")
+        head = commit(root, "attempt governed change during policy rollback")
         status, reasons, _, _ = floor.evaluate(root, bridge_base, head)
         assert status == "BLOCK"
-        assert "GOVERNANCE_POLICY_NORMALIZATION_WITH_GOVERNED_CHANGE" in reasons
+        assert "GOVERNANCE_POLICY_EPOCH_REGRESSION:base=19:head=18" in reasons
+
 
 
 def test_v1_manifest_rejected_after_v2_cutover() -> None:
@@ -1016,8 +1013,8 @@ def main() -> int:
     test_guard_change_uses_governance_generation_v2()
     test_governance_generation_without_root_migration_blocks()
     test_governance_generation_jump_blocks()
-    test_one_step_policy_normalization_after_legacy_bridge_passes()
-    test_policy_normalization_cannot_hide_governed_change()
+    test_policy_epoch_regression_after_legacy_bridge_blocks()
+    test_policy_epoch_regression_with_governed_change_still_blocks()
     test_v1_manifest_rejected_after_v2_cutover()
     test_v2_manifest_rejected_before_cutover()
     test_root_migration_reconciles_unrelated_base_advance()
