@@ -9,6 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 from execution_profile import load_profile_text, ProfileError, PROFILE_PATH
+from owner_runtime_override import verify_owner_runtime_override, OverrideError
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -175,7 +176,25 @@ def validate_gate(
     except ProfileError as exc:
         raise ContractError(f"EXECUTION_PROFILE_UNAVAILABLE:{exc}") from exc
     if data.get("runtime") != selected_runtime:
-        reasons.append("EXECUTION_PROFILE_RUNTIME_MISMATCH")
+        if "owner_runtime_override" not in data:
+            reasons.append("EXECUTION_PROFILE_RUNTIME_MISMATCH")
+        else:
+            try:
+                origin = str(_git(root, "remote", "get-url", "origin")).strip()
+                verify_owner_runtime_override(
+                    data["owner_runtime_override"],
+                    origin=origin,
+                    candidate_head=current_head,
+                    contract_path=rel,
+                    contract_sha256=digest,
+                    gate=str(data["gate"]),
+                    run_id=str(data["run_id"]),
+                    runtime=str(data["runtime"]),
+                )
+            except (OverrideError, ContractError) as exc:
+                reasons.append(str(exc))
+    elif "owner_runtime_override" in data:
+        reasons.append("OWNER_RUNTIME_OVERRIDE_NOT_NEEDED")
     if reasons:
         raise ContractError("GATE_STRUCTURAL_BLOCK:" + ",".join(reasons))
     return data

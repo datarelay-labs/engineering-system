@@ -47,6 +47,35 @@
     "real_effect_coverage_pct": {"type": "number", "minimum": 0, "maximum": 100},
     "cleanup_status": {"enum": ["PASS", "FAIL", "NOT_APPLICABLE"]},
     "evidence_root": {"type": "string"},
-    "notes": {"type": "string"}
+    "notes": {"type": "string"},
+    "owner_runtime_override": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "kind", "purpose", "issuer", "target_repo",
+        "candidate_head", "contract_path", "contract_sha256", "gate", "run_id",
+        "runtime", "owner_actor", "owner_authority", "owner_approval_ref",
+        "receipt_id", "issued_at_unix", "expires_at_unix", "signature"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "owner-runtime-override-receipt"},
+        "purpose": {"const": "user-acceptance-runtime-override"},
+        "issuer": {"const": "engineering-system-trusted-owner-boundary"},
+        "target_repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "candidate_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "contract_path": {"type": "string", "minLength": 1},
+        "contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "gate": {"enum": ["SURFACE_RECONCILIATION", "FULL_USER_E2E"]},
+        "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "runtime": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+        "owner_actor": {"type": "string", "minLength": 1, "maxLength": 80},
+        "owner_authority": {"enum": ["write", "maintain", "admin"]},
+        "owner_approval_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "receipt_id": {"type": "string", "minLength": 8, "maxLength": 128},
+        "issued_at_unix": {"type": "integer", "minimum": 1},
+        "expires_at_unix": {"type": "integer", "minimum": 1},
+        "signature": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    }
   }
 }
