@@ -719,6 +719,11 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             runnable_candidate_count=0,
         )
 
+    target_repository = _require_str(data.get("target_repository"), "target_repository")
+    target_workstream = None
+    if request_scope == "workstream":
+        target_workstream = _require_str(data.get("target_workstream"), "target_workstream")
+
     scheduler_value = data.get("scheduler_reconciled")
     scheduler_hint = (
         False
@@ -738,25 +743,46 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             raise AdmissionFactsError(
                 f"roadmap_runnable_work contains duplicate workstream {workstream!r}"
             )
+        if request_scope == "workstream" and workstream != target_workstream:
+            continue
         roadmap_work.append(workstream)
 
     runnable = len(roadmap_work)
     reconcile_required = False
+    pending_candidate_count = 0
+    scoped_candidate_count = 0
+    from context_epoch import parse_packet
     for index, item in enumerate(candidates_raw):
         try:
             candidate = _require_mapping(item, f"runnable_candidates[{index}]")
+            candidate_repository = _require_str(
+                candidate.get("expected_target_repo"),
+                f"runnable_candidates[{index}].expected_target_repo",
+            )
+            if candidate_repository != target_repository:
+                continue
+            if request_scope == "workstream":
+                body = _require_str(
+                    candidate.get("body"), f"runnable_candidates[{index}].body"
+                )
+                packet = parse_packet(body)
+                if packet.metadata.get("WORKSTREAM") != target_workstream:
+                    continue
+            scoped_candidate_count += 1
             result = evaluate_eligible(candidate)
         except AdmissionFactsError:
-            # One malformed/stale dependency must not suppress independent
-            # runnable work. Preserve it as reconciliation evidence instead.
+            # One malformed/stale in-scope dependency must not suppress
+            # independent runnable work. Preserve it as reconciliation evidence.
             reconcile_required = True
             continue
         if result.get("DECISION") == "ALLOW":
             runnable += 1
         elif result.get("DENY_CLASS") in TURN_RECONCILE_DENY_CLASSES:
             reconcile_required = True
+        elif result.get("DENY_CLASS") in {"WAITING", "PACKET_BLOCKER"}:
+            pending_candidate_count += 1
 
-    candidate_count = len(candidates_raw) + len(roadmap_work)
+    candidate_count = scoped_candidate_count + len(roadmap_work)
 
     # Independent runnable work always wins over a blocked/waiting lane.
     # Packetless roadmap work is intentionally representable: packet creation is
@@ -809,6 +835,18 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             request_scope=request_scope,
             scheduler_reconciled=scheduler_reconciled,
             remaining_state=remaining_state,
+            candidate_count=candidate_count,
+            runnable_candidate_count=0,
+        )
+
+    if remaining_state == "COMPLETE" and pending_candidate_count:
+        return _turn_disposition(
+            "RECONCILE",
+            final_allowed=False,
+            reason="pending in-scope candidates contradict COMPLETE remaining state",
+            request_scope=request_scope,
+            scheduler_reconciled=False,
+            remaining_state="UNKNOWN",
             candidate_count=candidate_count,
             runnable_candidate_count=0,
         )

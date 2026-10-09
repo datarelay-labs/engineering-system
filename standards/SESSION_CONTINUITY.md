@@ -431,8 +431,15 @@ background or treat completing a packet as completing the repository roadmap.
 For diagnostic scheduling, a collector may represent packet-backed candidates
 using the current `tools/work_admission.py eligible` facts. Safe authorized work
 without an ACTIVE packet may be represented by its workstream name under
-`roadmap_runnable_work`. Treat malformed or stale candidate facts as a need to
+`roadmap_runnable_work`. Repository/workstream disposition requests must bind the
+exact `target_repository`; workstream-scoped requests must also bind the exact
+`target_workstream`. Filter candidate `expected_target_repo`, packet `WORKSTREAM`,
+and roadmap workstream names to that requested scope before counting runnable or
+pending work. Treat malformed or stale in-scope candidate facts as a need to
 reconcile that dependency, not as permission to discard independent runnable work.
+An in-scope WAITING/PACKET_BLOCKER candidate is unfinished evidence: it may support
+`NO_SAFE_RUNNABLE` or a truthful blocker state, but it contradicts `COMPLETE` and
+must force reconciliation before terminal completion.
 
 `tools/work_admission.py disposition --request-json <facts.json>` is an **optional
 pure scheduling diagnostic** when a caller has already collected fresh facts. Its

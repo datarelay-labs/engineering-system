@@ -609,6 +609,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     runnable = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [facts],
         }
     )
@@ -621,6 +622,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     mixed = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [waiting, facts],
         }
     )
@@ -630,6 +632,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     packetless = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "roadmap_runnable_work": ["roadmap-next"],
         }
     )
@@ -644,6 +647,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         with_roadmap = evaluate_disposition(
             {
                 "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
                 "runnable_candidates": [non_object],
                 "roadmap_runnable_work": ["roadmap-independent"],
             }
@@ -653,6 +657,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         with_packet = evaluate_disposition(
             {
                 "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
                 "runnable_candidates": [non_object, facts],
             }
         )
@@ -661,6 +666,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         only_invalid = evaluate_disposition(
             {
                 "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
                 "runnable_candidates": [non_object],
                 "scheduler_reconciled": True,
                 "remaining_state": "COMPLETE",
@@ -674,6 +680,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     malformed_with_packetless = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [malformed],
             "roadmap_runnable_work": ["roadmap-independent"],
         }
@@ -685,6 +692,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     malformed_only = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [malformed],
             "scheduler_reconciled": True,
             "remaining_state": "COMPLETE",
@@ -697,6 +705,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     stale_terminal_claim = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [stale],
             "scheduler_reconciled": True,
             "remaining_state": "COMPLETE",
@@ -709,6 +718,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     unreconciled = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [waiting],
             "scheduler_reconciled": False,
             "remaining_state": "UNKNOWN",
@@ -720,6 +730,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     unknown = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [],
             "scheduler_reconciled": True,
             "remaining_state": "UNKNOWN",
@@ -727,22 +738,35 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     )
     assert unknown["TURN_DISPOSITION"] == "RECONCILE"
 
-    for state in ("COMPLETE", "NO_SAFE_RUNNABLE"):
-        report = evaluate_disposition(
-            {
-                "request_scope": "repository",
-                "runnable_candidates": [waiting],
-                "scheduler_reconciled": True,
-                "remaining_state": state,
-            }
-        )
-        assert report["TURN_DISPOSITION"] == "ALLOW_FINAL", state
-        assert report["FINAL_ALLOWED"] == "YES"
+    pending_complete = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [waiting],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert pending_complete["TURN_DISPOSITION"] == "RECONCILE"
+    assert pending_complete["FINAL_ALLOWED"] == "NO"
+
+    no_safe = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [waiting],
+            "scheduler_reconciled": True,
+            "remaining_state": "NO_SAFE_RUNNABLE",
+        }
+    )
+    assert no_safe["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert no_safe["FINAL_ALLOWED"] == "YES"
 
     for state in ("OWNER_REQUIRED", "IRRECONCILABLE"):
         report = evaluate_disposition(
             {
                 "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
                 "runnable_candidates": [waiting],
                 "scheduler_reconciled": True,
                 "remaining_state": state,
@@ -751,9 +775,50 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         assert report["TURN_DISPOSITION"] == "BLOCKED", state
         assert report["FINAL_ALLOWED"] == "YES"
 
+    wrong_repo = {**facts, "expected_target_repo": "datarelay-labs/datarelay-link"}
+    scoped_repository = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [wrong_repo],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert scoped_repository["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert scoped_repository["CANDIDATE_COUNT"] == "0"
+
+    matching_workstream = evaluate_disposition(
+        {
+            "request_scope": "workstream",
+            "target_repository": "datarelay-labs/engineering-system",
+            "target_workstream": "context-epoch-packet-projection",
+            "runnable_candidates": [facts],
+            "roadmap_runnable_work": ["other-workstream"],
+        }
+    )
+    assert matching_workstream["TURN_DISPOSITION"] == "CONTINUE"
+    assert matching_workstream["RUNNABLE_CANDIDATE_COUNT"] == "1"
+    assert matching_workstream["CANDIDATE_COUNT"] == "1"
+
+    mismatched_workstream = evaluate_disposition(
+        {
+            "request_scope": "workstream",
+            "target_repository": "datarelay-labs/engineering-system",
+            "target_workstream": "different-workstream",
+            "runnable_candidates": [facts],
+            "roadmap_runnable_work": ["context-epoch-packet-projection"],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert mismatched_workstream["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert mismatched_workstream["CANDIDATE_COUNT"] == "0"
+
     independent = evaluate_disposition(
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [waiting, facts],
             "scheduler_reconciled": True,
             "remaining_state": "OWNER_REQUIRED",
@@ -764,8 +829,27 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
 
     code, fields = run_cli(
         "disposition",
+        {"request_scope": "repository", "runnable_candidates": [facts]},
+    )
+    assert code == 3
+    assert fields["DECISION"] == "DENY"
+
+    code, fields = run_cli(
+        "disposition",
+        {
+            "request_scope": "workstream",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [facts],
+        },
+    )
+    assert code == 3
+    assert fields["DECISION"] == "DENY"
+
+    code, fields = run_cli(
+        "disposition",
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [facts],
         },
     )
@@ -777,6 +861,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         "disposition",
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "runnable_candidates": [],
             "scheduler_reconciled": True,
             "remaining_state": "NOT_A_STATE",
@@ -789,6 +874,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
         "disposition",
         {
             "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
             "roadmap_runnable_work": ["same", "same"],
         },
     )
