@@ -49,6 +49,10 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_context_epoch.py":
     domains: [session-continuity]
+  "tools/handoff_contract.py":
+    domains: [session-continuity, workflows]
+  "tools/test_handoff_contract.py":
+    domains: [session-continuity]
   "tools/context_compiler.py":
     domains: [session-continuity, workflows]
   "tools/test_context_compiler.py":
@@ -358,6 +362,23 @@ scenarios:
       - "owner-selected target repository stays bound across packet validation and cross-project references cannot retarget mutation authority"
       - "context reset is coordinator-owned and never derived from cache-read ratio or resident session count"
       - "native hook reduction retains no raw prompt transcript tool payload or workspace path"
+    release_gate: true
+
+  - id: ENG-HANDOFF-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Verified GitHub handoff and exact first-action resume
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_handoff_contract.py"
+    invariants:
+      - "caller-supplied local packet hashes cannot substitute for authenticated GitHub Issue persistence"
+      - "the first unfinished action and exact worktree/branch/HEAD must be checked without discarding dirty files"
     release_gate: true
 
   - id: ENG-CONTEXT-COMPILER-001
