@@ -157,6 +157,8 @@ paths:
     domains: [release-contract, workflows]
   "tools/test_user_acceptance_contract.py":
     domains: [release-contract]
+  "tools/test_owner_runtime_override.py":
+    domains: [release-contract]
   "schemas/user-acceptance-evidence.schema.json":
     domains: [schemas, release-contract]
   "standards/OPERATIONS.md":
@@ -277,6 +279,24 @@ scenarios:
       - "Execution-profile-selected direct persona execution is mandatory for both user gates"
       - "Surface Reconciliation and Full User E2E must cleanly bind to one exact HEAD before candidate freeze"
       - "quality closure is evidence-only and does not authorize release"
+    release_gate: true
+
+  - id: ENG-RELEASE-OWNER-RUNTIME-OVERRIDE-001
+    cost: cheap
+    estimated_seconds: 9
+    timeout_seconds: 65
+    agent_default: true
+    scope: unit
+    name: Signed owner-runtime override fail-closed contract
+    level: unit
+    domains: [release-contract]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_owner_runtime_override.py"
+    invariants:
+      - "Unsigned/self-attested runtime overrides never bypass the selected execution profile"
+      - "Trusted receipts bind repo/HEAD/gate/run/contract/runtime and expire"
+      - "Signature validation never grants persona evidence or product release"
     release_gate: true
 
   - id: ENG-STATIC-002

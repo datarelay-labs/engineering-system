@@ -119,6 +119,7 @@ REQUIRED_METHOD_FILES = (
     "tools/test_trusted_production_installed_layout.py",
     "tools/user_acceptance_contract.py",
     "tools/test_user_acceptance_contract.py",
+    "tools/test_owner_runtime_override.py",
     "schemas/user-acceptance-evidence.schema.json",
     "schemas/worker-adapter-result.schema.json",
     "tools/behavior_eval.py",
@@ -1914,6 +1915,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_user_acceptance_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_owner_runtime_override.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_auto_merge_eligibility.py"], cwd=ROOT)
