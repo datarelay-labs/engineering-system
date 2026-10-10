@@ -1,48 +1,135 @@
 #!/usr/bin/env python3
-"""Fail-closed next-chat handoff transaction verifier."""
+"""Fail-closed next-chat handoff verifier; strict mode reads the actual GitHub Issue."""
 from __future__ import annotations
-import argparse, hashlib, json, re
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
 from pathlib import Path
+
 from context_epoch import analyze_packet, parse_packet
 from work_admission import packet_not_runnable_reason
 
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _block(reason: str, **extra: object) -> dict:
+    return {"status": "BLOCK", "reason": reason, **extra}
+
 
 def verify(facts: dict) -> dict:
-    required = ("target_repo","packet_body","persisted_body_sha256","continuation_token")
-    missing=[k for k in required if not facts.get(k)]
+    """Legacy pure verifier: its digest is caller-reported, not a GitHub read."""
+    required = ("target_repo", "packet_body", "persisted_body_sha256", "continuation_token")
+    missing = [key for key in required if not facts.get(key)]
     if missing:
-        return {"status":"BLOCK","reason":"MISSING_FACTS","missing":missing}
-    body=str(facts["packet_body"])
-    digest=hashlib.sha256(body.encode()).hexdigest()
-    persisted=str(facts["persisted_body_sha256"])
+        return _block("MISSING_FACTS", missing=missing)
+    body = str(facts["packet_body"])
+    digest = hashlib.sha256(body.encode()).hexdigest()
+    persisted = str(facts["persisted_body_sha256"])
     if not SHA_RE.fullmatch(persisted) or digest != persisted:
-        return {"status":"BLOCK","reason":"PERSISTED_PACKET_MISMATCH"}
-    packet=parse_packet(body)
-    lint=analyze_packet(packet, expected_target_repo=str(facts["target_repo"]))
+        return _block("PERSISTED_PACKET_MISMATCH")
+    packet = parse_packet(body)
+    lint = analyze_packet(packet, expected_target_repo=str(facts["target_repo"]))
     if lint["status"] != "PASS":
-        return {
-            "status":"BLOCK",
-            "reason":"PACKET_NOT_CLEAN",
-            "blocking":lint["blocking"],
-            "warnings":lint["warnings"],
-        }
+        return _block("PACKET_NOT_CLEAN", blocking=lint["blocking"], warnings=lint["warnings"])
     if packet.metadata.get("STATUS") == "ACTIVE" and packet_not_runnable_reason(packet):
-        return {"status":"BLOCK","reason":"ACTIVE_PACKET_NOT_RUNNABLE"}
-    token=str(facts["continuation_token"]).strip()
-    if not token or "\n" in token or len(token)>120:
-        return {"status":"BLOCK","reason":"CONTINUATION_TOKEN_INVALID"}
-    return {"status":"PASS","reason":"HANDOFF_TRANSACTION_VERIFIED","continuation_token":token}
+        return _block("ACTIVE_PACKET_NOT_RUNNABLE")
+    token = str(facts["continuation_token"]).strip()
+    if not token or "\n" in token or len(token) > 120:
+        return _block("CONTINUATION_TOKEN_INVALID")
+    return {"status": "PASS", "reason": "HANDOFF_TRANSACTION_VERIFIED", "continuation_token": token}
 
-def main()->int:
-    p=argparse.ArgumentParser()
-    p.add_argument("--facts",required=True)
-    a=p.parse_args()
+
+def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
+    """Strict handoff: an authenticated GitHub API read must supply *Issue body*.
+
+    A NEXT_CHAT_START comment, proposed local packet, or matching local digest
+    cannot substitute for the actual authoritative Issue body.
+    """
+    if not isinstance(facts, dict) or not isinstance(issue, dict):
+        return _block("GITHUB_ISSUE_INVALID")
+    repo = facts.get("target_repo")
+    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo):
+        return _block("TARGET_REPO_INVALID")
+    if not isinstance(issue_number, int) or issue_number < 1:
+        return _block("GITHUB_ISSUE_INVALID")
+    url = f"https://github.com/{repo}/issues/{issue_number}"
+    if issue.get("number") != issue_number or issue.get("html_url") != url or "pull_request" in issue:
+        return _block("GITHUB_ISSUE_IDENTITY_MISMATCH")
+    body = issue.get("body")
+    if not isinstance(body, str) or body != facts.get("packet_body"):
+        return _block("PERSISTED_PACKET_MISMATCH")
+    # The digest must be calculated from the authenticated *persisted* Issue.
+    if hashlib.sha256(body.encode()).hexdigest() != facts.get("persisted_body_sha256"):
+        return _block("PERSISTED_PACKET_MISMATCH")
+    required = ("expected_workstream", "expected_owner_intent",
+                "expected_intent_revision", "verified_head", "first_action")
+    missing = [key for key in required if facts.get(key) is None or facts.get(key) == ""]
+    if missing:
+        return _block("RESUME_ANCHOR_MISSING", missing=missing)
+    packet = parse_packet(body)
+    expected = {
+        "WORKSTREAM": str(facts["expected_workstream"]),
+        "OWNER_INTENT": str(facts["expected_owner_intent"]),
+        "INTENT_REVISION": str(facts["expected_intent_revision"]),
+        "LAST_VERIFIED_HEAD": str(facts["verified_head"]),
+    }
+    if not HEAD_RE.fullmatch(expected["LAST_VERIFIED_HEAD"]):
+        return _block("VERIFIED_HEAD_INVALID")
+    mismatches = [key for key, value in expected.items()
+                  if packet.metadata.get(key) != value]
+    if mismatches:
+        return _block("RESUME_ANCHOR_STALE", mismatches=mismatches)
+    if packet.metadata.get("STATUS") == "ACTIVE" and issue.get("state") != "open":
+        return _block("GITHUB_ISSUE_NOT_OPEN")
+    action = str(facts["first_action"]).strip()
+    action_lines = {line.strip() for line in packet.sections.get("Next Action", "").splitlines()}
+    if len(action) > 500 or not action or action not in action_lines:
+        return _block("FIRST_ACTION_NOT_PERSISTED")
+    if f"#{issue_number}" not in str(facts.get("continuation_token", "")):
+        return _block("CONTINUATION_TOKEN_NOT_BOUND")
+    result = verify(facts)
+    if result["status"] != "PASS":
+        return result
+    return {**result, "issue_url": url, "workstream": expected["WORKSTREAM"],
+            "verified_first_action": action}
+
+
+def read_github_issue(repo: str, issue_number: int) -> dict:
+    """Read only one explicit GitHub Issue via an authenticated CLI."""
+    if not REPO_RE.fullmatch(repo):
+        raise ValueError("TARGET_REPO_INVALID")
+    proc = subprocess.run(
+        ["gh", "api", f"repos/{repo}/issues/{issue_number}"],
+        text=True, capture_output=True, timeout=20, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"gh api exit={proc.returncode}: {proc.stderr.strip()[:240]}")
+    return json.loads(proc.stdout)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--facts", required=True)
+    parser.add_argument("--github-issue", type=int, help="Strict handoff: read authoritative Issue via gh api")
+    args = parser.parse_args()
     try:
-        facts=json.loads(Path(a.facts).read_text())
-    except Exception:
-        print(json.dumps({"status":"BLOCK","reason":"FACTS_INVALID"},sort_keys=True)); return 2
-    result=verify(facts); print(json.dumps(result,sort_keys=True))
-    return 0 if result["status"]=="PASS" else 2
-if __name__=="__main__":
+        facts = json.loads(Path(args.facts).read_text(encoding="utf-8"))
+        if args.github_issue is None:
+            result = verify(facts)
+        else:
+            issue = read_github_issue(str(facts.get("target_repo", "")), args.github_issue)
+            result = verify_github_issue(facts, args.github_issue, issue)
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired, RuntimeError) as exc:
+        result = _block("GITHUB_READ_UNAVAILABLE" if args.github_issue else "FACTS_INVALID",
+                        detail=str(exc)[:260])
+    print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+    return 0 if result["status"] == "PASS" else 2
+
+
+if __name__ == "__main__":
     raise SystemExit(main())
