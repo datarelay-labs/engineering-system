@@ -520,6 +520,100 @@ def test_plan_has_no_production_mutation_or_execution_surface() -> None:
         _fail(f"cli dry-run returned {status}: {stdout.getvalue().strip()}")
 
 
+
+def test_campaign_prepares_all_frozen_cases_without_running_workers() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    plan = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE,
+    )
+    if plan["kind"] != "benchmark-campaign-dry-run" or plan["execution_state"] != "NOT_EXECUTED":
+        _fail("campaign implied an executed model run")
+    if plan["case_count"] != 7 or plan["observed_results"] != 0:
+        _fail("campaign did not keep seven plans separate from actual results")
+    if plan["profile_parity"] != "DECLARATIONS_MATCH" or plan["execute_worker"] is not False:
+        _fail("campaign did not enforce matched declared profiles")
+    expected = EXEC.benchmark_fixture.REQUIRED_CASE_IDS
+    if tuple(case["case_id"] for case in plan["cases"]) != expected:
+        _fail("campaign case ordering or set drifted")
+    for entry in plan["cases"]:
+        lanes = entry["lanes"]
+        if tuple(lane["lane"] for lane in lanes) != ("CONTROL", "CANDIDATE"):
+            _fail("campaign lane identity drifted")
+        if lanes[0]["worker_payload"]["task"] != lanes[1]["worker_payload"]["task"]:
+            _fail("candidate task differs from control")
+        if lanes[0]["profile"] != lanes[1]["profile"]:
+            _fail("candidate profile differs from control")
+        if any(lane["isolation"]["execute_worker"] for lane in lanes):
+            _fail("campaign attempted worker execution")
+        if any(EXEC.accepts_final_result(lane["result_template"]) for lane in lanes):
+            _fail("campaign converted template to final evidence")
+        source = next(c for c in manifest["cases"] if c["id"] == entry["case_id"])
+        payload = json.dumps(lanes[0]["worker_payload"])
+        if any(key in payload for key in ("source_record", "lineage_commits", "\"oracle\"")):
+            _fail("campaign exposed auditor-only material to worker")
+        if source["source_record"] in payload or any(code in payload for code in source["oracle"]):
+            _fail("campaign leaked frozen oracle")
+
+    multi = next(c for c in manifest["cases"] if c["id"] == "BENCH-MULTI-007")
+    control = next(c for c in plan["cases"] if c["case_id"] == "BENCH-MULTI-007")["lanes"][0]
+    if control["system_head"] != multi["lineage_commits"][0]:
+        _fail("historical comparison false-positive fixture was not reproduced")
+    evil = copy.deepcopy(control["worker_payload"])
+    evil["task"]["objective"] = multi["lineage_commits"][0]
+    try:
+        EXEC._reject_worker_leak(evil, multi)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TASK_LEAKS_ORACLE":
+            _fail("task-side historical lineage was not rejected")
+    else:
+        _fail("campaign allowed a hidden lineage SHA in the worker task")
+    evil = copy.deepcopy(control["worker_payload"])
+    evil["run"]["alternate_head"] = multi["lineage_commits"][0]
+    try:
+        EXEC._reject_worker_leak(evil, multi)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TASK_LEAKS_ORACLE":
+            _fail("alternate run field evaded lineage guard")
+    else:
+        _fail("campaign allowed hidden lineage outside fixed system HEAD")
+
+    mismatch = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE,
+        candidate_profile=dict(PROFILE, toolset="other"),
+    )
+    if mismatch["profile_parity"] != "DECLARATIONS_DIFFER" or mismatch["execution_state"] != "NOT_EXECUTED":
+        _fail("mismatched campaign profiles were treated as equivalent")
+    missing = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+        profile=dict(PROFILE, model=None),
+    )
+    if missing["profile_parity"] != "PROFILE_INCOMPLETE" or missing["cases"]:
+        _fail("incomplete campaign profile did not fail closed")
+    drift = copy.deepcopy(manifest)
+    drift["cases"][1]["task"]["objective"] = "A different accepted objective."
+    try:
+        EXEC.campaign_dry_run(drift, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "FROZEN_MANIFEST_MISMATCH":
+            _fail(f"campaign drift gave {exc.code}")
+    else:
+        _fail("edited campaign objective retained frozen fixture identity")
+
+
+def test_campaign_cli_prepares_seven_non_final_plans() -> None:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        status = EXEC.main([
+            "campaign-dry-run", "--provider", "example-provider",
+            "--model", "example-model", "--reasoning", "low",
+            "--toolset", "read-only", "--json",
+        ])
+    if status != 0:
+        _fail("campaign CLI failed with a matching declared profile")
+    plan = json.loads(stdout.getvalue())
+    if plan["execution_state"] != "NOT_EXECUTED" or len(plan["cases"]) != 7:
+        _fail("campaign CLI claimed executed model evidence or lost cases")
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -532,6 +626,8 @@ def main() -> None:
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
     test_plan_has_no_production_mutation_or_execution_surface()
+    test_campaign_prepares_all_frozen_cases_without_running_workers()
+    test_campaign_cli_prepares_seven_non_final_plans()
     print("PASS benchmark execution dry-run")
 
 
