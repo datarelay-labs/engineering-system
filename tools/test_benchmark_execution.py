@@ -520,6 +520,251 @@ def test_plan_has_no_production_mutation_or_execution_surface() -> None:
         _fail(f"cli dry-run returned {status}: {stdout.getvalue().strip()}")
 
 
+
+def test_campaign_prepares_all_frozen_cases_without_running_workers() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    plan = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE,
+    )
+    if plan["kind"] != "benchmark-campaign-dry-run" or plan["execution_state"] != "NOT_EXECUTED":
+        _fail("campaign implied an executed model run")
+    if plan["case_count"] != 7 or plan["observed_results"] != 0:
+        _fail("campaign did not keep seven plans separate from actual results")
+    if plan["profile_parity"] != "DECLARATIONS_MATCH" or plan["execute_worker"] is not False:
+        _fail("campaign did not enforce matched declared profiles")
+    expected = EXEC.benchmark_fixture.REQUIRED_CASE_IDS
+    if tuple(case["case_id"] for case in plan["cases"]) != expected:
+        _fail("campaign case ordering or set drifted")
+    for entry in plan["cases"]:
+        lanes = entry["lanes"]
+        if tuple(lane["lane"] for lane in lanes) != ("CONTROL", "CANDIDATE"):
+            _fail("campaign lane identity drifted")
+        if lanes[0]["worker_payload"]["task"] != lanes[1]["worker_payload"]["task"]:
+            _fail("candidate task differs from control")
+        if lanes[0]["profile"] != lanes[1]["profile"]:
+            _fail("candidate profile differs from control")
+        if any(lane["isolation"]["execute_worker"] for lane in lanes):
+            _fail("campaign attempted worker execution")
+        if any(EXEC.accepts_final_result(lane["result_template"]) for lane in lanes):
+            _fail("campaign converted template to final evidence")
+        source = next(c for c in manifest["cases"] if c["id"] == entry["case_id"])
+        payload = json.dumps(lanes[0]["worker_payload"])
+        if any(key in payload for key in ("source_record", "lineage_commits", "\"oracle\"")):
+            _fail("campaign exposed auditor-only material to worker")
+        if source["source_record"] in payload or any(code in payload for code in source["oracle"]):
+            _fail("campaign leaked frozen oracle")
+
+    multi = next(c for c in manifest["cases"] if c["id"] == "BENCH-MULTI-007")
+    control = next(c for c in plan["cases"] if c["case_id"] == "BENCH-MULTI-007")["lanes"][0]
+    if control["system_head"] != multi["lineage_commits"][0]:
+        _fail("historical comparison false-positive fixture was not reproduced")
+    evil = copy.deepcopy(control["worker_payload"])
+    evil["task"]["objective"] = multi["lineage_commits"][0]
+    try:
+        EXEC._reject_worker_leak(evil, multi)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TASK_LEAKS_ORACLE":
+            _fail("task-side historical lineage was not rejected")
+    else:
+        _fail("campaign allowed a hidden lineage SHA in the worker task")
+    evil = copy.deepcopy(control["worker_payload"])
+    evil["run"]["alternate_head"] = multi["lineage_commits"][0]
+    try:
+        EXEC._reject_worker_leak(evil, multi)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "TASK_LEAKS_ORACLE":
+            _fail("alternate run field evaded lineage guard")
+    else:
+        _fail("campaign allowed hidden lineage outside fixed system HEAD")
+
+    mismatch = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE,
+        candidate_profile=dict(PROFILE, toolset="other"),
+    )
+    if mismatch["profile_parity"] != "DECLARATIONS_DIFFER" or mismatch["execution_state"] != "NOT_EXECUTED":
+        _fail("mismatched campaign profiles were treated as equivalent")
+    missing = EXEC.campaign_dry_run(
+        manifest, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD,
+        profile=dict(PROFILE, model=None),
+    )
+    if missing["profile_parity"] != "PROFILE_INCOMPLETE" or missing["cases"]:
+        _fail("incomplete campaign profile did not fail closed")
+    drift = copy.deepcopy(manifest)
+    drift["cases"][1]["task"]["objective"] = "A different accepted objective."
+    try:
+        EXEC.campaign_dry_run(drift, manifest_git_sha=EXEC.PILOT_MANIFEST_HEAD, profile=PROFILE)
+    except EXEC.ExecutionError as exc:
+        if exc.code != "FROZEN_MANIFEST_MISMATCH":
+            _fail(f"campaign drift gave {exc.code}")
+    else:
+        _fail("edited campaign objective retained frozen fixture identity")
+
+
+def test_campaign_cli_prepares_seven_non_final_plans() -> None:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        status = EXEC.main([
+            "campaign-dry-run", "--provider", "example-provider",
+            "--model", "example-model", "--reasoning", "low",
+            "--toolset", "read-only", "--json",
+        ])
+    if status != 0:
+        _fail("campaign CLI failed with a matching declared profile")
+    plan = json.loads(stdout.getvalue())
+    if plan["execution_state"] != "NOT_EXECUTED" or len(plan["cases"]) != 7:
+        _fail("campaign CLI claimed executed model evidence or lost cases")
+
+
+def test_campaign_cli_incomplete_profile_reports_zero_prepared() -> None:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        status = EXEC.main([
+            "campaign-dry-run", "--provider", "example-provider",
+            "--reasoning", "low", "--toolset", "read-only",
+        ])
+    if status != 1 or "BLOCK benchmark campaign dry-run 0/7 planned" not in stdout.getvalue():
+        _fail("incomplete profile inaccurately reported all 7 campaign tasks as prepared")
+
+
+def _campaign_records() -> dict:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    records = []
+    for case in manifest["cases"]:
+        for lane in ("CONTROL", "CANDIDATE"):
+            record = _final_example(lane)
+            record.update(
+                CASE_ID=case["id"],
+                FIXTURE_ID=f"{EXEC.PILOT_MANIFEST_HEAD}:{case['id']}",
+                TERMINAL="PASS",
+                CORRECT_BEHAVIOR="PASS",
+                REGRESSION_TESTS="PASS",
+                EXACT_HEAD_EVIDENCE="PASS",
+                RELEVANT_CONTEXT="BOUNDED",
+                NOTES_CODE="SYNTHETIC_TEST_ONLY",
+            )
+            records.append(record)
+    return {
+        "schema_version": 1,
+        "kind": "benchmark-campaign-records",
+        "manifest_git_sha": EXEC.PILOT_MANIFEST_HEAD,
+        "records": records,
+    }
+
+
+def test_campaign_result_inspection_never_grants_verified_outcomes() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    raw = _campaign_records()  # Synthetic values are a shape test only.
+    report = EXEC.inspect_campaign_results(raw, manifest=manifest)
+    if report["kind"] != "benchmark-campaign-record-inspection":
+        _fail("campaign result report type drifted")
+    if report["structural_status"] != "COMPLETE" or report["paired_cases"] != 7:
+        _fail("seven complete shape-valid record pairs were rejected")
+    if report["record_count"] != 14 or report["case_count"] != 7:
+        _fail("campaign result lost exact seven-case counts")
+    if report["execution_attestation"] != "UNVERIFIED":
+        _fail("self-asserted records were mistaken for model execution evidence")
+    if report["native_usage_attestation"] != "UNVERIFIED":
+        _fail("self-asserted model cost was mistaken for native provider accounting")
+    if report["quality_closure"] != "BLOCK" or report["release_authorized"] is not False:
+        _fail("shape-valid synthetic data granted release or user-gate authority")
+    if any(key in json.dumps(report) for key in ('"oracle"', '"lineage_commits"', "SYNTHETIC_TEST_ONLY")):
+        _fail("record report leaked source oracle or raw notes")
+
+    partial = copy.deepcopy(raw)
+    partial["records"] = partial["records"][:1]
+    incomplete = EXEC.inspect_campaign_results(partial, manifest=manifest)
+    if incomplete["structural_status"] != "PARTIAL" or incomplete["paired_cases"] != 0:
+        _fail("partial campaign falsely reported complete")
+    if incomplete["missing_lane_count"] != 13 or incomplete["quality_closure"] != "BLOCK":
+        _fail("partial campaign did not report missing lanes")
+
+
+def test_campaign_result_inspection_rejects_false_provenance_and_identity() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    baseline = _campaign_records()
+
+    def reject(mutant: dict, code: str) -> None:
+        try:
+            EXEC.inspect_campaign_results(mutant, manifest=manifest)
+        except EXEC.ExecutionError as exc:
+            if exc.code != code:
+                _fail(f"wrong campaign rejection {exc.code}, expected {code}")
+        else:
+            _fail(f"campaign accepted prohibited input: {code}")
+
+    duplicate = copy.deepcopy(baseline)
+    duplicate["records"][1] = duplicate["records"][0]
+    reject(duplicate, "DUPLICATE_CAMPAIGN_LANE")
+
+    swapped = copy.deepcopy(baseline)
+    swapped["records"][1]["SYSTEM_HEAD"] = EXEC.benchmark_fixture.CONTROL_HEAD
+    reject(swapped, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    stale = copy.deepcopy(baseline)
+    stale["records"][2]["FIXTURE_ID"] = f"{'a'*40}:BENCH-CROSS-002"
+    reject(stale, "CAMPAIGN_FIXTURE_MISMATCH")
+
+    mixed = copy.deepcopy(baseline)
+    mixed["records"][3]["FIXTURE_ID"] = f"{EXEC.PILOT_MANIFEST_HEAD}:BENCH-BUG-001"
+    reject(mixed, "CAMPAIGN_FIXTURE_MISMATCH")
+
+    rogue = copy.deepcopy(baseline)
+    rogue["records"][0]["CASE_ID"] = "BENCH-ROGUE-999"
+    reject(rogue, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    placeholder = copy.deepcopy(baseline)
+    placeholder["records"][0]["NOTES_CODE"] = "NOT_EXECUTED"
+    reject(placeholder, "CAMPAIGN_UNEXECUTED_PLACEHOLDER")
+
+    claimed = copy.deepcopy(baseline)
+    claimed["verified"] = True
+    reject(claimed, "CAMPAIGN_ENVELOPE_INVALID")
+
+    wrong_manifest = copy.deepcopy(baseline)
+    wrong_manifest["manifest_git_sha"] = "b" * 40
+    reject(wrong_manifest, "FIXTURE_REVISION_MISMATCH")
+
+    oversized = copy.deepcopy(baseline)
+    oversized["records"].append(oversized["records"][0])
+    reject(oversized, "CAMPAIGN_RECORD_COUNT_EXCEEDED")
+
+    for invalid_cost in (float("nan"), float("inf"), float("-inf")):
+        nonfinite = copy.deepcopy(baseline)
+        nonfinite["records"][0]["MODEL_COST"] = invalid_cost
+        reject(nonfinite, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    contradictory = copy.deepcopy(baseline)
+    contradictory["records"][0]["CORRECT_BEHAVIOR"] = "FAIL"
+    reject(contradictory, "CAMPAIGN_CONTRADICTORY_TERMINAL")
+    unsafe = copy.deepcopy(baseline)
+    unsafe["records"][0]["SAFETY_REGRESSION"] = "YES"
+    reject(unsafe, "CAMPAIGN_CONTRADICTORY_TERMINAL")
+
+
+def test_campaign_record_inspection_cli_stays_evidence_only() -> None:
+    import tempfile
+    raw = _campaign_records()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "synthetic-campaign.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            status = EXEC.main(["campaign-inspect", "--input", str(path), "--json"])
+        if status != 0:
+            _fail("complete synthetic records should pass structural inspection only")
+        report = json.loads(stdout.getvalue())
+        if report["quality_closure"] != "BLOCK" or report["execution_attestation"] != "UNVERIFIED":
+            _fail("campaign CLI promoted synthetic results to verified outcomes")
+
+        bad = copy.deepcopy(raw)
+        bad["records"][0]["NOTES_CODE"] = "NOT_EXECUTED"
+        path.write_text(json.dumps(bad), encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            status = EXEC.main(["campaign-inspect", "--input", str(path)])
+        if status == 0 or "FAIL CAMPAIGN_UNEXECUTED_PLACEHOLDER" not in stdout.getvalue():
+            _fail("campaign CLI accepted a dry-run placeholder as an observed result")
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -532,6 +777,12 @@ def main() -> None:
     test_telemetry_mapping_uses_canonical_records_only()
     test_review_rework_preserves_canonical_aggregate()
     test_plan_has_no_production_mutation_or_execution_surface()
+    test_campaign_prepares_all_frozen_cases_without_running_workers()
+    test_campaign_cli_prepares_seven_non_final_plans()
+    test_campaign_cli_incomplete_profile_reports_zero_prepared()
+    test_campaign_result_inspection_never_grants_verified_outcomes()
+    test_campaign_result_inspection_rejects_false_provenance_and_identity()
+    test_campaign_record_inspection_cli_stays_evidence_only()
     print("PASS benchmark execution dry-run")
 
 

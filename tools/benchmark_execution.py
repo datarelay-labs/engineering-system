@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare a BENCH-BUG-001 control/candidate dry-run without launching workers.
+"""Prepare frozen #44 benchmark dry-runs without launching workers.
 
+The pilot command handles BENCH-BUG-001; campaign-dry-run handles all seven.
 The coordinator may read the frozen manifest. A worker payload is only
 ``worker_task()`` plus explicit run metadata. The dry-run binds the pilot
 identities and emits a non-final result template. Observed cost, time, and
@@ -11,7 +12,9 @@ or network call.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -106,19 +109,26 @@ def _reject_worker_leak(payload: dict[str, Any], case: dict[str, Any]) -> None:
     banned_values.update(case.get("lineage_commits") or [])
     banned_values.add(case["source_record"])
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, path: tuple[str, ...] = ()) -> None:
         if isinstance(value, dict):
             if FORBIDDEN_WORKER_KEYS.intersection(value):
                 raise ExecutionError("TASK_LEAKS_ORACLE")
-            for item in value.values():
-                walk(item)
+            for key, item in value.items():
+                walk(item, (*path, key))
             return
         if isinstance(value, list):
             for item in value:
-                walk(item)
+                walk(item, path)
             return
         if isinstance(value, str) and value in banned_values:
-            raise ExecutionError("TASK_LEAKS_ORACLE")
+            # BENCH-MULTI-007 legitimately pins CONTROL_HEAD as run metadata,
+            # and that SHA is also its historical rollout lineage identity.
+            # Exempt only the generated, immutable system-head slot, not task
+            # text or arbitrary alternate metadata locations.
+            if path != ("run", "system_head") or value not in {
+                benchmark_fixture.CONTROL_HEAD, benchmark_fixture.CANDIDATE_HEAD
+            }:
+                raise ExecutionError("TASK_LEAKS_ORACLE")
         if isinstance(value, str) and benchmark_fixture.PRODUCTION_MUTATION_RE.search(value):
             raise ExecutionError("PRODUCTION_MUTATION_INSTRUCTION")
 
@@ -419,6 +429,170 @@ def dry_run(
     )
 
 
+
+def campaign_dry_run(
+    manifest: dict[str, Any],
+    *,
+    manifest_git_sha: str,
+    profile: dict[str, Any] | None,
+    candidate_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Read-only seven-case plan. Matching declarations are NOT outcome evidence."""
+    if manifest_git_sha != PILOT_MANIFEST_HEAD:
+        raise ExecutionError("FIXTURE_REVISION_MISMATCH")
+    try:
+        validated = benchmark_fixture.validate_manifest(manifest)
+    except benchmark_fixture.FixtureError as exc:
+        raise ExecutionError(exc.code) from exc
+    _require_frozen_manifest(validated)
+    control_profile = _complete_profile(profile)
+    other = profile if candidate_profile is None else candidate_profile
+    candidate_profile_norm = _complete_profile(other)
+    parity = (
+        "PROFILE_INCOMPLETE"
+        if control_profile is None or candidate_profile_norm is None
+        else "DECLARATIONS_MATCH"
+        if control_profile == candidate_profile_norm
+        else "DECLARATIONS_DIFFER"
+    )
+    cases: list[dict[str, Any]] = []
+    if control_profile is not None and candidate_profile_norm is not None:
+        for case in validated["cases"]:
+            if case["status"] != "FROZEN":
+                raise ExecutionError("CASE_NOT_RUNNABLE")
+            bound = benchmark_fixture.bind_fixture_id(
+                f"{manifest_git_sha}:{case['id']}", validated, manifest_git_sha
+            )
+            lanes = [
+                _lane(validated, case, lane="CONTROL",
+                      manifest_git_sha=manifest_git_sha, profile=control_profile),
+                _lane(validated, case, lane="CANDIDATE",
+                      manifest_git_sha=manifest_git_sha, profile=candidate_profile_norm),
+            ]
+            if lanes[0]["worker_payload"]["task"] != lanes[1]["worker_payload"]["task"]:
+                raise ExecutionError("TASK_DIVERGED")
+            if lanes[0]["system_head"] == lanes[1]["system_head"]:
+                raise ExecutionError("SYSTEM_HEAD_MISMATCH")
+            cases.append({
+                "case_id": case["id"],
+                "fixture_id": bound["fixture_id"],
+                "lanes": lanes,
+            })
+    if cases and tuple(c["case_id"] for c in cases) != benchmark_fixture.REQUIRED_CASE_IDS:
+        raise ExecutionError("CASE_SET_MISMATCH")
+    return {
+        "schema_version": 1,
+        "kind": "benchmark-campaign-dry-run",
+        "manifest_git_sha": manifest_git_sha,
+        "control_head": validated["control"]["head"],
+        "candidate_head": validated["candidate"]["head"],
+        "case_count": len(validated["cases"]),
+        "profile_parity": parity,
+        "execution_state": "NOT_EXECUTED",
+        "execute_worker": False,
+        "observed_results": 0,
+        "model_cost": "UNKNOWN",
+        "network": "NONE",
+        "cases": cases,
+    }
+
+
+def inspect_campaign_results(
+    raw: Any, *, manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate seven-case record structure, never self-attested execution truth.
+
+    Only an independently authenticated model/auditor channel can establish
+    runtime provenance, correctness and promotion. This inspection has none.
+    """
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {"schema_version", "kind", "manifest_git_sha", "records"}
+        or type(raw["schema_version"]) is not int or raw["schema_version"] != 1
+        or raw["kind"] != "benchmark-campaign-records"
+    ):
+        raise ExecutionError("CAMPAIGN_ENVELOPE_INVALID")
+    if raw["manifest_git_sha"] != PILOT_MANIFEST_HEAD:
+        raise ExecutionError("FIXTURE_REVISION_MISMATCH")
+    records = raw["records"]
+    if not isinstance(records, list):
+        raise ExecutionError("CAMPAIGN_ENVELOPE_INVALID")
+    if len(records) > 2 * len(benchmark_fixture.REQUIRED_CASE_IDS):
+        raise ExecutionError("CAMPAIGN_RECORD_COUNT_EXCEEDED")
+    try:
+        frozen = benchmark_fixture.validate_manifest(manifest)
+    except benchmark_fixture.FixtureError as exc:
+        raise ExecutionError(exc.code) from exc
+    _require_frozen_manifest(frozen)
+    expected_case_ids = tuple(case["id"] for case in frozen["cases"])
+    if expected_case_ids != benchmark_fixture.REQUIRED_CASE_IDS:
+        raise ExecutionError("CASE_SET_MISMATCH")
+
+    # Reuse the existing per-lane result contract including exact version/HEAD
+    # pairing. Relax only its first-pilot CASE_ID/FIXTURE_ID constants, and bind
+    # both values independently against the immutable seven-case manifest.
+    schema = copy.deepcopy(_schema()["$defs"]["final_result"])
+    schema["properties"]["CASE_ID"] = {
+        "type": "string", "enum": list(expected_case_ids),
+    }
+    schema["properties"]["FIXTURE_ID"] = {
+        "type": "string", "pattern": r"^[0-9a-f]{40}:BENCH-[A-Z0-9-]+$",
+    }
+    validator = Draft202012Validator(schema)
+    seen: set[tuple[str, str]] = set()
+    for record in records:
+        if not isinstance(record, dict) or not validator.is_valid(record):
+            raise ExecutionError("CAMPAIGN_RECORD_SCHEMA_INVALID")
+        cost = record["MODEL_COST"]
+        if isinstance(cost, float) and not math.isfinite(cost):
+            raise ExecutionError("CAMPAIGN_RECORD_SCHEMA_INVALID")
+        if record["TERMINAL"] == "PASS" and (
+            record["CORRECT_BEHAVIOR"] != "PASS"
+            or record["SAFETY_REGRESSION"] != "NO"
+            or record["REGRESSION_TESTS"] != "PASS"
+            or record["EXACT_HEAD_EVIDENCE"] != "PASS"
+            or record["RELEVANT_CONTEXT"] != "BOUNDED"
+            or record["HOST_RESOURCE_OUTCOME"] == "BLOCK"
+        ):
+            raise ExecutionError("CAMPAIGN_CONTRADICTORY_TERMINAL")
+        case_id = record["CASE_ID"]
+        if record["FIXTURE_ID"] != f"{PILOT_MANIFEST_HEAD}:{case_id}":
+            raise ExecutionError("CAMPAIGN_FIXTURE_MISMATCH")
+        if record["NOTES_CODE"] == "NOT_EXECUTED":
+            raise ExecutionError("CAMPAIGN_UNEXECUTED_PLACEHOLDER")
+        lane = "CONTROL" if record["SYSTEM_HEAD"] == benchmark_fixture.CONTROL_HEAD else "CANDIDATE"
+        identity = (case_id, lane)
+        if identity in seen:
+            raise ExecutionError("DUPLICATE_CAMPAIGN_LANE")
+        seen.add(identity)
+    paired = sum(
+        (case_id, "CONTROL") in seen and (case_id, "CANDIDATE") in seen
+        for case_id in expected_case_ids
+    )
+    missing = [
+        {"case_id": case_id, "lane": lane}
+        for case_id in expected_case_ids
+        for lane in ("CONTROL", "CANDIDATE")
+        if (case_id, lane) not in seen
+    ]
+    # Never incorporate raw, self-asserted observations into a quality claim.
+    return {
+        "schema_version": 1,
+        "kind": "benchmark-campaign-record-inspection",
+        "authority": "EVIDENCE_ONLY",
+        "manifest_git_sha": PILOT_MANIFEST_HEAD,
+        "case_count": len(expected_case_ids),
+        "record_count": len(records),
+        "paired_cases": paired,
+        "missing_lane_count": len(missing),
+        "missing_lanes": missing,
+        "structural_status": "COMPLETE" if not missing else "PARTIAL",
+        "execution_attestation": "UNVERIFIED",
+        "native_usage_attestation": "UNVERIFIED",
+        "quality_closure": "BLOCK",
+        "release_authorized": False,
+    }
+
 def _profile_from_args(args: argparse.Namespace, prefix: str) -> dict[str, Any] | None:
     values = {
         "provider": getattr(args, f"{prefix}provider"),
@@ -435,17 +609,58 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     dry = sub.add_parser("dry-run")
-    dry.add_argument("--manifest", type=Path, default=benchmark_fixture.MANIFEST_PATH)
-    dry.add_argument("--json", action="store_true")
-    for prefix in ("", "candidate_"):
-        for field in efficiency_telemetry.PROFILE_FIELDS:
-            dry.add_argument(f"--{prefix.replace('_', '-')}{field}", default=None)
+    campaign = sub.add_parser("campaign-dry-run")
+    inspection = sub.add_parser("campaign-inspect")
+    inspection.add_argument("--manifest", type=Path, default=benchmark_fixture.MANIFEST_PATH)
+    inspection.add_argument("--input", type=Path, required=True)
+    inspection.add_argument("--json", action="store_true")
+    for command in (dry, campaign):
+        command.add_argument("--manifest", type=Path, default=benchmark_fixture.MANIFEST_PATH)
+        command.add_argument("--json", action="store_true")
+        for prefix in ("", "candidate_"):
+            for field in efficiency_telemetry.PROFILE_FIELDS:
+                command.add_argument(f"--{prefix.replace('_', '-')}{field}", default=None)
     args = parser.parse_args(argv)
-    if args.command != "dry-run":
-        print("FAIL UNSUPPORTED_COMMAND")
-        return 1
     try:
         manifest = benchmark_fixture.load_manifest(args.manifest)
+        if args.command == "campaign-inspect":
+            try:
+                if args.input.stat().st_size > 1024 * 1024:
+                    raise ExecutionError("CAMPAIGN_INPUT_TOO_LARGE")
+                def reject_json_constant(value: str) -> Any:
+                    raise ValueError("non-finite JSON numeric constant")
+                raw = json.loads(
+                    args.input.read_text(encoding="utf-8"),
+                    parse_constant=reject_json_constant,
+                )
+            except (OSError, ValueError, UnicodeError) as exc:
+                raise ExecutionError("CAMPAIGN_INPUT_INVALID") from exc
+            document = inspect_campaign_results(raw, manifest=manifest)
+            if args.json:
+                print(json.dumps(document, sort_keys=True))
+            else:
+                print(
+                    f"{document['structural_status']} benchmark record structure "
+                    f"{document['record_count']}/14, model execution UNVERIFIED, "
+                    "quality closure BLOCK"
+                )
+            return 0 if document["structural_status"] == "COMPLETE" else 2
+        if args.command == "campaign-dry-run":
+            document = campaign_dry_run(
+                manifest,
+                manifest_git_sha=PILOT_MANIFEST_HEAD,
+                profile=_profile_from_args(args, ""),
+                candidate_profile=_profile_from_args(args, "candidate_"),
+            )
+            if args.json:
+                print(json.dumps(document, sort_keys=True))
+            else:
+                print(
+                    f"{'PASS' if document['profile_parity'] == 'DECLARATIONS_MATCH' else 'BLOCK'} "
+                    f"benchmark campaign dry-run {len(document['cases'])}/{document['case_count']} "
+                    f"planned, zero workers executed"
+                )
+            return 0 if document["profile_parity"] == "DECLARATIONS_MATCH" else 1
         document = dry_run(
             manifest,
             case_id=PILOT_CASE_ID,
