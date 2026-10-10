@@ -625,6 +625,146 @@ def test_campaign_cli_incomplete_profile_reports_zero_prepared() -> None:
     if status != 1 or "BLOCK benchmark campaign dry-run 0/7 planned" not in stdout.getvalue():
         _fail("incomplete profile inaccurately reported all 7 campaign tasks as prepared")
 
+
+def _campaign_records() -> dict:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    records = []
+    for case in manifest["cases"]:
+        for lane in ("CONTROL", "CANDIDATE"):
+            record = _final_example(lane)
+            record.update(
+                CASE_ID=case["id"],
+                FIXTURE_ID=f"{EXEC.PILOT_MANIFEST_HEAD}:{case['id']}",
+                TERMINAL="PASS",
+                CORRECT_BEHAVIOR="PASS",
+                REGRESSION_TESTS="PASS",
+                EXACT_HEAD_EVIDENCE="PASS",
+                RELEVANT_CONTEXT="BOUNDED",
+                NOTES_CODE="SYNTHETIC_TEST_ONLY",
+            )
+            records.append(record)
+    return {
+        "schema_version": 1,
+        "kind": "benchmark-campaign-records",
+        "manifest_git_sha": EXEC.PILOT_MANIFEST_HEAD,
+        "records": records,
+    }
+
+
+def test_campaign_result_inspection_never_grants_verified_outcomes() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    raw = _campaign_records()  # Synthetic values are a shape test only.
+    report = EXEC.inspect_campaign_results(raw, manifest=manifest)
+    if report["kind"] != "benchmark-campaign-record-inspection":
+        _fail("campaign result report type drifted")
+    if report["structural_status"] != "COMPLETE" or report["paired_cases"] != 7:
+        _fail("seven complete shape-valid record pairs were rejected")
+    if report["record_count"] != 14 or report["case_count"] != 7:
+        _fail("campaign result lost exact seven-case counts")
+    if report["execution_attestation"] != "UNVERIFIED":
+        _fail("self-asserted records were mistaken for model execution evidence")
+    if report["native_usage_attestation"] != "UNVERIFIED":
+        _fail("self-asserted model cost was mistaken for native provider accounting")
+    if report["quality_closure"] != "BLOCK" or report["release_authorized"] is not False:
+        _fail("shape-valid synthetic data granted release or user-gate authority")
+    if any(key in json.dumps(report) for key in ('"oracle"', '"lineage_commits"', "SYNTHETIC_TEST_ONLY")):
+        _fail("record report leaked source oracle or raw notes")
+
+    partial = copy.deepcopy(raw)
+    partial["records"] = partial["records"][:1]
+    incomplete = EXEC.inspect_campaign_results(partial, manifest=manifest)
+    if incomplete["structural_status"] != "PARTIAL" or incomplete["paired_cases"] != 0:
+        _fail("partial campaign falsely reported complete")
+    if incomplete["missing_lane_count"] != 13 or incomplete["quality_closure"] != "BLOCK":
+        _fail("partial campaign did not report missing lanes")
+
+
+def test_campaign_result_inspection_rejects_false_provenance_and_identity() -> None:
+    manifest = EXEC.benchmark_fixture.load_manifest()
+    baseline = _campaign_records()
+
+    def reject(mutant: dict, code: str) -> None:
+        try:
+            EXEC.inspect_campaign_results(mutant, manifest=manifest)
+        except EXEC.ExecutionError as exc:
+            if exc.code != code:
+                _fail(f"wrong campaign rejection {exc.code}, expected {code}")
+        else:
+            _fail(f"campaign accepted prohibited input: {code}")
+
+    duplicate = copy.deepcopy(baseline)
+    duplicate["records"][1] = duplicate["records"][0]
+    reject(duplicate, "DUPLICATE_CAMPAIGN_LANE")
+
+    swapped = copy.deepcopy(baseline)
+    swapped["records"][1]["SYSTEM_HEAD"] = EXEC.benchmark_fixture.CONTROL_HEAD
+    reject(swapped, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    stale = copy.deepcopy(baseline)
+    stale["records"][2]["FIXTURE_ID"] = f"{'a'*40}:BENCH-CROSS-002"
+    reject(stale, "CAMPAIGN_FIXTURE_MISMATCH")
+
+    mixed = copy.deepcopy(baseline)
+    mixed["records"][3]["FIXTURE_ID"] = f"{EXEC.PILOT_MANIFEST_HEAD}:BENCH-BUG-001"
+    reject(mixed, "CAMPAIGN_FIXTURE_MISMATCH")
+
+    rogue = copy.deepcopy(baseline)
+    rogue["records"][0]["CASE_ID"] = "BENCH-ROGUE-999"
+    reject(rogue, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    placeholder = copy.deepcopy(baseline)
+    placeholder["records"][0]["NOTES_CODE"] = "NOT_EXECUTED"
+    reject(placeholder, "CAMPAIGN_UNEXECUTED_PLACEHOLDER")
+
+    claimed = copy.deepcopy(baseline)
+    claimed["verified"] = True
+    reject(claimed, "CAMPAIGN_ENVELOPE_INVALID")
+
+    wrong_manifest = copy.deepcopy(baseline)
+    wrong_manifest["manifest_git_sha"] = "b" * 40
+    reject(wrong_manifest, "FIXTURE_REVISION_MISMATCH")
+
+    oversized = copy.deepcopy(baseline)
+    oversized["records"].append(oversized["records"][0])
+    reject(oversized, "CAMPAIGN_RECORD_COUNT_EXCEEDED")
+
+    for invalid_cost in (float("nan"), float("inf"), float("-inf")):
+        nonfinite = copy.deepcopy(baseline)
+        nonfinite["records"][0]["MODEL_COST"] = invalid_cost
+        reject(nonfinite, "CAMPAIGN_RECORD_SCHEMA_INVALID")
+
+    contradictory = copy.deepcopy(baseline)
+    contradictory["records"][0]["CORRECT_BEHAVIOR"] = "FAIL"
+    reject(contradictory, "CAMPAIGN_CONTRADICTORY_TERMINAL")
+    unsafe = copy.deepcopy(baseline)
+    unsafe["records"][0]["SAFETY_REGRESSION"] = "YES"
+    reject(unsafe, "CAMPAIGN_CONTRADICTORY_TERMINAL")
+
+
+def test_campaign_record_inspection_cli_stays_evidence_only() -> None:
+    import tempfile
+    raw = _campaign_records()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "synthetic-campaign.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            status = EXEC.main(["campaign-inspect", "--input", str(path), "--json"])
+        if status != 0:
+            _fail("complete synthetic records should pass structural inspection only")
+        report = json.loads(stdout.getvalue())
+        if report["quality_closure"] != "BLOCK" or report["execution_attestation"] != "UNVERIFIED":
+            _fail("campaign CLI promoted synthetic results to verified outcomes")
+
+        bad = copy.deepcopy(raw)
+        bad["records"][0]["NOTES_CODE"] = "NOT_EXECUTED"
+        path.write_text(json.dumps(bad), encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            status = EXEC.main(["campaign-inspect", "--input", str(path)])
+        if status == 0 or "FAIL CAMPAIGN_UNEXECUTED_PLACEHOLDER" not in stdout.getvalue():
+            _fail("campaign CLI accepted a dry-run placeholder as an observed result")
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -640,6 +780,9 @@ def main() -> None:
     test_campaign_prepares_all_frozen_cases_without_running_workers()
     test_campaign_cli_prepares_seven_non_final_plans()
     test_campaign_cli_incomplete_profile_reports_zero_prepared()
+    test_campaign_result_inspection_never_grants_verified_outcomes()
+    test_campaign_result_inspection_rejects_false_provenance_and_identity()
+    test_campaign_record_inspection_cli_stays_evidence_only()
     print("PASS benchmark execution dry-run")
 
 
