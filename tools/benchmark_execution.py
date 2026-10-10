@@ -532,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(
                     f"{'PASS' if document['profile_parity'] == 'DECLARATIONS_MATCH' else 'BLOCK'} "
-                    f"benchmark campaign dry-run {document['case_count']}/7 "
+                    f"benchmark campaign dry-run {len(document['cases'])}/{document['case_count']} "
                     f"planned, zero workers executed"
                 )
             return 0 if document["profile_parity"] == "DECLARATIONS_MATCH" else 1

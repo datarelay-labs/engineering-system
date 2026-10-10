@@ -614,6 +614,17 @@ def test_campaign_cli_prepares_seven_non_final_plans() -> None:
     if plan["execution_state"] != "NOT_EXECUTED" or len(plan["cases"]) != 7:
         _fail("campaign CLI claimed executed model evidence or lost cases")
 
+
+def test_campaign_cli_incomplete_profile_reports_zero_prepared() -> None:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        status = EXEC.main([
+            "campaign-dry-run", "--provider", "example-provider",
+            "--reasoning", "low", "--toolset", "read-only",
+        ])
+    if status != 1 or "BLOCK benchmark campaign dry-run 0/7 planned" not in stdout.getvalue():
+        _fail("incomplete profile inaccurately reported all 7 campaign tasks as prepared")
+
 def main() -> None:
     test_dry_run_matches_task_and_profile_and_differs_by_head()
     test_worker_payload_hides_oracle_lineage_and_source_record()
@@ -628,6 +639,7 @@ def main() -> None:
     test_plan_has_no_production_mutation_or_execution_surface()
     test_campaign_prepares_all_frozen_cases_without_running_workers()
     test_campaign_cli_prepares_seven_non_final_plans()
+    test_campaign_cli_incomplete_profile_reports_zero_prepared()
     print("PASS benchmark execution dry-run")
 
 
