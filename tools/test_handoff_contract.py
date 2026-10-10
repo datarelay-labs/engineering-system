@@ -69,6 +69,10 @@ def test_strict_handoff_snapshot():
              "html_url": "https://github.com/datarelay-labs/demo/issues/7", "body": body}
     assert verify_github_issue(data, 7, issue)["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
     assert verify_github_issue(data, 7, issue)["evidence_scope"] == "AUTHENTICATED_GITHUB_ISSUE"
+    terminal = "1. This bounded legacy queued-approval notification defect is fixed and **WAITING**."
+    terminal_body = body.replace(first, terminal)
+    terminal_data = facts_with_body({**data, "first_action": terminal}, terminal_body)
+    assert verify_github_issue(terminal_data, 7, {**issue, "body": terminal_body})["reason"] == "FIRST_ACTION_NOT_EXECUTABLE"
     second = "2. Only then select the next roadmap workstream."
     assert verify_github_issue({**data, "first_action": second}, 7, issue)["reason"] == "FIRST_ACTION_NOT_FIRST"
     unrelated_first = body.replace("## Next Action\n", "## Next Action\n1. Browse all GitHub Issues again.\n")
@@ -192,6 +196,13 @@ def test_incoming_resume_resolves_one_authoritative_workstream():
     assert result["reason"] == "RESUME_FIRST_ACTION_VERIFIED"
     assert result["first_action"] == action
     assert result["dirty_worktree_preserved"] is True
+    terminal = "1. This bounded legacy queued-approval notification defect is fixed and **WAITING**."
+    terminal_body = body.replace(action, terminal)
+    assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "body": terminal_body},
+                               git_state)["reason"] == "RESUME_FIRST_ACTION_NOT_EXECUTABLE"
+    actionable = body.replace(action, "1. Verify the fix with focused tests and preserve other work.")
+    assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "body": actionable},
+                               git_state)["reason"] == "RESUME_FIRST_ACTION_VERIFIED"
     assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "state": "closed"}, git_state)["reason"] == "RESUME_ISSUE_IDENTITY_INVALID"
     assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "body": body.replace("STATUS=ACTIVE", "STATUS=PAUSED")}, git_state)["reason"] == "RESUME_PACKET_NOT_RUNNABLE"
     assert verify_resume_issue("datarelay-labs/demo", 7, issue, {**git_state, "head": "f"*40})["reason"] == "RESUME_HEAD_STALE"

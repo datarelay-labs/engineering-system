@@ -21,6 +21,24 @@ def _block(reason: str, **extra: object) -> dict:
     return {"status": "BLOCK", "reason": reason, **extra}
 
 
+def _terminal_first_action(action: str) -> bool:
+    """Reject narrowly identifiable completed/status prose as an execution step.
+
+    This is not an NLP substitute for owner-intent review. In particular,
+    imperative actions such as 'Verify the fix' remain valid.
+    """
+    text = re.sub(r"[*_`]", "", action).strip()
+    text = re.sub(r"^[0-9]+[.)]\s*", "", text)
+    if re.match(r"^(?:NONE|N/A|NO ACTION|NO REMAINING|WAITING|PAUSED|COMPLETE|COMPLETED)\b", text, re.I):
+        return True
+    return bool(re.match(
+        r"^(?:This|The|Previous|Current|Already|Completed|Done)\b.{0,250}?"
+        r"\b(?:is|was|has been|have been|are|were)\s+"
+        r"(?:already\s+)?(?:fixed|completed?|done|waiting|paused)\b",
+        text, re.I,
+    ))
+
+
 def verify(facts: dict) -> dict:
     """Legacy pure verifier: its digest is caller-reported, not a GitHub read."""
     required = ("target_repo", "packet_body", "persisted_body_sha256", "continuation_token")
@@ -93,6 +111,8 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
         return _block("FIRST_ACTION_NOT_PERSISTED")
     if action_lines[0] != action:
         return _block("FIRST_ACTION_NOT_FIRST")
+    if _terminal_first_action(action):
+        return _block("FIRST_ACTION_NOT_EXECUTABLE")
     if not re.search(rf"(?<![A-Za-z0-9])#{issue_number}(?![A-Za-z0-9])",
                      str(facts.get("continuation_token", ""))):
         return _block("CONTINUATION_TOKEN_NOT_BOUND")
@@ -219,6 +239,8 @@ def verify_resume_issue(repo: str, number: int, issue: dict, git_state: dict) ->
     actions = [line.strip() for line in packet.sections.get("Next Action", "").splitlines() if line.strip()]
     if not actions or len(actions[0]) > 500:
         return _block("RESUME_FIRST_ACTION_MISSING")
+    if _terminal_first_action(actions[0]):
+        return _block("RESUME_FIRST_ACTION_NOT_EXECUTABLE")
     return {
         "status": "PASS", "reason": "RESUME_FIRST_ACTION_VERIFIED",
         "issue_url": url, "workstream": packet.metadata.get("WORKSTREAM"),
