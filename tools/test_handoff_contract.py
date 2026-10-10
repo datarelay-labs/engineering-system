@@ -2,7 +2,14 @@
 from __future__ import annotations
 from pathlib import Path
 import hashlib
-from handoff_contract import verify, verify_github_issue
+import json
+import subprocess
+import sys
+import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
+from handoff_contract import verify, verify_github_issue, read_github_issue, main as handoff_main
 
 BODY="""PACKET_VERSION=3
 TARGET_REPO=datarelay-labs/demo
@@ -57,7 +64,13 @@ def test_strict_handoff_snapshot():
                 expected_intent_revision=1, verified_head=head, first_action=first)
     issue = {"number": 7, "state": "open",
              "html_url": "https://github.com/datarelay-labs/demo/issues/7", "body": body}
-    assert verify_github_issue(data, 7, issue)["status"] == "PASS"
+    assert verify_github_issue(data, 7, issue)["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
+    assert verify_github_issue(data, 7, issue)["evidence_scope"] == "AUTHENTICATED_GITHUB_ISSUE"
+    second = "2. Only then select the next roadmap workstream."
+    assert verify_github_issue({**data, "first_action": second}, 7, issue)["reason"] == "FIRST_ACTION_NOT_FIRST"
+    unrelated_first = body.replace("## Next Action\n", "## Next Action\n1. Browse all GitHub Issues again.\n")
+    assert verify_github_issue(facts_with_body(data, unrelated_first), 7,
+                               {**issue, "body": unrelated_first})["reason"] == "FIRST_ACTION_NOT_FIRST"
     # Old authoritative body still on GitHub; latest comment has the new instructions.
     old = {**issue, "body": BODY}
     assert verify_github_issue(data, 7, old)["reason"] == "PERSISTED_PACKET_MISMATCH"
@@ -66,6 +79,7 @@ def test_strict_handoff_snapshot():
     assert verify_github_issue({**data, "verified_head": "f"*40}, 7, issue)["reason"] == "RESUME_ANCHOR_STALE"
     assert verify_github_issue({**data, "first_action": "Recheck all issues."}, 7, issue)["reason"] == "FIRST_ACTION_NOT_PERSISTED"
     assert verify_github_issue({**data, "continuation_token": "Demo 계속"}, 7, issue)["reason"] == "CONTINUATION_TOKEN_NOT_BOUND"
+    assert verify_github_issue({**data, "continuation_token": "Demo 계속 — Work Packet #70"}, 7, issue)["reason"] == "CONTINUATION_TOKEN_NOT_BOUND"
     assert verify_github_issue(data, 9, issue)["reason"] == "GITHUB_ISSUE_IDENTITY_MISMATCH"
     assert verify_github_issue(data, 7, {**issue, "state": "closed"})["reason"] == "GITHUB_ISSUE_NOT_OPEN"
     assert verify_github_issue({k:v for k,v in data.items() if k!="first_action"}, 7, issue)["reason"] == "RESUME_ANCHOR_MISSING"
@@ -77,10 +91,72 @@ def test_strict_handoff_snapshot():
 def facts_with_body(data, body):
     return {**data, "packet_body": body, "persisted_body_sha256": hashlib.sha256(body.encode()).hexdigest()}
 
+def test_authenticated_issue_author_gate():
+    issue = {"number": 7, "html_url": "https://github.com/datarelay-labs/demo/issues/7",
+             "body": BODY, "user": {"login": "trusted-owner"}}
+    commands = []
+
+    def call_gh(argv, **kwargs):
+        commands.append(tuple(argv))
+        if argv[2].endswith("/issues/7"):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(issue), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"permission": "write"}), "")
+
+    with patch("handoff_contract.subprocess.run", side_effect=call_gh):
+        actual = read_github_issue("datarelay-labs/demo", 7)
+        assert actual["body"] == BODY
+    assert commands == [
+        ("gh", "api", "repos/datarelay-labs/demo/issues/7"),
+        ("gh", "api", "repos/datarelay-labs/demo/collaborators/trusted-owner/permission"),
+    ]
+    for permission in ("read", "triage", "none"):
+        def fail_perm(argv, **kwargs):
+            payload = issue if argv[2].endswith("/issues/7") else {"permission": permission}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+        with patch("handoff_contract.subprocess.run", side_effect=fail_perm):
+            try:
+                read_github_issue("datarelay-labs/demo", 7)
+                raise AssertionError("Read-only Issue author incorrectly trusted")
+            except ValueError as exc:
+                assert str(exc) == "WORK_PACKET_AUTHOR_UNTRUSTED"
+
+
+def test_strict_cli_read_and_classification():
+    head = "0123456789abcdef0123456789abcdef01234567"
+    action = "1. Resume the original work before browsing all Issues."
+    body = BODY.replace("OWNER_INTENT=Continue the roadmap.",
+                        f"OWNER_INTENT=Resume original work.\nLAST_VERIFIED_HEAD={head}")
+    body = body.replace("Continue implementation.", action)
+    inputs = facts(body=body, token="Demo 계속 — #7")
+    inputs.update(expected_workstream="demo", expected_owner_intent="Resume original work.",
+                  expected_intent_revision=1, verified_head=head, first_action=action)
+    issue = {"number": 7, "state": "open",
+             "html_url": "https://github.com/datarelay-labs/demo/issues/7",
+             "body": body}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "facts.json"
+        path.write_text(json.dumps(inputs), encoding="utf-8")
+        with patch.object(sys, "argv", ["handoff_contract.py", "--facts", str(path),
+                                        "--github-issue", "7"]):
+            out = StringIO()
+            with patch("handoff_contract.read_github_issue", return_value=issue), redirect_stdout(out):
+                assert handoff_main() == 0
+            assert json.loads(out.getvalue())["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
+            out = StringIO()
+            with patch("handoff_contract.read_github_issue",
+                       side_effect=ValueError("WORK_PACKET_AUTHOR_UNTRUSTED")), redirect_stdout(out):
+                assert handoff_main() == 2
+            assert json.loads(out.getvalue())["reason"] == "WORK_PACKET_AUTHOR_UNTRUSTED"
+
+
 def main():
     test_documented_cli_flag_matches_parser()
     test_strict_handoff_snapshot()
+    test_authenticated_issue_author_gate()
+    test_strict_cli_read_and_classification()
     assert verify(facts())["status"]=="PASS"
+    assert verify(facts())["reason"]=="LOCAL_PACKET_VERIFIED_ONLY"
+    assert verify(facts())["evidence_scope"]=="CALLER_SUPPLIED_PACKET"
     for state in ("PAUSED", "BLOCKED", "COMPLETE"):
         body=BODY.replace("STATUS=ACTIVE", "STATUS="+state)
         assert verify(facts(body=body))["status"]=="PASS"

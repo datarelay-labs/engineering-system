@@ -41,7 +41,8 @@ def verify(facts: dict) -> dict:
     token = str(facts["continuation_token"]).strip()
     if not token or "\n" in token or len(token) > 120:
         return _block("CONTINUATION_TOKEN_INVALID")
-    return {"status": "PASS", "reason": "HANDOFF_TRANSACTION_VERIFIED", "continuation_token": token}
+    return {"status": "PASS", "reason": "LOCAL_PACKET_VERIFIED_ONLY",
+            "evidence_scope": "CALLER_SUPPLIED_PACKET", "continuation_token": token}
 
 
 def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
@@ -87,15 +88,20 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
     if packet.metadata.get("STATUS") == "ACTIVE" and issue.get("state") != "open":
         return _block("GITHUB_ISSUE_NOT_OPEN")
     action = str(facts["first_action"]).strip()
-    action_lines = {line.strip() for line in packet.sections.get("Next Action", "").splitlines()}
+    action_lines = [line.strip() for line in packet.sections.get("Next Action", "").splitlines() if line.strip()]
     if len(action) > 500 or not action or action not in action_lines:
         return _block("FIRST_ACTION_NOT_PERSISTED")
-    if f"#{issue_number}" not in str(facts.get("continuation_token", "")):
+    if action_lines[0] != action:
+        return _block("FIRST_ACTION_NOT_FIRST")
+    if not re.search(rf"(?<![A-Za-z0-9])#{issue_number}(?![A-Za-z0-9])",
+                     str(facts.get("continuation_token", ""))):
         return _block("CONTINUATION_TOKEN_NOT_BOUND")
     result = verify(facts)
     if result["status"] != "PASS":
         return result
-    return {**result, "issue_url": url, "workstream": expected["WORKSTREAM"],
+    return {**result, "reason": "HANDOFF_TRANSACTION_VERIFIED",
+            "evidence_scope": "AUTHENTICATED_GITHUB_ISSUE",
+            "issue_url": url, "workstream": expected["WORKSTREAM"],
             "verified_first_action": action}
 
 
@@ -108,8 +114,25 @@ def read_github_issue(repo: str, issue_number: int) -> dict:
         text=True, capture_output=True, timeout=20, check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"gh api exit={proc.returncode}: {proc.stderr.strip()[:240]}")
-    return json.loads(proc.stdout)
+        raise RuntimeError(f"gh issue read exit={proc.returncode}: {proc.stderr.strip()[:240]}")
+    issue = json.loads(proc.stdout)
+    if not isinstance(issue, dict):
+        raise ValueError("GITHUB_ISSUE_INVALID")
+    author = issue.get("user")
+    login = author.get("login") if isinstance(author, dict) else None
+    if not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", login):
+        raise ValueError("WORK_PACKET_AUTHOR_UNTRUSTED")
+    # The GitHub association/Issue title alone cannot grant execution authority.
+    perm = subprocess.run(
+        ["gh", "api", f"repos/{repo}/collaborators/{login}/permission"],
+        text=True, capture_output=True, timeout=20, check=False,
+    )
+    if perm.returncode != 0:
+        raise RuntimeError(f"gh author permission read exit={perm.returncode}: {perm.stderr.strip()[:240]}")
+    permission = json.loads(perm.stdout)
+    if not isinstance(permission, dict) or permission.get("permission") not in ("admin", "maintain", "write"):
+        raise ValueError("WORK_PACKET_AUTHOR_UNTRUSTED")
+    return issue
 
 
 def main() -> int:
@@ -124,7 +147,14 @@ def main() -> int:
         else:
             issue = read_github_issue(str(facts.get("target_repo", "")), args.github_issue)
             result = verify_github_issue(facts, args.github_issue, issue)
-    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired, RuntimeError) as exc:
+    except ValueError as exc:
+        reason = str(exc)
+        if args.github_issue is None or reason not in (
+            "WORK_PACKET_AUTHOR_UNTRUSTED", "TARGET_REPO_INVALID", "GITHUB_ISSUE_INVALID",
+        ):
+            reason = "GITHUB_READ_INVALID" if args.github_issue else "FACTS_INVALID"
+        result = _block(reason, detail=str(exc)[:260])
+    except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         result = _block("GITHUB_READ_UNAVAILABLE" if args.github_issue else "FACTS_INVALID",
                         detail=str(exc)[:260])
     print(json.dumps(result, sort_keys=True, ensure_ascii=False))
