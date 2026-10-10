@@ -206,7 +206,7 @@ def probe_worktree(worktree: str) -> dict:
     }
 
 
-def verify_resume_issue(repo: str, number: int, issue: dict, git_state: dict) -> dict:
+def _verify_resume_issue_primary(repo: str, number: int, issue: dict, git_state: dict) -> dict:
     """Resolve one explicitly named Work Packet; never enumerate unrelated Issues."""
     if not REPO_RE.fullmatch(repo) or not isinstance(issue, dict) or not isinstance(git_state, dict):
         return _block("RESUME_INPUT_INVALID")
@@ -248,6 +248,65 @@ def verify_resume_issue(repo: str, number: int, issue: dict, git_state: dict) ->
         "owner_intent": packet.metadata.get("OWNER_INTENT"), "branch": git_state["branch"],
         "head": recorded, "dirty_worktree_preserved": bool(git_state.get("dirty")),
     }
+
+
+
+def _resume_reconciliation(repo: str, number: int, issue: dict, git_state: dict) -> list[str]:
+    """Collect independent, read-only mismatch classes for one pinned Issue.
+
+    Never infer authority from comments, scan other Issues or rewrite Work
+    Packets. The original first error still controls the blocking result.
+    """
+    if not isinstance(issue, dict) or not isinstance(git_state, dict) or not REPO_RE.fullmatch(repo):
+        return ["RESUME_INPUT_INVALID"]
+    discrepancies: list[str] = []
+
+    def add(reason: str) -> None:
+        if reason not in discrepancies:
+            discrepancies.append(reason)
+
+    url = f"https://github.com/{repo}/issues/{number}"
+    if (issue.get("number") != number or issue.get("html_url") != url
+            or "pull_request" in issue or issue.get("state") != "open"):
+        add("RESUME_ISSUE_IDENTITY_INVALID")
+    body = issue.get("body")
+    if not isinstance(body, str):
+        add("RESUME_PACKET_MISSING")
+        return discrepancies
+    packet = parse_packet(body)
+    lint = analyze_packet(packet, expected_target_repo=repo)
+    if lint["status"] != "PASS":
+        add("RESUME_PACKET_NOT_CLEAN")
+    if packet.metadata.get("STATUS") != "ACTIVE" or packet_not_runnable_reason(packet):
+        add("RESUME_PACKET_NOT_RUNNABLE")
+    if git_state.get("remote_repo") != repo:
+        add("RESUME_REPOSITORY_MISMATCH")
+    expected_worktree = packet.metadata.get("WORKTREE")
+    if expected_worktree and Path(expected_worktree).expanduser().resolve() != Path(str(git_state.get("worktree"))).resolve():
+        add("RESUME_WORKTREE_MISMATCH")
+    if packet.metadata.get("BRANCH") != git_state.get("branch"):
+        add("RESUME_BRANCH_MISMATCH")
+    recorded = packet.metadata.get("LAST_VERIFIED_HEAD")
+    if not isinstance(recorded, str) or not HEAD_RE.fullmatch(recorded):
+        add("RESUME_HEAD_UNBOUND")
+    elif recorded != git_state.get("head"):
+        add("RESUME_HEAD_STALE")
+    actions = [line.strip() for line in packet.sections.get("Next Action", "").splitlines() if line.strip()]
+    if not actions or len(actions[0]) > 500:
+        add("RESUME_FIRST_ACTION_MISSING")
+    elif _terminal_first_action(actions[0]):
+        add("RESUME_FIRST_ACTION_NOT_EXECUTABLE")
+    return discrepancies
+
+
+def verify_resume_issue(repo: str, number: int, issue: dict, git_state: dict) -> dict:
+    """Return the earliest blocking mismatch and all independently observed gaps."""
+    result = _verify_resume_issue_primary(repo, number, issue, git_state)
+    if result["status"] == "BLOCK":
+        # Do not hide a stale HEAD or completed first task behind an earlier
+        # packet-lint warning: a new chat needs the whole repair list.
+        return {**result, "reconciliation": _resume_reconciliation(repo, number, issue, git_state)}
+    return result
 
 
 def main() -> int:

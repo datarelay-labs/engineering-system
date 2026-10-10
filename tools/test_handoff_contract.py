@@ -249,6 +249,45 @@ def test_real_git_worktree_probe_is_read_only():
         assert path.read_text(encoding="utf-8") == "original plus uncommitted content"
 
 
+
+def test_resume_reconciliation_collects_all_independent_gaps():
+    head = "0123456789abcdef0123456789abcdef01234567"
+    terminal = "1. This bounded legacy notification defect is fixed and **WAITING**."
+    body = BODY.replace("OWNER_INTENT=Continue the roadmap.",
+                        f"OWNER_INTENT=Resume original task.\nLAST_VERIFIED_HEAD={head}"
+                        "\nWORKTREE=/tmp/expected")
+    body = body.replace("Continue implementation.", terminal)
+    body = body.replace("## Blockers\nNone.", "## Blockers\nPending security review.")
+    body += "\n## Old history\nPast unstructured work."
+    issue = {"number": 7, "state": "open",
+             "html_url": "https://github.com/datarelay-labs/demo/issues/7",
+             "body": body}
+    git_state = {"remote_repo": "other/demo", "worktree": "/tmp/another",
+                 "branch": "elsewhere", "head": "f"*40, "dirty": True}
+    result = verify_resume_issue("datarelay-labs/demo", 7, issue, git_state)
+    assert result["reason"] == "RESUME_PACKET_NOT_CLEAN"
+    assert result["reconciliation"] == [
+        "RESUME_PACKET_NOT_CLEAN",
+        "RESUME_PACKET_NOT_RUNNABLE",
+        "RESUME_REPOSITORY_MISMATCH",
+        "RESUME_WORKTREE_MISMATCH",
+        "RESUME_BRANCH_MISMATCH",
+        "RESUME_HEAD_STALE",
+        "RESUME_FIRST_ACTION_NOT_EXECUTABLE",
+    ]
+    # The report is a single read-only pass. It never selects another Issue,
+    # discards dirty changes or silently invents an executable action.
+    assert git_state["dirty"] is True
+    good = BODY.replace("OWNER_INTENT=Continue the roadmap.",
+                        f"OWNER_INTENT=Resume original task.\nLAST_VERIFIED_HEAD={head}")
+    clean = {"number": 7, "state": "open",
+             "html_url": "https://github.com/datarelay-labs/demo/issues/7",
+             "body": good}
+    valid_state = {"remote_repo": "datarelay-labs/demo", "worktree": "/tmp/demo",
+                   "branch": "fix/demo", "head": head, "dirty": False}
+    assert verify_resume_issue("datarelay-labs/demo", 7, clean, valid_state)["status"] == "PASS"
+
+
 def main():
     test_documented_cli_flag_matches_parser()
     test_strict_handoff_snapshot()
@@ -256,6 +295,7 @@ def main():
     test_strict_cli_read_and_classification()
     test_incoming_resume_resolves_one_authoritative_workstream()
     test_real_git_worktree_probe_is_read_only()
+    test_resume_reconciliation_collects_all_independent_gaps()
     assert verify(facts())["status"]=="PASS"
     assert verify(facts())["reason"]=="LOCAL_PACKET_VERIFIED_ONLY"
     assert verify(facts())["evidence_scope"]=="CALLER_SUPPLIED_PACKET"
