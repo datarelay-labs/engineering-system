@@ -136,17 +136,43 @@ def test_strict_cli_read_and_classification():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "facts.json"
         path.write_text(json.dumps(inputs), encoding="utf-8")
-        with patch.object(sys, "argv", ["handoff_contract.py", "--facts", str(path),
-                                        "--github-issue", "7"]):
+        for extra_args in ([], ["--github-issue", "7"]):
+            # The documented --facts-only invocation is now strict by default.
+            with patch.object(sys, "argv", ["handoff_contract.py", "--facts", str(path), *extra_args]):
+                out = StringIO()
+                with patch("handoff_contract.read_github_issue", return_value=issue) as read, redirect_stdout(out):
+                    assert handoff_main() == 0
+                assert read.call_args.args == ("datarelay-labs/demo", 7)
+                assert json.loads(out.getvalue())["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
+                out = StringIO()
+                with patch("handoff_contract.read_github_issue",
+                           side_effect=ValueError("WORK_PACKET_AUTHOR_UNTRUSTED")), redirect_stdout(out):
+                    assert handoff_main() == 2
+                assert json.loads(out.getvalue())["reason"] == "WORK_PACKET_AUTHOR_UNTRUSTED"
+
+        # No Issue reference, ambiguous token, or explicit mismatch: zero remote reads.
+        for token, extra_args in (
+            ("Demo 계속", []),
+            ("Demo 계속 — #7 and #8", []),
+            ("Demo 계속 — #70", ["--github-issue", "7"]),
+            ("Demo 계속 — #7", ["--github-issue", "70"]),
+        ):
+            bad = {**inputs, "continuation_token": token}
+            path.write_text(json.dumps(bad), encoding="utf-8")
+            with patch.object(sys, "argv", ["handoff_contract.py", "--facts", str(path), *extra_args]):
+                out = StringIO()
+                with patch("handoff_contract.read_github_issue") as read, redirect_stdout(out):
+                    assert handoff_main() == 2
+                read.assert_not_called()
+                assert json.loads(out.getvalue())["reason"] == "GITHUB_ISSUE_NOT_BOUND"
+        bad = {**inputs, "work_packet_issue_number": 8}
+        path.write_text(json.dumps(bad), encoding="utf-8")
+        with patch.object(sys, "argv", ["handoff_contract.py", "--facts", str(path)]):
             out = StringIO()
-            with patch("handoff_contract.read_github_issue", return_value=issue), redirect_stdout(out):
-                assert handoff_main() == 0
-            assert json.loads(out.getvalue())["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
-            out = StringIO()
-            with patch("handoff_contract.read_github_issue",
-                       side_effect=ValueError("WORK_PACKET_AUTHOR_UNTRUSTED")), redirect_stdout(out):
+            with patch("handoff_contract.read_github_issue") as read, redirect_stdout(out):
                 assert handoff_main() == 2
-            assert json.loads(out.getvalue())["reason"] == "WORK_PACKET_AUTHOR_UNTRUSTED"
+            read.assert_not_called()
+            assert json.loads(out.getvalue())["reason"] == "GITHUB_ISSUE_NOT_BOUND"
 
 
 def main():
