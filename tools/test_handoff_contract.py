@@ -9,7 +9,10 @@ import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
-from handoff_contract import verify, verify_github_issue, read_github_issue, main as handoff_main
+from handoff_contract import (
+    verify, verify_github_issue, verify_resume_issue, probe_worktree,
+    read_github_issue, main as handoff_main,
+)
 
 BODY="""PACKET_VERSION=3
 TARGET_REPO=datarelay-labs/demo
@@ -175,11 +178,73 @@ def test_strict_cli_read_and_classification():
             assert json.loads(out.getvalue())["reason"] == "GITHUB_ISSUE_NOT_BOUND"
 
 
+def test_incoming_resume_resolves_one_authoritative_workstream():
+    head = "0123456789abcdef0123456789abcdef01234567"
+    action = "1. Finish the previously started code review before unrelated tasks."
+    body = BODY.replace("OWNER_INTENT=Continue the roadmap.",
+                        f"OWNER_INTENT=Finish existing review.\nLAST_VERIFIED_HEAD={head}")
+    body = body.replace("Continue implementation.", action)
+    issue = {"number": 7, "state": "open",
+             "html_url": "https://github.com/datarelay-labs/demo/issues/7", "body": body}
+    git_state = {"remote_repo": "datarelay-labs/demo", "worktree": "/tmp/demo-worktree",
+                 "branch": "fix/demo", "head": head, "dirty": True}
+    result = verify_resume_issue("datarelay-labs/demo", 7, issue, git_state)
+    assert result["reason"] == "RESUME_FIRST_ACTION_VERIFIED"
+    assert result["first_action"] == action
+    assert result["dirty_worktree_preserved"] is True
+    assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "state": "closed"}, git_state)["reason"] == "RESUME_ISSUE_IDENTITY_INVALID"
+    assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "body": body.replace("STATUS=ACTIVE", "STATUS=PAUSED")}, git_state)["reason"] == "RESUME_PACKET_NOT_RUNNABLE"
+    assert verify_resume_issue("datarelay-labs/demo", 7, issue, {**git_state, "head": "f"*40})["reason"] == "RESUME_HEAD_STALE"
+    assert verify_resume_issue("datarelay-labs/demo", 7, issue, {**git_state, "branch": "main"})["reason"] == "RESUME_BRANCH_MISMATCH"
+    assert verify_resume_issue("datarelay-labs/demo", 7, issue, {**git_state, "remote_repo": "elsewhere/demo"})["reason"] == "RESUME_REPOSITORY_MISMATCH"
+    assert verify_resume_issue("datarelay-labs/demo", 7,
+                               {**issue, "body": body+"\n## Old irrelevant history\nother tasks"},
+                               git_state)["reason"] == "RESUME_PACKET_NOT_CLEAN"
+    bound = body.replace("BRANCH=fix/demo", "BRANCH=fix/demo\nWORKTREE=/tmp/some-other-worktree")
+    assert verify_resume_issue("datarelay-labs/demo", 7, {**issue, "body": bound},
+                               git_state)["reason"] == "RESUME_WORKTREE_MISMATCH"
+    # The incoming CLI reads one pinned Issue, not a list of unrelated Issues.
+    with patch.object(sys, "argv", ["handoff_contract.py", "--resume-repo",
+                                    "datarelay-labs/demo", "--resume-issue", "7",
+                                    "--worktree", "/tmp/demo-worktree"]):
+        out = StringIO()
+        with patch("handoff_contract.read_github_issue", return_value=issue) as read, \
+             patch("handoff_contract.probe_worktree", return_value=git_state) as probed, \
+             redirect_stdout(out):
+            assert handoff_main() == 0
+        read.assert_called_once_with("datarelay-labs/demo", 7)
+        probed.assert_called_once_with("/tmp/demo-worktree")
+        assert json.loads(out.getvalue())["first_action"] == action
+
+
+def test_real_git_worktree_probe_is_read_only():
+    with tempfile.TemporaryDirectory() as temp:
+        def git(*args):
+            subprocess.run(["git", "-C", temp, *args], check=True,
+                           capture_output=True, text=True)
+        subprocess.run(["git", "init", "-b", "demo", temp], check=True, capture_output=True)
+        git("remote", "add", "origin", "https://github.com/datarelay-labs/demo.git")
+        path = Path(temp)/"work.txt"
+        path.write_text("original", encoding="utf-8")
+        git("add", "work.txt")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "-m", "test fixture")
+        clean = probe_worktree(temp)
+        assert clean["remote_repo"] == "datarelay-labs/demo"
+        assert clean["branch"] == "demo" and clean["dirty"] is False
+        path.write_text("original plus uncommitted content", encoding="utf-8")
+        dirty = probe_worktree(temp)
+        assert dirty["head"] == clean["head"] and dirty["dirty"] is True
+        assert path.read_text(encoding="utf-8") == "original plus uncommitted content"
+
+
 def main():
     test_documented_cli_flag_matches_parser()
     test_strict_handoff_snapshot()
     test_authenticated_issue_author_gate()
     test_strict_cli_read_and_classification()
+    test_incoming_resume_resolves_one_authoritative_workstream()
+    test_real_git_worktree_probe_is_read_only()
     assert verify(facts())["status"]=="PASS"
     assert verify(facts())["reason"]=="LOCAL_PACKET_VERIFIED_ONLY"
     assert verify(facts())["evidence_scope"]=="CALLER_SUPPLIED_PACKET"

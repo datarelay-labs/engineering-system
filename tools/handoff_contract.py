@@ -152,36 +152,128 @@ def resolve_issue_number(facts: dict) -> int | None:
     return issue_number
 
 
+def _git_read(worktree: str, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", worktree, *args], text=True, capture_output=True,
+        timeout=15, check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError("RESUME_GIT_READ_FAILED")
+    return proc.stdout.strip()
+
+
+def probe_worktree(worktree: str) -> dict:
+    """Read-only exact worktree identity; never writes or cleans dirty changes."""
+    root = Path(worktree).expanduser().resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("RESUME_WORKTREE_NOT_DIRECTORY")
+    top = Path(_git_read(str(root), "rev-parse", "--show-toplevel")).resolve(strict=True)
+    if root != top:
+        raise ValueError("RESUME_WORKTREE_ROOT_MISMATCH")
+    head = _git_read(str(root), "rev-parse", "HEAD")
+    branch = _git_read(str(root), "rev-parse", "--abbrev-ref", "HEAD")
+    origin = _git_read(str(root), "remote", "get-url", "origin")
+    expected = None
+    for prefix in ("https://github.com/", "git@github.com:",
+                   "ssh://git@github.com/", "git://github.com/"):
+        if origin.startswith(prefix):
+            expected = origin[len(prefix):].rstrip("/").removesuffix(".git")
+            break
+    return {
+        "worktree": str(root), "head": head, "branch": branch,
+        "remote_repo": expected,
+        "dirty": bool(_git_read(str(root), "status", "--porcelain", "--untracked-files=normal")),
+    }
+
+
+def verify_resume_issue(repo: str, number: int, issue: dict, git_state: dict) -> dict:
+    """Resolve one explicitly named Work Packet; never enumerate unrelated Issues."""
+    if not REPO_RE.fullmatch(repo) or not isinstance(issue, dict) or not isinstance(git_state, dict):
+        return _block("RESUME_INPUT_INVALID")
+    url = f"https://github.com/{repo}/issues/{number}"
+    if (issue.get("number") != number or issue.get("html_url") != url
+            or "pull_request" in issue or issue.get("state") != "open"):
+        return _block("RESUME_ISSUE_IDENTITY_INVALID")
+    body = issue.get("body")
+    if not isinstance(body, str):
+        return _block("RESUME_PACKET_MISSING")
+    packet = parse_packet(body)
+    lint = analyze_packet(packet, expected_target_repo=repo)
+    if lint["status"] != "PASS":
+        return _block("RESUME_PACKET_NOT_CLEAN", blocking=lint["blocking"],
+                      warnings=lint["warnings"])
+    if packet.metadata.get("STATUS") != "ACTIVE" or packet_not_runnable_reason(packet):
+        return _block("RESUME_PACKET_NOT_RUNNABLE")
+    if git_state.get("remote_repo") != repo:
+        return _block("RESUME_REPOSITORY_MISMATCH")
+    expected_worktree = packet.metadata.get("WORKTREE")
+    if expected_worktree and Path(expected_worktree).expanduser().resolve() != Path(str(git_state.get("worktree"))).resolve():
+        return _block("RESUME_WORKTREE_MISMATCH")
+    if packet.metadata.get("BRANCH") != git_state.get("branch"):
+        return _block("RESUME_BRANCH_MISMATCH", expected_branch=packet.metadata.get("BRANCH"))
+    recorded = packet.metadata.get("LAST_VERIFIED_HEAD")
+    if not isinstance(recorded, str) or not HEAD_RE.fullmatch(recorded):
+        return _block("RESUME_HEAD_UNBOUND")
+    if recorded != git_state.get("head"):
+        return _block("RESUME_HEAD_STALE", recorded_head=recorded, actual_head=git_state.get("head"))
+    actions = [line.strip() for line in packet.sections.get("Next Action", "").splitlines() if line.strip()]
+    if not actions or len(actions[0]) > 500:
+        return _block("RESUME_FIRST_ACTION_MISSING")
+    return {
+        "status": "PASS", "reason": "RESUME_FIRST_ACTION_VERIFIED",
+        "issue_url": url, "workstream": packet.metadata.get("WORKSTREAM"),
+        "first_action": actions[0], "next_action": "\n".join(actions)[:2400],
+        "owner_intent": packet.metadata.get("OWNER_INTENT"), "branch": git_state["branch"],
+        "head": recorded, "dirty_worktree_preserved": bool(git_state.get("dirty")),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--facts", required=True)
+    parser.add_argument("--facts", help="Outgoing handoff facts (authoritative Issue read is mandatory)")
     parser.add_argument("--github-issue", type=int,
                         help="Optional exact Work Packet Issue ID; token must name it too")
+    parser.add_argument("--resume-repo", help="Incoming resume: exact owner/repository")
+    parser.add_argument("--resume-issue", type=int, help="Incoming resume: one exact Work Packet Issue")
+    parser.add_argument("--worktree", help="Incoming resume: exact local product worktree")
     args = parser.parse_args()
+    resuming = args.resume_issue is not None or args.resume_repo or args.worktree
     try:
-        facts = json.loads(Path(args.facts).read_text(encoding="utf-8"))
-        if not isinstance(facts, dict):
-            raise ValueError("FACTS_INVALID")
-        issue_number = resolve_issue_number(facts)
-        # The documented --facts-only CLI must no longer report handoff PASS
-        # from caller-generated bytes. Verify the authenticated GitHub Issue.
-        if issue_number is None or (
-            args.github_issue is not None and issue_number != args.github_issue
-        ):
-            result = _block("GITHUB_ISSUE_NOT_BOUND")
+        if resuming:
+            if (args.facts or args.github_issue is not None or not args.resume_repo
+                    or not args.worktree or not args.resume_issue or args.resume_issue < 1):
+                result = _block("RESUME_ARGS_INVALID")
+            else:
+                issue = read_github_issue(args.resume_repo, args.resume_issue)
+                git_state = probe_worktree(args.worktree)
+                result = verify_resume_issue(args.resume_repo, args.resume_issue, issue, git_state)
+        elif not args.facts:
+            result = _block("FACTS_INVALID")
         else:
-            issue = read_github_issue(str(facts.get("target_repo", "")), issue_number)
-            result = verify_github_issue(facts, issue_number, issue)
+            facts = json.loads(Path(args.facts).read_text(encoding="utf-8"))
+            if not isinstance(facts, dict):
+                raise ValueError("FACTS_INVALID")
+            issue_number = resolve_issue_number(facts)
+            # Documented --facts-only CLI must NEVER pass from caller bytes alone.
+            if issue_number is None or (
+                args.github_issue is not None and issue_number != args.github_issue
+            ):
+                result = _block("GITHUB_ISSUE_NOT_BOUND")
+            else:
+                issue = read_github_issue(str(facts.get("target_repo", "")), issue_number)
+                result = verify_github_issue(facts, issue_number, issue)
     except ValueError as exc:
         reason = str(exc)
         if reason not in (
             "WORK_PACKET_AUTHOR_UNTRUSTED", "TARGET_REPO_INVALID",
-            "GITHUB_ISSUE_INVALID", "FACTS_INVALID",
+            "GITHUB_ISSUE_INVALID", "FACTS_INVALID", "RESUME_GIT_READ_FAILED",
+            "RESUME_WORKTREE_NOT_DIRECTORY", "RESUME_WORKTREE_ROOT_MISMATCH",
         ):
-            reason = "GITHUB_READ_INVALID"
+            reason = "RESUME_READ_INVALID" if resuming else "GITHUB_READ_INVALID"
         result = _block(reason, detail=str(exc)[:260])
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
-        result = _block("GITHUB_READ_UNAVAILABLE", detail=str(exc)[:260])
+        result = _block("RESUME_READ_UNAVAILABLE" if resuming else "GITHUB_READ_UNAVAILABLE",
+                        detail=str(exc)[:260])
     print(json.dumps(result, sort_keys=True, ensure_ascii=False))
     return 0 if result["status"] == "PASS" else 2
 
