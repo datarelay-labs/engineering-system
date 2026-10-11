@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from handoff_contract import verify_github_issue, verify_resume_issue
+from handoff_contract import probe_worktree, verify_github_issue, verify_resume_issue
 from test_handoff_contract import BODY
 
 REPO = "datarelay-labs/demo"
@@ -79,7 +79,7 @@ def outgoing(facts: dict, issue: dict) -> dict:
 
 
 class OutgoingHandoffContractRED(unittest.TestCase):
-    """The eight unresolved rejects and two already-working control cases."""
+    """Known unresolved outgoing rejects and two already-working control cases."""
 
     def assert_rejected(self, *, expected: str, **changes: object) -> None:
         facts, issue = synthetic_case(**changes)
@@ -131,6 +131,42 @@ class OutgoingHandoffContractRED(unittest.TestCase):
             )
             self.assertEqual(git("rev-parse", "HEAD"), actual_head)
             self.assertEqual(artifact.read_text(encoding="utf-8"), "unchanged user content")
+
+    def test_red_real_git_foreign_origin_is_not_accepted(self) -> None:
+        """Matching source SHA is insufficient when origin points to another repo."""
+        with tempfile.TemporaryDirectory(prefix="eng-handoff-foreign-origin-") as root:
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", root, *args], check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", REAL_BRANCH)
+            git("remote", "add", "origin",
+                "https://github.com/unrelated-owner/foreign-repository.git")
+            artifact = Path(root) / "fixture.txt"
+            artifact.write_text("unchanged fixture", encoding="utf-8")
+            git("add", "fixture.txt")
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                "commit", "-m", "identity mismatch fixture")
+            head = git("rev-parse", "HEAD")
+            facts, issue = synthetic_case(head=head, worktree=root)
+            facts["worktree"] = root
+            actual = probe_worktree(root)
+            self.assertEqual(actual["head"], head)
+            self.assertEqual(actual["branch"], REAL_BRANCH)
+            self.assertEqual(actual["remote_repo"],
+                             "unrelated-owner/foreign-repository")
+            self.assertEqual(
+                verify_resume_issue(REPO, ISSUE, issue, actual)["reason"],
+                "RESUME_REPOSITORY_MISMATCH",
+            )
+            self.assertEqual(
+                verify_github_issue(facts, ISSUE, issue)["status"], "BLOCK",
+                "outgoing Handoff must reject a foreign origin despite matching HEAD",
+            )
+            self.assertEqual(artifact.read_text(encoding="utf-8"),
+                             "unchanged fixture")
 
     def test_control_active_closed_is_blocked(self) -> None:
         self.assert_rejected(expected="ACTIVE Issue must remain open", issue_state="closed")
