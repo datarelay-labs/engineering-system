@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from work_admission import (  # noqa: E402
     evaluate_eligible,
     evaluate_disposition,
+    evaluate_priority_selection,
     evaluate_admit,
     evaluate_release,
     evaluate_size,
@@ -919,7 +920,110 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert fields["DECISION"] == "DENY"
 
 
+
+def priority_candidate(issue_number: int, workstream: str, priority: str = "NORMAL") -> dict:
+    facts = eligible_facts()
+    body = facts["body"].replace(
+        "WORKSTREAM=context-epoch-packet-projection", "WORKSTREAM=" + workstream, 1
+    ).replace(
+        "EXECUTION_PROFILE_REVISION=3\n",
+        "EXECUTION_PROFILE_REVISION=3\nPRIORITY=" + priority + "\n",
+        1,
+    ).replace("Implement and validate.", "Implement " + workstream + ".")
+    return {**facts, "body": body, "issue_number": issue_number}
+
+
+def test_owner_priority_selection_guard() -> None:
+    high = priority_candidate(100, "high-risk-fix", "HIGH")
+    low = priority_candidate(101, "convenient-feature", "LOW")
+    facts = {
+        "target_repository": "datarelay-labs/engineering-system",
+        "candidates": [low, high],
+        "proposed_workstream": "convenient-feature",
+    }
+
+    # A runnable higher-priority task cannot be silently bypassed.
+    report = evaluate_priority_selection(facts)
+    assert report["SELECTION"] == "DENY" and report["REASON"] == "PRIORITY_DRIFT"
+    assert report["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+    code, fields = run_cli("select", facts)
+    assert code == 2 and fields["REASON"] == "PRIORITY_DRIFT"
+
+    # The exact first action and immutable intent revision survive selection.
+    ok = evaluate_priority_selection({**facts, "proposed_workstream": "high-risk-fix"})
+    assert ok["SELECTION"] == "ALLOW"
+    assert ok["NEXT_ACTION"] == "Implement high-risk-fix."
+    assert ok["INTENT_REVISION"] == "1"
+    assert ok["ISSUE_NUMBER"] == "100"
+
+    # An explicit owner change overrides the priority rank. A locked in-flight
+    # task otherwise wins until completed, paused or demonstrably blocked.
+    owner = evaluate_priority_selection({**facts, "owner_focus": "convenient-feature"})
+    assert owner["SELECTION"] == "ALLOW"
+    locked = evaluate_priority_selection({
+        **facts, "locked_workstream": "convenient-feature"
+    })
+    assert locked["SELECTION"] == "ALLOW"
+    owner_changed = evaluate_priority_selection({
+        **facts,
+        "owner_focus": "high-risk-fix",
+        "locked_workstream": "convenient-feature",
+    })
+    assert owner_changed["SELECTION"] == "DENY"
+    assert owner_changed["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+
+    # New explicit owner intent may replace a prior lock that is no longer
+    # among the supplied candidate set.
+    override = evaluate_priority_selection({
+        **facts,
+        "candidates": [high],
+        "proposed_workstream": "high-risk-fix",
+        "owner_focus": "high-risk-fix",
+        "locked_workstream": "retired-workstream",
+    })
+    assert override["SELECTION"] == "ALLOW"
+
+    # Waiting/closed/high-priority packets can yield, but a stale or invalid
+    # high-priority packet cannot disappear and be reported as no work.
+    high_waiting = {**high, "waiting_for": ["CI"]}
+    waiting = evaluate_priority_selection({**facts, "candidates": [high_waiting, low]})
+    assert waiting["SELECTION"] == "ALLOW"
+    high_stale = {**high, "observed_head": "b" * 40}
+    stale = evaluate_priority_selection({**facts, "candidates": [high_stale, low]})
+    assert stale["SELECTION"] == "RECONCILE"
+    assert stale["REASON"] == "UNRECONCILED_CANDIDATE"
+
+    # Malformed live-style v1 and nonstandard P0 priority are not valid v3,
+    # and must not be interpreted as runnable work or quietly skipped.
+    legacy = priority_candidate(103, "legacy-p0", "HIGH")
+    legacy["body"] = legacy["body"].replace("PACKET_VERSION=3", "PACKET_VERSION=1", 1)
+    assert evaluate_priority_selection({**facts, "candidates": [legacy, low]})["SELECTION"] == "RECONCILE"
+    invalid_priority = priority_candidate(104, "not-standard-p0", "P0")
+    invalid = evaluate_priority_selection({**facts, "candidates": [invalid_priority, low]})
+    assert invalid["SELECTION"] == "RECONCILE" and invalid["REASON"] == "INVALID_PRIORITY"
+
+    # Contradictory/ambiguous portfolio inputs must not authorize free selection.
+    assert evaluate_priority_selection({**facts, "candidates": [high, high]})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": [low] , "owner_focus": "high-risk-fix"})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": []})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": [high, low], "proposed_workstream": "not-listed"})["SELECTION"] == "DENY"
+
+    # An out-of-repo candidate must never acquire local execution authority.
+    foreign = {**high, "expected_target_repo": "xdr-labs/other-product"}
+    assert evaluate_priority_selection({**facts, "candidates": [foreign, low]})["SELECTION"] == "ALLOW"
+
+    # Issue age (monotone GitHub issue number) breaks priority ties, not model whim.
+    same = priority_candidate(102, "equal-priority", "HIGH")
+    ties = evaluate_priority_selection({
+        **facts,
+        "candidates": [same, high],
+        "proposed_workstream": "equal-priority",
+    })
+    assert ties["SELECTION"] == "DENY"
+    assert ties["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+
 def main() -> int:
+    test_owner_priority_selection_guard()
     test_turn_disposition_policy_surfaces()
     test_turn_disposition_classifies_supplied_facts()
     test_runnable_selection_excludes_stale_waiting_and_terminal_packets()
