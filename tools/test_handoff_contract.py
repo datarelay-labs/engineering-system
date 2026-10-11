@@ -36,6 +36,17 @@ Continue implementation.
 None.
 """
 
+# Stable, independently specified Git identity for existing passing test fixtures.
+# The production verifier may query probe_worktree after B2 is authorized.
+SNAPSHOT_GIT_STATE = {
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "branch": "fix/demo",
+    "worktree": "/tmp/demo-worktree",
+    "remote_repo": "datarelay-labs/demo",
+    "dirty": False,
+}
+
+
 def facts(body=BODY,digest=None,token="Demo 계속"):
     return {"target_repo":"datarelay-labs/demo","packet_body":body,
             "persisted_body_sha256":digest or hashlib.sha256(body.encode()).hexdigest(),
@@ -49,11 +60,14 @@ def test_documented_cli_flag_matches_parser():
     assert "accurate canonical lifecycle state" in session
 
 
-def test_strict_handoff_snapshot():
-    """A locally self-consistent hash or next-chat comment cannot replace Issue persistence."""
+@patch("handoff_contract.probe_worktree", return_value=SNAPSHOT_GIT_STATE)
+def test_strict_handoff_snapshot(_git_probe):
+    """GitHub Issue and local Git proof are separate, fixed fixture identities."""
     head = "0123456789abcdef0123456789abcdef01234567"
     first = "1. Finish the already-started inbox task and its focused tests."
     body = BODY.replace(
+        "BRANCH=fix/demo", "BRANCH=fix/demo\nWORKTREE=/tmp/demo-worktree",
+    ).replace(
         "OWNER_INTENT=Continue the roadmap.",
         "OWNER_INTENT=Finish existing inbox task before selecting unrelated roadmap work.\n"
         f"LAST_VERIFIED_HEAD={head}",
@@ -64,7 +78,8 @@ def test_strict_handoff_snapshot():
     data = facts(body=body, token="Demo 계속 — Work Packet #7")
     data.update(expected_workstream="demo",
                 expected_owner_intent="Finish existing inbox task before selecting unrelated roadmap work.",
-                expected_intent_revision=1, verified_head=head, first_action=first)
+                expected_intent_revision=1, verified_head=head, first_action=first,
+                worktree="/tmp/demo-worktree")
     issue = {"number": 7, "state": "open",
              "html_url": "https://github.com/datarelay-labs/demo/issues/7", "body": body}
     assert verify_github_issue(data, 7, issue)["reason"] == "HANDOFF_TRANSACTION_VERIFIED"
@@ -128,15 +143,19 @@ def test_authenticated_issue_author_gate():
                 assert str(exc) == "WORK_PACKET_AUTHOR_UNTRUSTED"
 
 
-def test_strict_cli_read_and_classification():
+@patch("handoff_contract.probe_worktree", return_value=SNAPSHOT_GIT_STATE)
+def test_strict_cli_read_and_classification(_git_probe):
     head = "0123456789abcdef0123456789abcdef01234567"
     action = "1. Resume the original work before browsing all Issues."
-    body = BODY.replace("OWNER_INTENT=Continue the roadmap.",
-                        f"OWNER_INTENT=Resume original work.\nLAST_VERIFIED_HEAD={head}")
+    body = BODY.replace(
+        "BRANCH=fix/demo", "BRANCH=fix/demo\nWORKTREE=/tmp/demo-worktree",
+    ).replace("OWNER_INTENT=Continue the roadmap.",
+              f"OWNER_INTENT=Resume original work.\nLAST_VERIFIED_HEAD={head}")
     body = body.replace("Continue implementation.", action)
     inputs = facts(body=body, token="Demo 계속 — #7")
     inputs.update(expected_workstream="demo", expected_owner_intent="Resume original work.",
-                  expected_intent_revision=1, verified_head=head, first_action=action)
+                  expected_intent_revision=1, verified_head=head, first_action=action,
+                  worktree="/tmp/demo-worktree")
     issue = {"number": 7, "state": "open",
              "html_url": "https://github.com/datarelay-labs/demo/issues/7",
              "body": body}
