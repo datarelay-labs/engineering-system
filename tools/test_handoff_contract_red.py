@@ -3,19 +3,24 @@
 
 These tests intentionally FAIL against PR #304 until the separately authorized
 source repair is complete. They are NOT registered as passing CI release gates.
-Only synthesized, in-memory Issue data is used; no GitHub writes or edits
-to the product worktree occur. A disposable Git repository is used for one
-real-HEAD comparison. Keep this file in the existing Handoff PR lane.
+Only in-memory GitHub Issue fixtures are used; no GitHub writes or edits
+to the existing worktree occur. Disposable Git repositories exercise real
+HEAD, remote identity, and the outgoing CLI. Keep this in the existing PR lane.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from handoff_contract import main as handoff_main
 from handoff_contract import probe_worktree, verify_github_issue, verify_resume_issue
 from test_handoff_contract import BODY
 
@@ -167,6 +172,55 @@ class OutgoingHandoffContractRED(unittest.TestCase):
             )
             self.assertEqual(artifact.read_text(encoding="utf-8"),
                              "unchanged fixture")
+
+    def test_red_outgoing_cli_rejects_forged_head(self) -> None:
+        """Exercise the documented --facts CLI entrypoint against real Git."""
+        with tempfile.TemporaryDirectory(prefix="eng-handoff-cli-git-") as root, \
+             tempfile.TemporaryDirectory(prefix="eng-handoff-cli-input-") as args_root:
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", root, *args], check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", REAL_BRANCH)
+            git("remote", "add", "origin", f"https://github.com/{REPO}.git")
+            artifact = Path(root) / "keep.txt"
+            artifact.write_text("preserve exact contents", encoding="utf-8")
+            git("add", "keep.txt")
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                "commit", "-m", "CLI fixture")
+            actual_head = git("rev-parse", "HEAD")
+            facts_path = Path(args_root) / "facts.json"
+
+            def run_cli(head: str) -> tuple[int, dict]:
+                facts, issue = synthetic_case(head=head, worktree=root)
+                facts["worktree"] = root
+                facts_path.write_text(json.dumps(facts), encoding="utf-8")
+                out = StringIO()
+                with patch.object(sys, "argv",
+                                  ["handoff_contract.py", "--facts", str(facts_path)]), \
+                     patch("handoff_contract.read_github_issue", return_value=issue) as read, \
+                     redirect_stdout(out):
+                    exit_code = handoff_main()
+                read.assert_called_once_with(REPO, ISSUE)
+                return exit_code, json.loads(out.getvalue())
+
+            positive_exit, positive = run_cli(actual_head)
+            self.assertEqual(positive_exit, 0)
+            self.assertEqual(positive["reason"], "HANDOFF_TRANSACTION_VERIFIED")
+
+            # Only GitHub I/O is mocked. The checkout and commit HEAD are real.
+            forged = "f" * 40 if actual_head != "f" * 40 else "e" * 40
+            negative_exit, negative = run_cli(forged)
+            self.assertEqual(
+                negative_exit, 2,
+                f"outgoing --facts CLI must reject real Git mismatch; got {negative}",
+            )
+            self.assertEqual(negative["status"], "BLOCK")
+            self.assertEqual(git("rev-parse", "HEAD"), actual_head)
+            self.assertEqual(artifact.read_text(encoding="utf-8"),
+                             "preserve exact contents")
 
     def test_control_active_closed_is_blocked(self) -> None:
         self.assert_rejected(expected="ACTIVE Issue must remain open", issue_state="closed")
