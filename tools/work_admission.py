@@ -772,6 +772,16 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
             priority = packet.metadata.get("PRIORITY", "NORMAL")
             if priority not in PRIORITY_RANK:
                 return _priority_result("RECONCILE", "INVALID_PRIORITY", proposed)
+            issue_state = _require_str(candidate.get("issue_state"), "issue_state").upper()
+            status = packet.metadata.get("STATUS")
+            if issue_state not in {"OPEN", "CLOSED"} or (
+                issue_state == "CLOSED" and status != "COMPLETE"
+            ) or (issue_state == "OPEN" and status == "COMPLETE"):
+                # A stale GitHub lifecycle is a reconciliation error, not a
+                # valid excuse to skip the highest-priority workstream.
+                return _priority_result(
+                    "RECONCILE", "INCONSISTENT_PACKET_LIFECYCLE", proposed
+                )
             admission = evaluate_eligible(candidate)
             if admission["DECISION"] == "ALLOW":
                 eligible.append({

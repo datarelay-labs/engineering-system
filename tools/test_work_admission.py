@@ -1032,6 +1032,23 @@ def test_owner_priority_selection_guard() -> None:
     })
     assert locked_yield["SELECTION"] == "ALLOW"
     assert locked_yield["SKIPPED_REASON"] == "WAITING"
+    # Inconsistent GitHub/packet lifecycle is not permission to bypass a
+    # higher-priority unfinished item (or falsely accept a COMPLETE label).
+    high_closed_while_active = {**high, "issue_state": "CLOSED"}
+    mismatch_active = evaluate_priority_selection({
+        **facts, "candidates": [high_closed_while_active, low]
+    })
+    assert mismatch_active["SELECTION"] == "RECONCILE"
+    assert mismatch_active["REASON"] == "INCONSISTENT_PACKET_LIFECYCLE"
+    high_open_while_complete = {**high,
+        "body": high["body"].replace("STATUS=ACTIVE", "STATUS=COMPLETE", 1)
+    }
+    mismatch_complete = evaluate_priority_selection({
+        **facts, "candidates": [high_open_while_complete, low]
+    })
+    assert mismatch_complete["SELECTION"] == "RECONCILE"
+    assert mismatch_complete["REASON"] == "INCONSISTENT_PACKET_LIFECYCLE"
+
     high_stale = {**high, "observed_head": "b" * 40}
     stale = evaluate_priority_selection({**facts, "candidates": [high_stale, low]})
     assert stale["SELECTION"] == "RECONCILE"
