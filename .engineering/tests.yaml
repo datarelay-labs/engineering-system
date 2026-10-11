@@ -584,6 +584,8 @@ scenarios:
       - "second workers fail closed on ownership overlap or host budget pressure"
       - "handoff sizing chooses BATCH KEEP or SPLIT deterministically"
       - "optional disposition classifies supplied scheduling facts but cannot control ChatGPT final responses"
+      - "priority selection denies lower-priority or unlocked drift with explicit owner focus precedence"
+      - "stale or non-v3 candidate priority requires reconciliation rather than silent fallback"
       - "unrelated sessions are never mutated to create capacity"
     release_gate: true
 

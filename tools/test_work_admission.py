@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from work_admission import (  # noqa: E402
     evaluate_eligible,
     evaluate_disposition,
+    evaluate_priority_selection,
     evaluate_admit,
     evaluate_release,
     evaluate_size,
@@ -641,6 +642,20 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert packetless["CANDIDATE_COUNT"] == "1"
     assert packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
 
+    # An explicitly supplied runnable P0 must override a fabricated
+    # COMPLETE terminal claim. This checks both first priority and closure.
+    p0 = priority_candidate(301, "owner-p0-not-done", "URGENT")
+    bad_terminal = evaluate_disposition({
+        "request_scope": "repository",
+        "target_repository": "datarelay-labs/engineering-system",
+        "runnable_candidates": [p0],
+        "scheduler_reconciled": True,
+        "remaining_state": "COMPLETE",
+    })
+    assert bad_terminal["TURN_DISPOSITION"] == "CONTINUE"
+    assert bad_terminal["FINAL_ALLOWED"] == "NO"
+    assert bad_terminal["ROADMAP_COMPLETE"] == "NO"
+
     # Non-mapping collector values must be isolated like malformed packet
     # fields; they cannot suppress other safe runnable work.
     for non_object in (None, "invalid", 123, [], False):
@@ -750,6 +765,23 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert pending_complete["TURN_DISPOSITION"] == "RECONCILE"
     assert pending_complete["FINAL_ALLOWED"] == "NO"
 
+    # Regression: an empty repository inventory cannot prove a whole roadmap
+    # is complete, even when the caller marks scheduler_reconciled=True.
+    empty_complete = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [],
+            "roadmap_runnable_work": [],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert empty_complete["TURN_DISPOSITION"] == "RECONCILE"
+    assert empty_complete["ROADMAP_COMPLETE"] == "NOT_VERIFIED"
+    assert empty_complete["FINAL_ALLOWED"] == "NO"
+    assert runnable["ROADMAP_COMPLETE"] == "NO"
+
     no_safe = evaluate_disposition(
         {
             "request_scope": "repository",
@@ -761,6 +793,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     )
     assert no_safe["TURN_DISPOSITION"] == "ALLOW_FINAL"
     assert no_safe["FINAL_ALLOWED"] == "YES"
+    assert no_safe["ROADMAP_COMPLETE"] == "NO"  # turn ended, roadmap NOT finished
 
     for state in ("OWNER_REQUIRED", "IRRECONCILABLE"):
         report = evaluate_disposition(
@@ -785,7 +818,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
             "remaining_state": "COMPLETE",
         }
     )
-    assert scoped_repository["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert scoped_repository["TURN_DISPOSITION"] == "RECONCILE"
     assert scoped_repository["CANDIDATE_COUNT"] == "0"
 
     matching_workstream = evaluate_disposition(
@@ -919,7 +952,139 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert fields["DECISION"] == "DENY"
 
 
+
+def priority_candidate(issue_number: int, workstream: str, priority: str = "NORMAL") -> dict:
+    facts = eligible_facts()
+    body = facts["body"].replace(
+        "WORKSTREAM=context-epoch-packet-projection", "WORKSTREAM=" + workstream, 1
+    ).replace(
+        "EXECUTION_PROFILE_REVISION=3\n",
+        "EXECUTION_PROFILE_REVISION=3\nPRIORITY=" + priority + "\n",
+        1,
+    ).replace("Implement and validate.", "Implement " + workstream + ".")
+    return {**facts, "body": body, "issue_number": issue_number}
+
+
+def test_owner_priority_selection_guard() -> None:
+    high = priority_candidate(100, "high-risk-fix", "HIGH")
+    low = priority_candidate(101, "convenient-feature", "LOW")
+    facts = {
+        "target_repository": "datarelay-labs/engineering-system",
+        "candidates": [low, high],
+        "proposed_workstream": "convenient-feature",
+    }
+
+    # A runnable higher-priority task cannot be silently bypassed.
+    report = evaluate_priority_selection(facts)
+    assert report["SELECTION"] == "DENY" and report["REASON"] == "PRIORITY_DRIFT"
+    assert report["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+    code, fields = run_cli("select", facts)
+    assert code == 2 and fields["REASON"] == "PRIORITY_DRIFT"
+
+    # The exact first action and immutable intent revision survive selection.
+    ok = evaluate_priority_selection({**facts, "proposed_workstream": "high-risk-fix"})
+    assert ok["SELECTION"] == "ALLOW"
+    assert ok["NEXT_ACTION"] == "Implement high-risk-fix."
+    assert ok["INTENT_REVISION"] == "1"
+    assert ok["ISSUE_NUMBER"] == "100"
+
+    # An explicit owner change overrides the priority rank. A locked in-flight
+    # task otherwise wins until completed, paused or demonstrably blocked.
+    owner = evaluate_priority_selection({**facts, "owner_focus": "convenient-feature"})
+    assert owner["SELECTION"] == "ALLOW"
+    locked = evaluate_priority_selection({
+        **facts, "locked_workstream": "convenient-feature"
+    })
+    assert locked["SELECTION"] == "ALLOW"
+    owner_changed = evaluate_priority_selection({
+        **facts,
+        "owner_focus": "high-risk-fix",
+        "locked_workstream": "convenient-feature",
+    })
+    assert owner_changed["SELECTION"] == "DENY"
+    assert owner_changed["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+
+    # New explicit owner intent may replace a prior lock that is no longer
+    # among the supplied candidate set.
+    override = evaluate_priority_selection({
+        **facts,
+        "candidates": [high],
+        "proposed_workstream": "high-risk-fix",
+        "owner_focus": "high-risk-fix",
+        "locked_workstream": "retired-workstream",
+    })
+    assert override["SELECTION"] == "ALLOW"
+
+    # Waiting/closed/high-priority packets can yield, but a stale or invalid
+    # high-priority packet cannot disappear and be reported as no work.
+    high_waiting = {**high, "waiting_for": ["CI"]}
+    waiting = evaluate_priority_selection({**facts, "candidates": [high_waiting, low]})
+    assert waiting["SELECTION"] == "ALLOW"
+    owner_yield = evaluate_priority_selection({
+        **facts, "candidates": [high_waiting, low], "owner_focus": "high-risk-fix"
+    })
+    assert owner_yield["SELECTION"] == "ALLOW"
+    assert owner_yield["REASON"] == "VERIFIED_FOCUS_YIELDED"
+    assert owner_yield["SKIPPED_FOCUS"] == "high-risk-fix"
+    assert owner_yield["SKIPPED_REASON"] == "WAITING"
+    locked_yield = evaluate_priority_selection({
+        **facts, "candidates": [high_waiting, low], "locked_workstream": "high-risk-fix"
+    })
+    assert locked_yield["SELECTION"] == "ALLOW"
+    assert locked_yield["SKIPPED_REASON"] == "WAITING"
+    # Inconsistent GitHub/packet lifecycle is not permission to bypass a
+    # higher-priority unfinished item (or falsely accept a COMPLETE label).
+    high_closed_while_active = {**high, "issue_state": "CLOSED"}
+    mismatch_active = evaluate_priority_selection({
+        **facts, "candidates": [high_closed_while_active, low]
+    })
+    assert mismatch_active["SELECTION"] == "RECONCILE"
+    assert mismatch_active["REASON"] == "INCONSISTENT_PACKET_LIFECYCLE"
+    high_open_while_complete = {**high,
+        "body": high["body"].replace("STATUS=ACTIVE", "STATUS=COMPLETE", 1)
+    }
+    mismatch_complete = evaluate_priority_selection({
+        **facts, "candidates": [high_open_while_complete, low]
+    })
+    assert mismatch_complete["SELECTION"] == "RECONCILE"
+    assert mismatch_complete["REASON"] == "INCONSISTENT_PACKET_LIFECYCLE"
+
+    high_stale = {**high, "observed_head": "b" * 40}
+    stale = evaluate_priority_selection({**facts, "candidates": [high_stale, low]})
+    assert stale["SELECTION"] == "RECONCILE"
+    assert stale["REASON"] == "UNRECONCILED_CANDIDATE"
+
+    # Malformed live-style v1 and nonstandard P0 priority are not valid v3,
+    # and must not be interpreted as runnable work or quietly skipped.
+    legacy = priority_candidate(103, "legacy-p0", "HIGH")
+    legacy["body"] = legacy["body"].replace("PACKET_VERSION=3", "PACKET_VERSION=1", 1)
+    assert evaluate_priority_selection({**facts, "candidates": [legacy, low]})["SELECTION"] == "RECONCILE"
+    invalid_priority = priority_candidate(104, "not-standard-p0", "P0")
+    invalid = evaluate_priority_selection({**facts, "candidates": [invalid_priority, low]})
+    assert invalid["SELECTION"] == "RECONCILE" and invalid["REASON"] == "INVALID_PRIORITY"
+
+    # Contradictory/ambiguous portfolio inputs must not authorize free selection.
+    assert evaluate_priority_selection({**facts, "candidates": [high, high]})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": [low] , "owner_focus": "high-risk-fix"})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": []})["SELECTION"] == "RECONCILE"
+    assert evaluate_priority_selection({**facts, "candidates": [high, low], "proposed_workstream": "not-listed"})["SELECTION"] == "DENY"
+
+    # An out-of-repo candidate must never acquire local execution authority.
+    foreign = {**high, "expected_target_repo": "xdr-labs/other-product"}
+    assert evaluate_priority_selection({**facts, "candidates": [foreign, low]})["SELECTION"] == "ALLOW"
+
+    # Issue age (monotone GitHub issue number) breaks priority ties, not model whim.
+    same = priority_candidate(102, "equal-priority", "HIGH")
+    ties = evaluate_priority_selection({
+        **facts,
+        "candidates": [same, high],
+        "proposed_workstream": "equal-priority",
+    })
+    assert ties["SELECTION"] == "DENY"
+    assert ties["REQUIRED_WORKSTREAM"] == "high-risk-fix"
+
 def main() -> int:
+    test_owner_priority_selection_guard()
     test_turn_disposition_policy_surfaces()
     test_turn_disposition_classifies_supplied_facts()
     test_runnable_selection_excludes_stale_waiting_and_terminal_packets()

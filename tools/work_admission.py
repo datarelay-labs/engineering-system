@@ -6,6 +6,7 @@ pure functions over packet/claim/worktree/resource facts. This tool never
 stops, kills, attaches to, or otherwise mutates existing worker sessions.
 
 Commands:
+  select      Detect priority drift and preserve the first unfinished action
   eligible    ALLOW/DENY runnable packet selection from fresh packet and observed facts
   disposition Optional CONTINUE/RECONCILE/ALLOW_FINAL/BLOCKED scheduling classification
   admit       ALLOW/DENY starting a proposed worker claim
@@ -68,6 +69,29 @@ REPORT_KEYS_RELEASE = (
     "MUTATES_EXISTING_SESSIONS",
 )
 
+REPORT_KEYS_PRIORITY = (
+    "SELECTION",
+    "REASON",
+    "REQUIRED_WORKSTREAM",
+    "PROPOSED_WORKSTREAM",
+    "ISSUE_NUMBER",
+    "PRIORITY",
+    "INTENT_REVISION",
+    "NEXT_ACTION",
+    "SKIPPED_FOCUS",
+    "SKIPPED_REASON",
+    "FACT_AUTHORITY",
+    "MUTATES_EXISTING_SESSIONS",
+)
+
+PRIORITY_RANK = {"URGENT": 0, "HIGH": 1, "NORMAL": 2, "LOW": 3}
+PRIORITY_RECONCILE_DENIALS = frozenset(
+    {"INVALID_PACKET", "BRANCH_MISMATCH", "STALE_HEAD", "WORKTREE_MISMATCH", "NO_NEXT_ACTION"}
+)
+PRIORITY_NONRUNNABLE_DENIALS = frozenset(
+    {"NOT_ACTIVE", "CLOSED_ISSUE", "WAITING", "PACKET_BLOCKER"}
+)
+
 REPORT_KEYS_DISPOSITION = (
     "TURN_DISPOSITION",
     "FINAL_ALLOWED",
@@ -77,6 +101,7 @@ REPORT_KEYS_DISPOSITION = (
     "REMAINING_STATE",
     "CANDIDATE_COUNT",
     "RUNNABLE_CANDIDATE_COUNT",
+    "ROADMAP_COMPLETE",
     "MUTATES_EXISTING_SESSIONS",
 )
 
@@ -663,6 +688,151 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     return allow("repository-bound current-profile packet is runnable now")
 
 
+def _priority_result(
+    selection: str, reason: str, proposed: str, chosen: dict[str, Any] | None = None
+) -> dict[str, str]:
+    # Pure classification: the supplied candidate Issue bodies and Git observations
+    # must be freshly collected by the authenticated caller. This is not an Issue
+    # reader, trusted launcher, worker, or new execution authorization boundary.
+    fields = {
+        "SELECTION": selection,
+        "REASON": reason,
+        "PROPOSED_WORKSTREAM": proposed,
+        "FACT_AUTHORITY": "CALLER_SUPPLIED_ONLY",
+        "MUTATES_EXISTING_SESSIONS": "NO",
+    }
+    if chosen is not None:
+        packet = chosen["packet"]
+        fields.update({
+            "REQUIRED_WORKSTREAM": packet.metadata["WORKSTREAM"],
+            "ISSUE_NUMBER": str(chosen["issue_number"]),
+            "PRIORITY": chosen["priority"],
+            "INTENT_REVISION": packet.metadata.get("INTENT_REVISION", ""),
+            "NEXT_ACTION": next(
+                (line.strip() for line in packet.sections.get("Next Action", "").splitlines()
+                 if line.strip()), ""
+            ),
+        })
+    return fields
+
+
+def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
+    """Fail closed if the proposed work violates current owner/lock/priority facts.
+
+    Only for *already authenticated* Issue/HEAD observations in one repository.
+    Does not discover work or grant GitHub or product modification authority.
+    Owner focus takes precedence over an in-progress lock, then rank and oldest
+    GitHub Issue number decide between runnable workstreams.
+    """
+    from context_epoch import SAFE_WORKSTREAM_RE, parse_packet
+
+    data = _require_mapping(payload, "request")
+    target = _require_str(data.get("target_repository"), "target_repository")
+    proposed = _require_str(data.get("proposed_workstream"), "proposed_workstream")
+    owner_focus = data.get("owner_focus")
+    locked = data.get("locked_workstream")
+    for label, value in (
+        ("proposed_workstream", proposed), ("owner_focus", owner_focus),
+        ("locked_workstream", locked),
+    ):
+        if value is None:
+            continue
+        if not isinstance(value, str) or SAFE_WORKSTREAM_RE.fullmatch(value) is None:
+            raise AdmissionFactsError(f"{label} must be one valid workstream")
+    candidates = _require_list(data.get("candidates"), "candidates")
+    if not candidates:
+        return _priority_result("RECONCILE", "NO_CANDIDATES_VERIFIED", proposed)
+
+    eligible: list[dict[str, Any]] = []
+    nonrunnable: dict[str, str] = {}
+    observed: set[str] = set()
+    issue_numbers: set[int] = set()
+    scoped: set[str] = set()
+    for index, raw in enumerate(candidates):
+        try:
+            candidate = _require_mapping(raw, f"candidates[{index}]")
+            repository = _require_str(
+                candidate.get("expected_target_repo"), "expected_target_repo"
+            )
+            # Foreign-scope references are never scheduling candidates.
+            if repository != target:
+                continue
+            issue_number = _require_int(candidate.get("issue_number"), "issue_number", minimum=1)
+            packet = parse_packet(_require_str(candidate.get("body"), "body"))
+            workstream = _require_str(
+                packet.metadata.get("WORKSTREAM"), "WORKSTREAM"
+            )
+            if SAFE_WORKSTREAM_RE.fullmatch(workstream) is None:
+                raise AdmissionFactsError("invalid WORKSTREAM")
+            if issue_number in issue_numbers or workstream in observed:
+                return _priority_result("RECONCILE", "DUPLICATE_IDENTITY", proposed)
+            issue_numbers.add(issue_number)
+            observed.add(workstream)
+            scoped.add(workstream)
+            priority = packet.metadata.get("PRIORITY", "NORMAL")
+            if priority not in PRIORITY_RANK:
+                return _priority_result("RECONCILE", "INVALID_PRIORITY", proposed)
+            issue_state = _require_str(candidate.get("issue_state"), "issue_state").upper()
+            status = packet.metadata.get("STATUS")
+            if issue_state not in {"OPEN", "CLOSED"} or (
+                issue_state == "CLOSED" and status != "COMPLETE"
+            ) or (issue_state == "OPEN" and status == "COMPLETE"):
+                # A stale GitHub lifecycle is a reconciliation error, not a
+                # valid excuse to skip the highest-priority workstream.
+                return _priority_result(
+                    "RECONCILE", "INCONSISTENT_PACKET_LIFECYCLE", proposed
+                )
+            admission = evaluate_eligible(candidate)
+            if admission["DECISION"] == "ALLOW":
+                eligible.append({
+                    "issue_number": issue_number,
+                    "priority": priority,
+                    "packet": packet,
+                })
+            elif admission["DENY_CLASS"] in PRIORITY_NONRUNNABLE_DENIALS:
+                nonrunnable[workstream] = admission["DENY_CLASS"]
+                continue
+            else:
+                # Stale/invalid P0 must not silently vanish behind healthy P2.
+                return _priority_result("RECONCILE", "UNRECONCILED_CANDIDATE", proposed)
+        except (AdmissionFactsError, KeyError):
+            return _priority_result("RECONCILE", "UNRECONCILED_CANDIDATE", proposed)
+
+    if owner_focus is not None and owner_focus not in scoped:
+        return _priority_result("RECONCILE", "OWNER_FOCUS_NOT_OBSERVED", proposed)
+    if owner_focus is None and locked is not None and locked not in scoped:
+        return _priority_result("RECONCILE", "LOCKED_WORKSTREAM_NOT_OBSERVED", proposed)
+    if not eligible:
+        return _priority_result("RECONCILE", "NO_RUNNABLE_CANDIDATE", proposed)
+
+    by_workstream = {c["packet"].metadata["WORKSTREAM"]: c for c in eligible}
+    skipped_focus = None
+    if owner_focus is not None and owner_focus not in by_workstream:
+        # Verified waiting/blocked or terminal first action yields to
+        # independent runnable work without reinterpreting it as COMPLETE.
+        skipped_focus = owner_focus
+    if owner_focus in by_workstream:
+        chosen = by_workstream[owner_focus]
+    elif locked in by_workstream:
+        chosen = by_workstream[locked]
+    else:
+        chosen = min(
+            eligible,
+            key=lambda c: (PRIORITY_RANK[c["priority"]], c["issue_number"]),
+        )
+    decision = "ALLOW" if chosen["packet"].metadata["WORKSTREAM"] == proposed else "DENY"
+    reason = "PRIORITY_VERIFIED" if decision == "ALLOW" else "PRIORITY_DRIFT"
+    if decision == "ALLOW" and skipped_focus is not None:
+        reason = "VERIFIED_FOCUS_YIELDED"
+    result = _priority_result(decision, reason, proposed, chosen)
+    if skipped_focus is None and owner_focus is None and locked in nonrunnable:
+        skipped_focus = locked
+    if skipped_focus is not None:
+        result["SKIPPED_FOCUS"] = skipped_focus
+        result["SKIPPED_REASON"] = nonrunnable[skipped_focus]
+    return result
+
+
 def _turn_disposition(
     disposition: str,
     *,
@@ -687,6 +857,16 @@ def _turn_disposition(
         "REMAINING_STATE": remaining_state,
         "CANDIDATE_COUNT": str(candidate_count),
         "RUNNABLE_CANDIDATE_COUNT": str(runnable_candidate_count),
+        # An optional classifier cannot certify an exhaustive GitHub roadmap
+        # from caller facts. In particular ALLOW_FINAL only ends this turn.
+        "ROADMAP_COMPLETE": (
+            "NO" if disposition == "CONTINUE"
+            or (
+                candidate_count > 0
+                and remaining_state in {"NO_SAFE_RUNNABLE", "OWNER_REQUIRED", "IRRECONCILABLE"}
+            )
+            else "NOT_VERIFIED"
+        ),
         "MUTATES_EXISTING_SESSIONS": "NO",
     }
 
@@ -851,6 +1031,18 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             runnable_candidate_count=0,
         )
 
+    if remaining_state == "COMPLETE" and request_scope == "repository" and candidate_count == 0:
+        return _turn_disposition(
+            "RECONCILE",
+            final_allowed=False,
+            reason="empty repository candidate inventory cannot prove roadmap completion",
+            request_scope=request_scope,
+            scheduler_reconciled=False,
+            remaining_state="UNKNOWN",
+            candidate_count=0,
+            runnable_candidate_count=0,
+        )
+
     if remaining_state == "COMPLETE" and pending_candidate_count:
         return _turn_disposition(
             "RECONCILE",
@@ -932,6 +1124,10 @@ def failure_report(reason: str, deny_class: str = "AMBIGUOUS_FACTS") -> tuple[st
 
 
 def run_command(command: str, payload: dict[str, Any]) -> tuple[str, int]:
+    if command == "select":
+        report = evaluate_priority_selection(payload)
+        code = {"ALLOW": 0, "DENY": 2, "RECONCILE": 3}[report["SELECTION"]]
+        return format_report(report, REPORT_KEYS_PRIORITY), code
     if command == "eligible":
         report = evaluate_eligible(payload)
         return format_report(report, REPORT_KEYS_ADMIT), int(report["EXIT_CODE"])
@@ -954,8 +1150,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("eligible", "disposition", "admit", "size", "release"),
-        help="Runnable/turn disposition, admission, sizing, or claim release/cleanup",
+        choices=("select", "eligible", "disposition", "admit", "size", "release"),
+        help="Priority selection, runnable/turn disposition, admission, sizing, or claim cleanup",
     )
     parser.add_argument(
         "--request-json",
