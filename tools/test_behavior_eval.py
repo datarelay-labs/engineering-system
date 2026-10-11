@@ -291,6 +291,110 @@ def test_deterministic_run_passes() -> None:
         _fail("deterministic gate did not pass")
 
 
+def test_real_chat_canary_evidence_only() -> None:
+    import hashlib
+    import itertools
+    import tempfile
+
+    def record(product: str, case: str, attempt: int) -> dict:
+        repo = behavior_eval.REAL_CHAT_PRODUCTS[product]
+        key = f"{product}-{case}-{attempt}".lower().replace("_", "-")
+        return {
+            "PRODUCT": product, "CASE": case, "ATTEMPT": attempt,
+            "RUN_ID": key,
+            "SESSION_DIGEST": hashlib.sha256(key.encode()).hexdigest(),
+            "INITIAL_PACKET_ISSUE": 99, "INTENT_REVISION": 7,
+            "BRANCH": "feat/canary-observation", "HEAD": "a" * 40,
+            "EXPECTED_FIRST_ACTION": "resume-first-unfinished",
+            "OBSERVED_FIRST_TOOL_AND_TARGET": "mcp__GitHub__fetch_issue:" + repo + "#99",
+            "SUPPORTING_GIT_OR_TOOL_EVIDENCE_URL":
+                "https://github.com/" + repo + "/issues/99#issuecomment-"
+                + str(100000 + int.from_bytes(hashlib.sha256(key.encode()).digest()[:4], "big")),
+            "RESULT": "PASS", "USER_REDIRECTIONS_COUNT": 0,
+        }
+
+    base = {"schema_version": 1, "kind": "real-chat-reliability-evidence", "records": []}
+    empty = behavior_eval.score_real_chat_canary(base)
+    assert empty["expected_runs"] == 30
+    assert empty["submitted_runs"] == 0
+    assert empty["coverage"] == "INCOMPLETE"
+    assert empty["success"] == "NOT_VERIFIED"
+    assert empty["verified_success_rate"] is None
+    assert empty["baseline_comparison"] == "UNKNOWN"
+    assert empty["reported_pass"] == 0
+
+    all_records = [
+        record(product, case, attempt)
+        for product, case, attempt in itertools.product(
+            behavior_eval.REAL_CHAT_PRODUCTS, behavior_eval.REAL_CHAT_CASES, (1, 2)
+        )
+    ]
+    assert len(all_records) == 30
+    one = behavior_eval.score_real_chat_canary({**base, "records": all_records[:1]})
+    assert one["submitted_runs"] == 1 and one["missing_runs"] == 29
+    assert one["reported_pass"] == 1
+    assert one["success"] == "NOT_VERIFIED"
+    unknown_identity = dict(all_records[0])
+    unknown_identity["SESSION_DIGEST"] = None
+    cautious = behavior_eval.score_real_chat_canary({**base, "records": [unknown_identity]})
+    assert cautious["session_identity_submitted"] == 0
+    assert cautious["session_identity_unknown"] == 1
+    assert cautious["success"] == "NOT_VERIFIED"
+    whole = behavior_eval.score_real_chat_canary({**base, "records": all_records})
+    assert whole["coverage"] == "SUBMITTED"
+    assert whole["submitted_runs"] == 30 and whole["missing_runs"] == 0
+    assert whole["reported_pass"] == 30
+    # Synthetic, self-reported 30/30 is NOT actual ChatGPT E2E acceptance.
+    assert whole["success"] == "NOT_VERIFIED"
+    assert whole["verified_success_rate"] is None
+    assert whole["baseline_comparison"] == "UNKNOWN"
+    assert whole["human_redirections_reported"] == 0
+    assert "evidence_url" not in str(whole).lower()
+
+    cases = [
+        [{**all_records[0], "RUN_ID": all_records[0]["RUN_ID"]}, all_records[0]],
+        [all_records[0], {**all_records[1], "SESSION_DIGEST": all_records[0]["SESSION_DIGEST"]}],
+        [{**all_records[0], "PRODUCT": "atlas"}],
+        [{**all_records[0], "CASE": "ROADMAPPED_BUT_NOT_REAL"}],
+        [{**all_records[0], "ATTEMPT": 3}],
+        [{**all_records[0], "HEAD": "b"}],
+        [{**all_records[0], "RESULT": "VERIFIED_PASS"}],
+        [{**all_records[0], "USER_REDIRECTIONS_COUNT": -1}],
+        [{**all_records[0], "SUPPORTING_GIT_OR_TOOL_EVIDENCE_URL":
+          "https://evil.example/issuecomment-123"}],
+        [{**all_records[0], "SUPPORTING_GIT_OR_TOOL_EVIDENCE_URL":
+          "https://github.com/xdr-labs/private/issues/1#issuecomment-2"}],
+        [{**all_records[0], "EXPECTED_FIRST_ACTION": "Run rm -rf /"}],
+        [{**all_records[0], "prompt": "raw private chat content"}],
+    ]
+    for invalid in cases:
+        try:
+            behavior_eval.score_real_chat_canary({**base, "records": invalid})
+        except behavior_eval.EvalError:
+            pass
+        else:
+            _fail("invalid self-reported real-chat evidence was accepted")
+
+    # CLI produces metadata-only report; no token/secret/transcript text.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "canary.json"
+        path.write_text(json.dumps(base), encoding="utf-8")
+        run = subprocess.run(
+            ["python3", str(TOOL), "real-chat-report", "--evidence", str(path)],
+            text=True, capture_output=True, check=False,
+        )
+        assert run.returncode == 0, run.stderr
+        result = json.loads(run.stdout)
+        assert result["success"] == "NOT_VERIFIED" and result["submitted_runs"] == 0
+        path.write_text(json.dumps({"schema_version": 1, "kind": "real-chat-reliability-evidence",
+                                    "records": [{"RUN_ID": "no-other-fields"}]}), encoding="utf-8")
+        reject = subprocess.run(
+            ["python3", str(TOOL), "real-chat-report", "--evidence", str(path)],
+            text=True, capture_output=True, check=False,
+        )
+        assert reject.returncode != 0
+
+
 def main() -> None:
     from test_access_reporting_policy import run_checks
     run_checks()
@@ -306,6 +410,7 @@ def main() -> None:
     test_wait_state_transitions()
     test_trust_checker_does_not_import_verification_fixtures()
     test_deterministic_run_passes()
+    test_real_chat_canary_evidence_only()
     print("PASS behavior eval framework")
 
 
