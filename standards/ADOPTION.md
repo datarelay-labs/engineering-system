@@ -10,6 +10,29 @@ The result should be a bounded, reviewable adoption that preserves project-speci
 
 Adoption is not permission to redesign the product, replace native CI, weaken tests, or rewrite repository-specific invariants.
 
+## Delivery responsibility before adoption
+
+Resolve any current owner-specific delivery assignment before planning a repository rollout
+(`standards/CORE.md` describes the generic ownership contract; the canonical checkout
+may include `.engineering/owner-delivery.md` for this owner's organization assignments).
+
+- For **delegated consumers**, the Engineering System steward finalizes common standards
+  and verification contracts, then updates that product's **existing GitHub roadmap Issue**
+  with a pinned canonical PR/SHA, affected project surfaces, migration and rollback
+  implications, product-owned implementation tasks, deterministic affected tests, applicable
+  user-gate contracts, and acceptance evidence. Re-read the persisted Issue before claiming
+  handoff. Do not modify product source, worktree, PR, CI, or claim product E2E from this
+  coordination step. The product chat performs and verifies adoption itself.
+- For **directly assigned consumers**, the steward owns the real repository adoption:
+  inspect `AGENTS.md` and `.engineering/project.yaml`, honor current owner/Work Packet
+  authority and dirty work, implement compatible changes, run the cheapest affected tests,
+  commit/push ordinary changes, reconcile CI/reviews, and record the exact remaining gates.
+  Use a separate worktree/branch when existing workers or changes require isolation.
+- An organization name is an **owner-scoped delivery choice**, not a core rule, a runtime
+  override, a grant of high-risk authority, or a reason to supersede a product's current
+  executable first action. Previously blocked effects stay blocked. Do not duplicate
+  roadmaps or Work Packets for micro-steps; preserve owner-controlled source work.
+
 ## Adoption trigger
 
 When a user asks to apply, adopt, bootstrap, migrate to, or align a repository with the Engineering System:
