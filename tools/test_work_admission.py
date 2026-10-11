@@ -642,6 +642,20 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert packetless["CANDIDATE_COUNT"] == "1"
     assert packetless["RUNNABLE_CANDIDATE_COUNT"] == "1"
 
+    # An explicitly supplied runnable P0 must override a fabricated
+    # COMPLETE terminal claim. This checks both first priority and closure.
+    p0 = priority_candidate(301, "owner-p0-not-done", "URGENT")
+    bad_terminal = evaluate_disposition({
+        "request_scope": "repository",
+        "target_repository": "datarelay-labs/engineering-system",
+        "runnable_candidates": [p0],
+        "scheduler_reconciled": True,
+        "remaining_state": "COMPLETE",
+    })
+    assert bad_terminal["TURN_DISPOSITION"] == "CONTINUE"
+    assert bad_terminal["FINAL_ALLOWED"] == "NO"
+    assert bad_terminal["ROADMAP_COMPLETE"] == "NO"
+
     # Non-mapping collector values must be isolated like malformed packet
     # fields; they cannot suppress other safe runnable work.
     for non_object in (None, "invalid", 123, [], False):
@@ -751,6 +765,23 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     assert pending_complete["TURN_DISPOSITION"] == "RECONCILE"
     assert pending_complete["FINAL_ALLOWED"] == "NO"
 
+    # Regression: an empty repository inventory cannot prove a whole roadmap
+    # is complete, even when the caller marks scheduler_reconciled=True.
+    empty_complete = evaluate_disposition(
+        {
+            "request_scope": "repository",
+            "target_repository": "datarelay-labs/engineering-system",
+            "runnable_candidates": [],
+            "roadmap_runnable_work": [],
+            "scheduler_reconciled": True,
+            "remaining_state": "COMPLETE",
+        }
+    )
+    assert empty_complete["TURN_DISPOSITION"] == "RECONCILE"
+    assert empty_complete["ROADMAP_COMPLETE"] == "NOT_VERIFIED"
+    assert empty_complete["FINAL_ALLOWED"] == "NO"
+    assert runnable["ROADMAP_COMPLETE"] == "NO"
+
     no_safe = evaluate_disposition(
         {
             "request_scope": "repository",
@@ -762,6 +793,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
     )
     assert no_safe["TURN_DISPOSITION"] == "ALLOW_FINAL"
     assert no_safe["FINAL_ALLOWED"] == "YES"
+    assert no_safe["ROADMAP_COMPLETE"] == "NO"  # turn ended, roadmap NOT finished
 
     for state in ("OWNER_REQUIRED", "IRRECONCILABLE"):
         report = evaluate_disposition(
@@ -786,7 +818,7 @@ def test_turn_disposition_classifies_supplied_facts() -> None:
             "remaining_state": "COMPLETE",
         }
     )
-    assert scoped_repository["TURN_DISPOSITION"] == "ALLOW_FINAL"
+    assert scoped_repository["TURN_DISPOSITION"] == "RECONCILE"
     assert scoped_repository["CANDIDATE_COUNT"] == "0"
 
     matching_workstream = evaluate_disposition(

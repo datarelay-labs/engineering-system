@@ -101,6 +101,7 @@ REPORT_KEYS_DISPOSITION = (
     "REMAINING_STATE",
     "CANDIDATE_COUNT",
     "RUNNABLE_CANDIDATE_COUNT",
+    "ROADMAP_COMPLETE",
     "MUTATES_EXISTING_SESSIONS",
 )
 
@@ -846,6 +847,16 @@ def _turn_disposition(
         "REMAINING_STATE": remaining_state,
         "CANDIDATE_COUNT": str(candidate_count),
         "RUNNABLE_CANDIDATE_COUNT": str(runnable_candidate_count),
+        # An optional classifier cannot certify an exhaustive GitHub roadmap
+        # from caller facts. In particular ALLOW_FINAL only ends this turn.
+        "ROADMAP_COMPLETE": (
+            "NO" if disposition == "CONTINUE"
+            or (
+                candidate_count > 0
+                and remaining_state in {"NO_SAFE_RUNNABLE", "OWNER_REQUIRED", "IRRECONCILABLE"}
+            )
+            else "NOT_VERIFIED"
+        ),
         "MUTATES_EXISTING_SESSIONS": "NO",
     }
 
@@ -1007,6 +1018,18 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
             scheduler_reconciled=scheduler_reconciled,
             remaining_state=remaining_state,
             candidate_count=candidate_count,
+            runnable_candidate_count=0,
+        )
+
+    if remaining_state == "COMPLETE" and request_scope == "repository" and candidate_count == 0:
+        return _turn_disposition(
+            "RECONCILE",
+            final_allowed=False,
+            reason="empty repository candidate inventory cannot prove roadmap completion",
+            request_scope=request_scope,
+            scheduler_reconciled=False,
+            remaining_state="UNKNOWN",
+            candidate_count=0,
             runnable_candidate_count=0,
         )
 
