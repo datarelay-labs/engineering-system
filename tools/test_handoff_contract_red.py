@@ -3,13 +3,17 @@
 
 These tests intentionally FAIL against PR #304 until the separately authorized
 source repair is complete. They are NOT registered as passing CI release gates.
-Only synthesized, in-memory Issue data is used; no GitHub writes or file edits
-occur during test execution. Keep this file in the existing Handoff PR lane.
+Only synthesized, in-memory Issue data is used; no GitHub writes or edits
+to the product worktree occur. A disposable Git repository is used for one
+real-HEAD comparison. Keep this file in the existing Handoff PR lane.
 """
 from __future__ import annotations
 
 import hashlib
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from handoff_contract import verify_github_issue, verify_resume_issue
@@ -92,6 +96,41 @@ class OutgoingHandoffContractRED(unittest.TestCase):
             verify_resume_issue(REPO, ISSUE, issue, ACTUAL_GIT_STATE)["status"],
             "PASS",
         )
+
+    def test_red_real_git_forged_sha_is_not_accepted(self) -> None:
+        """Observe a real disposable Git HEAD, not only mocked probe_worktree data."""
+        with tempfile.TemporaryDirectory(prefix="eng-handoff-real-git-") as root:
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", root, *args], check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", REAL_BRANCH)
+            git("remote", "add", "origin", f"https://github.com/{REPO}.git")
+            artifact = Path(root) / "fixture.txt"
+            artifact.write_text("unchanged user content", encoding="utf-8")
+            git("add", "fixture.txt")
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                "commit", "-m", "fixture identity")
+            actual_head = git("rev-parse", "HEAD")
+
+            # Control: a persisted-body-shaped fixture matching actual Git identity.
+            facts, issue = synthetic_case(head=actual_head, worktree=root)
+            facts["worktree"] = root
+            self.assertEqual(verify_github_issue(facts, ISSUE, issue)["status"], "PASS")
+
+            # RED: the caller and Issue agree on a forged SHA, not actual Git.
+            forged = "f" * 40 if actual_head != "f" * 40 else "e" * 40
+            facts, issue = synthetic_case(head=forged, worktree=root)
+            facts["worktree"] = root
+            result = verify_github_issue(facts, ISSUE, issue)
+            self.assertEqual(
+                result["status"], "BLOCK",
+                "outgoing handoff must independently probe real Git HEAD",
+            )
+            self.assertEqual(git("rev-parse", "HEAD"), actual_head)
+            self.assertEqual(artifact.read_text(encoding="utf-8"), "unchanged user content")
 
     def test_control_active_closed_is_blocked(self) -> None:
         self.assert_rejected(expected="ACTIVE Issue must remain open", issue_state="closed")
