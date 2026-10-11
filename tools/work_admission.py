@@ -78,6 +78,8 @@ REPORT_KEYS_PRIORITY = (
     "PRIORITY",
     "INTENT_REVISION",
     "NEXT_ACTION",
+    "SKIPPED_FOCUS",
+    "SKIPPED_REASON",
     "FACT_AUTHORITY",
     "MUTATES_EXISTING_SESSIONS",
 )
@@ -741,6 +743,7 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
         return _priority_result("RECONCILE", "NO_CANDIDATES_VERIFIED", proposed)
 
     eligible: list[dict[str, Any]] = []
+    nonrunnable: dict[str, str] = {}
     observed: set[str] = set()
     issue_numbers: set[int] = set()
     scoped: set[str] = set()
@@ -776,6 +779,7 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
                     "packet": packet,
                 })
             elif admission["DENY_CLASS"] in PRIORITY_NONRUNNABLE_DENIALS:
+                nonrunnable[workstream] = admission["DENY_CLASS"]
                 continue
             else:
                 # Stale/invalid P0 must not silently vanish behind healthy P2.
@@ -791,9 +795,12 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
         return _priority_result("RECONCILE", "NO_RUNNABLE_CANDIDATE", proposed)
 
     by_workstream = {c["packet"].metadata["WORKSTREAM"]: c for c in eligible}
-    if owner_focus is not None:
-        if owner_focus not in by_workstream:
-            return _priority_result("RECONCILE", "OWNER_FOCUS_NOT_RUNNABLE", proposed)
+    skipped_focus = None
+    if owner_focus is not None and owner_focus not in by_workstream:
+        # Verified waiting/blocked or terminal first action yields to
+        # independent runnable work without reinterpreting it as COMPLETE.
+        skipped_focus = owner_focus
+    if owner_focus in by_workstream:
         chosen = by_workstream[owner_focus]
     elif locked in by_workstream:
         chosen = by_workstream[locked]
@@ -804,7 +811,15 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
         )
     decision = "ALLOW" if chosen["packet"].metadata["WORKSTREAM"] == proposed else "DENY"
     reason = "PRIORITY_VERIFIED" if decision == "ALLOW" else "PRIORITY_DRIFT"
-    return _priority_result(decision, reason, proposed, chosen)
+    if decision == "ALLOW" and skipped_focus is not None:
+        reason = "VERIFIED_FOCUS_YIELDED"
+    result = _priority_result(decision, reason, proposed, chosen)
+    if skipped_focus is None and owner_focus is None and locked in nonrunnable:
+        skipped_focus = locked
+    if skipped_focus is not None:
+        result["SKIPPED_FOCUS"] = skipped_focus
+        result["SKIPPED_REASON"] = nonrunnable[skipped_focus]
+    return result
 
 
 def _turn_disposition(

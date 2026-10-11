@@ -988,6 +988,18 @@ def test_owner_priority_selection_guard() -> None:
     high_waiting = {**high, "waiting_for": ["CI"]}
     waiting = evaluate_priority_selection({**facts, "candidates": [high_waiting, low]})
     assert waiting["SELECTION"] == "ALLOW"
+    owner_yield = evaluate_priority_selection({
+        **facts, "candidates": [high_waiting, low], "owner_focus": "high-risk-fix"
+    })
+    assert owner_yield["SELECTION"] == "ALLOW"
+    assert owner_yield["REASON"] == "VERIFIED_FOCUS_YIELDED"
+    assert owner_yield["SKIPPED_FOCUS"] == "high-risk-fix"
+    assert owner_yield["SKIPPED_REASON"] == "WAITING"
+    locked_yield = evaluate_priority_selection({
+        **facts, "candidates": [high_waiting, low], "locked_workstream": "high-risk-fix"
+    })
+    assert locked_yield["SELECTION"] == "ALLOW"
+    assert locked_yield["SKIPPED_REASON"] == "WAITING"
     high_stale = {**high, "observed_head": "b" * 40}
     stale = evaluate_priority_selection({**facts, "candidates": [high_stale, low]})
     assert stale["SELECTION"] == "RECONCILE"
