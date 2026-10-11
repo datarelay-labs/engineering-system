@@ -41,6 +41,23 @@ def violations(core: str, adoption: str, owner: str, template: str) -> list[str]
         findings.append("profile:DIRECT_EXECUTION_MISSING")
     if "its own prior unfinished Work Packet" not in owner:
         findings.append("profile:FIRST_ACTION_PRIORITY_LOST")
+    for excluded in ("datarelay-labs/athena", "xdr-labs/athena"):
+        if f"- `{excluded}` — **EXCLUDED**" not in owner:
+            findings.append(f"profile:EXCLUSION_MISSING:{excluded}")
+    product_row = next(
+        (line for line in owner.splitlines()
+         if line.startswith("| `datarelay-labs/*` product repositories")), ""
+    )
+    if "Athena" in product_row or not product_row:
+        findings.append("profile:EXCLUDED_DATARELAY_IN_PRODUCT_SCOPE")
+    xdr_row = next(
+        (line for line in owner.splitlines()
+         if line.startswith("| `xdr-labs/*`")), ""
+    )
+    if "except `xdr-labs/athena`" not in xdr_row:
+        findings.append("profile:EXCLUDED_XDR_IN_DIRECT_SCOPE")
+    if "Do **not** resume or create Athena work" not in owner:
+        findings.append("profile:EXCLUSION_INOPERATIVE")
     if not all(s in owner.lower() for s in ("no", "release", "credential", "denial")):
         findings.append("profile:SAFETY_APPROVAL_BOUNDARY_MISSING")
     if any(mark in template for mark in ("## Owner-scoped XDR direct application",
@@ -73,6 +90,21 @@ def main() -> int:
     )
     assert "template:OWNER_ORGANIZATION_LEAK" in violations(
         core, adoption, owner, template + "\n## Owner-scoped XDR direct application"
+    )
+    assert "profile:EXCLUSION_MISSING:xdr-labs/athena" in violations(
+        core, adoption,
+        owner.replace("- `xdr-labs/athena` — **EXCLUDED**", "- deleted"),
+        template,
+    )
+    assert "profile:EXCLUDED_XDR_IN_DIRECT_SCOPE" in violations(
+        core, adoption,
+        owner.replace("except `xdr-labs/athena`", "including Athena"),
+        template,
+    )
+    assert "profile:EXCLUDED_DATARELAY_IN_PRODUCT_SCOPE" in violations(
+        core, adoption,
+        owner.replace("Product Foundation, Link plugin", "Product Foundation, Athena, Link plugin"),
+        template,
     )
     print("OWNER_DELIVERY_POLICY_REGRESSION=PASS")
     return 0
