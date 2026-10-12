@@ -56,6 +56,9 @@ REQUIRED_METHOD_FILES = (
     "schemas/execution-profile.schema.json",
     "tools/context_epoch.py",
     "tools/test_context_epoch.py",
+    "tools/handoff_contract.py",
+    "tools/test_handoff_contract.py",
+    "tools/test_handoff_contract_red.py",
     "tools/context_compiler.py",
     "tools/test_context_compiler.py",
     "tools/context_optimization_benchmark.py",
@@ -1845,6 +1848,12 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_handoff_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_handoff_contract_red.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_compiler.py"], cwd=ROOT)
