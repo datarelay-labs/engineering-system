@@ -20,6 +20,37 @@ requirements / decisions -> minimal design gate -> development -> review -> affe
 - **GitHub:** durable source of truth for code, history, gates, and releases.
 - **Derived knowledge plane:** an optional organization/project adapter may provide bounded human-readable and AI-searchable derived context; canonical Git/GitHub content wins on conflict. Retired knowledge systems are provenance-only and never active dependencies.
 
+## Delivery accountability and repository ownership
+
+The Engineering System steward maintains **shared engineering standards**, reusable templates,
+contracts, adoption tools, common deterministic verification, and cross-repository governance.
+A consumer repository retains its own product truth, roadmap, implementation, native tests,
+public-surface/user E2E, PR/CI convergence, and release acceptance unless the owner
+**explicitly assigns direct execution** to the steward.
+
+- **Delegated delivery:** the steward publishes a repository-scoped, issue-backed adoption
+  roadmap with exact canonical reference, scope, compatibility, test and completion criteria.
+  The consumer's authorized project chat executes and validates its product changes.
+  Publishing a roadmap is not proof of product adoption or user E2E.
+- **Direct delivery:** for repositories explicitly assigned by the owner, the steward
+  acts as the authorized repository implementer and completes actual implementation,
+  affected tests, Git/PR/CI review, and truthful handoff. A direct assignment does not
+  authorize production, destructive changes, credentials, permissions, release or merge
+  beyond their separate applicable gates.
+- **Boundary:** cross-project citations, derived context, and advisory coordination
+  never retarget product mutation. A genuine systemic coordination defect may warrant
+  narrowly scoped supervisor recovery, preserving existing worker changes; normal
+  product implementation immediately returns to its assigned repository owner.
+- **Precedence:** the current owner's explicit instruction prevails over the owner-specific
+  organization delivery profile, then fresh Work Packet, execution profile, and repository
+  rules. Existing platform safety denials are binding; changing the executor never
+  authorizes circumventing a denied effect.
+
+This allocation is a reusable policy *mechanism*, not a universal organization
+or product requirement. Current owner/organization-specific assignments live in
+`.engineering/owner-delivery.md` and MUST NOT be propagated into unrelated
+consumers as generic mandatory rules.
+
 ## Provider-aligned policy layers
 
 The Engineering System separates durable engineering invariants from replaceable AI-provider scaffolding:

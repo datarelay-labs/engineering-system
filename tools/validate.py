@@ -1940,6 +1940,9 @@ def main():
     completed = subprocess.run(["python3", "tools/test_org_rollout.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_owner_delivery_policy.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/behavior_eval.py", "validate-catalog"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

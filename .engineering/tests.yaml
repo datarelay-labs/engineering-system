@@ -956,6 +956,24 @@ scenarios:
       - "provable duplicate native CI and unconditional expensive ordinary-PR release-gate commands fail closed"
     release_gate: false
 
+  - id: ENG-OWNER-DELIVERY-001
+    cost: cheap
+    estimated_seconds: 1
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Owner-scoped delivery and neutral consumer template policy
+    level: static
+    domains: [standards, adoption, templates]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_owner_delivery_policy.py"
+    invariants:
+      - "portable core/adoption rules contain no hard-coded product organization assignments"
+      - "owner profile delegates DataRelay to product chats and assigns XDR direct execution to the steward"
+      - "organization choices do not leak into managed consumer AGENTS template"
+    release_gate: true
+
   - id: ENG-TARGETED-CONVERGENCE-001
     cost: cheap
     estimated_seconds: 1
