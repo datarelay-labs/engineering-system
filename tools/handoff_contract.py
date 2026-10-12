@@ -39,6 +39,35 @@ def _terminal_first_action(action: str) -> bool:
     ))
 
 
+def _canonical_continuation_marker(token: str, repo: str, issue_number: int) -> bool:
+    """Accept only a short repository-bound locator, never task instructions.
+
+    A matching #Issue suffix alone is insufficient: an arbitrary prefixed
+    instruction can redirect the model while impersonating a verified handoff.
+    This does not restrict the owner's normal messages, only what we label as
+    the trusted *handoff token*. Keep the token small and purely referential.
+    """
+    match = re.fullmatch(
+        rf"(?P<project>[A-Za-z0-9 ._-]{{1,80}})\s+계속\s*[—-]\s*"
+        rf"(?:Work Packet\s+|Issue\s+)?#{issue_number}",
+        token,
+    )
+    if match is None:
+        return False
+    name = re.sub(r"[^a-z0-9]", "", match.group("project").lower())
+    slug = re.sub(r"[^a-z0-9]", "", repo.partition("/")[2].lower())
+    labels = {slug}
+    if slug.startswith("datarelay"):
+        short = slug[len("datarelay"):]
+        if short:
+            labels.update((short, "dr" + short))
+    # Product display names can carry a short suffix (e.g. Grant 1.0).
+    return any(
+        name == label or re.fullmatch(re.escape(label) + r"[0-9]{1,3}", name)
+        for label in labels if label
+    )
+
+
 def verify(facts: dict) -> dict:
     """Legacy pure verifier: its digest is caller-reported, not a GitHub read."""
     required = ("target_repo", "packet_body", "persisted_body_sha256", "continuation_token")
@@ -120,9 +149,9 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
     token = str(facts.get("continuation_token", "")).strip()
     if not re.search(rf"(?<![A-Za-z0-9])#{issue_number}(?![A-Za-z0-9])", token):
         return _block("CONTINUATION_TOKEN_NOT_BOUND")
-    # Only the pinned Issue may end the continuation marker; appended commands
-    # to skip or replace the first unfinished task must never be certified.
-    if not token.endswith(f"#{issue_number}"):
+    # A valid suffix is not enough: instructions can also be prepended.
+    # The token must be a canonical repository-bound locator, not prose.
+    if not _canonical_continuation_marker(token, repo, issue_number):
         return _block("CONTINUATION_TOKEN_REDIRECT")
 
     requested = facts.get("worktree")

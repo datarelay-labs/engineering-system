@@ -396,7 +396,7 @@ scenarios:
     platforms: [linux]
     command: "python3 tools/test_handoff_contract_red.py"
     invariants:
-      - "all thirteen outgoing real-Git and synthetic handoff cases are GREEN"
+      - "all fifteen outgoing real-Git and synthetic handoff controls/negative cases are GREEN"
       - "forged HEAD foreign origin mismatched lifecycle and first-action redirects fail closed"
     release_gate: true
 
