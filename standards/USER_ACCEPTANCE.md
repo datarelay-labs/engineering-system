@@ -11,13 +11,11 @@ Project-specific scenario catalogs stay in the project repository. This standard
 
 ## Mandatory executor
 
-**The runtime selected by the current execution profile is the executor and final auditor of both user gates.**
+**The default `AI_DIRECT` mode is unchanged:** the current execution-profile runtime is the acting user executor and final auditor of both gates. The selected runtime directly acts as the applicable End User, Operator, Administrator, Incident Responder, or Platform Maintainer on the supported public surface.
 
-The selected runtime MUST directly act as the applicable real user personas — for example End User, Operator, Administrator, Incident Responder, or Platform Maintainer — and directly drive the supported public product surface.
+A different AI runtime, wrapper, shell script, browser test script, unit/integration suite, CI job, or automated harness MUST NOT impersonate the acting user or declare either gate PASS. Browser drivers can support real actions but cannot substitute scenario judgments.
 
-Another runtime, wrapper, shell script, browser test script, unit/integration suite, CI job, or other automated harness MUST NOT impersonate the acting user or declare either gate PASS for that run.
-
-Automation may drive a browser or collect supporting evidence, but the selected runtime must own the persona goal, public-surface interaction, observation, recovery decisions, scenario disposition, and final gate judgment. The required authority is:
+In `AI_DIRECT`, the selected runtime owns persona goals, public-surface interactions, observations, recovery, scenario disposition and final judgment. Its default contract remains:
 
 ```text
 USER_ACCEPTANCE_EXECUTOR=EXECUTION_PROFILE
@@ -28,7 +26,27 @@ SCRIPTED_USER_SCENARIO_EXECUTION=FORBIDDEN
 AUTOMATED_HARNESS_ROLE=SUPPLEMENTAL_ONLY
 ```
 
-If the selected runtime cannot perform a mandatory real user action because the required environment or interaction capability is unavailable, that scenario is BLOCKED. It is never delegated to another runtime merely to obtain PASS.
+If the selected runtime cannot perform a mandatory real user action, the scenario is BLOCKED under `AI_DIRECT`. An alternate AI runtime must not be silently substituted.
+
+### Explicit human-owner opt-in — acting user is human, auditor remains ChatGPT
+
+When the **currently authenticated owner explicitly opts in** for a particular candidate and user gate, `HUMAN_OWNER_WITH_CHATGPT_AUDIT` is a permissible alternative *user-action* mode. This is not an execution-profile runtime switch and does not use or bypass the unmerged owner-runtime-override signer (#297/#301). The selected ChatGPT runtime remains the **final independent auditor** of the real user evidence. The human owner personally interacts with the real Chrome/Chromium browser or supported primary CLI/desktop/mobile surface; another agent, hidden wrapper, simulated DOM, API-only test, or scripted scenario cannot count as that human's action.
+
+Only a genuine explicit owner instruction in the live, authenticated conversation (and independently verifiable owner permission when the host provides it) may choose this mode. An Issue comment, screenshot, boolean, model text, purported `owner_authenticated` flag, or self-supplied signing key **cannot authenticate a human**. When user identity or execution provenance cannot be established, mark the human run **BLOCKED / UNVERIFIED**, not PASS. A report reference or authenticated GitHub write proves the referenced artifact's origin at most; it does not prove who physically operated the browser.
+
+For an explicitly selected human-user gate:
+
+1. ChatGPT first reads the **entire canonical gate contract** and confirms candidate/repository, exact HEAD, committed contract bytes/hash, roles, scenario inventory, real surface URL/localhost preview, prohibited actions and cleanup bounds. It provides the bounded user mission without leaking a source-level answer key.
+2. The owner physically performs the actual public-surface actions and reports per-scenario timestamps, action intent, expected/observed UI outcomes, any failures and recovery, live screenshot/video and/or independent persisted readback, browser/process/version or actual primary-surface metadata, and run-owned state/cleanup. Evidence must be bound to the **same immutable candidate**, contract digest, run ID and the authenticated owner's opt-in. No secrets or production tokens are required in the ledger.
+3. ChatGPT independently checks the observation against the entire scenario catalog, authentic owner opt-in, browser/public-surface evidence, real effects, cross-session consistency, role/access controls, negative paths, remediation and cleanup. An incomplete, fabricated, replayed, script-only, stale, cross-HEAD or untrusted report is **BLOCKED**. The owner's `PASS` claim is input to audit, never the audit decision.
+4. Full breadth and defect-convergence are unchanged: **100% applicable mandatory missions**, zero unresolved FAIL/PARTIAL/BLOCKED/finding, targeted regression then a fresh complete confirmation on the same exact HEAD. Any source, scenario or contract mutation invalidates affected evidence and requires appropriate re-execution.
+5. ChatGPT records its **own** evidence audit separately from the owner's observation, with an auditable reference and actual findings. Even a successful independent user-gate audit is **not** GitHub merge, production, candidate-freeze, release, credential or deployment authorization; existing owner/security/release gates still apply.
+
+The product's managed release-profile `human_equivalent_user_tests.executor` remains `EXECUTION_PROFILE` in both modes because it selects the **ChatGPT audit authority**, not the physical human action mode. No managed adopter silently switches a release profile or an execution runtime. The optional acting-user mode belongs to the **one exact run's evidence** after the owner's explicit opt-in, and it is reviewed by the product's own Chat before user-quality closure.
+
+The structural JSON contract accepts optional `user_execution_mode=HUMAN_OWNER_WITH_CHATGPT_AUDIT`, `executor=HUMAN_OWNER`, `runtime` equal to the committed ChatGPT execution profile, `final_auditor=EXECUTION_PROFILE` and `human_owner_evidence` with owner-intent/observation/audit references, exact candidate/run/contract identity, real process/surface/version and scenario timestamps/results and screenshot/readback references. Missing `user_execution_mode` means `AI_DIRECT`; its existing evidence remains compatible. A human owner's purported `chatgpt_audit_claim=PASS` inside JSON is **not authenticated** merely because it passes schema checks.
+
+`tools/user_acceptance_contract.py validate-gate` and `quality-close` perform structural checks only. They emit `HUMAN_OWNER_ATTESTATION=UNVERIFIED`, `CHATGPT_AUDIT_PROVENANCE=UNVERIFIED`, `USER_GATE_EXECUTION_PASS=NOT_ESTABLISHED`, `PRODUCT_QUALITY_CLOSURE=BLOCK`, `CANDIDATE_FREEZE_ELIGIBLE=NO` and `AUTHORIZES_RELEASE=NO` without a separate trusted audit. This limitation already applies to `AI_DIRECT`: caller-authored metadata never mints real-world operator provenance. A genuinely signed owner operator receipt would need a separate trusted issuer and explicit security/permission review, not repo-writable or test keys.
 
 ## Applicability
 
@@ -50,7 +68,7 @@ Managed adoption/upgrade MUST NOT infer these contract semantics merely from the
 
 ## Shared execution semantics
 
-Both gates MUST bind to an exact candidate HEAD/build and exact committed test contract, use the actual supported primary public surface, use selected-runtime-led persona execution rather than a hidden/scripted answer key, and separate acting-user knowledge from auditor/source/test oracle knowledge.Both gates MUST also:
+Both gates MUST bind to an exact candidate HEAD/build and exact committed test contract, use the actual supported primary public surface, require direct persona actions by either the selected runtime in `AI_DIRECT` or the explicitly opted-in human owner with independent ChatGPT audit, and separate acting-user knowledge from auditor/source/test oracle knowledge. Both gates MUST also:
 
 - continue every safe independent scenario after a finding;
 - freeze the complete bounded finding set before remediation;
@@ -63,9 +81,9 @@ Both gates MUST bind to an exact candidate HEAD/build and exact committed test c
 
 Parallel execution is preferred whenever independent lanes are isolated. It must never corrupt shared product state or evidence.
 
-For browser products, the selected runtime must perform the user action through a real Chromium/Chrome process. Playwright or another browser driver is allowed as the interaction mechanism because the real browser is still the public surface. Component rendering, jsdom, API-only checks, screenshots without interaction, and static DOM checks are supporting evidence only.
+For browser products, the acting user (`AI_DIRECT` runtime or opted-in human owner) must operate a real Chromium/Chrome process. Under `AI_DIRECT`, Playwright or another browser driver may support the selected runtime's real actions. Under human-owner mode, browser automation never substitutes for the owner's own physical action. Component rendering, jsdom, API-only checks, screenshots without interaction, and static DOM checks are supporting evidence only.
 
-For CLI/desktop/mobile/mixed/other surfaces, the selected runtime directly uses the corresponding actual supported public interface.
+For CLI/desktop/mobile/mixed/other surfaces, the acting user uses the corresponding actual supported public interface with the same mode boundary.
 
 ## Gate A — Surface Reconciliation
 
@@ -91,7 +109,7 @@ Release PASS requires complete mandatory capability/public-surface disposition p
 
 Full User E2E is **mission-first, black-box, and real-effect**.
 
-For each applicable supported mission, the selected runtime assumes the applicable user role and maps:
+For each applicable supported mission, the selected runtime (`AI_DIRECT`) or the explicitly opted-in human owner assumes the applicable user role and maps:
 
 ```text
 PRODUCT_CAPABILITY
