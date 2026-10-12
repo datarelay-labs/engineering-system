@@ -61,11 +61,11 @@ def human_owner_evidence(gate: str) -> dict:
         "contract_sha256": DIGEST,
         "run_id": "run-1",
         "owner_instruction_reference":
-            "https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-123",
+            "https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-123",
         "owner_observation_reference":
-            "https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-124",
+            "https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-124",
         "chatgpt_audit_reference":
-            "https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-125",
+            "https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-125",
         "chatgpt_audit_claim": "PASS",
         "client": {
             "kind": "CHROME",
@@ -73,7 +73,7 @@ def human_owner_evidence(gate: str) -> dict:
             "version": "135.0.1.2",
             "target": "https://example.test",
             "process_observation_reference":
-                "https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-126"
+                "https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-126"
         },
         "started_at": "2026-10-12T00:00:00Z",
         "completed_at": "2026-10-12T00:10:00Z",
@@ -88,11 +88,11 @@ def human_owner_evidence(gate: str) -> dict:
                 "expected": f"Scenario {n} succeeds through real UI",
                 "observed": f"Scenario {n} user-observed outcome",
                 "evidence_reference":
-                    f"https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-{200+n}",
+                    f"https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-{200+n}",
                 "screenshot_sha256": "a" * 64 if n == 1 else None,
                 "readback_reference": (
                     None if n == 1 else
-                    f"https://github.com/datarelay-labs/datarelay-atlas/issues/341#issuecomment-{300+n}"
+                    f"https://github.com/datarelay-labs/engineering-system/issues/341#issuecomment-{300+n}"
                 ),
             } for n in (1, 2, 3)
         ],
@@ -144,6 +144,21 @@ class UserAcceptanceTests(unittest.TestCase):
             self.assertIn("SURFACE_EXECUTOR_CLAIM=EXECUTION_PROFILE", mixed.stdout)
             self.assertIn("E2E_EXECUTOR_CLAIM=HUMAN_OWNER", mixed.stdout)
             self.assertIn("PRODUCT_QUALITY_CLOSURE=BLOCK", mixed.stdout)
+
+    def test_human_owner_git_origin_is_independent_of_evidence(self) -> None:
+        from unittest.mock import patch
+        from user_acceptance_contract import _committed_repository_origin, ContractError
+        # Known local Git remotes are accepted in HTTPS and SSH forms; neither
+        # a caller-selected evidence URL nor an untrusted non-GitHub remote is.
+        with patch("user_acceptance_contract._git",
+                   return_value="git@github.com:datarelay-labs/engineering-system.git"):
+            self.assertEqual(
+                _committed_repository_origin(ROOT), "datarelay-labs/engineering-system"
+            )
+        with patch("user_acceptance_contract._git",
+                   return_value="https://attacker.test/datarelay-labs/engineering-system.git"):
+            with self.assertRaisesRegex(ContractError, "ORIGIN_UNAVAILABLE"):
+                _committed_repository_origin(ROOT)
 
     def test_human_owner_untrusted_claims_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -227,6 +242,24 @@ class UserAcceptanceTests(unittest.TestCase):
                 spoof = json.loads(json.dumps(valid))
                 mutate(spoof)
                 blocked(spoof)
+
+            # An attacker-controlled repo can offer internally consistent
+            # GitHub-looking references. It MUST NOT qualify as evidence for
+            # the candidate's independently resolved Git origin repository.
+            spoof = json.loads(json.dumps(valid))
+            foreign = "https://github.com/attacker/false-e2e/issues/1#issuecomment-"
+            human = spoof["human_owner_evidence"]
+            for idx, field in enumerate((
+                "owner_instruction_reference", "owner_observation_reference",
+                "chatgpt_audit_reference"
+            )):
+                human[field] = foreign + str(idx + 11)
+            human["client"]["process_observation_reference"] = foreign + "14"
+            for idx, scenario in enumerate(human["scenarios"]):
+                scenario["evidence_reference"] = foreign + str(101 + idx)
+                if scenario["readback_reference"]:
+                    scenario["readback_reference"] = foreign + str(201 + idx)
+            blocked(spoof, "HUMAN_OWNER_REFERENCE_REPOSITORY_MISMATCH")
 
             # Legacy AI mode rejects a forged nested human receipt and an
             # explicitly claimed human-mode executor.

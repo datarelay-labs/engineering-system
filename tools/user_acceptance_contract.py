@@ -18,6 +18,10 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas" / "user-acceptance-evidence.schema.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITHUB_ORIGIN_PREFIXES = (
+    "https://github.com/", "git@github.com:", "ssh://git@github.com/",
+)
 
 
 class ContractError(ValueError):
@@ -101,7 +105,29 @@ def _utc_timestamp(value: str) -> datetime | None:
         return None
 
 
-def _human_owner_reasons(data: dict[str, Any]) -> list[str]:
+def _committed_repository_origin(root: Path) -> str:
+    """Bind owner-owned observations to the candidate's actual Git origin.
+
+    Evidence supplied by the operator may contain internally consistent
+    GitHub URLs from an unrelated repository. Those URLs cannot authenticate
+    a run for the product currently under structural review. This check uses
+    the local Git identity only; it does not grant trusted user provenance.
+    """
+    try:
+        remote = str(_git(root, "remote", "get-url", "origin")).strip()
+    except ContractError as exc:
+        raise ContractError("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE") from exc
+    for prefix in GITHUB_ORIGIN_PREFIXES:
+        if remote.startswith(prefix):
+            repo = remote[len(prefix):].rstrip("/")
+            if repo.endswith(".git"):
+                repo = repo[:-4]
+            if REPO_RE.fullmatch(repo) is not None:
+                return repo.lower()
+    raise ContractError("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE")
+
+
+def _human_owner_reasons(data: dict[str, Any], expected_repo: str) -> list[str]:
     """Structural review only: no submitted string can authenticate a human.
 
     Authenticated owner intent/physical actions and the ChatGPT evidence audit
@@ -145,6 +171,8 @@ def _human_owner_reasons(data: dict[str, Any]) -> list[str]:
         reasons.append("HUMAN_OWNER_SCENARIO_INCOMPLETE")
     ids: set[str] = set()
     owner_repo = urlsplit(human["owner_instruction_reference"]).path.split("/")[1:3]
+    if "/".join(owner_repo).lower() != expected_repo:
+        reasons.append("HUMAN_OWNER_REFERENCE_REPOSITORY_MISMATCH")
     references = [human[k] for k in (
         "owner_instruction_reference", "owner_observation_reference",
         "chatgpt_audit_reference",
@@ -176,7 +204,9 @@ def _human_owner_reasons(data: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
-def _structural_reasons(data: dict[str, Any]) -> list[str]:
+def _structural_reasons(
+    data: dict[str, Any], *, human_origin_repo: str | None = None
+) -> list[str]:
     reasons: list[str] = []
     checks = (
         ("FINAL_STATUS_NOT_PASS", data.get("final_status") == "PASS"),
@@ -201,7 +231,10 @@ def _structural_reasons(data: dict[str, Any]) -> list[str]:
     )
     reasons.extend(reason for reason, ok in checks if not ok)
     if data.get("user_execution_mode", "AI_DIRECT") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT":
-        reasons.extend(_human_owner_reasons(data))
+        if human_origin_repo is None:
+            reasons.append("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE")
+        else:
+            reasons.extend(_human_owner_reasons(data, human_origin_repo))
     elif "human_owner_evidence" in data:
         reasons.append("HUMAN_OWNER_EVIDENCE_UNEXPECTED")
 
@@ -264,7 +297,12 @@ def validate_gate(
     if actual_dirty:
         raise ContractError("CONTRACT_DIRTY")
 
-    reasons = _structural_reasons(data)
+    origin_repo = (
+        _committed_repository_origin(root)
+        if data.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"
+        else None
+    )
+    reasons = _structural_reasons(data, human_origin_repo=origin_repo)
     try:
         profile_text = str(_git(root, "show", f"{current_head}:{PROFILE_PATH}"))
         selected_runtime = str(load_profile_text(profile_text)["runtime"]["primary"])
