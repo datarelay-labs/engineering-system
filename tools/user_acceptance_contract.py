@@ -7,7 +7,9 @@ import hashlib
 import json
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from execution_profile import load_profile_text, ProfileError, PROFILE_PATH
 from typing import Any
 
@@ -16,6 +18,10 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas" / "user-acceptance-evidence.schema.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITHUB_ORIGIN_PREFIXES = (
+    "https://github.com/", "git@github.com:", "ssh://git@github.com/",
+)
 
 
 class ContractError(ValueError):
@@ -92,12 +98,128 @@ def _validate_schema(data: dict[str, Any]) -> None:
         raise ContractError(f"EVIDENCE_SCHEMA_INVALID:{path}:{err.message}")
 
 
-def _structural_reasons(data: dict[str, Any]) -> list[str]:
+def _utc_timestamp(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+
+
+def _committed_repository_origin(root: Path) -> str:
+    """Bind owner-owned observations to the candidate's actual Git origin.
+
+    Evidence supplied by the operator may contain internally consistent
+    GitHub URLs from an unrelated repository. Those URLs cannot authenticate
+    a run for the product currently under structural review. This check uses
+    the local Git identity only; it does not grant trusted user provenance.
+    """
+    try:
+        remote = str(_git(root, "remote", "get-url", "origin")).strip()
+    except ContractError as exc:
+        raise ContractError("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE") from exc
+    for prefix in GITHUB_ORIGIN_PREFIXES:
+        if remote.startswith(prefix):
+            repo = remote[len(prefix):].rstrip("/")
+            if repo.endswith(".git"):
+                repo = repo[:-4]
+            if REPO_RE.fullmatch(repo) is not None:
+                return repo.lower()
+    raise ContractError("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE")
+
+
+def _human_owner_reasons(data: dict[str, Any], expected_repo: str) -> list[str]:
+    """Structural review only: no submitted string can authenticate a human.
+
+    Authenticated owner intent/physical actions and the ChatGPT evidence audit
+    remain independent of this worker-writable evidence JSON. No verifier or
+    signer from the unmerged alternate-runtime PR is imported or reused.
+    """
+    human = data.get("human_owner_evidence")
+    if human is None:
+        return ["HUMAN_OWNER_EVIDENCE_MISSING"]
+    reasons: list[str] = []
+    for outer, key in (
+        ("candidate_head", "CANDIDATE_HEAD"),
+        ("contract_sha256", "CONTRACT_SHA256"),
+        ("run_id", "RUN_ID"),
+    ):
+        if human[outer] != data[outer]:
+            reasons.append(f"HUMAN_OWNER_{key}_MISMATCH")
+    dates = [_utc_timestamp(human[k]) for k in ("started_at", "completed_at")]
+    if None in dates or dates[0] > dates[1]:
+        reasons.append("HUMAN_OWNER_TIME_INCONSISTENT")
+    client = human["client"]
+    try:
+        address = urlsplit(client["target"])
+    except ValueError:
+        return reasons + ["HUMAN_OWNER_SURFACE_TARGET_INVALID"]
+    # Isolated local SSH port-forward is a legitimate real-browser surface;
+    # remote browsers must use HTTPS. Query strings and userinfo can leak keys.
+    kind = client["kind"]
+    allowed = (
+        (address.scheme == "https" and bool(address.hostname))
+        or (address.scheme == "http" and address.hostname in {"localhost", "127.0.0.1", "::1"})
+    ) if kind in {"CHROME", "CHROMIUM"} else bool(address.scheme)
+    if (not allowed or address.username or address.password
+            or address.query or address.fragment or any(ord(ch) < 32 for ch in client["target"])):
+        reasons.append("HUMAN_OWNER_SURFACE_TARGET_INVALID")
+
+    # Every user-observed scenario must be represented once, match the
+    # mandatory result ledger and include a screenshot or actual read-back ref.
+    missions = human["scenarios"]
+    if len(missions) != data["mandatory_total"]:
+        reasons.append("HUMAN_OWNER_SCENARIO_INCOMPLETE")
+    ids: set[str] = set()
+    owner_repo = urlsplit(human["owner_instruction_reference"]).path.split("/")[1:3]
+    if "/".join(owner_repo).lower() != expected_repo:
+        reasons.append("HUMAN_OWNER_REFERENCE_REPOSITORY_MISMATCH")
+    references = [human[k] for k in (
+        "owner_instruction_reference", "owner_observation_reference",
+        "chatgpt_audit_reference",
+    )] + [client["process_observation_reference"]]
+    for item in missions:
+        if item["id"] in ids:
+            reasons.append("HUMAN_OWNER_SCENARIO_DUPLICATE")
+        ids.add(item["id"])
+        stamp = _utc_timestamp(item["executed_at"])
+        if stamp is None or None in dates or not dates[0] <= stamp <= dates[1]:
+            reasons.append("HUMAN_OWNER_SCENARIO_TIME_INVALID")
+        if item["result"] != "PASS":
+            reasons.append("HUMAN_OWNER_SCENARIO_NOT_PASS")
+        if not item["screenshot_sha256"] and not item["readback_reference"]:
+            reasons.append("HUMAN_OWNER_SCENARIO_OBSERVATION_MISSING")
+        references.append(item["evidence_reference"])
+        if item["readback_reference"] is not None:
+            references.append(item["readback_reference"])
+    if sum(item["result"] == "PASS" for item in missions) != data["mandatory_pass"]:
+        reasons.append("HUMAN_OWNER_LEDGER_MISMATCH")
+    for reference in references:
+        if urlsplit(reference).path.split("/")[1:3] != owner_repo:
+            reasons.append("HUMAN_OWNER_REFERENCE_REPOSITORY_MISMATCH")
+            break
+    if human["chatgpt_audit_claim"] != "PASS":
+        reasons.append("HUMAN_OWNER_AUDIT_NOT_PASS")
+    if human["operator_reported_cleanup"] != data["cleanup_status"]:
+        reasons.append("HUMAN_OWNER_CLEANUP_MISMATCH")
+    return list(dict.fromkeys(reasons))
+
+
+def _structural_reasons(
+    data: dict[str, Any], *, human_origin_repo: str | None = None
+) -> list[str]:
     reasons: list[str] = []
     checks = (
         ("FINAL_STATUS_NOT_PASS", data.get("final_status") == "PASS"),
         ("HEAD_CHANGED", data.get("head_unchanged") is True),
-        ("EXECUTOR_CLAIM_INVALID", data.get("executor") == "EXECUTION_PROFILE"),
+        (
+            "HUMAN_OWNER_EXECUTOR_REQUIRED"
+            if data.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"
+            else "EXECUTOR_CLAIM_INVALID",
+            data.get("executor") == (
+                "HUMAN_OWNER" if data.get("user_execution_mode") ==
+                "HUMAN_OWNER_WITH_CHATGPT_AUDIT" else "EXECUTION_PROFILE"
+            ),
+        ),
         ("FINAL_AUDITOR_CLAIM_INVALID", data.get("final_auditor") == "EXECUTION_PROFILE"),
         ("PERSONA_EXECUTION_CLAIM_INVALID", data.get("direct_persona_execution") is True),
         ("ACTUAL_USER_SURFACE_MISSING", data.get("actual_user_surface") is True),
@@ -108,6 +230,13 @@ def _structural_reasons(data: dict[str, Any]) -> list[str]:
         ("REPORT_INCONSISTENT", data.get("report_consistency") == "PASS"),
     )
     reasons.extend(reason for reason, ok in checks if not ok)
+    if data.get("user_execution_mode", "AI_DIRECT") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT":
+        if human_origin_repo is None:
+            reasons.append("HUMAN_OWNER_REPOSITORY_ORIGIN_UNAVAILABLE")
+        else:
+            reasons.extend(_human_owner_reasons(data, human_origin_repo))
+    elif "human_owner_evidence" in data:
+        reasons.append("HUMAN_OWNER_EVIDENCE_UNEXPECTED")
 
     mandatory_total = int(data.get("mandatory_total") or 0)
     mandatory_pass = int(data.get("mandatory_pass") or 0)
@@ -168,7 +297,12 @@ def validate_gate(
     if actual_dirty:
         raise ContractError("CONTRACT_DIRTY")
 
-    reasons = _structural_reasons(data)
+    origin_repo = (
+        _committed_repository_origin(root)
+        if data.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"
+        else None
+    )
+    reasons = _structural_reasons(data, human_origin_repo=origin_repo)
     try:
         profile_text = str(_git(root, "show", f"{current_head}:{PROFILE_PATH}"))
         selected_runtime = str(load_profile_text(profile_text)["runtime"]["primary"])
@@ -190,8 +324,13 @@ def quality_close(surface_path: Path, e2e_path: Path, root: Path) -> None:
         raise ContractError("CANDIDATE_HEAD_MISMATCH")
     print("PRODUCT_QUALITY_CLOSURE_STRUCTURAL=PASS")
     print(f"STRUCTURALLY_READY_HEAD={current_head}")
-    print("EXECUTOR_CLAIM=EXECUTION_PROFILE")
+    print(f"SURFACE_EXECUTOR_CLAIM={surface['executor']}")
+    print(f"E2E_EXECUTOR_CLAIM={e2e['executor']}")
     print("EXECUTOR_PROVENANCE=UNVERIFIED")
+    if (surface.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"
+            or e2e.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"):
+        print("HUMAN_OWNER_ATTESTATION=UNVERIFIED")
+        print("CHATGPT_AUDIT_PROVENANCE=UNVERIFIED")
     print("TRUSTED_PERSONA_ATTESTATION=REQUIRED")
     print("PRODUCT_QUALITY_CLOSURE=BLOCK")
     print("CANDIDATE_FREEZE_ELIGIBLE=NO")
@@ -228,6 +367,12 @@ def main() -> int:
             print(f"RUN_ID={data['run_id']}")
             print(f"CANDIDATE_HEAD={data['candidate_head']}")
             print("EXECUTOR_PROVENANCE=UNVERIFIED")
+            if data.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT":
+                print("USER_EXECUTION_MODE=HUMAN_OWNER_WITH_CHATGPT_AUDIT")
+                print("HUMAN_OWNER_ATTESTATION=UNVERIFIED")
+                print("CHATGPT_AUDIT_PROVENANCE=UNVERIFIED")
+            else:
+                print("USER_EXECUTION_MODE=AI_DIRECT")
             print("USER_GATE_EXECUTION_PASS=NOT_ESTABLISHED")
         else:
             quality_close(args.surface_evidence, args.e2e_evidence, args.root)
