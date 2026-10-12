@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""RED acceptance tests for the unfinished outgoing Handoff contract.
+"""Originally RED regression cases for the outgoing Handoff contract.
 
-These tests intentionally FAIL against PR #304 until the separately authorized
-source repair is complete. They are NOT registered as passing CI release gates.
+All 13 cases now pass on the repaired source. This suite is enabled as a
+passing CI gate so a forged HEAD, foreign origin, stale issue lifecycle or
+instruction-bearing first-action token cannot silently regain PASS.
 Only in-memory GitHub Issue fixtures are used; no GitHub writes or edits
 to the existing worktree occur. Disposable Git repositories exercise real
 HEAD, remote identity, and the outgoing CLI. Keep this in the existing PR lane.

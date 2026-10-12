@@ -103,8 +103,12 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
                   if packet.metadata.get(key) != value]
     if mismatches:
         return _block("RESUME_ANCHOR_STALE", mismatches=mismatches)
-    if packet.metadata.get("STATUS") == "ACTIVE" and issue.get("state") != "open":
+    # The authoritative GitHub Issue lifecycle must agree with the packet.
+    status = packet.metadata.get("STATUS")
+    if (status in {"ACTIVE", "PAUSED", "BLOCKED"} and issue.get("state") != "open"):
         return _block("GITHUB_ISSUE_NOT_OPEN")
+    if status == "COMPLETE" and issue.get("state") != "closed":
+        return _block("GITHUB_ISSUE_NOT_CLOSED")
     action = str(facts["first_action"]).strip()
     action_lines = [line.strip() for line in packet.sections.get("Next Action", "").splitlines() if line.strip()]
     if len(action) > 500 or not action or action not in action_lines:
@@ -113,9 +117,32 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
         return _block("FIRST_ACTION_NOT_FIRST")
     if _terminal_first_action(action):
         return _block("FIRST_ACTION_NOT_EXECUTABLE")
-    if not re.search(rf"(?<![A-Za-z0-9])#{issue_number}(?![A-Za-z0-9])",
-                     str(facts.get("continuation_token", ""))):
+    token = str(facts.get("continuation_token", "")).strip()
+    if not re.search(rf"(?<![A-Za-z0-9])#{issue_number}(?![A-Za-z0-9])", token):
         return _block("CONTINUATION_TOKEN_NOT_BOUND")
+    # Only the pinned Issue may end the continuation marker; appended commands
+    # to skip or replace the first unfinished task must never be certified.
+    if not token.endswith(f"#{issue_number}"):
+        return _block("CONTINUATION_TOKEN_REDIRECT")
+
+    requested = facts.get("worktree")
+    recorded = packet.metadata.get("WORKTREE")
+    if not isinstance(requested, str) or not requested or not isinstance(recorded, str) or not recorded:
+        return _block("HANDOFF_WORKTREE_UNBOUND")
+    if Path(requested).expanduser().resolve() != Path(recorded).expanduser().resolve():
+        return _block("HANDOFF_WORKTREE_MISMATCH")
+    try:
+        git_state = probe_worktree(requested)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        return _block("HANDOFF_GIT_UNAVAILABLE")
+    if Path(str(git_state.get("worktree", ""))).resolve() != Path(recorded).expanduser().resolve():
+        return _block("HANDOFF_WORKTREE_MISMATCH")
+    if git_state.get("remote_repo") != repo:
+        return _block("HANDOFF_REPOSITORY_MISMATCH")
+    if git_state.get("branch") != packet.metadata.get("BRANCH"):
+        return _block("HANDOFF_BRANCH_MISMATCH")
+    if git_state.get("head") != expected["LAST_VERIFIED_HEAD"]:
+        return _block("HANDOFF_HEAD_STALE")
     result = verify(facts)
     if result["status"] != "PASS":
         return result

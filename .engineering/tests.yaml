@@ -53,6 +53,8 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_handoff_contract.py":
     domains: [session-continuity]
+  "tools/test_handoff_contract_red.py":
+    domains: [session-continuity]
   "tools/context_compiler.py":
     domains: [session-continuity, workflows]
   "tools/test_context_compiler.py":
@@ -379,6 +381,23 @@ scenarios:
     invariants:
       - "caller-supplied local packet hashes cannot substitute for authenticated GitHub Issue persistence"
       - "the first unfinished action and exact worktree/branch/HEAD must be checked without discarding dirty files"
+    release_gate: true
+
+  - id: ENG-HANDOFF-NEGATIVE-002
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Real Git outgoing handoff negative regression matrix
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_handoff_contract_red.py"
+    invariants:
+      - "all thirteen outgoing real-Git and synthetic handoff cases are GREEN"
+      - "forged HEAD foreign origin mismatched lifecycle and first-action redirects fail closed"
     release_gate: true
 
   - id: ENG-CONTEXT-COMPILER-001
