@@ -141,6 +141,7 @@ Do not run multi-hour full suites on every PR. Do not continue expensive downstr
 | Product Master/OpenSpec/ADR/Wiki source-of-truth roles and optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
 | AI session continuity and repository-scoped Work Packets | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
 | Provider-guidance alignment, policy layers, and scaffolding lifecycle | [`standards/PROVIDER_GUIDANCE.md`](standards/PROVIDER_GUIDANCE.md) |
+| Official external standards and guidance — informative coverage/gap map | [`standards/EXTERNAL_REFERENCES.md`](standards/EXTERNAL_REFERENCES.md) |
 | Automated repository adoption and qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
 | Core/adapters and deterministic enforcement | [`standards/ENFORCEMENT.md`](standards/ENFORCEMENT.md) |
 
