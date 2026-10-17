@@ -1994,6 +1994,9 @@ def main():
     print("PASS behavior eval regression and deterministic gate")
     validate_benchmark_fixtures()
 
+    completed = subprocess.run(["python3", "tools/test_external_references.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_knowledge_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
