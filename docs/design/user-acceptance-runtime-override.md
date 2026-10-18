@@ -14,6 +14,12 @@ validator currently treats only the committed profile runtime as acceptable.
 A self-asserted `owner_override: true`, alternate user runtime in a Work Packet,
 GitHub prose, or unrestricted key path is not sufficient.
 
+The existing `HUMAN_OWNER_WITH_CHATGPT_AUDIT` option is a distinct
+owner-physically-operates-the-surface mode. ChatGPT remains its independent
+final auditor, and a signed alternate-runtime receipt **cannot** retarget that
+mode. Alternate runtime selection applies only to `AI_DIRECT` when a trusted
+issuer attests the exact run.
+
 A signed receipt can be attached as `owner_runtime_override` to evidence
 produced by the actual selected executor. The validator accepts the alternate
 runtime only when a purpose-scoped, bounded Ed25519 receipt verifies against
@@ -27,9 +33,14 @@ issuer/purpose. A receipt can be used to validate the *same* run more than once
 different repo, candidate, gate, run, or runtime. Lifetime is at most one hour.
 
 The public key and OpenSSL executable are resolved only from fixed root-owned,
-non-writable paths. The repository, evidence, environment and CLI cannot select
-a trust anchor. Missing anchor, invalid signature, expired or mismatched
-receipt, malformed evidence, or absent owner authorization => BLOCK.
+non-writable paths. The **dedicated override key** is
+`/etc/engineering-system/owner-runtime-override-trust-anchor.pub`, **not** the
+shared `skills-trust-anchor.pub` used by other effect classes. A purpose-specific,
+independently administered issuer must own the corresponding private key; never
+copy/reuse an external-write/production signer key to this path. The repository,
+evidence, environment and CLI cannot select a trust anchor. Missing dedicated
+anchor, invalid signature, expired or mismatched receipt, malformed evidence,
+or absent owner authorization => BLOCK.
 
 ## Trusted issuance boundary — prerequisite for adoption
 
@@ -43,6 +54,15 @@ gate/run. Do not accept arbitrary caller fields such as `owner_actor` or
 when a separately trusted issuer verifies and signs them. It must prohibit
 generic private-key access, arbitrary payload signing, uncontrolled key
 selection, and replay across different runs.
+
+A host-level prototype that emits a different receipt envelope
+(`payload` / `algorithm` / `signature`, UTC date strings) is **not**
+interoperable with this direct-field, epoch-time schema. Merely possessing
+a root-owned private key, an interactive root shell, or a signed prototype
+receipt does not establish independently verified owner identity, effective
+repository permission, or compatibility. Integration requires reviewed
+issuer source/provenance, enrolled key separation, authenticated owner decision,
+audited issuance and a non-production interoperability proof before adoption.
 
 Do not deploy, enable or merge as an effective permission-policy change
 without the applicable owner/security approval and verified trusted issuance

@@ -30,7 +30,9 @@ GITHUB_ORIGIN_PREFIXES = (
 )
 
 
-ANCHOR = Path("/etc/engineering-system/skills-trust-anchor.pub")
+# Purpose-separated root-administered key: generic skills/external-write signer
+# keys must not authorize owner runtime selection by cross-protocol reuse.
+ANCHOR = Path("/etc/engineering-system/owner-runtime-override-trust-anchor.pub")
 OPENSSL = Path("/usr/bin/openssl")
 MAX_RECEIPT_AGE_SECONDS = 3600
 MAX_CLOCK_SKEW_SECONDS = 60
@@ -474,8 +476,18 @@ def validate_gate(
         selected_runtime = str(load_profile_text(profile_text)["runtime"]["primary"])
     except ProfileError as exc:
         raise ContractError(f"EXECUTION_PROFILE_UNAVAILABLE:{exc}") from exc
+    human_owner_mode = (
+        data.get("user_execution_mode") == "HUMAN_OWNER_WITH_CHATGPT_AUDIT"
+    )
+    # This separate human-acting-user lane ALWAYS retains ChatGPT as the
+    # independent final auditor. A runtime-selection receipt cannot silently
+    # convert it into a non-ChatGPT final audit.
+    if human_owner_mode and selected_runtime != "CHATGPT_CHAT":
+        reasons.append("HUMAN_OWNER_CHATGPT_FINAL_AUDITOR_REQUIRED")
     if data.get("runtime") != selected_runtime:
-        if "owner_runtime_override" not in data:
+        if human_owner_mode:
+            reasons.append("OWNER_RUNTIME_OVERRIDE_HUMAN_OWNER_MODE_FORBIDDEN")
+        elif "owner_runtime_override" not in data:
             reasons.append("EXECUTION_PROFILE_RUNTIME_MISMATCH")
         else:
             try:

@@ -28,6 +28,30 @@ AUTOMATED_HARNESS_ROLE=SUPPLEMENTAL_ONLY
 
 If the selected runtime cannot perform a mandatory real user action, the scenario is BLOCKED under `AI_DIRECT`. An alternate AI runtime must not be silently substituted.
 
+### Conditional owner-selected AI_DIRECT runtime — trusted authority required
+
+A current explicit owner instruction may select a different AI implementation/runtime for
+one named `AI_DIRECT` user-gate run **only after a separately administered trust
+boundary authenticates that owner's approval and effective permission**. The
+ordinary execution profile remains the default. An Issue comment, model text,
+caller-authored evidence, copied private key, local test signature or plain
+`owner_override: true` never grants runtime-selection authority.
+
+A supported conditional receipt must bind the GitHub repository, exact HEAD,
+committed gate contract digest, gate, run ID and selected runtime, with a
+bounded lifetime and separately auditable trusted issuance. An independent
+issuer must use a **purpose-specific** root-administered Ed25519 key, not a
+shared external-write/production signing key; absence of the separately
+enrolled verifier trust anchor or issuer blocks the override. This is a
+**conditional capability**, not proof that an authorized issuer has been
+deployed in any product or environment.
+
+This does **not** permit another runtime to replace ChatGPT in
+`HUMAN_OWNER_WITH_CHATGPT_AUDIT`; that separate lane retains the human
+acting user and ChatGPT as final independent auditor. Neither a structurally
+valid signature nor a different runtime establishes real user execution, a
+`PRODUCT_QUALITY_CLOSURE=PASS`, candidate freeze or release permission.
+
 ### Explicit human-owner opt-in — acting user is human, auditor remains ChatGPT
 
 When the **currently authenticated owner explicitly opts in** for a particular candidate and user gate, `HUMAN_OWNER_WITH_CHATGPT_AUDIT` is a permissible alternative *user-action* mode. This is not an execution-profile runtime switch and does not use or bypass the unmerged owner-runtime-override signer (#297/#301). The selected ChatGPT runtime remains the **final independent auditor** of the real user evidence. The human owner personally interacts with the real Chrome/Chromium browser or supported primary CLI/desktop/mobile surface; another agent, hidden wrapper, simulated DOM, API-only test, or scripted scenario cannot count as that human's action.

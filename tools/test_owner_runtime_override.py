@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import user_acceptance_contract as gate  # noqa: E402
 override = gate
-from test_user_acceptance_contract import evidence  # noqa: E402
+from test_user_acceptance_contract import evidence, human_owner_evidence  # noqa: E402
 
 CONTRACT_REL = "standards/USER_ACCEPTANCE.md"
 PROFILE_REL = ".engineering/execution-profile.yaml"
@@ -141,6 +141,36 @@ class OwnerRuntimeOverrideTests(unittest.TestCase):
 
                 with mock.patch.object(gate, "_current_head", side_effect=moving_head):
                     self.expect_block(data, "CANDIDATE_HEAD_CHANGED_DURING_VALIDATION")
+
+    def test_human_owner_mode_never_changes_chatgpt_final_auditor(self) -> None:
+        """A valid runtime-selection signature cannot retarget human-owner audit."""
+        data = human_owner_evidence("FULL_USER_E2E")
+        data["candidate_head"] = self.head
+        data["contract_sha256"] = self.digest
+        data["runtime"] = "CODEX"
+        data["human_owner_evidence"]["candidate_head"] = self.head
+        data["human_owner_evidence"]["contract_sha256"] = self.digest
+        data["owner_runtime_override"] = self.sign(self.make_receipt(data))
+        self.expect_block(data, "OWNER_RUNTIME_OVERRIDE_HUMAN_OWNER_MODE_FORBIDDEN")
+
+    def test_human_owner_auditor_must_remain_chatgpt_even_if_profile_changed(self) -> None:
+        data = human_owner_evidence("FULL_USER_E2E")
+        data["candidate_head"] = self.head
+        data["contract_sha256"] = self.digest
+        data["runtime"] = "CODEX"
+        data["human_owner_evidence"]["candidate_head"] = self.head
+        data["human_owner_evidence"]["contract_sha256"] = self.digest
+        with mock.patch.object(
+            gate, "load_profile_text",
+            return_value={"runtime": {"primary": "CODEX"}},
+        ):
+            self.expect_block(data, "HUMAN_OWNER_CHATGPT_FINAL_AUDITOR_REQUIRED")
+
+    def test_anchor_must_be_purpose_specific_and_not_skills_shared_anchor(self) -> None:
+        self.assertEqual(
+            str(override.ANCHOR),
+            "/etc/engineering-system/owner-runtime-override-trust-anchor.pub",
+        )
 
     def test_signed_alternate_runtime_with_direct_persona_both_gates(self) -> None:
         for name in ("SURFACE_RECONCILIATION", "FULL_USER_E2E"):
@@ -270,6 +300,18 @@ class OwnerRuntimeOverrideTests(unittest.TestCase):
         primary["runtime"] = "CHATGPT_CHAT"
         primary["owner_runtime_override"] = signed
         self.expect_block(primary, "OWNER_RUNTIME_OVERRIDE_NOT_NEEDED")
+
+    def test_root_operator_prototype_envelope_is_not_a_trusted_override(self) -> None:
+        # The independently administered prototype emits an incompatible
+        # payload/algorithm/signature envelope. A signature-shaped object
+        # without this contract's issuer/binding is never approval.
+        data = self.case()
+        data["owner_runtime_override"] = {
+            "payload": {"purpose": "engineering-system/owner-runtime-override/v1"},
+            "algorithm": "Ed25519",
+            "signature": "unverified-prototype",
+        }
+        self.expect_block(data, "EVIDENCE_SCHEMA_INVALID")
 
     def test_unsigned_malformed_and_untrusted_anchor_are_fail_closed(self) -> None:
         data = self.case()
