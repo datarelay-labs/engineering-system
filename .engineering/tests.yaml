@@ -29,6 +29,8 @@ paths:
     domains: [adoption, enforcement, release-contract, operations-contract, adoption-upgrade]
   "tools/check-adoption.py":
     domains: [adoption]
+  "tools/test_external_references.py":
+    domains: [standards, workflows]
   "tools/test_adopt.py":
     domains: [adoption]
   "tools/ci_policy_audit.py":
@@ -248,6 +250,23 @@ scenarios:
     platforms: [linux]
     command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/user-acceptance-evidence.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
     release_gate: true
+
+  - id: ENG-EXTERNAL-REF-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Official external-reference crosswalk integrity
+    level: static
+    domains: [standards]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_external_references.py"
+    invariants:
+      - "References map to current canonical paths but never assert certification or SLSA levels"
+      - "Malformed official sources and missing evidence paths fail deterministically"
+    release_gate: false
 
   - id: ENG-AFFECTED-SELECTION-001
     cost: cheap

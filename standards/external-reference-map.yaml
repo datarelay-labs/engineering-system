@@ -1,0 +1,200 @@
+# Informative public-source crosswalk, not a certification/attestation.
+# "mapped" means an existing policy file addresses the public topic, not clause-level compliance.
+schema_version: 1
+reviewed_on: "2026-10-18"
+references:
+  - id: ISO-12207-2026
+    title: Software life cycle processes
+    type: international_standard
+    source_url: https://www.iso.org/standard/90219.html
+    publication_state: published
+    applicability: general
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/CORE.md, standards/DEVELOPMENT.md, standards/OPERATIONS.md]
+    evidence_paths: [tools/validate.py]
+    gap: "No complete process-by-process conformance assessment; public abstract only."
+    next_action: "Map essential lifecycle outcomes to existing gates; avoid a second lifecycle."
+    conformance_claim: false
+
+  - id: ISO-29148-2018
+    title: Requirements engineering
+    type: international_standard
+    source_url: https://www.iso.org/standard/72089.html
+    publication_state: published_revision_in_development
+    applicability: general
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/DESIGN.md, standards/SESSION_CONTINUITY.md]
+    evidence_paths: [tools/test_work_packet_authority.py]
+    gap: "No measured requirement-to-scenario-to-current-evidence traceability rate."
+    next_action: "Measure links already present in accepted specs and Work Packets before requiring new records."
+    conformance_claim: false
+
+  - id: ISO-25010-2023
+    title: Product quality model
+    type: international_standard
+    source_url: https://www.iso.org/standard/78176.html
+    publication_state: published
+    applicability: general
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/QUALITY.md, standards/USER_ACCEPTANCE.md]
+    evidence_paths: [tools/test_user_acceptance_contract.py]
+    gap: "Release tests are defined; nine quality characteristics are not individually evaluated."
+    next_action: "Choose relevant quality characteristics per product and reuse existing evidence."
+    conformance_claim: false
+
+  - id: ISO-25023-2016
+    title: Measurement of system and software product quality
+    type: international_standard
+    source_url: https://www.iso.org/standard/35747.html
+    publication_state: published_revision_in_development
+    applicability: conditional
+    priority: P1
+    mapping_state: partial
+    policy_paths: [standards/QUALITY.md, standards/TESTING.md]
+    evidence_paths: [tools/test_behavior_eval.py]
+    gap: "No universally applicable quality-measurement report; measured results are product-specific."
+    next_action: "Reuse real observed quality metrics without inventing a mandatory organization-wide score."
+    conformance_claim: false
+
+  - id: ISO-29119-2-2021
+    title: Software testing processes
+    type: international_standard
+    source_url: https://www.iso.org/standard/79428.html
+    publication_state: published
+    applicability: general
+    priority: P1
+    mapping_state: partial
+    policy_paths: [standards/TESTING.md, standards/RELEASE.md]
+    evidence_paths: [tools/test_affected_test_selection.py]
+    gap: "Process-level test management conformance has not been independently assessed."
+    next_action: "Check representative scenario ownership, planning, execution, reporting and closure."
+    conformance_claim: false
+
+  - id: NIST-SSDF-1.1
+    title: Secure Software Development Framework v1.1
+    type: government_guidance
+    source_url: https://csrc.nist.gov/pubs/sp/800/218/final
+    publication_state: final_revision_draft
+    applicability: general
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/SECURITY.md, standards/DEVELOPMENT.md, standards/RELEASE.md]
+    evidence_paths: [tools/test_security_profile.py]
+    gap: "Security policy exists; practice/task coverage and deployed controls are not fully assessed."
+    next_action: "Compare existing controls with SSDF 1.1 practices; track v1.2 draft separately."
+    conformance_claim: false
+
+  - id: NIST-AI-RMF-1.0
+    title: AI Risk Management Framework 1.0
+    type: government_guidance
+    source_url: https://airc.nist.gov/airmf-resources/airmf/
+    publication_state: published_revision_in_development
+    applicability: agent_execution
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/PROVIDER_GUIDANCE.md, standards/SECURITY.md, standards/QUALITY.md]
+    evidence_paths: [tools/test_behavior_eval.py]
+    gap: "GOVERN/MAP/MEASURE/MANAGE risk outcomes lack a complete live Chat run evidence set."
+    next_action: "Use existing #309 real-chat canary; do not infer behavior from rule-text tests."
+    conformance_claim: false
+
+  - id: OWASP-AGENTIC-2026
+    title: OWASP Top 10 for Agentic Applications 2026
+    type: industry_guidance
+    source_url: https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
+    publication_state: published
+    applicability: agent_execution
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/SECURITY.md, standards/SKILLS.md, standards/ENFORCEMENT.md]
+    evidence_paths: [tools/test_skills_contract.py]
+    gap: "No complete ASI01-ASI10 risk-to-scenario matrix or live attack-surface evaluation."
+    next_action: "Map applicable agent trust-boundary risks to existing security tests, then add missing targeted cases."
+    conformance_claim: false
+
+  - id: OWASP-ACS-2026
+    title: Agent Control Standard
+    type: industry_specification
+    source_url: https://genai.owasp.org/resource/agent-control-standard-acs/
+    publication_state: published
+    applicability: agent_execution
+    priority: P2
+    mapping_state: reference_only
+    policy_paths: [standards/SKILLS.md, standards/SECURITY.md]
+    evidence_paths: []
+    gap: "ACS middleware hooks are not proof that this ChatGPT runtime exposes such hooks."
+    next_action: "Review the host/platform control interface only if native hook capabilities become available."
+    conformance_claim: false
+
+  - id: MCP-2026-07-28
+    title: Model Context Protocol specification
+    type: industry_specification
+    source_url: https://modelcontextprotocol.io/specification/2026-07-28
+    publication_state: published
+    applicability: agent_execution
+    priority: P2
+    mapping_state: reference_only
+    policy_paths: [standards/SECURITY.md, standards/SKILLS.md]
+    evidence_paths: []
+    gap: "A policy about external tools is not evidence of MCP protocol or auth conformance."
+    next_action: "Validate against the current MCP protocol only for owned MCP servers/clients."
+    conformance_claim: false
+
+  - id: SLSA-1.2
+    title: Supply-chain Levels for Software Artifacts v1.2
+    type: industry_specification
+    source_url: https://slsa.dev/spec/v1.2/
+    publication_state: approved
+    applicability: release_artifacts
+    priority: P1
+    mapping_state: partial
+    policy_paths: [standards/SECURITY.md, standards/RELEASE.md]
+    evidence_paths: [tools/test_auto_merge_eligibility.py]
+    gap: "Hashes and provenance rules do not establish any SLSA Build or Source level."
+    next_action: "Evaluate a real release artifact and hosted-builder provenance before asserting a level."
+    conformance_claim: false
+
+  - id: ISO-42001-2023
+    title: Artificial intelligence management system
+    type: international_standard
+    source_url: https://www.iso.org/standard/81230.html
+    publication_state: published
+    applicability: conditional_ai_management
+    priority: P2
+    mapping_state: reference_only
+    policy_paths: [standards/PROVIDER_GUIDANCE.md]
+    evidence_paths: []
+    gap: "An organizational AI-management-system audit/certification is outside this solo-developer harness scope."
+    next_action: "Reassess only if formal AI management obligations arise."
+    conformance_claim: false
+
+  - id: ISO-5338-2023
+    title: AI system life cycle processes
+    type: international_standard
+    source_url: https://www.iso.org/standard/81118.html
+    publication_state: published
+    applicability: conditional_ai_product
+    priority: P2
+    mapping_state: reference_only
+    policy_paths: [standards/CORE.md, standards/PROVIDER_GUIDANCE.md]
+    evidence_paths: []
+    gap: "AI-system product development and use of AI coding assistance have different scope."
+    next_action: "Apply to AI products only when their lifecycle requires it."
+    conformance_claim: false
+
+  - id: DORA-2026
+    title: Software delivery performance metrics
+    type: industry_research
+    source_url: https://dora.dev/guides/dora-metrics/
+    publication_state: published
+    applicability: measurement
+    priority: P0
+    mapping_state: partial
+    policy_paths: [standards/QUALITY.md, standards/PROVIDER_GUIDANCE.md]
+    evidence_paths: [tools/behavior_eval.py, tools/test_behavior_eval.py]
+    gap: "Real-chat adherence and baseline improvements are NOT_VERIFIED (Issue #309: 0/30 at last audit)."
+    next_action: "Measure observed results, with zero-denominator/absent baselines UNKNOWN, not 100%."
+    conformance_claim: false
