@@ -103,6 +103,7 @@ TOP_LEVEL_KEYS = frozenset(
         "wait",
         "gates",
         "previous_decision",
+        "priority_scope",
     }
 )
 
@@ -451,8 +452,12 @@ def normalize_facts(payload: dict[str, Any]) -> dict[str, Any]:
     if "packet" not in data:
         raise PlannerFactsError("facts.packet is required")
     packet = _parse_packet(data["packet"])
+    priority_scope = _optional_mapping(data, "priority_scope")
+    if "priority_scope" in data and priority_scope is None:
+        raise PlannerFactsError("priority_scope cannot be null")
     return {
         "packet": packet,
+        "priority_scope": priority_scope,
         "worker": _parse_worker(_optional_mapping(data, "worker")),
         "git": _parse_git(_optional_mapping(data, "git")),
         "resource": _parse_resource(_optional_mapping(data, "resource")),
@@ -712,6 +717,41 @@ def plan(payload: dict[str, Any]) -> dict[str, Any]:
     facts = normalize_facts(payload)
     packet = facts["packet"]
     status = packet["status"]
+    # Opt-in, recomputed priority preflight at the existing coordinator path.
+    # Its GitHub/HEAD observations are caller-supplied, never minted here.
+    # This does not create a ChatGPT platform pre-turn hook; native callers
+    # must supply fresh authenticated Issue and actual Git facts explicitly.
+    priority_scope = facts["priority_scope"]
+    if status == "ACTIVE" and priority_scope is not None:
+        fields = frozenset({
+            "target_repository", "proposed_workstream", "owner_focus",
+            "locked_workstream", "candidates",
+        })
+        if set(priority_scope) - fields:
+            return _emit(facts, "RECONCILE_AMBIGUOUS",
+                         "priority preflight rejects unknown/claimed authorization fields")
+        if (
+            priority_scope.get("target_repository") != packet["repository"]
+            or priority_scope.get("proposed_workstream") != packet["workstream"]
+        ):
+            return _emit(facts, "RECONCILE_AMBIGUOUS",
+                         "priority preflight repository/workstream mismatch")
+        from work_admission import AdmissionFactsError, evaluate_priority_selection
+        try:
+            selected = evaluate_priority_selection(priority_scope)
+        except (AdmissionFactsError, KeyError, TypeError, ValueError):
+            return _emit(facts, "RECONCILE_AMBIGUOUS",
+                         "priority preflight facts invalid or incomplete")
+        if selected["SELECTION"] != "ALLOW":
+            return _emit(facts, "RECONCILE_AMBIGUOUS",
+                         "priority preflight " + selected["REASON"])
+        if (
+            selected.get("REQUIRED_WORKSTREAM") != packet["workstream"]
+            or selected.get("PRIORITY") != packet["priority"]
+            or selected.get("INTENT_REVISION") != str(packet["intent_revision"])
+        ):
+            return _emit(facts, "RECONCILE_AMBIGUOUS",
+                         "priority preflight packet intent/revision mismatch")
     if status == "COMPLETE":
         return _emit(facts, "NOOP_COMPLETE", "COMPLETE packets do not launch workers")
     if status == "PAUSED":

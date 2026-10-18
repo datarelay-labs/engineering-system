@@ -56,6 +56,9 @@ REQUIRED_METHOD_FILES = (
     "schemas/execution-profile.schema.json",
     "tools/context_epoch.py",
     "tools/test_context_epoch.py",
+    "tools/handoff_contract.py",
+    "tools/test_handoff_contract.py",
+    "tools/test_handoff_contract_red.py",
     "tools/context_compiler.py",
     "tools/test_context_compiler.py",
     "tools/context_optimization_benchmark.py",
@@ -1848,6 +1851,12 @@ def main():
     completed = subprocess.run(["python3", "tools/test_context_epoch.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_handoff_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_handoff_contract_red.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_context_compiler.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
@@ -1944,6 +1953,9 @@ def main():
     completed = subprocess.run(["python3", "tools/test_org_rollout.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_owner_delivery_policy.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/behavior_eval.py", "validate-catalog"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
@@ -1986,6 +1998,9 @@ def main():
     print("PASS behavior eval regression and deterministic gate")
     validate_benchmark_fixtures()
 
+    completed = subprocess.run(["python3", "tools/test_external_references.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_knowledge_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from coordinator import plan  # noqa: E402
+from test_work_admission import priority_candidate  # noqa: E402
 
 TOOL = ROOT / "tools" / "coordinator.py"
 FIXTURES = ROOT / "tools" / "fixtures" / "coordinator"
@@ -106,6 +107,75 @@ def test_priority_does_not_change_decision() -> None:
     assert high["decision"] == low["decision"] == "ADMIT_IMPLEMENTATION"
     assert low["priority"] == "LOW"
     assert high["change_risk"] == low["change_risk"]
+
+
+def test_priority_preflight_on_real_coordinator_entrypoint() -> None:
+    # The existing coordinator CLI is the integration surface: it must
+    # recompute selection, never trust a caller-provided "PASS" string.
+    low = priority_candidate(220, "p2-coordinator", "HIGH")
+    low["body"] = low["body"].replace("INTENT_REVISION=1", "INTENT_REVISION=3", 1)
+    high = priority_candidate(210, "owner-p0", "URGENT")
+    facts = load_fixture("01-admit-implementation.json")
+    assert plan(facts)["decision"] == "ADMIT_IMPLEMENTATION"  # legacy compatibility
+
+    scope = {
+        "target_repository": "datarelay-labs/engineering-system",
+        "proposed_workstream": "p2-coordinator",
+        "candidates": [low, high],
+    }
+    # RED: proposed lower-priority work must not get ADMIT_IMPLEMENTATION.
+    facts["priority_scope"] = scope
+    rejected = plan(facts)
+    assert_schema(rejected)
+    assert rejected["decision"] == "RECONCILE_AMBIGUOUS"
+    assert rejected["launches_worker"] is False
+    assert "PRIORITY_DRIFT" in rejected["reason"]
+    with tempfile.TemporaryDirectory() as temp:
+        request = Path(temp) / "facts.json"
+        request.write_text(json.dumps(facts), encoding="utf-8")
+        proc = subprocess.run(
+            ["python3", str(TOOL), "plan", "--facts", str(request)],
+            cwd=ROOT, text=True, capture_output=True, check=False
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "DECISION=RECONCILE_AMBIGUOUS" in proc.stdout
+        assert "LAUNCHES_WORKER=NO" in proc.stdout
+        assert "PRIORITY_DRIFT" in proc.stdout
+
+    # A genuine explicit owner focus overrides priorities; match the exact
+    # selected packet revision/priority as well as the workstream.
+    facts["priority_scope"] = {**scope, "owner_focus": "p2-coordinator"}
+    allowed = plan(facts)
+    assert_schema(allowed)
+    assert allowed["decision"] == "ADMIT_IMPLEMENTATION"
+
+    facts["priority_scope"]["owner_focus"] = "owner-p0"
+    assert plan(facts)["launches_worker"] is False
+
+    invalids = [
+        {**scope, "target_repository": "xdr-labs/other"},
+        {**scope, "proposed_workstream": "owner-p0"},
+        {**scope, "candidates": [low], "selection": "ALLOW"},  # forged result
+        {**scope, "candidates": []},
+        {**scope, "candidates": [{**low, "observed_head": "b" * 40}]},
+        {**scope, "candidates": [low], "owner_focus": "p2-coordinator"},
+    ]
+    # Valid one-candidate case is allowed; invalid duplicate/legacy/etc rejected.
+    for scope_item in invalids[:-1]:
+        facts["priority_scope"] = scope_item
+        result = plan(facts)
+        assert result["decision"] == "RECONCILE_AMBIGUOUS", scope_item
+        assert result["launches_worker"] is False
+
+    facts["priority_scope"] = {**scope, "candidates": [low], "owner_focus": "p2-coordinator"}
+    assert plan(facts)["decision"] == "ADMIT_IMPLEMENTATION"
+    stale = dict(low)
+    stale["body"] = stale["body"].replace("INTENT_REVISION=3", "INTENT_REVISION=2", 1)
+    facts["priority_scope"] = {**scope, "candidates": [stale], "owner_focus": "p2-coordinator"}
+    assert plan(facts)["decision"] == "RECONCILE_AMBIGUOUS"
+
+    facts["priority_scope"] = {**scope, "candidates": [priority_candidate(220, "p2-coordinator", "LOW")], "owner_focus": "p2-coordinator"}
+    assert plan(facts)["decision"] == "RECONCILE_AMBIGUOUS"
 
 
 def test_stale_publication_revision_does_not_authorize() -> None:
@@ -269,6 +339,7 @@ def main() -> int:
     test_resume_is_worker_microstep()
     test_non_active_never_launch_even_with_worker()
     test_priority_does_not_change_decision()
+    test_priority_preflight_on_real_coordinator_entrypoint()
     test_stale_publication_revision_does_not_authorize()
     test_stale_ci_head_does_not_merge()
     test_high_risk_merge_requires_audit()

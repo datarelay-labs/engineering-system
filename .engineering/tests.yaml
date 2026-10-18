@@ -29,6 +29,8 @@ paths:
     domains: [adoption, enforcement, release-contract, operations-contract, adoption-upgrade]
   "tools/check-adoption.py":
     domains: [adoption]
+  "tools/test_external_references.py":
+    domains: [standards, workflows]
   "tools/test_adopt.py":
     domains: [adoption]
   "tools/ci_policy_audit.py":
@@ -48,6 +50,12 @@ paths:
   "tools/context_epoch.py":
     domains: [session-continuity, workflows]
   "tools/test_context_epoch.py":
+    domains: [session-continuity]
+  "tools/handoff_contract.py":
+    domains: [session-continuity, workflows]
+  "tools/test_handoff_contract.py":
+    domains: [session-continuity]
+  "tools/test_handoff_contract_red.py":
     domains: [session-continuity]
   "tools/context_compiler.py":
     domains: [session-continuity, workflows]
@@ -245,6 +253,23 @@ scenarios:
     command: "python3 -m json.tool schemas/project.schema.json >/dev/null && python3 -m json.tool schemas/tests.schema.json >/dev/null && python3 -m json.tool schemas/release.schema.json >/dev/null && python3 -m json.tool schemas/behavior-scenario.schema.json >/dev/null && python3 -m json.tool schemas/behavior-result.schema.json >/dev/null && python3 -m json.tool schemas/efficiency-telemetry.schema.json >/dev/null && python3 -m json.tool schemas/knowledge-index.schema.json >/dev/null && python3 -m json.tool schemas/runtime-contract.schema.json >/dev/null && python3 -m json.tool schemas/skills-contract.schema.json >/dev/null && python3 -m json.tool schemas/incident-evidence.schema.json >/dev/null && python3 -m json.tool schemas/verification-contract.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-receipt.schema.json >/dev/null && python3 -m json.tool schemas/trust-evidence-boundary.schema.json >/dev/null && python3 -m json.tool schemas/security-profile.schema.json >/dev/null && python3 -m json.tool schemas/security-hardening-plan.schema.json >/dev/null && python3 -m json.tool schemas/user-acceptance-evidence.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-fixture.schema.json >/dev/null && python3 -m json.tool schemas/benchmark-execution.schema.json >/dev/null && python3 -m json.tool schemas/context-canary-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-shadow-comparison.schema.json >/dev/null && python3 -m json.tool schemas/context-economics-report.schema.json >/dev/null"
     release_gate: true
 
+  - id: ENG-EXTERNAL-REF-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Official external-reference crosswalk integrity
+    level: static
+    domains: [standards]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_external_references.py"
+    invariants:
+      - "References map to current canonical paths but never assert certification or SLSA levels"
+      - "Malformed official sources and missing evidence paths fail deterministically"
+    release_gate: false
+
   - id: ENG-AFFECTED-SELECTION-001
     cost: cheap
     estimated_seconds: 2
@@ -378,6 +403,40 @@ scenarios:
       - "owner-selected target repository stays bound across packet validation and cross-project references cannot retarget mutation authority"
       - "context reset is coordinator-owned and never derived from cache-read ratio or resident session count"
       - "native hook reduction retains no raw prompt transcript tool payload or workspace path"
+    release_gate: true
+
+  - id: ENG-HANDOFF-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Verified GitHub handoff and exact first-action resume
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_handoff_contract.py"
+    invariants:
+      - "caller-supplied local packet hashes cannot substitute for authenticated GitHub Issue persistence"
+      - "the first unfinished action and exact worktree/branch/HEAD must be checked without discarding dirty files"
+    release_gate: true
+
+  - id: ENG-HANDOFF-NEGATIVE-002
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Real Git outgoing handoff negative regression matrix
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_handoff_contract_red.py"
+    invariants:
+      - "all fifteen outgoing real-Git and synthetic handoff controls/negative cases are GREEN"
+      - "forged HEAD foreign origin mismatched lifecycle and first-action redirects fail closed"
     release_gate: true
 
   - id: ENG-CONTEXT-COMPILER-001
@@ -604,6 +663,8 @@ scenarios:
       - "second workers fail closed on ownership overlap or host budget pressure"
       - "handoff sizing chooses BATCH KEEP or SPLIT deterministically"
       - "optional disposition classifies supplied scheduling facts but cannot control ChatGPT final responses"
+      - "priority selection denies lower-priority or unlocked drift with explicit owner focus precedence"
+      - "stale or non-v3 candidate priority requires reconciliation rather than silent fallback"
       - "unrelated sessions are never mutated to create capacity"
     release_gate: true
 
@@ -973,6 +1034,24 @@ scenarios:
     invariants:
       - "provable duplicate native CI and unconditional expensive ordinary-PR release-gate commands fail closed"
     release_gate: false
+
+  - id: ENG-OWNER-DELIVERY-001
+    cost: cheap
+    estimated_seconds: 1
+    timeout_seconds: 30
+    agent_default: true
+    scope: static
+    name: Owner-scoped delivery and neutral consumer template policy
+    level: static
+    domains: [standards, adoption, templates]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_owner_delivery_policy.py"
+    invariants:
+      - "portable core/adoption rules contain no hard-coded product organization assignments"
+      - "owner profile delegates DataRelay to product chats and assigns XDR direct execution to the steward"
+      - "organization choices do not leak into managed consumer AGENTS template"
+    release_gate: true
 
   - id: ENG-TARGETED-CONVERGENCE-001
     cost: cheap

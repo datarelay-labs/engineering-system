@@ -835,6 +835,143 @@ def evaluate_gate(
     return parse_document(document)
 
 
+# Issue #309: capture only bounded metadata from 30 real independent Chat runs.
+# This additive reporter is an evidence ledger, not a Chat runner, a trusted
+# human-attestation issuer, or a promotion/merge/release decision.
+REAL_CHAT_PRODUCTS = {
+    "foundation": "datarelay-labs/datarelay-product-foundation",
+    "control": "datarelay-labs/datarelay-control",
+    "grant": "datarelay-labs/datarelay-grant",
+}
+REAL_CHAT_CASES = (
+    "P0_FIRST_ACTION",
+    "CONTINUE_UNFINISHED",
+    "BLOCKED_P0_YIELD",
+    "STALE_HEAD_RECONCILE",
+    "FALSE_COMPLETE_REJECT",
+)
+REAL_CHAT_RUN_FIELDS = frozenset({
+    "PRODUCT", "CASE", "ATTEMPT", "RUN_ID", "SESSION_DIGEST",
+    "INITIAL_PACKET_ISSUE", "INTENT_REVISION", "BRANCH", "HEAD",
+    "EXPECTED_FIRST_ACTION", "OBSERVED_FIRST_TOOL_AND_TARGET",
+    "SUPPORTING_GIT_OR_TOOL_EVIDENCE_URL", "RESULT",
+    "USER_REDIRECTIONS_COUNT",
+})
+REAL_CHAT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
+REAL_CHAT_ACTION_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,100}$")
+REAL_CHAT_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./-]{0,99}$")
+REAL_CHAT_TARGET_RE = re.compile(r"^[A-Za-z0-9_:/#.-]{3,190}$")
+REAL_CHAT_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def score_real_chat_canary(data: Any) -> dict[str, Any]:
+    """Report supplied coverage honestly; never convert claims into verified E2E.
+
+    The caller must independently authenticate GitHub references and observe the
+    real Chat's first tool action; this offline metadata checker cannot do it.
+    """
+    _reject_prohibited(data)
+    if not isinstance(data, dict) or set(data) != {"schema_version", "kind", "records"}:
+        raise EvalError("CANARY_DOCUMENT_INVALID")
+    if data.get("schema_version") != 1 or data.get("kind") != "real-chat-reliability-evidence":
+        raise EvalError("CANARY_DOCUMENT_INVALID")
+    records = data.get("records")
+    if not isinstance(records, list) or len(records) > 30:
+        raise EvalError("CANARY_RECORD_COUNT_INVALID")
+    used_slots: set[tuple[str, str, int]] = set()
+    used_ids: set[str] = set()
+    used_sessions: set[str] = set()
+    used_evidence: set[str] = set()
+    totals = {"PASS": 0, "FAIL": 0, "BLOCK": 0, "UNKNOWN": 0}
+    redirections: list[int | None] = []
+    per_product = {product: {"submitted": 0, "reported_pass": 0}
+                   for product in REAL_CHAT_PRODUCTS}
+    for entry in records:
+        if not isinstance(entry, dict) or set(entry) != REAL_CHAT_RUN_FIELDS:
+            raise EvalError("CANARY_RECORD_INVALID")
+        product, case, attempt = entry["PRODUCT"], entry["CASE"], entry["ATTEMPT"]
+        if (not isinstance(product, str) or product not in REAL_CHAT_PRODUCTS
+                or not isinstance(case, str) or case not in REAL_CHAT_CASES
+                or type(attempt) is not int or attempt not in (1, 2)):
+            raise EvalError("CANARY_SLOT_INVALID")
+        slot = (product, case, attempt)
+        run_id = entry["RUN_ID"]
+        digest = entry["SESSION_DIGEST"]
+        url = entry["SUPPORTING_GIT_OR_TOOL_EVIDENCE_URL"]
+        if (not isinstance(run_id, str) or not REAL_CHAT_ID_RE.fullmatch(run_id)
+                or (digest is not None and (
+                    not isinstance(digest, str) or not REAL_CHAT_DIGEST_RE.fullmatch(digest)
+                ))
+                or not isinstance(url, str) or re.fullmatch(
+                    r"https://github[.]com/" + re.escape(REAL_CHAT_PRODUCTS[product])
+                    + r"/issues/[1-9][0-9]*#issuecomment-[1-9][0-9]*", url
+                ) is None):
+            raise EvalError("CANARY_EVIDENCE_REFERENCE_INVALID")
+        if (slot in used_slots or run_id in used_ids
+                or (digest is not None and digest in used_sessions)
+                or url in used_evidence):
+            raise EvalError("CANARY_DUPLICATE_RUN")
+        used_slots.add(slot)
+        used_ids.add(run_id)
+        if digest is not None:
+            used_sessions.add(digest)
+        used_evidence.add(url)
+        issue, rev = entry["INITIAL_PACKET_ISSUE"], entry["INTENT_REVISION"]
+        branch, head = entry["BRANCH"], entry["HEAD"]
+        expected, observed = entry["EXPECTED_FIRST_ACTION"], entry["OBSERVED_FIRST_TOOL_AND_TARGET"]
+        if (type(issue) is not int or issue < 1 or type(rev) is not int or rev < 1
+                or not isinstance(branch, str) or not REAL_CHAT_BRANCH_RE.fullmatch(branch)
+                or ".." in branch or "//" in branch
+                or not isinstance(head, str) or not SHA_RE.fullmatch(head)
+                or not isinstance(expected, str) or not REAL_CHAT_ACTION_RE.fullmatch(expected)
+                or not isinstance(observed, str) or not REAL_CHAT_TARGET_RE.fullmatch(observed)
+                or ":" not in observed or ".." in observed):
+            raise EvalError("CANARY_OBSERVATION_INVALID")
+        status = entry["RESULT"]
+        if not isinstance(status, str) or status not in totals:
+            raise EvalError("CANARY_RESULT_INVALID")
+        count = entry["USER_REDIRECTIONS_COUNT"]
+        if count is not None and (type(count) is not int or count < 0 or count > 10000):
+            raise EvalError("CANARY_COUNT_INVALID")
+        totals[status] += 1
+        per_product[product]["submitted"] += 1
+        per_product[product]["reported_pass"] += status == "PASS"
+        redirections.append(count)
+    expected_slots = {
+        (product, case, attempt)
+        for product in REAL_CHAT_PRODUCTS for case in REAL_CHAT_CASES for attempt in (1, 2)
+    }
+    missing = sorted(
+        f"{product}:{case}:{attempt}"
+        for product, case, attempt in expected_slots - used_slots
+    )
+    # Reported PASS and valid-looking URLs cannot establish fresh independent
+    # Chat sessions or actual first tool actions; no inferred 30/30 success.
+    return {
+        "kind": "real-chat-reliability-summary",
+        "expected_runs": 30,
+        "submitted_runs": len(records),
+        "missing_runs": len(missing),
+        "missing_slots": missing,
+        "coverage": "SUBMITTED" if not missing else "INCOMPLETE",
+        "by_product": per_product,
+        "reported_pass": totals["PASS"],
+        "reported_fail": totals["FAIL"],
+        "reported_block": totals["BLOCK"],
+        "reported_unknown": totals["UNKNOWN"],
+        "session_identity_submitted": len(used_sessions),
+        "session_identity_unknown": len(records) - len(used_sessions),
+        "human_redirections_reported": (
+            sum(redirections) if redirections and all(x is not None for x in redirections) else None
+        ),
+        "verified_success_rate": None,
+        "success": "NOT_VERIFIED",
+        "baseline_comparison": "UNKNOWN",
+        "independent_evidence_audit": "REQUIRED",
+        "execution_effect": "NONE",
+    }
+
+
 def _emit(document: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
@@ -858,6 +995,9 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run")
     run.add_argument("--root", type=Path, default=ROOT)
 
+    chat = sub.add_parser("real-chat-report")
+    chat.add_argument("--evidence", type=Path, required=True)
+
     gate = sub.add_parser("gate")
     gate.add_argument("--result", type=Path, required=True)
     gate.add_argument("--head", required=True)
@@ -873,6 +1013,13 @@ def main(argv: list[str] | None = None) -> int:
             document = run_deterministic(args.root.resolve())
             _emit(document)
             return _run_exit(document)
+        if args.command == "real-chat-report":
+            try:
+                instance = json.loads(args.evidence.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise EvalError("CANARY_EVIDENCE_UNREADABLE") from exc
+            _emit(score_real_chat_canary(instance))
+            return 0
         if args.command == "gate":
             instance = json.loads(args.result.read_text(encoding="utf-8"))
             document = evaluate_gate(
