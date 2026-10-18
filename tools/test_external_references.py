@@ -10,6 +10,7 @@ import copy
 import json
 import re
 import shlex
+import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -44,10 +45,13 @@ class InvalidCrosswalk(ValueError):
 def _repo_file(root: Path, path: object, *, policy: bool) -> None:
     if not isinstance(path, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", path):
         raise InvalidCrosswalk("unsafe or invalid repository path")
+    if any(segment in {".", ".."} for segment in path.split("/")):
+        raise InvalidCrosswalk("noncanonical repository path: " + path)
     if policy and not path.startswith("standards/"):
         raise InvalidCrosswalk("policy_paths must point to canonical standards/")
     target = root / path
-    if not target.is_file() or not target.resolve().is_relative_to(root.resolve()):
+    allowed_root = (root / "standards").resolve() if policy else root.resolve()
+    if not target.is_file() or not target.resolve().is_relative_to(allowed_root):
         raise InvalidCrosswalk("missing or escaping repository path: " + path)
 
 
@@ -199,6 +203,23 @@ def main() -> None:
     item = copy.deepcopy(doc)
     item["references"][0]["policy_paths"] = ["standards/MISSING.md"]
     _reject(item, "nonexistent policy")
+    item = copy.deepcopy(doc)
+    item["references"][0]["policy_paths"] = ["standards/../AGENTS.md"]
+    _reject(item, "policy path escapes standards directory")
+    item = copy.deepcopy(doc)
+    item["references"][0]["policy_paths"] = ["standards/./CORE.md"]
+    _reject(item, "policy path contains noncanonical dot segments")
+    with tempfile.TemporaryDirectory() as td:
+        fake = Path(td)
+        (fake / "standards").mkdir()
+        (fake / "AGENTS.md").write_text("outside policy scope", encoding="utf-8")
+        (fake / "standards" / "alias.md").symlink_to("../AGENTS.md")
+        try:
+            _repo_file(fake, "standards/alias.md", policy=True)
+        except InvalidCrosswalk:
+            pass
+        else:
+            raise AssertionError("policy symlink escaped standards directory")
     item = copy.deepcopy(doc)
     item["references"][0]["source_url"] = "https://untrusted.example/standard"
     _reject(item, "unknown authority")
