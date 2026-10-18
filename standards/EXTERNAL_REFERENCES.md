@@ -27,6 +27,14 @@ Engineering System is a lightweight, provider-neutral engineering control layer 
 
 **Version caveats:** ISO 12207:2026 supersedes 2017. ISO 29148:2018 and ISO 25023:2016 are still published while revisions are in development. NIST SSDF v1.1 is the current *final* publication; the v1.2 revision is a **draft**, not the final baseline. NIST AI RMF 1.0 is being updated. SLSA 1.2 is approved and uses separate Build/Source tracks. Check authoritative publication status again before changing the referenced baseline.
 
+## P0 evidence trace: reference → test scenario (metadata only)
+
+The original reference map included `tools/validate.py` (a broad validation runner) and `tools/behavior_eval.py` (an evaluation implementation) under `evidence_paths`, even though neither was a **direct test scenario**. This created a misleading candidate-evidence link. The former is now explicitly unmapped, and the latter is replaced by the existing directly registered `tools/test_behavior_eval.py` scenario.
+
+Run `python3 -B tools/test_external_references.py --report` for a deterministic JSON **manifest trace**, separate from the normal catalog integrity test. For each source it lists *candidate test file → declared scenario ID*, when a direct selection exists. A scenario being configured **does not prove it ran**, that its assertion establishes the standard requirement, or that any ISO/NIST/SLSA conformance level is met. Accordingly `exact_head_test_evidence=NOT_ESTABLISHED`, `live_agent_evidence=NOT_VERIFIED`, and `conformance_evidence=NOT_ESTABLISHED` remain explicit. The report is read-only and creates no duplicate CI, release requirement or product Work Packet.
+
+If a path is not registered as a directly invocable test in the canonical `.engineering/tests.yaml`, the integrity test fails; quoting a script in a shell comment, echo, wrapper, or `|| true` does not count. This strengthens the crosswalk's narrow *catalog traceability*, not the still-unmeasured full *requirement → independently observed exact-HEAD behavior* traceability.
+
 ## P0 — execute without adding ceremony
 
 1. **Requirement → observable result.** For a material change, the existing accepted requirement/Work Packet completion criterion, affected scenario ID and the actual outcome at the relevant exact HEAD should be traceable through existing artifacts. Start by measuring gaps; do not mandate a new requirements file or checklist for every small fix. Unknown coverage is not completion.

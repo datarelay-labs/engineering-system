@@ -5,8 +5,11 @@ Never treats policy mappings, CI or self-authored records as certification/evide
 """
 from __future__ import annotations
 
+import argparse
 import copy
+import json
 import re
+import shlex
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -48,6 +51,76 @@ def _repo_file(root: Path, path: object, *, policy: bool) -> None:
         raise InvalidCrosswalk("missing or escaping repository path: " + path)
 
 
+
+def _direct_test_script(command: object) -> str | None:
+    # Intentionally conservative: textual mentions, wrappers, OR/AND shell
+    # expressions and opaque commands are not proof of direct test selection.
+    if not isinstance(command, str):
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv or argv[0] not in {"python", "python3"}:
+        return None
+    if len(argv) == 3 and argv[1] == "-B":
+        argv = [argv[0], argv[2]]
+    if len(argv) != 2:
+        return None
+    script = argv[1]
+    if not re.fullmatch(r"tools/test_[A-Za-z0-9_]+\.py", script):
+        return None
+    return script
+
+
+def _manifest_bindings(root: Path) -> dict[str, list[str]]:
+    path = root / ".engineering/tests.yaml"
+    try:
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise InvalidCrosswalk("missing or invalid canonical test manifest") from exc
+    scenarios = manifest.get("scenarios") if isinstance(manifest, dict) else None
+    if not isinstance(scenarios, list) or not scenarios:
+        raise InvalidCrosswalk("test manifest lacks scenarios")
+    mapped: dict[str, list[str]] = {}
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            raise InvalidCrosswalk("test scenario is not an object")
+        sid = scenario.get("id")
+        script = _direct_test_script(scenario.get("command"))
+        if script:
+            if not isinstance(sid, str) or not sid:
+                raise InvalidCrosswalk("direct test scenario lacks ID")
+            mapped.setdefault(script, []).append(sid)
+    return mapped
+
+
+def _trace_report(doc: dict, root: Path) -> dict:
+    # This is a manifest linkage report, NOT executed CI, standard
+    # conformance, risk coverage or independently witnessed Chat evidence.
+    bindings = _manifest_bindings(root)
+    records = []
+    for item in doc["references"]:
+        scripts = item["evidence_paths"]
+        records.append({
+            "reference_id": item["id"],
+            "mapping_state": item["mapping_state"],
+            "candidate_test_paths": scripts,
+            "scenario_ids": sorted({id_ for p in scripts for id_ in bindings[p]}),
+            "runtime_evidence": "NOT_ESTABLISHED",
+        })
+    return {
+        "kind": "external-standards-manifest-trace",
+        "basis": "CONFIGURATION_ONLY_NOT_TEST_EXECUTION",
+        "total_references": len(records),
+        "scenario_linked_references": sum(bool(r["scenario_ids"]) for r in records),
+        "unlinked_references": sum(not r["scenario_ids"] for r in records),
+        "exact_head_test_evidence": "NOT_ESTABLISHED",
+        "live_agent_evidence": "NOT_VERIFIED",
+        "conformance_evidence": "NOT_ESTABLISHED",
+        "references": records,
+    }
+
 def validate(doc: object, root: Path) -> int:
     if not isinstance(doc, dict) or doc.get("schema_version") != 1:
         raise InvalidCrosswalk("unsupported catalog schema_version")
@@ -56,6 +129,7 @@ def validate(doc: object, root: Path) -> int:
     entries = doc.get("references")
     if not isinstance(entries, list) or len(entries) < 10:
         raise InvalidCrosswalk("missing or implausibly small reference set")
+    scenario_bindings = _manifest_bindings(root)
     ids = set()
     required = {
         "id", "title", "type", "source_url", "publication_state",
@@ -103,12 +177,22 @@ def validate(doc: object, root: Path) -> int:
             _repo_file(root, path, policy=True)
         for path in evidence:
             _repo_file(root, path, policy=False)
+            if path not in scenario_bindings:
+                raise InvalidCrosswalk(
+                    "candidate test is not a directly selected manifest scenario: " + path
+                )
     return len(entries)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Informative standards manifest linkage")
+    parser.add_argument("--report", action="store_true", help="JSON trace, not an execution receipt")
+    args = parser.parse_args()
     doc = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
     count = validate(doc, ROOT)
+    if args.report:
+        print(json.dumps(_trace_report(doc, ROOT), indent=2, sort_keys=True))
+        return
     item = copy.deepcopy(doc)
     item["references"][1]["id"] = item["references"][0]["id"]
     _reject(item, "duplicate IDs")
@@ -127,6 +211,25 @@ def main() -> None:
     item = copy.deepcopy(doc)
     item["references"][0]["evidence_paths"] = ["../secrets.txt"]
     _reject(item, "path traversal")
+    item = copy.deepcopy(doc)
+    item["references"][0]["evidence_paths"] = ["tools/validate.py"]
+    _reject(item, "existing non-test tool is not a direct scenario")
+    item = copy.deepcopy(doc)
+    item["references"][0]["evidence_paths"] = ["tools/test_lifecycle_audit.py"]
+    _reject(item, "existing test file but not a direct scenario")
+    assert _direct_test_script("python3 tools/test_behavior_eval.py") == "tools/test_behavior_eval.py"
+    assert _direct_test_script("python3 -B tools/test_behavior_eval.py") == "tools/test_behavior_eval.py"
+    for false_command in (
+        "echo python3 tools/test_behavior_eval.py",
+        "python3 tools/test_behavior_eval.py || true",
+        "python3 -c 'print(1)'",
+        "bash -lc 'python3 tools/test_behavior_eval.py'",
+    ):
+        assert _direct_test_script(false_command) is None, false_command
+    trace = _trace_report(doc, ROOT)
+    assert trace["total_references"] == count
+    assert trace["exact_head_test_evidence"] == "NOT_ESTABLISHED"
+    assert trace["live_agent_evidence"] == "NOT_VERIFIED"
     print(f"PASS external references: {count} source mappings; no conformance claims")
 
 

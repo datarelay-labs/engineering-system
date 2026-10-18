@@ -1,5 +1,7 @@
 # Informative public-source crosswalk, not a certification/attestation.
 # "mapped" means an existing policy file addresses the public topic, not clause-level compliance.
+# evidence_paths are candidate test files directly selected in .engineering/tests.yaml;
+# they are NOT execution receipts, exact-HEAD CI, human-equivalent E2E or certification.
 schema_version: 1
 reviewed_on: "2026-10-18"
 references:
@@ -12,7 +14,7 @@ references:
     priority: P0
     mapping_state: partial
     policy_paths: [standards/CORE.md, standards/DEVELOPMENT.md, standards/OPERATIONS.md]
-    evidence_paths: [tools/validate.py]
+    evidence_paths: []
     gap: "No complete process-by-process conformance assessment; public abstract only."
     next_action: "Map essential lifecycle outcomes to existing gates; avoid a second lifecycle."
     conformance_claim: false
@@ -194,7 +196,7 @@ references:
     priority: P0
     mapping_state: partial
     policy_paths: [standards/QUALITY.md, standards/PROVIDER_GUIDANCE.md]
-    evidence_paths: [tools/behavior_eval.py, tools/test_behavior_eval.py]
+    evidence_paths: [tools/test_behavior_eval.py]
     gap: "Real-chat adherence and baseline improvements are NOT_VERIFIED (Issue #309: 0/30 at last audit)."
     next_action: "Measure observed results, with zero-denominator/absent baselines UNKNOWN, not 100%."
     conformance_claim: false
