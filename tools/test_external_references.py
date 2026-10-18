@@ -50,8 +50,11 @@ def _repo_file(root: Path, path: object, *, policy: bool) -> None:
     if policy and not path.startswith("standards/"):
         raise InvalidCrosswalk("policy_paths must point to canonical standards/")
     target = root / path
-    allowed_root = (root / "standards").resolve() if policy else root.resolve()
-    if not target.is_file() or not target.resolve().is_relative_to(allowed_root):
+    repo_root = root.resolve()
+    allowed_root = (root / "standards").resolve() if policy else repo_root
+    resolved = target.resolve()
+    if (not target.is_file() or not resolved.is_relative_to(repo_root)
+            or not resolved.is_relative_to(allowed_root)):
         raise InvalidCrosswalk("missing or escaping repository path: " + path)
 
 
@@ -220,6 +223,17 @@ def main() -> None:
             pass
         else:
             raise AssertionError("policy symlink escaped standards directory")
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as outside:
+        fake = Path(td)
+        external = Path(outside)
+        (external / "CORE.md").write_text("outside repository", encoding="utf-8")
+        (fake / "standards").symlink_to(external, target_is_directory=True)
+        try:
+            _repo_file(fake, "standards/CORE.md", policy=True)
+        except InvalidCrosswalk:
+            pass
+        else:
+            raise AssertionError("standards directory symlink escaped repository")
     item = copy.deepcopy(doc)
     item["references"][0]["source_url"] = "https://untrusted.example/standard"
     _reject(item, "unknown authority")
