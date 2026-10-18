@@ -180,7 +180,9 @@ class UserAcceptanceTests(unittest.TestCase):
             blocked(spoof, "HUMAN_OWNER_EXECUTOR_REQUIRED")
             spoof = json.loads(json.dumps(valid))
             spoof["runtime"] = "CODEX"
-            blocked(spoof, "EXECUTION_PROFILE_RUNTIME_MISMATCH")
+            # The human-owner lane must retain ChatGPT final audit, not
+            # merely reject an unsanctioned profile mismatch.
+            blocked(spoof, "OWNER_RUNTIME_OVERRIDE_HUMAN_OWNER_MODE_FORBIDDEN")
             spoof = json.loads(json.dumps(valid))
             spoof["owner_authenticated"] = True
             blocked(spoof)
