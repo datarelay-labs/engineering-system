@@ -57,6 +57,29 @@ The source-mutation-probe.py changes eight one-at-a-time predicates in **tempora
 
 This proves the QA benchmark's source regression sensitivity in a narrow subset. It is **not** a Parser Studio, DataRelay Link or other product source Mutation Score, and does not replace a later project-native Stryker/Hypothesis pilot.
 
+## Actual Parser Studio product-source mutation (P2)
+
+A separate product-scoped adapter now archives the immutable exact Parser Studio HEAD into a disposable temporary sandbox, links the *already installed* pinned Vitest dependencies, executes the unchanged product-native normalization regression against five syntax-checked TypeScript source mutants, then adds an independent requirements-derived holdout for nested mapping destination collisions. The original checkout, its node_modules and its deployed service are not modified.
+
+Command (use the qualified nonproduction 154+155+156 source, and a NEW private output path):
+
+    python3 -B adapters/ai-qa/parser-studio-product-mutation.py \
+      --product-root /home/aella/parser-studio-dev-integration-154155156-20261024 \
+      --expected-head 567e0c255312028337898114cac452567bc585cc \
+      --out /private/new-product-source-mutation.json
+
+The initial five-mutant pilot found original product tests kill 4/5 and independently added holdout kills 1 more. These are intentionally selected mutants, **not** general mutation coverage or E2E release quality. Test cases never access actual Stellar target, production accounts or host credentials. See the 20261024 cross-product pilot report.
+
+## DataRelay Grant read-only Chromium discovery (P3)
+
+The separate grant-login-readonly.cjs adapter navigates only an operator-selected **localhost** development Grant entrypoint in real Chromium. Network requests are restricted to the same origin and GET/HEAD/OPTIONS; any POST/external request is blocked, no credentials entered, and no approval action exercised. It requires independently pinned raw HTML SHA-256 and a NEW private evidence directory; it captures screenshot, trace and a limited result receipt. This proves only login discoverability, never two-user email/MFA or Full User E2E.
+
+    PLAYWRIGHT_MODULE_ROOT=/path/to/existing/pinned/playwright/node_modules \
+      node adapters/ai-qa/grant-login-readonly.cjs \
+      --url http://127.0.0.1:19720/ \
+      --expected-html-sha256 PINNED_PUBLIC_HTML_SHA256 \
+      --out /private/new-grant-readonly-evidence
+
 ## Frozen provider comparison (P4)
 
 tools/ai_qa_bakeoff.py reads 2–12 tools' pinned QA observations and locally hashed artifacts against the SAME hidden holdout, exact HEAD and separately frozen campaign SHA-256. It reports missed critical seeded defects, false PASS journeys and claimed cost per seeded bug. Costs, actual provider invocations and actor identity remain unverified and T0_ADVISORY_ONLY. The resulting comparison order never grants procurement, release or merge authority.

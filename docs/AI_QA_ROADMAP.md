@@ -10,9 +10,9 @@ Detect actual novel defects in AI-developed software, independently validate fin
 | --- | --- | --- | --- |
 | P0 | Portable blind QA policy + pinned evidence benchmark | Exact-head/digest gate, missing/false PASS/altered artifacts fail closed; 31 regression tests, CI | SOURCE + CI COMPLETE / DRAFT PR #318 |
 | P1 | Actual browser journey + independent backend oracle | Live Chromium/Playwright trace, raw source/backend field readback, independent downloaded Ruby+CONF oracle | PILOT PASS / PORTABLE ADAPTER IMPLEMENTED |
-| P2 | Property, fuzz, metamorphic, mutation adapters | Seeded source-value property/metamorphic campaign; 12 semantic mutants; 8 actual Python QA-engine source mutants; later product source mutation/API/chaos | PARTIAL: PILOTS PASS / PRODUCT-SOURCE MUTATION PENDING |
-| P3 | Owner-coordinated product pilots | Parser Studio, Link, Control, Grant, Atlas independent defect discovery and verified native E2E results | PARSER PILOT PASS / OTHER FOUR PENDING |
-| P4 | Qualified adoption / optional QA SaaS bakeoff | Deterministic pinned comparison CLI; later actual vendor calls and independent cost/false-positive qualification | COMPARISON TOOL COMPLETE / PROVIDER RUNS PENDING |
+| P2 | Property, fuzz, metamorphic, mutation adapters | Seeded property/metamorphic, 12 semantic mutations, 8 QA-engine source mutants, 5 real product TypeScript mutants with an independent holdout; broader unbiased mutation / API state / transport chaos pending | ACTUAL PRODUCT-SOURCE PILOT PASS / BROADER QUALIFICATION PENDING |
+| P3 | Owner-coordinated product pilots | Parser Studio real browser+backend+download; Link CLI; Control health; Grant read-only Chromium; Atlas read-only MCP; full E2E remains product-owned | PARSER PILOT PASS / 4 READ-ONLY TRIAGES, FORMAL USER E2E PENDING |
+| P4 | Qualified adoption / optional QA SaaS bakeoff | Pinned tool + scoped observed 4/5 vs 5/5 strategy comparison; real QA.tech/TestSprite/Momentic invocation and independently verified cost later | OPEN-SOURCE SCOPED COMPARISON MEASURED / VENDOR RUNS NOT VERIFIED |
 
 ## P0 deliverables
 
@@ -21,6 +21,8 @@ Detect actual novel defects in AI-developed software, independently validate fin
 - tools/test_ai_qa_benchmark.py regression tests for the complete and intentionally faulty campaign, stale HEAD/plan tampering, unproven assertions, missing journeys, fake PASS, unknown bugs and artifact spoofing.
 - evals/ai-qa sample plan, observation and sandbox-only artifacts demonstrating the file format.
 - Add a cheap QA scenario and mapping in .engineering/tests.yaml; run the focused tests during native tools/validate.py.
+
+**Latest measured P2/P3/P4 pilot evidence:** [real product-source mutation and cross-product read-only observations](../evals/ai-qa/pilots/20261024-product-source-mutation-and-cross-project.md). Parser Studio five selected source mutants: existing product suite killed 4/5; independent QA holdout added one detection (combined 5/5), exact product HEAD 567e0c255312028337898114cac452567bc585cc. This is not product-wide Mutation Score. Grant actual read-only Chromium login discovery PASS advisory; Link status permission, Control trusted-TLS backend, and Atlas exact-source-bound E2E remain unverified. External QA vendor results remain absent; no fabricated performance, pricing or provider calls.
 
 ## P1 deliverable sequence
 

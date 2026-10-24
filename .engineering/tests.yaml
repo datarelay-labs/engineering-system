@@ -33,6 +33,8 @@ paths:
     domains: [ai, workflows]
   "tools/test_ai_qa_bakeoff.py":
     domains: [ai, workflows]
+  "tools/test_ai_qa_product_mutation.py":
+    domains: [ai, adapters, workflows]
   "tools/test_ai_qa_parser_studio_oracle.py":
     domains: [ai, adapters, workflows]
   "standards/AI_QA.md":
@@ -1078,6 +1080,23 @@ scenarios:
     command: "python3 -B tools/test_ai_qa_parser_studio_oracle.py"
     invariants:
       - "synthetic browser receipts cannot grant release and tampered field/byte/download evidence is denied"
+    release_gate: false
+
+  - id: ENG-AI-QA-PRODUCT-MUTATION-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Isolated actual product-source mutation and QA holdout contract
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_product_mutation.py"
+    invariants:
+      - "original source is archived at exact pinned HEAD, all edits remain disposable, holdout kills separate from original suite kills"
+      - "invalid/timed-out mutants never count as caught; product release authority remains absent"
     release_gate: false
 
   - id: ENG-AI-QA-BAKEOFF-001
