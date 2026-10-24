@@ -16,6 +16,7 @@ REQUIRED_STANDARDS = (
     "standards/DEVELOPMENT.md",
     "standards/DESIGN.md",
     "standards/QUALITY.md",
+    "standards/AI_QA.md",
     "standards/TESTING.md",
     "standards/SECURITY.md",
     "standards/RELEASE.md",
@@ -82,6 +83,11 @@ REQUIRED_METHOD_FILES = (
     "tools/test_governance_floor.py",
     "tools/affected_test_selection.py",
     "tools/test_affected_test_selection.py",
+    "tools/ai_qa_benchmark.py",
+    "tools/ai_qa_explorer_audit.py",
+    "tools/test_ai_qa_explorer_audit.py",
+    "tools/test_ai_qa_autonomous_browser.cjs",
+    "tools/test_ai_qa_benchmark.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -1938,6 +1944,17 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_affected_test_selection.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "-B", "tools/test_ai_qa_benchmark.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    for ai_qa_test in ("tools/test_ai_qa_parser_studio_oracle.py", "tools/test_ai_qa_bakeoff.py",
+                       "tools/test_ai_qa_product_mutation.py", "tools/test_ai_qa_explorer_audit.py"):
+        completed = subprocess.run(["python3", "-B", ai_qa_test], cwd=ROOT)
+        if completed.returncode:
+            raise SystemExit(completed.returncode)
+    completed = subprocess.run(["node", "--test", "tools/test_ai_qa_autonomous_browser.cjs"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)

@@ -25,6 +25,28 @@ paths:
     domains: [session-continuity]
   "tools/**":
     domains: [workflows]
+  "tools/ai_qa_benchmark.py":
+    domains: [ai, workflows]
+  "tools/test_ai_qa_benchmark.py":
+    domains: [ai, workflows]
+  "tools/ai_qa_bakeoff.py":
+    domains: [ai, workflows]
+  "tools/test_ai_qa_bakeoff.py":
+    domains: [ai, workflows]
+  "tools/test_ai_qa_product_mutation.py":
+    domains: [ai, adapters, workflows]
+  "tools/ai_qa_explorer_audit.py":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_explorer_audit.py":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_autonomous_browser.cjs":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_parser_studio_oracle.py":
+    domains: [ai, adapters, workflows]
+  "standards/AI_QA.md":
+    domains: [standards, ai]
+  "docs/AI_QA_ROADMAP.md":
+    domains: [standards, ai]
   "tools/adopt.py":
     domains: [adoption, enforcement, release-contract, operations-contract, adoption-upgrade]
   "tools/check-adoption.py":
@@ -1032,6 +1054,89 @@ scenarios:
       - "owner profile delegates DataRelay to product chats and assigns XDR direct execution to the steward"
       - "organization choices do not leak into managed consumer AGENTS template"
     release_gate: true
+
+  - id: ENG-AI-QA-BENCHMARK-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Independent AI QA pinned fault benchmark adversarial regression
+    level: unit
+    domains: [ai, standards, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_benchmark.py"
+    invariants:
+      - "held-out frozen oracle and exact-HEAD checks fail closed on missing or forged quality evidence"
+      - "synthetic benchmark cannot claim trusted verification or human-equivalent E2E"
+    release_gate: false
+
+  - id: ENG-AI-QA-REAL-OUTCOME-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Independent Parser Studio browser outcome oracle contract
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_parser_studio_oracle.py"
+    invariants:
+      - "synthetic browser receipts cannot grant release and tampered field/byte/download evidence is denied"
+    release_gate: false
+
+  - id: ENG-AI-QA-PRODUCT-MUTATION-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Isolated actual product-source mutation and QA holdout contract
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_product_mutation.py"
+    invariants:
+      - "original source is archived at exact pinned HEAD, all edits remain disposable, holdout kills separate from original suite kills"
+      - "invalid/timed-out mutants never count as caught; product release authority remains absent"
+    release_gate: false
+
+  - id: ENG-AI-QA-AUTONOMOUS-EXPLORATION-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Model-selected live Chromium exploration safety and evidence contracts
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_explorer_audit.py && node --test tools/test_ai_qa_autonomous_browser.cjs"
+    invariants:
+      - "frozen mission, fresh observation references, bounded model reasons and allowlisted network actions remain fail closed"
+      - "advisory evidence audit verifies model action causality and screenshot/trace integrity without asserting independent provider or release PASS"
+    release_gate: false
+
+  - id: ENG-AI-QA-BAKEOFF-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Pinned independent QA provider comparison contract
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_bakeoff.py"
+    invariants:
+      - "common holdout exact HEAD and external pins deny false vendor comparison; claimed price remains unverified"
+    release_gate: false
 
   - id: ENG-TARGETED-CONVERGENCE-001
     cost: cheap
