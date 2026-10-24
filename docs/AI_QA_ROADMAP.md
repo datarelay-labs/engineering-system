@@ -8,11 +8,11 @@ Detect actual novel defects in AI-developed software, independently validate fin
 
 | Phase | Deliverable | Completion oracle | State |
 | --- | --- | --- | --- |
-| P0 | Portable blind QA policy + pinned evidence benchmark | Exact-head/digest gate, missing/false PASS/altered artifacts fail closed; focused adversarial tests + native validation | IN PROGRESS |
-| P1 | Actual browser journey + independent backend oracle | Live Chromium/Playwright trace, user action, backend readback, isolated QA context; optional Midscene exploration | PLANNED |
-| P2 | Property, fuzz, metamorphic, mutation adapters | One product-native pilot for each relevant class; frozen seed, surviving mutants, detected faults and false-pass measurement | PLANNED |
-| P3 | Owner-coordinated product pilots | Parser Studio, Link, Control, Grant, Atlas independent defect discovery and verified native E2E results | PLANNED |
-| P4 | Qualified adoption / optional QA SaaS bakeoff | Compare real confirmed defect yield, false alarms, replay quality and cost on identical hidden-fault corpus | PLANNED |
+| P0 | Portable blind QA policy + pinned evidence benchmark | Exact-head/digest gate, missing/false PASS/altered artifacts fail closed; 31 regression tests, CI | SOURCE + CI COMPLETE / DRAFT PR #318 |
+| P1 | Actual browser journey + independent backend oracle | Live Chromium/Playwright trace, raw source/backend field readback, independent downloaded Ruby+CONF oracle | PILOT PASS / PORTABLE ADAPTER IMPLEMENTED |
+| P2 | Property, fuzz, metamorphic, mutation adapters | Seeded source-value property/metamorphic campaign; 12 semantic mutants; 8 actual Python QA-engine source mutants; later product source mutation/API/chaos | PARTIAL: PILOTS PASS / PRODUCT-SOURCE MUTATION PENDING |
+| P3 | Owner-coordinated product pilots | Parser Studio, Link, Control, Grant, Atlas independent defect discovery and verified native E2E results | PARSER PILOT PASS / OTHER FOUR PENDING |
+| P4 | Qualified adoption / optional QA SaaS bakeoff | Deterministic pinned comparison CLI; later actual vendor calls and independent cost/false-positive qualification | COMPARISON TOOL COMPLETE / PROVIDER RUNS PENDING |
 
 ## P0 deliverables
 

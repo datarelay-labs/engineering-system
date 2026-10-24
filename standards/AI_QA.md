@@ -46,4 +46,8 @@ The plan declares repository, HEAD, revision, plan ID, journeys with required pu
 
 Exit codes: 0=BENCHMARK_COMPLETE on pinned campaign; 2=QUALITY_FAIL or INCOMPLETE; 3=BLOCK for malformed, conflicting or tampered input. Always inspect the advisory-only authority field. This is **not a trusted T1–T5 receipt, product QA PASS or Full User E2E PASS**.
 
-See docs/AI_QA_ROADMAP.md and evals/ai-qa for sample inputs. Product Chat owns actual implementation and live browser user evidence.
+## P1–P4 optional executable adapters
+
+Product-scoped adapters live in [adapters/ai-qa](../adapters/ai-qa/README.md): a real Parser Studio Chromium collector, frozen raw-field/byte/download oracle, seeded metamorphic/property campaign, semantic observation fault injection and disposable **actual Python source mutation** of the QA benchmark. The source mutation probe measures the Engineering System QA benchmark's regression sensitivity, not Parser Studio's code mutation score. Neither adapter modifies production or supplants a product's full user-gate contract.
+
+The pinned cross-provider comparator at tools/ai_qa_bakeoff.py compares observations from the same hidden challenge and exact HEAD; costs and SaaS invocation identities are unverified unless independently qualified. No model name or leaderboard score is a vendor procurement decision. See docs/AI_QA_ROADMAP.md and evals/ai-qa for runnable examples and measured bounds. Product owning Chats retain actual live user evidence and release decisions.
