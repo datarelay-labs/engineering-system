@@ -25,6 +25,14 @@ paths:
     domains: [session-continuity]
   "tools/**":
     domains: [workflows]
+  "tools/ai_qa_benchmark.py":
+    domains: [ai, workflows]
+  "tools/test_ai_qa_benchmark.py":
+    domains: [ai, workflows]
+  "standards/AI_QA.md":
+    domains: [standards, ai]
+  "docs/AI_QA_ROADMAP.md":
+    domains: [standards, ai]
   "tools/adopt.py":
     domains: [adoption, enforcement, release-contract, operations-contract, adoption-upgrade]
   "tools/check-adoption.py":
@@ -1032,6 +1040,23 @@ scenarios:
       - "owner profile delegates DataRelay to product chats and assigns XDR direct execution to the steward"
       - "organization choices do not leak into managed consumer AGENTS template"
     release_gate: true
+
+  - id: ENG-AI-QA-BENCHMARK-001
+    cost: cheap
+    estimated_seconds: 5
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Independent AI QA pinned fault benchmark adversarial regression
+    level: unit
+    domains: [ai, standards, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_benchmark.py"
+    invariants:
+      - "held-out frozen oracle and exact-HEAD checks fail closed on missing or forged quality evidence"
+      - "synthetic benchmark cannot claim trusted verification or human-equivalent E2E"
+    release_gate: false
 
   - id: ENG-TARGETED-CONVERGENCE-001
     cost: cheap

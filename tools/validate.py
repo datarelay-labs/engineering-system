@@ -16,6 +16,7 @@ REQUIRED_STANDARDS = (
     "standards/DEVELOPMENT.md",
     "standards/DESIGN.md",
     "standards/QUALITY.md",
+    "standards/AI_QA.md",
     "standards/TESTING.md",
     "standards/SECURITY.md",
     "standards/RELEASE.md",
@@ -82,6 +83,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_governance_floor.py",
     "tools/affected_test_selection.py",
     "tools/test_affected_test_selection.py",
+    "tools/ai_qa_benchmark.py",
+    "tools/test_ai_qa_benchmark.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -1938,6 +1941,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_affected_test_selection.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "-B", "tools/test_ai_qa_benchmark.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_token_efficiency.py"], cwd=ROOT)
