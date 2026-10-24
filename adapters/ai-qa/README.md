@@ -25,6 +25,31 @@ Independently compare the frozen raw values, exact UTF-8 field byte boundaries, 
 
 The current oracle targets the limited synthetic customized_demo_firewall DRAFT naming and port contract. Other missions need separate strict oracles rather than weakening this pilot. Every result remains T0_ADVISORY_ONLY; neither selected-runtime release acceptance nor Stellar native verification is conferred.
 
+## Model-selected independent browser exploration (P1)
+
+The provider-neutral autonomous-browser-explorer.cjs runs a **persistent real Chromium** browser but intentionally does not embed an external LLM API. The selected CHATGPT_CHAT operator must read each actual UI/HTTP/screenshot observation, choose the next button/input/scroll/press/select/back action, and provide a reason. An action must reference the latest fresh observation ID and currently visible element; replaying stale selectors, attempting external origins, credentials or unapproved writes is denied. Offscreen controls appear only after a real scroll and new observation, including long mapping forms.
+
+A synthetic-only mission must be frozen and given with its exact SHA-256 before browsing. The current public development site allows only same-origin GET/HEAD/OPTIONS and a predeclared safe preview-batch POST, no state-changing parser generation. Evidence stays in a new private directory, with JSONL action/observation journal, screenshot digests, real Playwright trace and advisory result. No commercial LLM/QA account is required or invoked by the adapter.
+
+    PLAYWRIGHT_MODULE_ROOT=/path/to/existing/playwright/node_modules node \
+      adapters/ai-qa/autonomous-browser-explorer.cjs \
+      --mission /private/frozen-synthetic-mission.json \
+      --expected-plan-sha256 INDEPENDENT_FROZEN_SHA256 \
+      --expected-html-sha256 FROZEN_REAL_RUNTIME_HTML_SHA256 \
+      --out /private/new-qa-run
+
+The process accepts newline-delimited model-chosen JSON commands on standard input, such as action kind click with observation_id, ref and a decision reason; it prints AIQA_OBSERVATION for the next selected step. Allowed final disposition is NO_CONFIRMED_FINDING, POTENTIAL_FINDING, BLOCKED or UNVERIFIED, **never release PASS**. See the complete actual [two-run pilot](../../evals/ai-qa/pilots/20261024-autonomous-browser-exploration.md).
+
+Independently check causal action order, pinned runtime/mission, screenshot hashes and trace (advisory, not external identity attestation):
+
+    python3 -B tools/ai_qa_explorer_audit.py \
+      --mission /private/frozen-synthetic-mission.json \
+      --expected-mission-sha256 INDEPENDENT_FROZEN_SHA256 \
+      --expected-html-sha256 FROZEN_REAL_RUNTIME_HTML_SHA256 \
+      --run-dir /private/new-qa-run
+
+This live model-in-the-loop mode is **not** unattended provider autonomy; there is no verified separate LLM invocation, and a scripted replay or a user-agent declaration cannot stand in for selected-runtime Full User E2E. Deterministic CI uses Node built-in contract tests and Python stdlib evidence tests; it never requests a real public service or installs model credentials.
+
 ## Bounded property and metamorphic testing (P2)
 
 Run only against the explicitly allowed development site. Input is safe random synthetic security JSON, not customer logs:

@@ -35,6 +35,12 @@ paths:
     domains: [ai, workflows]
   "tools/test_ai_qa_product_mutation.py":
     domains: [ai, adapters, workflows]
+  "tools/ai_qa_explorer_audit.py":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_explorer_audit.py":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_autonomous_browser.cjs":
+    domains: [ai, adapters, workflows]
   "tools/test_ai_qa_parser_studio_oracle.py":
     domains: [ai, adapters, workflows]
   "standards/AI_QA.md":
@@ -1097,6 +1103,23 @@ scenarios:
     invariants:
       - "original source is archived at exact pinned HEAD, all edits remain disposable, holdout kills separate from original suite kills"
       - "invalid/timed-out mutants never count as caught; product release authority remains absent"
+    release_gate: false
+
+  - id: ENG-AI-QA-AUTONOMOUS-EXPLORATION-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Model-selected live Chromium exploration safety and evidence contracts
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_explorer_audit.py && node --test tools/test_ai_qa_autonomous_browser.cjs"
+    invariants:
+      - "frozen mission, fresh observation references, bounded model reasons and allowlisted network actions remain fail closed"
+      - "advisory evidence audit verifies model action causality and screenshot/trace integrity without asserting independent provider or release PASS"
     release_gate: false
 
   - id: ENG-AI-QA-BAKEOFF-001

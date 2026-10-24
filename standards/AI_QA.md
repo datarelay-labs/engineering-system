@@ -46,6 +46,12 @@ The plan declares repository, HEAD, revision, plan ID, journeys with required pu
 
 Exit codes: 0=BENCHMARK_COMPLETE on pinned campaign; 2=QUALITY_FAIL or INCOMPLETE; 3=BLOCK for malformed, conflicting or tampered input. Always inspect the advisory-only authority field. This is **not a trusted T1–T5 receipt, product QA PASS or Full User E2E PASS**.
 
+## Adaptive AI-led user exploration
+
+Do not label a fixed Playwright scenario as independent autonomous QA merely because an AI wrote the script. For the bounded P1 model-in-the-loop approach, freeze a requirements-first mission and independent oracle, start a real Chromium session, and let the selected AI choose the next action only after inspecting the current rendered UI and network evidence. Each action carries a current observation identity and a reason; stale or invented controls, non-allowlisted effects and credential entry are rejected. Preserve each decision, screenshot, trace and actual network response in private auditable evidence.
+
+A host/runtime declaring itself a different QA actor is not an external cryptographic identity. The ChatGPT actor can perform real interactive exploratory QA without any external LLM API connection, but such interaction is **not** a verified second-provider experiment, unattended service or a formal release Full User E2E. The independent provenance auditor reports T0 internal evidence consistency only. See evals/ai-qa/pilots/20261024-autonomous-browser-exploration.md for the confirmed QA harness defect, correction and actual rerun.
+
 ## P1–P4 optional executable adapters
 
 Product-scoped adapters live in [adapters/ai-qa](../adapters/ai-qa/README.md): a real Parser Studio Chromium collector, frozen raw-field/byte/download oracle, seeded metamorphic/property campaign, semantic observation fault injection and disposable **actual Python source mutation** of the QA benchmark. The source mutation probe measures the Engineering System QA benchmark's regression sensitivity, not Parser Studio's code mutation score. Neither adapter modifies production or supplants a product's full user-gate contract.
