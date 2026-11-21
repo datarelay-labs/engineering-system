@@ -105,10 +105,10 @@ def execute_test(root: Path, *, holdout: bool) -> tuple[str, str]:
     # missing dependency, Vitest config crash or other infrastructure failure.
     # Require Vitest's terminal test summary to classify an actual assertion.
     last = (ran.stdout + "\n" + ran.stderr)[-6000:]
-    passed_files = bool(re.search(r"Test Files\\s+\\d+\\s+passed", last))
-    passed_tests = bool(re.search(r"Tests\\s+\\d+\\s+passed", last))
-    failed_files = bool(re.search(r"Test Files\\s+\\d+\\s+failed", last))
-    failed_tests = bool(re.search(r"Tests\\s+\\d+\\s+failed", last))
+    passed_files = bool(re.search(r"Test Files\s+\d+\s+passed", last))
+    passed_tests = bool(re.search(r"Tests\s+\d+\s+passed", last))
+    failed_files = bool(re.search(r"Test Files\s+\d+\s+failed", last))
+    failed_tests = bool(re.search(r"Tests\s+\d+\s+failed", last))
     if ran.returncode == 0 and passed_files and passed_tests and not failed_files and not failed_tests:
         return "PASS", sha(last.encode())
     if ran.returncode != 0 and failed_files and failed_tests:
