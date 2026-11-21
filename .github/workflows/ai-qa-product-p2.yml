@@ -74,9 +74,9 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json
+          from pathlib import Path
           base = {
             "testRunner": "vitest",
-            "vitest": {"related": False},
             "mutate": ["src/guided/normalizationValidation.ts:26-28",
                        "src/guided/normalizationValidation.ts:35-37"],
             "reporters": ["json", "clear-text"],
@@ -90,15 +90,24 @@ jobs:
             ("enhanced", ["src/guided/normalizationValidation.test.ts",
                           "src/guided/aiQaGenerativeHoldout.test.ts"]),
           ]:
-            config = dict(base, testFiles=tests)
+            # StrykerJS 9 ignores the legacy testFiles option. Each runner
+            # must load a separate Vitest include configuration instead.
+            path = "p2-" + label + ".vitest.config.mjs"
+            Path(path).write_text(
+              "import {defineConfig} from 'vitest/config';\\n"
+              "export default defineConfig({test:{include:"
+              + json.dumps(tests) + "}});\\n")
+            config = dict(base, vitest={"related": False, "configFile": path})
             with open("p2-" + label + ".conf.json", "w") as stream:
               json.dump(config, stream, sort_keys=True)
           PY
           mkdir -p p2-reports
-          ./node_modules/.bin/stryker run p2-original.conf.json
+          ./node_modules/.bin/stryker run p2-original.conf.json | tee p2-reports/original.log
+          grep -E 'Initial test run succeeded\\. Ran 3 tests' p2-reports/original.log
           test -s reports/mutation/mutation.json
           cp reports/mutation/mutation.json p2-reports/original.json
-          ./node_modules/.bin/stryker run p2-enhanced.conf.json
+          ./node_modules/.bin/stryker run p2-enhanced.conf.json | tee p2-reports/enhanced.log
+          grep -E 'Initial test run succeeded\\. Ran 7 tests' p2-reports/enhanced.log
           test -s reports/mutation/mutation.json
           cp reports/mutation/mutation.json p2-reports/enhanced.json
 
