@@ -127,3 +127,22 @@ jobs:
             --output product/p2-reports/score.json
           sha256sum product/p2-reports/*.json
           git -C product status --short | head -30
+
+      - name: Freeze dependency provenance and exact report hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd product && npm ls --depth=0 --json > p2-reports/package-versions.json)
+          sha256sum product/package-lock.json product/p2-reports/package-versions.json             product/p2-reports/original.json product/p2-reports/enhanced.json             product/p2-reports/score.json
+          test "$(git -C product rev-parse HEAD)" = "567e0c255312028337898114cac452567bc585cc"
+
+      - name: Preserve independent QA evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: parser-studio-p2-frozen-stryker
+          path: |
+            source.sha256
+            product/p2-reports/*.json
+            product/p2-reports/*.log
+          if-no-files-found: error
+          retention-days: 14
