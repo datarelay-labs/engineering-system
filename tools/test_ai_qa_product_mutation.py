@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 from pathlib import Path
 
 PATH = Path(__file__).resolve().parents[1] / "adapters/ai-qa/parser-studio-product-mutation.py"
@@ -79,6 +81,60 @@ class ScoreTest(unittest.TestCase):
         self.assertIn("custom.actor.id", raw)
         self.assertIn("TARGET_COLLISION", raw)
         self.assertIn("toHaveLength(2)", raw)
+
+
+    def test_duplicate_mutant_ids_cannot_inflate_scores(self):
+        rows = [
+            {"id": "reused", "original": "FAIL", "with_holdout": "FAIL"},
+            {"id": "reused", "original": "PASS", "with_holdout": "FAIL"},
+        ]
+        with self.assertRaisesRegex(module.Unsafe, "DUPLICATE_MUTANT_ID"):
+            module.score(rows, "PASS", "PASS")
+
+    def test_malformed_mutant_ids_and_outcome_rows_fail_closed(self):
+        for rows, reason in [
+            ([{"id": "../escape", "original": "PASS", "with_holdout": "FAIL"}], "INVALID_MUTANT_ID"),
+            ([{"original": "PASS", "with_holdout": "FAIL"}], "INVALID_MUTANT_ID"),
+            ([None], "INVALID_TEST_RESULT"),
+            ("fabricated", "INVALID_OUTCOMES"),
+        ]:
+            with self.subTest(rows=rows):
+                with self.assertRaisesRegex(module.Unsafe, reason):
+                    module.score(rows, "PASS", "PASS")
+
+    def test_unqualified_outcomes_separated_without_inflating_kills(self):
+        rows = [
+            {"id": "syntax", "original": "INVALID_MUTANT", "with_holdout": "INVALID_MUTANT"},
+            {"id": "timeout", "original": "TIMEOUT", "with_holdout": "TIMEOUT"},
+            {"id": "infra", "original": "INFRA_FAILURE", "with_holdout": "FAIL"},
+        ]
+        out = module.score(rows, "PASS", "PASS")
+        self.assertEqual(out["valid_mutants"], 0)
+        self.assertEqual(out["not_qualified"], 3)
+        self.assertEqual(out["unqualified_by_reason"], {
+            "INVALID_MUTANT": ["syntax"], "TIMEOUT": ["timeout"], "INFRA_FAILURE": ["infra"],
+        })
+        self.assertIsNone(out["combined_mutation_score"])
+        self.assertEqual(out["measurement_scope"], "TARGETED_CUSTOM_MUTANTS_ONLY")
+        self.assertFalse(out["human_equivalent_release_gate"])
+
+    def test_vitest_process_errors_are_not_mutation_kills(self):
+        scenarios = [
+            (0, "tool exited zero without test summary", "", "INFRA_FAILURE"),
+            (1, "", "Error: Failed to load config", "INFRA_FAILURE"),
+            (1, "Test Files  1 failed (1)\\nTests  2 failed | 1 passed (3)", "", "FAIL"),
+            (0, "Test Files  1 passed (1)\\nTests  3 passed (3)", "", "PASS"),
+            (0, "Test Files  1 passed (1)\\nTests  1 failed (1)", "", "INFRA_FAILURE"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            for code, stdout, stderr, expected in scenarios:
+                with self.subTest(exit_code=code, stdout=stdout):
+                    fake = SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr)
+                    with mock.patch.object(module.subprocess, "run", return_value=fake):
+                        status, digest = module.execute_test(Path(tmp), holdout=False)
+                    self.assertEqual(status, expected)
+                    self.assertEqual(len(digest), 64)
+
 
 
 if __name__ == "__main__":
