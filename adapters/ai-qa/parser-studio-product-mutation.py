@@ -170,6 +170,10 @@ def score(outcomes: list[dict], product_baseline: str, holdout_baseline: str) ->
 def run(product_root: Path, expected_head: str, *, output: Path) -> dict:
     must(bool(HEAD_PATTERN.fullmatch(expected_head)), "BAD_EXPECTED_HEAD")
     must(not output.exists(), "REFUSE_OVERWRITE_EXISTING_EVIDENCE")
+    # Evidence may be written to the requested independent QA location, never
+    # to the product checkout (including paths reached through symlinks).
+    must(not output.resolve().is_relative_to(product_root.resolve()),
+         "OUTPUT_INSIDE_PRODUCT_CHECKOUT")
     raw = obtain_snapshot(product_root, expected_head)
     must(HOLDOUT_SOURCE.is_file(), "MISSING_INDEPENDENT_QA_HOLDOUT")
     holdout_data = HOLDOUT_SOURCE.read_bytes()
