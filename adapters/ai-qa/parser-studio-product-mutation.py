@@ -101,17 +101,32 @@ def execute_test(root: Path, *, holdout: bool) -> tuple[str, str]:
                              capture_output=True, text=True, timeout=55, check=False)
     except subprocess.TimeoutExpired:
         return "TIMEOUT", "TIMEOUT"
-    last = (ran.stdout + "\n" + ran.stderr)[-1800:]
-    if ran.returncode == 0:
+    # A nonzero process exit alone is NOT a product test kill: it can be a
+    # missing dependency, Vitest config crash or other infrastructure failure.
+    # Require Vitest's terminal test summary to classify an actual assertion.
+    last = (ran.stdout + "\n" + ran.stderr)[-6000:]
+    passed_files = bool(re.search(r"Test Files\\s+\\d+\\s+passed", last))
+    passed_tests = bool(re.search(r"Tests\\s+\\d+\\s+passed", last))
+    failed_files = bool(re.search(r"Test Files\\s+\\d+\\s+failed", last))
+    failed_tests = bool(re.search(r"Tests\\s+\\d+\\s+failed", last))
+    if ran.returncode == 0 and passed_files and passed_tests and not failed_files and not failed_tests:
         return "PASS", sha(last.encode())
-    if "Error: " in last and "Failed to load" in last:
-        return "INFRA_FAILURE", sha(last.encode())
-    return "FAIL", sha(last.encode())
+    if ran.returncode != 0 and failed_files and failed_tests:
+        return "FAIL", sha(last.encode())
+    return "INFRA_FAILURE", sha(last.encode())
 
 
 def score(outcomes: list[dict], product_baseline: str, holdout_baseline: str) -> dict:
     must(product_baseline == holdout_baseline == "PASS", "BASELINE_NOT_GREEN")
+    must(type(outcomes) is list and len(outcomes) <= 1000, "INVALID_OUTCOMES")
+    seen: set[str] = set()
     for row in outcomes:
+        must(type(row) is dict, "INVALID_TEST_RESULT")
+        label = row.get("id")
+        must(type(label) is str and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", label)),
+             "INVALID_MUTANT_ID")
+        must(label not in seen, "DUPLICATE_MUTANT_ID")
+        seen.add(label)
         must(row.get("original") in {"PASS", "FAIL", "TIMEOUT", "INFRA_FAILURE", "INVALID_MUTANT"}
              and row.get("with_holdout") in {"PASS", "FAIL", "TIMEOUT", "INFRA_FAILURE", "INVALID_MUTANT"},
              "INVALID_TEST_RESULT")
@@ -123,7 +138,19 @@ def score(outcomes: list[dict], product_baseline: str, holdout_baseline: str) ->
     extra = [r["id"] for r in valid if r["original"] == "PASS" and r["with_holdout"] == "FAIL"]
     survivors = [r["id"] for r in valid if r["original"] == r["with_holdout"] == "PASS"]
     unqualified = [r["id"] for r in outcomes if r not in valid]
+    unqualified_by_reason = {"INVALID_MUTANT": [], "TIMEOUT": [], "INFRA_FAILURE": []}
+    for row in outcomes:
+        if row in valid:
+            continue
+        states = {row["original"], row["with_holdout"]}
+        reason = ("INVALID_MUTANT" if "INVALID_MUTANT" in states else
+                  "TIMEOUT" if "TIMEOUT" in states else "INFRA_FAILURE")
+        unqualified_by_reason[reason].append(row["id"])
     return {
+        # Deliberately not Stryker coverage or a product release qualification.
+        "measurement_scope": "TARGETED_CUSTOM_MUTANTS_ONLY",
+        "human_equivalent_release_gate": False,
+        "unqualified_by_reason": unqualified_by_reason,
         "source_mutants_attempted": len(outcomes),
         "valid_mutants": len(valid),
         "caught_existing_tests": len(killed_product),
