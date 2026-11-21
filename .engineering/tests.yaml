@@ -35,6 +35,14 @@ paths:
     domains: [ai, workflows]
   "tools/test_ai_qa_product_mutation.py":
     domains: [ai, adapters, workflows]
+  "tools/ai_qa_stryker_compare.py":
+    domains: [ai, adapters, workflows]
+  "tools/test_ai_qa_stryker_compare.py":
+    domains: [ai, adapters, workflows]
+  "adapters/ai-qa/parser-studio-generative-holdout.test.ts":
+    domains: [ai, adapters, workflows]
+  ".github/workflows/ai-qa-product-p2.yml":
+    domains: [ai, workflows]
   "tools/ai_qa_explorer_audit.py":
     domains: [ai, adapters, workflows]
   "tools/test_ai_qa_explorer_audit.py":
@@ -1136,6 +1144,23 @@ scenarios:
     command: "python3 -B tools/test_ai_qa_bakeoff.py"
     invariants:
       - "common holdout exact HEAD and external pins deny false vendor comparison; claimed price remains unverified"
+    release_gate: false
+
+  - id: ENG-AI-QA-STRYKER-COMPARISON-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 45
+    agent_default: true
+    scope: unit
+    name: Frozen same-mutant Stryker score and source provenance
+    level: unit
+    domains: [ai, adapters, workflows]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_stryker_compare.py"
+    invariants:
+      - "same original and independent generated mutants require exact identities and source pins"
+      - "timeouts, compiler errors and missing mutants are never silently scored as kills or release PASS"
     release_gate: false
 
   - id: ENG-TARGETED-CONVERGENCE-001
