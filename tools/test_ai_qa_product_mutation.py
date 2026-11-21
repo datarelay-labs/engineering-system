@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import random
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -134,6 +135,51 @@ class ScoreTest(unittest.TestCase):
                         status, digest = module.execute_test(Path(tmp), holdout=False)
                     self.assertEqual(status, expected)
                     self.assertEqual(len(digest), 64)
+
+
+    def test_rejects_output_under_product_root_including_symlink(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / "product"
+            root.mkdir()
+            output = root / "evidence.json"
+            with self.assertRaisesRegex(module.Unsafe, "OUTPUT_INSIDE_PRODUCT_CHECKOUT"):
+                module.run(root, "a" * 40, output=output)
+            shortcut = Path(t) / "alias"
+            shortcut.symlink_to(root, target_is_directory=True)
+            with self.assertRaisesRegex(module.Unsafe, "OUTPUT_INSIDE_PRODUCT_CHECKOUT"):
+                module.run(root, "a" * 40, output=shortcut / "evidence.json")
+            self.assertFalse(output.exists())
+
+    def test_seeded_generated_mutant_accounting_invariants(self):
+        rng = random.Random(20261122)
+        states = ["PASS", "FAIL", "TIMEOUT", "INFRA_FAILURE", "INVALID_MUTANT"]
+        for attempt in range(60):
+            rows = []
+            for i in range(rng.randrange(1, 40)):
+                original = rng.choice(states)
+                combined = (rng.choice(["PASS", "FAIL"]) if original == "PASS"
+                            else "FAIL" if original == "FAIL"
+                            else rng.choice([original, "FAIL"]))
+                rows.append({"id": f"case-{attempt}-{i}",
+                             "original": original, "with_holdout": combined})
+            out = module.score(rows, "PASS", "PASS")
+            qualified = [r for r in rows if r["original"] in {"PASS", "FAIL"}
+                         and r["with_holdout"] in {"PASS", "FAIL"}]
+            existing = sum(r["original"] == "FAIL" for r in qualified)
+            additional = sum(r["original"] == "PASS" and r["with_holdout"] == "FAIL"
+                             for r in qualified)
+            survivors = sum(r["original"] == r["with_holdout"] == "PASS"
+                            for r in qualified)
+            with self.subTest(attempt=attempt):
+                self.assertEqual(out["valid_mutants"], len(qualified))
+                self.assertEqual(out["caught_existing_tests"], existing)
+                self.assertEqual(out["additional_caught_by_independent_holdout"], additional)
+                self.assertEqual(out["survived_both"], survivors)
+                self.assertEqual(out["not_qualified"], len(rows) - len(qualified))
+                self.assertEqual(existing + additional + survivors, len(qualified))
+                self.assertEqual(sum(map(len, out["unqualified_by_reason"].values())),
+                                 len(rows) - len(qualified))
+                self.assertFalse(out["human_equivalent_release_gate"])
 
 
 
