@@ -94,20 +94,20 @@ jobs:
             # must load a separate Vitest include configuration instead.
             path = "p2-" + label + ".vitest.config.mjs"
             Path(path).write_text(
-              "import {defineConfig} from 'vitest/config';\\n"
+              "import {defineConfig} from 'vitest/config';\n"
               "export default defineConfig({test:{include:"
-              + json.dumps(tests) + "}});\\n")
+              + json.dumps(tests) + "}});\n")
             config = dict(base, vitest={"related": False, "configFile": path})
             with open("p2-" + label + ".conf.json", "w") as stream:
               json.dump(config, stream, sort_keys=True)
           PY
           mkdir -p p2-reports
           ./node_modules/.bin/stryker run p2-original.conf.json | tee p2-reports/original.log
-          grep -E 'Initial test run succeeded\\. Ran 3 tests' p2-reports/original.log
+          grep -E 'Initial test run succeeded\. Ran 3 tests' p2-reports/original.log
           test -s reports/mutation/mutation.json
           cp reports/mutation/mutation.json p2-reports/original.json
           ./node_modules/.bin/stryker run p2-enhanced.conf.json | tee p2-reports/enhanced.log
-          grep -E 'Initial test run succeeded\\. Ran 7 tests' p2-reports/enhanced.log
+          grep -E 'Initial test run succeeded\. Ran 7 tests' p2-reports/enhanced.log
           test -s reports/mutation/mutation.json
           cp reports/mutation/mutation.json p2-reports/enhanced.json
 
