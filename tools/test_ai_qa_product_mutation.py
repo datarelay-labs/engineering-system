@@ -122,9 +122,9 @@ class ScoreTest(unittest.TestCase):
         scenarios = [
             (0, "tool exited zero without test summary", "", "INFRA_FAILURE"),
             (1, "", "Error: Failed to load config", "INFRA_FAILURE"),
-            (1, "Test Files  1 failed (1)\\nTests  2 failed | 1 passed (3)", "", "FAIL"),
-            (0, "Test Files  1 passed (1)\\nTests  3 passed (3)", "", "PASS"),
-            (0, "Test Files  1 passed (1)\\nTests  1 failed (1)", "", "INFRA_FAILURE"),
+            (1, "Test Files  1 failed (1)\nTests  2 failed | 1 passed (3)", "", "FAIL"),
+            (0, "Test Files  1 passed (1)\nTests  3 passed (3)", "", "PASS"),
+            (0, "Test Files  1 passed (1)\nTests  1 failed (1)", "", "INFRA_FAILURE"),
         ]
         with tempfile.TemporaryDirectory() as tmp:
             for code, stdout, stderr, expected in scenarios:
