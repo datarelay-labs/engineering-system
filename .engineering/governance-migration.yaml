@@ -10,6 +10,6 @@ rationale: Bind the canonical adoption/check-adoption managed helper closure for
   upgrade policy.
 changed_surfaces:
 - path: tools/adopt.py
-  head_blob_sha: 9bf67cb75b6cb27ef2b7100fd1442cd29437943e
+  head_blob_sha: 7cc2e124cbd3b9a754dbba2a8ba91954ed6baa65
 - path: tools/check-adoption.py
   head_blob_sha: 134d46d40cb3209bd18f58bcf1fdeadedcab38c5
