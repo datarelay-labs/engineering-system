@@ -2813,6 +2813,8 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     required = (
         "tools/check-adoption.py",
         "tools/adopt.py",
+        "tools/current_packet_issue.py",
+        "tools/handoff_contract.py",
         "tools/execution_profile.py",
         "tools/engineering-context.py",
         "tools/governance_floor.py",
@@ -2826,6 +2828,15 @@ def test_adoption_compliance_workflow_checks_engineering_context_helper() -> Non
     )
     for token in required:
         assert token in workflow, token
+    # Merely mentioning managed helpers elsewhere in this workflow is not
+    # sufficient: the canonical runtime must actually check them out.
+    document = yaml.safe_load(workflow)
+    checkout = next(
+        step for step in document["jobs"]["compliance"]["steps"]
+        if (step.get("with") or {}).get("path") == ".engineering-system-runtime"
+    )
+    sparse = set(checkout["with"]["sparse-checkout"].splitlines())
+    assert set(required[:8]).issubset(sparse), sorted(set(required[:8]) - sparse)
     assert 'if "Cursor" in text' not in workflow
     assert "canonical_helper = Path" not in workflow
 
