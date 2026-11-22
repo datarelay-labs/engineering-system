@@ -68,6 +68,22 @@ def _canonical_continuation_marker(token: str, repo: str, issue_number: int) -> 
     )
 
 
+def _packet_from_issue_body(body: str, repo: str):
+    """Only explicit markers opt in; ordinary packet parsing remains unchanged.
+
+    The authenticated GitHub read/author check and actual Git state remain
+    separate requirements. This helper cannot mint mutation authority.
+    """
+    if "ENGINEERING_CURRENT_PACKET_" not in body:
+        return parse_packet(body)
+    from current_packet_issue import select_marked_packet
+    return select_marked_packet(
+        body,
+        expected_source_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        expected_target_repo=repo,
+    )
+
+
 def verify(facts: dict) -> dict:
     """Legacy pure verifier: its digest is caller-reported, not a GitHub read."""
     required = ("target_repo", "packet_body", "persisted_body_sha256", "continuation_token")
@@ -79,7 +95,10 @@ def verify(facts: dict) -> dict:
     persisted = str(facts["persisted_body_sha256"])
     if not SHA_RE.fullmatch(persisted) or digest != persisted:
         return _block("PERSISTED_PACKET_MISMATCH")
-    packet = parse_packet(body)
+    try:
+        packet = _packet_from_issue_body(body, str(facts["target_repo"]))
+    except (ValueError, ImportError):
+        return _block("PACKET_SELECTION_INVALID")
     lint = analyze_packet(packet, expected_target_repo=str(facts["target_repo"]))
     if lint["status"] != "PASS":
         return _block("PACKET_NOT_CLEAN", blocking=lint["blocking"], warnings=lint["warnings"])
@@ -119,7 +138,10 @@ def verify_github_issue(facts: dict, issue_number: int, issue: dict) -> dict:
     missing = [key for key in required if facts.get(key) is None or facts.get(key) == ""]
     if missing:
         return _block("RESUME_ANCHOR_MISSING", missing=missing)
-    packet = parse_packet(body)
+    try:
+        packet = _packet_from_issue_body(body, repo)
+    except (ValueError, ImportError):
+        return _block("PERSISTED_PACKET_SELECTION_INVALID")
     expected = {
         "WORKSTREAM": str(facts["expected_workstream"]),
         "OWNER_INTENT": str(facts["expected_owner_intent"]),
@@ -273,7 +295,10 @@ def _verify_resume_issue_primary(repo: str, number: int, issue: dict, git_state:
     body = issue.get("body")
     if not isinstance(body, str):
         return _block("RESUME_PACKET_MISSING")
-    packet = parse_packet(body)
+    try:
+        packet = _packet_from_issue_body(body, repo)
+    except (ValueError, ImportError):
+        return _block("RESUME_PACKET_SELECTION_INVALID")
     lint = analyze_packet(packet, expected_target_repo=repo)
     if lint["status"] != "PASS":
         return _block("RESUME_PACKET_NOT_CLEAN", blocking=lint["blocking"],
@@ -329,7 +354,11 @@ def _resume_reconciliation(repo: str, number: int, issue: dict, git_state: dict)
     if not isinstance(body, str):
         add("RESUME_PACKET_MISSING")
         return discrepancies
-    packet = parse_packet(body)
+    try:
+        packet = _packet_from_issue_body(body, repo)
+    except (ValueError, ImportError):
+        add("RESUME_PACKET_SELECTION_INVALID")
+        return discrepancies
     lint = analyze_packet(packet, expected_target_repo=repo)
     if lint["status"] != "PASS":
         add("RESUME_PACKET_NOT_CLEAN")

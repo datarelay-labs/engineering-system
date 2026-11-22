@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-from context_epoch import ContextError, analyze_packet, parse_packet, project_packet
+from context_epoch import ContextError, Packet, analyze_packet, parse_packet, project_packet
 from execution_profile import FENCE_RE
 
 BEGIN = "<!-- ENGINEERING_CURRENT_PACKET_BEGIN -->"
@@ -50,13 +50,13 @@ def _marker_indices(source: str) -> tuple[list[str], list[int], list[int]]:
     return lines, begins, ends
 
 
-def project_marked_issue(
+def select_marked_packet(
     source: str,
     *,
     expected_source_sha256: str,
     expected_target_repo: str,
-) -> str:
-    """Produce bounded diagnostic context, never executable authority."""
+) -> Packet:
+    """Select a structurally valid packet from exact caller-bound Issue bytes."""
     if not SHA256_RE.fullmatch(expected_source_sha256):
         raise ContextError("ISSUE_DIGEST_INVALID")
     if (
@@ -85,7 +85,22 @@ def project_marked_issue(
         raise ContextError("CURRENT_PACKET_INVALID:" + ",".join(reasons)[:600])
     if packet.metadata.get("STATUS") != "ACTIVE":
         raise ContextError("CURRENT_PACKET_NOT_ACTIVE")
+    return packet
 
+
+def project_marked_issue(
+    source: str,
+    *,
+    expected_source_sha256: str,
+    expected_target_repo: str,
+) -> str:
+    """Emit read-only diagnostic context, not execution authority."""
+    packet = select_marked_packet(
+        source,
+        expected_source_sha256=expected_source_sha256,
+        expected_target_repo=expected_target_repo,
+    )
+    digest = expected_source_sha256
     prefix = (
         "ISSUE_PACKET_SOURCE_SHA256=" + digest + "\n"
         + "ISSUE_PACKET_SELECTION=EXPLICIT_MARKERS\n"

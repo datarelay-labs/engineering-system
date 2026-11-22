@@ -341,6 +341,10 @@ provenance is explicitly `CALLER_SUPPLIED_NOT_ATTESTED`; the CLI does not
 authenticate GitHub, grant execution, validate actual branch/HEAD/worktree,
 or replace `handoff_contract`, current user intent, or trusted release gates.
 Treat its output as **diagnostic context only**, never an execution approval.
+The existing `handoff_contract.py` may independently select this same
+validated current block **only** after its authenticated GitHub Issue and
+author-permission checks, and still requires matching current Git repository,
+worktree, branch, HEAD, persisted first action, and caller authorization.
 No marker means use the normal canonical flow or repair the existing Issue
 under the owning workstream; do not auto-select the latest-looking text.
 

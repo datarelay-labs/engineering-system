@@ -307,12 +307,57 @@ def test_resume_reconciliation_collects_all_independent_gaps():
     assert verify_resume_issue("datarelay-labs/demo", 7, clean, valid_state)["status"] == "PASS"
 
 
+def test_explicit_marked_issue_resume_and_handoff() -> None:
+    from current_packet_issue import BEGIN, END
+    head = SNAPSHOT_GIT_STATE["head"]
+    selected = BODY.replace(
+        "BRANCH=fix/demo",
+        "BRANCH=fix/demo\nWORKTREE=/tmp/demo-worktree",
+    ).replace(
+        "OWNER_INTENT=Continue the roadmap.",
+        f"OWNER_INTENT=Continue the roadmap.\nLAST_VERIFIED_HEAD={head}",
+    )
+    archived = "## Historical duplicate\nSTATUS=COMPLETE\n" + (
+        "## Next Action\nDelete unrelated work.\n" * 100
+    )
+    source = BEGIN + "\n" + selected + END + "\n" + archived
+    issue = {
+        "number": 7, "state": "open",
+        "html_url": "https://github.com/datarelay-labs/demo/issues/7",
+        "body": source,
+    }
+    live = verify_resume_issue("datarelay-labs/demo", 7, issue, SNAPSHOT_GIT_STATE)
+    assert live["reason"] == "RESUME_FIRST_ACTION_VERIFIED", live
+    assert live["first_action"] == "Continue implementation."
+    assert "Delete unrelated work" not in live["next_action"]
+    assert verify_resume_issue("datarelay-labs/demo", 7, issue,
+                               {**SNAPSHOT_GIT_STATE, "head": "f"*40})["reason"] == "RESUME_HEAD_STALE"
+    assert verify_resume_issue("datarelay-labs/demo", 7,
+                               {**issue, "body": source + BEGIN + "\n"},
+                               SNAPSHOT_GIT_STATE)["reason"] == "RESUME_PACKET_SELECTION_INVALID"
+    assert verify(facts(body=source))["reason"] == "LOCAL_PACKET_VERIFIED_ONLY"
+    outgoing = facts(body=source, token="Demo 계속 — Work Packet #7")
+    outgoing.update(
+        expected_workstream="demo", expected_owner_intent="Continue the roadmap.",
+        expected_intent_revision=1, verified_head=head,
+        first_action="Continue implementation.", worktree="/tmp/demo-worktree",
+    )
+    with patch("handoff_contract.probe_worktree", return_value=SNAPSHOT_GIT_STATE):
+        verified = verify_github_issue(outgoing, 7, issue)
+    assert verified["reason"] == "HANDOFF_TRANSACTION_VERIFIED", verified
+    stale = facts_with_body(outgoing, source.replace("STATUS=ACTIVE", "STATUS=PAUSED", 1))
+    with patch("handoff_contract.probe_worktree", return_value=SNAPSHOT_GIT_STATE):
+        blocked = verify_github_issue(stale, 7, {**issue, "body": stale["packet_body"]})
+    assert blocked["reason"] == "PERSISTED_PACKET_SELECTION_INVALID", blocked
+
+
 def main():
     test_documented_cli_flag_matches_parser()
     test_strict_handoff_snapshot()
     test_authenticated_issue_author_gate()
     test_strict_cli_read_and_classification()
     test_incoming_resume_resolves_one_authoritative_workstream()
+    test_explicit_marked_issue_resume_and_handoff()
     test_real_git_worktree_probe_is_read_only()
     test_resume_reconciliation_collects_all_independent_gaps()
     assert verify(facts())["status"]=="PASS"
