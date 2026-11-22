@@ -647,7 +647,8 @@ def packet_not_runnable_reason(packet: Any) -> tuple[str, str] | None:
 
 def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     """Evaluate fresh repository-bound packet facts; never mutate or launch work."""
-    from context_epoch import analyze_packet, parse_packet
+    from context_epoch import ContextError, analyze_packet
+    from current_packet_issue import packet_from_issue_body
 
     data = _require_mapping(payload, "request")
     body = _require_str(data.get("body"), "body")
@@ -666,7 +667,12 @@ def evaluate_eligible(payload: dict[str, Any]) -> dict[str, str]:
     ready = _require_bool(data.get("dependencies_ready"), "dependencies_ready")
     waits = _require_list(data.get("waiting_for"), "waiting_for")
     waits = [_require_str(value, "waiting_for item") for value in waits]
-    packet = parse_packet(body)
+    try:
+        packet = packet_from_issue_body(
+            body, expected_target_repo=target, profile_root=root
+        )
+    except ContextError as exc:
+        return deny("packet source selection: " + str(exc)[:240], "INVALID_PACKET")
     audit = analyze_packet(packet, profile_root=root, expected_target_repo=target)
     if audit["blocking"]:
         return deny("packet lint: " + ",".join(audit["blocking"]), "INVALID_PACKET")
@@ -724,7 +730,8 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
     Owner focus takes precedence over an in-progress lock, then rank and oldest
     GitHub Issue number decide between runnable workstreams.
     """
-    from context_epoch import SAFE_WORKSTREAM_RE, parse_packet
+    from context_epoch import ContextError, SAFE_WORKSTREAM_RE
+    from current_packet_issue import packet_from_issue_body
 
     data = _require_mapping(payload, "request")
     target = _require_str(data.get("target_repository"), "target_repository")
@@ -758,7 +765,11 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
             if repository != target:
                 continue
             issue_number = _require_int(candidate.get("issue_number"), "issue_number", minimum=1)
-            packet = parse_packet(_require_str(candidate.get("body"), "body"))
+            packet = packet_from_issue_body(
+                _require_str(candidate.get("body"), "body"),
+                expected_target_repo=repository,
+                profile_root=candidate.get("profile_root"),
+            )
             workstream = _require_str(
                 packet.metadata.get("WORKSTREAM"), "WORKSTREAM"
             )
@@ -795,7 +806,7 @@ def evaluate_priority_selection(payload: dict[str, Any]) -> dict[str, str]:
             else:
                 # Stale/invalid P0 must not silently vanish behind healthy P2.
                 return _priority_result("RECONCILE", "UNRECONCILED_CANDIDATE", proposed)
-        except (AdmissionFactsError, KeyError):
+        except (AdmissionFactsError, ContextError, KeyError):
             return _priority_result("RECONCILE", "UNRECONCILED_CANDIDATE", proposed)
 
     if owner_focus is not None and owner_focus not in scoped:
@@ -931,7 +942,8 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
     reconcile_required = False
     pending_candidate_count = 0
     scoped_candidate_count = 0
-    from context_epoch import SAFE_WORKSTREAM_RE, parse_packet
+    from context_epoch import ContextError, SAFE_WORKSTREAM_RE
+    from current_packet_issue import packet_from_issue_body
     for index, item in enumerate(candidates_raw):
         try:
             candidate = _require_mapping(item, f"runnable_candidates[{index}]")
@@ -945,7 +957,11 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
                 body = _require_str(
                     candidate.get("body"), f"runnable_candidates[{index}].body"
                 )
-                packet = parse_packet(body)
+                packet = packet_from_issue_body(
+                    body,
+                    expected_target_repo=candidate_repository,
+                    profile_root=candidate.get("profile_root"),
+                )
                 candidate_workstream = packet.metadata.get("WORKSTREAM", "")
                 if (
                     "WORKSTREAM" in packet.duplicate_metadata
@@ -962,7 +978,7 @@ def evaluate_disposition(request: dict[str, Any]) -> dict[str, str]:
                     continue
             scoped_candidate_count += 1
             result = evaluate_eligible(candidate)
-        except AdmissionFactsError:
+        except (AdmissionFactsError, ContextError):
             # One malformed/stale in-scope dependency must not suppress
             # independent runnable work. Preserve it as reconciliation evidence.
             reconcile_required = True

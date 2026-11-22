@@ -55,8 +55,17 @@ def select_marked_packet(
     *,
     expected_source_sha256: str,
     expected_target_repo: str,
+    profile_root: Path | str | None = None,
 ) -> Packet:
     """Select a structurally valid packet from exact caller-bound Issue bytes."""
+    # Work Admission receives JSON-shaped caller facts. A malformed profile
+    # root must never crash priority/disposition or bypass reconciliation.
+    if profile_root is not None and (
+        not isinstance(profile_root, (str, Path))
+        or not str(profile_root).strip()
+        or not Path(profile_root).is_absolute()
+    ):
+        raise ContextError("PROFILE_ROOT_INVALID")
     if not SHA256_RE.fullmatch(expected_source_sha256):
         raise ContextError("ISSUE_DIGEST_INVALID")
     if (
@@ -79,13 +88,36 @@ def select_marked_packet(
     if len(selected.encode("utf-8")) > MAX_PACKET_BYTES:
         raise ContextError("CURRENT_PACKET_SIZE_INVALID")
     packet = parse_packet(selected)
-    lint = analyze_packet(packet, expected_target_repo=expected_target_repo)
+    lint = analyze_packet(
+        packet, expected_target_repo=expected_target_repo, profile_root=profile_root
+    )
     if lint["status"] != "PASS":
         reasons = lint["blocking"] or lint["warnings"]
         raise ContextError("CURRENT_PACKET_INVALID:" + ",".join(reasons)[:600])
     if packet.metadata.get("STATUS") != "ACTIVE":
         raise ContextError("CURRENT_PACKET_NOT_ACTIVE")
     return packet
+
+
+def packet_from_issue_body(
+    source: str, *, expected_target_repo: str,
+    profile_root: Path | str | None = None,
+) -> Packet:
+    """Interpret one caller-provided Issue; no authentication or mutation authority.
+
+    Legacy ordinary packets keep their original parser and validation semantics.
+    A marker-like substring opts in to strict, unique current-block selection:
+    malformed, duplicated or fenced markers never fall back to legacy parsing.
+    Only an authenticated caller may use the result for scheduling decisions.
+    """
+    if "ENGINEERING_CURRENT_PACKET_" not in source:
+        return parse_packet(source)
+    return select_marked_packet(
+        source,
+        expected_source_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+        expected_target_repo=expected_target_repo,
+        profile_root=profile_root,
+    )
 
 
 def project_marked_issue(

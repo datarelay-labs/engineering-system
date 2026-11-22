@@ -1083,8 +1083,99 @@ def test_owner_priority_selection_guard() -> None:
     assert ties["SELECTION"] == "DENY"
     assert ties["REQUIRED_WORKSTREAM"] == "high-risk-fix"
 
+
+def test_marked_current_issue_consistent_across_selection_gates() -> None:
+    """History cannot falsely block a uniquely pinned canonical ACTIVE packet."""
+    from current_packet_issue import BEGIN, END
+    urgent = priority_candidate(320, "verified-thin-harness", "URGENT")
+    competing = priority_candidate(321, "unrelated-maintenance", "LOW")
+    # The raw historical Issue would produce duplicate canonical headings,
+    # including the Blockers section, unless the source-bound marker is honored.
+    historical = (
+        "## Goal\nOld completed objective.\n"
+        "## Next Action\nOld unrelated action.\n"
+        "## Blockers\nWAITING_FOR_CI\n"
+    )
+    source = (
+        "# Historical Issue\n"
+        + BEGIN + "\n" + urgent["body"].rstrip() + "\n" + END
+        + "\n\n" + historical
+    )
+    marked = {**urgent, "body": source}
+    admitted = evaluate_eligible(marked)
+    assert admitted["DECISION"] == "ALLOW", admitted
+    selection = evaluate_priority_selection({
+        "target_repository": "datarelay-labs/engineering-system",
+        "proposed_workstream": "unrelated-maintenance",
+        "candidates": [competing, marked],
+    })
+    assert selection["SELECTION"] == "DENY", selection
+    assert selection["REASON"] == "PRIORITY_DRIFT", selection
+    assert selection["REQUIRED_WORKSTREAM"] == "verified-thin-harness"
+    assert selection["NEXT_ACTION"] == "Implement verified-thin-harness."
+    disposition = evaluate_disposition({
+        "request_scope": "workstream",
+        "target_repository": "datarelay-labs/engineering-system",
+        "target_workstream": "verified-thin-harness",
+        "runnable_candidates": [marked],
+        "roadmap_runnable_work": [],
+    })
+    assert disposition["TURN_DISPOSITION"] == "CONTINUE", disposition
+    assert disposition["ROADMAP_COMPLETE"] == "NO", disposition
+    assert disposition["MUTATES_EXISTING_SESSIONS"] == "NO"
+
+    # Marker spoof/duplication is never a fallback to historical prose.
+    invalid = {**marked, "body": source + "\n" + BEGIN + "\n"}
+    not_eligible = evaluate_eligible(invalid)
+    assert not_eligible["DECISION"] == "DENY", not_eligible
+    assert not_eligible["DENY_CLASS"] == "INVALID_PACKET", not_eligible
+    bad_priority = evaluate_priority_selection({
+        "target_repository": "datarelay-labs/engineering-system",
+        "proposed_workstream": "unrelated-maintenance",
+        "candidates": [competing, invalid],
+    })
+    assert bad_priority["SELECTION"] == "RECONCILE", bad_priority
+    bad_disposition = evaluate_disposition({
+        "request_scope": "workstream",
+        "target_repository": "datarelay-labs/engineering-system",
+        "target_workstream": "verified-thin-harness",
+        "runnable_candidates": [invalid],
+        "roadmap_runnable_work": [],
+    })
+    assert bad_disposition["TURN_DISPOSITION"] == "RECONCILE", bad_disposition
+    assert bad_disposition["FINAL_ALLOWED"] == "NO", bad_disposition
+
+    # A malformed profile root must classify, not raise TypeError and bypass
+    # the caller's deterministic failure/reconciliation protocol.
+    bad_root = {**marked, "profile_root": {"untrusted": "object"}}
+    bad_root_priority = evaluate_priority_selection({
+        "target_repository": "datarelay-labs/engineering-system",
+        "proposed_workstream": "unrelated-maintenance",
+        "candidates": [competing, bad_root],
+    })
+    assert bad_root_priority["SELECTION"] == "RECONCILE", bad_root_priority
+    bad_root_disposition = evaluate_disposition({
+        "request_scope": "workstream",
+        "target_repository": "datarelay-labs/engineering-system",
+        "target_workstream": "verified-thin-harness",
+        "runnable_candidates": [bad_root],
+        "roadmap_runnable_work": [],
+    })
+    assert bad_root_disposition["TURN_DISPOSITION"] == "RECONCILE"
+    assert bad_root_disposition["FINAL_ALLOWED"] == "NO"
+
+    # Even an otherwise valid marked Issue remains pinned to observed Git.
+    stale = evaluate_eligible({**marked, "observed_head": "f" * 40})
+    assert stale["DECISION"] == "DENY" and stale["DENY_CLASS"] == "STALE_HEAD", stale
+    wrong_repo = evaluate_eligible({
+        **marked, "expected_target_repo": "datarelay-labs/other",
+    })
+    assert wrong_repo["DENY_CLASS"] == "INVALID_PACKET", wrong_repo
+
+
 def main() -> int:
     test_owner_priority_selection_guard()
+    test_marked_current_issue_consistent_across_selection_gates()
     test_turn_disposition_policy_surfaces()
     test_turn_disposition_classifies_supplied_facts()
     test_runnable_selection_excludes_stale_waiting_and_terminal_packets()

@@ -74,14 +74,8 @@ def _packet_from_issue_body(body: str, repo: str):
     The authenticated GitHub read/author check and actual Git state remain
     separate requirements. This helper cannot mint mutation authority.
     """
-    if "ENGINEERING_CURRENT_PACKET_" not in body:
-        return parse_packet(body)
-    from current_packet_issue import select_marked_packet
-    return select_marked_packet(
-        body,
-        expected_source_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
-        expected_target_repo=repo,
-    )
+    from current_packet_issue import packet_from_issue_body
+    return packet_from_issue_body(body, expected_target_repo=repo)
 
 
 def verify(facts: dict) -> dict:

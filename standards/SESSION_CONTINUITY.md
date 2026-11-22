@@ -345,6 +345,13 @@ The existing `handoff_contract.py` may independently select this same
 validated current block **only** after its authenticated GitHub Issue and
 author-permission checks, and still requires matching current Git repository,
 worktree, branch, HEAD, persisted first action, and caller authorization.
+The pure `work_admission.py` eligible/select/disposition classifiers also
+use the same strict marker selection for already authenticated caller-supplied
+Issue facts. An invalid/ambiguous marker returns denial or reconciliation;
+historical sections cannot become blockers, priorities, or next actions.
+This classifier never performs authentication, directly executes work or
+grants external mutation authority. Actual source/author permission, Git state,
+and owner intent remain separate prerequisites for execution.
 No marker means use the normal canonical flow or repair the existing Issue
 under the owning workstream; do not auto-select the latest-looking text.
 
