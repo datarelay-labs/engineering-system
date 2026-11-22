@@ -13,3 +13,5 @@ changed_surfaces:
   head_blob_sha: 7cc2e124cbd3b9a754dbba2a8ba91954ed6baa65
 - path: tools/check-adoption.py
   head_blob_sha: 134d46d40cb3209bd18f58bcf1fdeadedcab38c5
+- path: tools/upgrade-adoption.py
+  head_blob_sha: b3522dbc40ed1b08fa5446c0df37fc4920206505

@@ -819,6 +819,45 @@ def write_root_migration_manifest(root: Path, manifest: dict[str, object] | None
     return True
 
 
+def require_clean_pr_base_for_root_migration(
+    root: Path,
+    base_head: str,
+    planned_root_surfaces: dict[str, str],
+    *,
+    apply: bool,
+) -> None:
+    """Reject applying a root migration from a mid-PR commit.
+
+    A generation manifest's base_sha is checked by the *actual PR base*,
+    not by a prior intermediate commit on the candidate branch. When the
+    local origin default-branch ref is available, a new root migration must
+    be prepared from that exact base. This is a local consistency guard,
+    NOT authentication of a GitHub PR base or merge permission.
+    """
+    if not apply or not planned_root_surfaces:
+        return
+    remote_ref = run_git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+    if not remote_ref:
+        for guess in ("refs/remotes/origin/main", "refs/remotes/origin/master"):
+            if run_git(root, "rev-parse", "--verify", guess):
+                remote_ref = guess
+                break
+    if not remote_ref:
+        # Local fixture / no discoverable remote default: the base-owned
+        # governance-floor CI remains mandatory. Never invent a base ref.
+        return
+    remote_head = run_git(root, "rev-parse", "--verify", remote_ref)
+    if not re.fullmatch(r"[0-9a-f]{40}", remote_head):
+        raise SystemExit("FAIL root migration tracked default-branch HEAD is invalid")
+    if remote_head != base_head:
+        raise SystemExit(
+            "FAIL root migration must begin at the actual PR base: "
+            "target HEAD differs from tracked origin default branch. "
+            "Use a clean isolated checkout of the current target base; "
+            "do not create an intermediate-commit governance receipt."
+        )
+
+
 def plan_verification_contract_install(root: Path, old_baseline: str = "") -> dict[str, str]:
     """Install or upgrade only known managed verification-contract bytes."""
     return plan_managed_file_install(
@@ -1160,6 +1199,9 @@ def main() -> int:
         governance_epoch_repair = (
             target_governance_epoch != existing_governance_epoch
             or not governance_epoch_present
+        )
+        require_clean_pr_base_for_root_migration(
+            root, base_head, planned_root_surfaces, apply=args.apply
         )
         root_migration = build_root_migration_manifest(
             base_sha=base_head,
@@ -1562,6 +1604,9 @@ def main() -> int:
         engineering["policy_epoch"] = target_policy_epoch
         engineering["governance_epoch"] = target_governance_epoch
         project["engineering_system"] = engineering
+    require_clean_pr_base_for_root_migration(
+        root, base_head, planned_root_surfaces, apply=args.apply
+    )
     root_migration = build_root_migration_manifest(
         base_sha=base_head,
         from_policy_epoch=existing_policy_epoch,

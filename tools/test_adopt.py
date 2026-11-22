@@ -4044,6 +4044,47 @@ def test_datarelay_atlas_bootstrap_policy_is_managed() -> None:
         repaired_project = load_yaml(project_path)
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
 
+def test_root_migration_requires_actual_default_base() -> None:
+    """A mid-PR HEAD cannot mint a misleading root migration receipt."""
+    spec = importlib.util.spec_from_file_location("guarded_upgrade", UPGRADE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    guard = module.require_clean_pr_base_for_root_migration
+    with tempfile.TemporaryDirectory() as tmp:
+        checkout = Path(tmp)
+        init_repo(checkout)
+        (checkout / "base.txt").write_text("base\n", encoding="utf-8")
+        commit_all(checkout, "true PR base")
+        base = run("git", "rev-parse", "HEAD", cwd=checkout).stdout.strip()
+        run("git", "update-ref", "refs/remotes/origin/main", base, cwd=checkout)
+        run(
+            "git", "symbolic-ref", "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main", cwd=checkout,
+        )
+        surfaces = {"tools/governance_floor.py": "changed"}
+        guard(checkout, base, surfaces, apply=True)
+        run("git", "checkout", "-qb", "feature", cwd=checkout)
+        (checkout / "intermediate.txt").write_text("stage\n", encoding="utf-8")
+        commit_all(checkout, "PR intermediate step")
+        mid = run("git", "rev-parse", "HEAD", cwd=checkout).stdout.strip()
+        assert mid != base
+        for allow in (True, False):
+            if not allow:
+                guard(checkout, mid, surfaces, apply=False)
+                guard(checkout, mid, {}, apply=True)
+                continue
+            try:
+                guard(checkout, mid, surfaces, apply=True)
+            except SystemExit as exc:
+                assert "actual PR base" in str(exc)
+                assert "intermediate-commit governance receipt" in str(exc)
+            else:
+                raise AssertionError("mid-PR base was incorrectly accepted")
+        assert (checkout / "intermediate.txt").read_text() == "stage\n"
+        assert not run("git", "status", "--porcelain", cwd=checkout).stdout
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
@@ -4056,6 +4097,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_root_migration_requires_actual_default_base()
     test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
