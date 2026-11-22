@@ -303,6 +303,47 @@ The projector:
 
 Packet-size warning thresholds, when used for canaries, are explicit inputs to `packet-lint`; they are not universal constants. Structural duplication/history drift is the primary defect.
 
+### Optional current-packet markers for legacy long Issues
+
+Long-lived Issues with historical headings, repeated metadata, or multiple older Work
+Packets must **not** be silently interpreted as one runnable packet. The existing
+`packet-identity` / `packet-project` commands intentionally fail closed on such
+ambiguity. Before repairing a legacy Issue, preserve the current Work Packet,
+the full historical body, all owner instructions, and any active worker's state.
+Do not rewrite an in-flight Issue solely to make a validator return PASS.
+
+For a deliberately migrated Issue, one complete canonical, profile-compatible
+ACTIVE Work Packet may be bounded by two **unique, standalone, out-of-fence**
+HTML comment marker lines:
+
+```text
+<!-- ENGINEERING_CURRENT_PACKET_BEGIN -->
+PACKET_VERSION=3
+... validated current metadata and required canonical sections ...
+<!-- ENGINEERING_CURRENT_PACKET_END -->
+```
+
+An authenticated GitHub Issue read **and author-permission verification** are
+still prerequisites. After the caller binds the exact UTF-8 SHA-256 of that
+authenticated Issue body, the optional read-only helper:
+
+```sh
+python3 -B tools/current_packet_issue.py --body-file issue-body.md \
+  --expect-body-sha256 "$AUTHENTICATED_ISSUE_BODY_SHA256" \
+  --expect-target-repo owner/repo
+```
+
+selects only the single marked block, rejects stale bytes, duplicate or missing
+markers, wrong repository, noncanonical current sections, unsupported packet
+versions and non-ACTIVE status, and emits a bounded projection without
+history. Markers inside fenced examples cannot choose the packet. Source
+provenance is explicitly `CALLER_SUPPLIED_NOT_ATTESTED`; the CLI does not
+authenticate GitHub, grant execution, validate actual branch/HEAD/worktree,
+or replace `handoff_contract`, current user intent, or trusted release gates.
+Treat its output as **diagnostic context only**, never an execution approval.
+No marker means use the normal canonical flow or repair the existing Issue
+under the owning workstream; do not auto-select the latest-looking text.
+
 ### Engineering-aware context compiler
 
 After authoritative packet resolution/projection, an optional deterministic context-compiler stage may reduce **optional** task context before model invocation. It never establishes authority and must not parse raw conversation history to reconstruct durable state.

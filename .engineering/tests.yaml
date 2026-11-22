@@ -51,6 +51,10 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_context_epoch.py":
     domains: [session-continuity]
+  "tools/current_packet_issue.py":
+    domains: [session-continuity, workflows]
+  "tools/test_current_packet_issue.py":
+    domains: [session-continuity]
   "tools/handoff_contract.py":
     domains: [session-continuity, workflows]
   "tools/test_handoff_contract.py":
@@ -383,6 +387,24 @@ scenarios:
       - "owner-selected target repository stays bound across packet validation and cross-project references cannot retarget mutation authority"
       - "context reset is coordinator-owned and never derived from cache-read ratio or resident session count"
       - "native hook reduction retains no raw prompt transcript tool payload or workspace path"
+    release_gate: true
+
+  - id: ENG-CURRENT-ISSUE-PACKET-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 30
+    agent_default: true
+    scope: unit
+    name: Authenticated-source-bound current Issue packet projection
+    level: unit
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_current_packet_issue.py"
+    invariants:
+      - "only the uniquely delimited current canonical ACTIVE packet is projected"
+      - "issue digest or repo mismatch and ambiguous or fenced markers fail closed"
+      - "the projection never grants mutation/release authority or substitutes for authenticated GitHub reads"
     release_gate: true
 
   - id: ENG-HANDOFF-001
