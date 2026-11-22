@@ -361,6 +361,8 @@ def main() -> int:
                 ".engineering/execution-profile.yaml",
                 "schemas/execution-profile.schema.json",
                 "tools/context_epoch.py",
+                "tools/current_packet_issue.py",
+                "tools/handoff_contract.py",
                 "tools/engineering-context.py",
                 "tools/governance_floor.py",
                 "tools/work_packet_authority.py",

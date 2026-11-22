@@ -2479,6 +2479,10 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "context_epoch.py"
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        current_issue = target / "tools" / "current_packet_issue.py"
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
+        handoff = target / "tools" / "handoff_contract.py"
+        assert handoff.read_bytes() == (ROOT / "tools" / "handoff_contract.py").read_bytes()
         affected_selector = target / "tools" / "affected_test_selection.py"
         assert affected_selector.read_bytes() == (
             ROOT / "tools" / "affected_test_selection.py"
@@ -2488,6 +2492,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
             ROOT / "tools" / "terminal_completion_notify.py"
         ).read_bytes()
         helper.unlink()
+        current_issue.unlink()
         affected_selector.unlink()
         notifier.unlink()
         compliance = run(
@@ -2499,6 +2504,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert compliance.returncode != 0
         assert "managed-profile adoption missing required helper tools/context_epoch.py" in compliance.stdout
+        assert "managed-profile adoption missing required helper tools/current_packet_issue.py" in compliance.stdout
         assert (
             "managed adoption missing required file: tools/affected_test_selection.py"
             in compliance.stdout
@@ -2526,6 +2532,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert "tools/current_packet_issue.py" in upgraded.stdout
         assert (
             "AFFECTED_TEST_SELECTION_INSTALLED=tools/affected_test_selection.py"
             in upgraded.stdout
@@ -2535,6 +2542,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
             in upgraded.stdout
         )
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
         assert affected_selector.read_bytes() == (
             ROOT / "tools" / "affected_test_selection.py"
         ).read_bytes()
@@ -2567,6 +2575,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         assert "ADOPTION_UPGRADE=NO_CHANGE" not in repaired.stdout
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
         assert packet_template.read_bytes() == (
             ROOT / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
         ).read_bytes()
@@ -4035,6 +4044,47 @@ def test_datarelay_atlas_bootstrap_policy_is_managed() -> None:
         repaired_project = load_yaml(project_path)
         assert repaired_project["engineering_system"]["policy_epoch"] == POLICY_EPOCH
 
+def test_root_migration_requires_actual_default_base() -> None:
+    """A mid-PR HEAD cannot mint a misleading root migration receipt."""
+    spec = importlib.util.spec_from_file_location("guarded_upgrade", UPGRADE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    guard = module.require_clean_pr_base_for_root_migration
+    with tempfile.TemporaryDirectory() as tmp:
+        checkout = Path(tmp)
+        init_repo(checkout)
+        (checkout / "base.txt").write_text("base\n", encoding="utf-8")
+        commit_all(checkout, "true PR base")
+        base = run("git", "rev-parse", "HEAD", cwd=checkout).stdout.strip()
+        run("git", "update-ref", "refs/remotes/origin/main", base, cwd=checkout)
+        run(
+            "git", "symbolic-ref", "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main", cwd=checkout,
+        )
+        surfaces = {"tools/governance_floor.py": "changed"}
+        guard(checkout, base, surfaces, apply=True)
+        run("git", "checkout", "-qb", "feature", cwd=checkout)
+        (checkout / "intermediate.txt").write_text("stage\n", encoding="utf-8")
+        commit_all(checkout, "PR intermediate step")
+        mid = run("git", "rev-parse", "HEAD", cwd=checkout).stdout.strip()
+        assert mid != base
+        for allow in (True, False):
+            if not allow:
+                guard(checkout, mid, surfaces, apply=False)
+                guard(checkout, mid, {}, apply=True)
+                continue
+            try:
+                guard(checkout, mid, surfaces, apply=True)
+            except SystemExit as exc:
+                assert "actual PR base" in str(exc)
+                assert "intermediate-commit governance receipt" in str(exc)
+            else:
+                raise AssertionError("mid-PR base was incorrectly accepted")
+        assert (checkout / "intermediate.txt").read_text() == "stage\n"
+        assert not run("git", "status", "--porcelain", cwd=checkout).stdout
+
+
 def main() -> int:
     run(sys.executable, "-m", "py_compile", str(ADOPT), str(CHECK), str(UPGRADE))
     test_obsolete_coordinator_gate_removed_without_weakening_product_approval()
@@ -4047,6 +4097,7 @@ def main() -> int:
     test_operations_signals_fail_closed_then_production_profile()
     test_quality_and_domain_discovery()
     test_managed_upgrade_to_1_6()
+    test_root_migration_requires_actual_default_base()
     test_generated_agents_references_only_managed_tools()
     test_general_upgrade_requires_stage_a_bridge_before_profile_v3()
     test_same_baseline_governance_floor_repair_emits_root_migration()
