@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import importlib.util
 import json
 import os
@@ -201,6 +202,54 @@ class PhaseGuardTests(unittest.TestCase):
     def test_missing_explicit_owner_allowed_effects_fails_closed(self):
         self.plan['owner_intent'].pop('allowed_effects')
         self.assertEqual(self.decide('test_run')['reason'], 'INTENT_EFFECTS_INVALID')
+
+    def test_frozen_evidence_malformed_paths_are_deterministic_blocks(self):
+        self.plan['phase'] = self.plan['owner_phase'] = self.plan['agent_restatement']['phase'] = 'FIX'
+        self.plan['owner_intent']['allowed_effects'].append('source_write')
+        self.plan['agent_restatement']['planned_effects'].append('source_write')
+        digest = hashlib.sha256(self.ledger.read_bytes()).hexdigest()
+        for bad_path in ([], {}, 1, True, None):
+            with self.subTest(kind=type(bad_path).__name__):
+                self.plan['frozen_evidence'] = {'path': bad_path, 'sha256': digest}
+                self.assertEqual(module.evaluate(self.plan, 'source_write')['reason'], 'FROZEN_EVIDENCE_PATH_INVALID')
+                self.assertEqual(module.replay(self.plan)['status'], 'BLOCK')
+
+    def test_malformed_plan_matrix_never_raises(self):
+        variants = (None, 0, [], {}, ['TEST'], {'x': 1}, '', 'bad', 1234, True)
+        field_names = ('contract_version', 'repository', 'worktree', 'phase',
+                       'owner_phase', 'pinned_head', 'source_contract',
+                       'source_contract_sha256', 'owner_intent', 'agent_restatement')
+        checked = 0
+        for phase in ('TEST', 'FIX'):
+            p = copy.deepcopy(self.plan)
+            if phase == 'FIX':
+                p['phase'] = p['owner_phase'] = p['agent_restatement']['phase'] = 'FIX'
+                p['owner_intent']['allowed_effects'].append('source_write')
+                p['agent_restatement']['planned_effects'].append('source_write')
+                p['frozen_evidence'] = {
+                    'path': str(self.ledger),
+                    'sha256': hashlib.sha256(self.ledger.read_bytes()).hexdigest(),
+                }
+            for name in field_names + (('frozen_evidence',) if phase == 'FIX' else ()):
+                for value in variants:
+                    plan = copy.deepcopy(p)
+                    plan[name] = value
+                    a = module.evaluate(plan, 'read')
+                    b = module.replay(plan)
+                    self.assertIn(a['status'], ('ALLOW', 'BLOCK'))
+                    self.assertIn(b['status'], ('ALLOW', 'BLOCK'))
+                    checked += 2
+            if phase == 'FIX':
+                for name in ('path', 'sha256'):
+                    for value in variants:
+                        plan = copy.deepcopy(p)
+                        plan['frozen_evidence'][name] = value
+                        a = module.evaluate(plan, 'source_write')
+                        b = module.replay(plan)
+                        self.assertIn(a['status'], ('ALLOW', 'BLOCK'))
+                        self.assertIn(b['status'], ('ALLOW', 'BLOCK'))
+                        checked += 2
+        self.assertEqual(checked, 460)
 
     def test_agent_instruction_templates_preserve_test_then_fix(self):
         root = TOOL.parents[1]

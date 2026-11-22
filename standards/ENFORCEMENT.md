@@ -105,7 +105,8 @@ In TEST, use explicit typed effects such as
 `["read", "test_run", "evidence_write"]`; adding `"source_write"` to the
 agent proposal is rejected even when the agent labels its phase TEST. A wrong
 remote-origin repository identity, missing typed effects, unknown effect, or
-invalid input structure also fails closed. Do not copy a stale or untrusted
+invalid input structure (including malformed frozen-evidence path types) also
+fails closed. The regression suite includes a 460-check malformed-plan matrix. Do not copy a stale or untrusted
 worker-authored plan into a new phase and treat it as owner permission.
 
 `run-test --user <unprivileged-user> --evidence-dir <external-dir> -- <argv>`

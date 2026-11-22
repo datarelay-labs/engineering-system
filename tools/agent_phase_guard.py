@@ -191,15 +191,24 @@ def evaluate(plan: dict, effect: str) -> dict[str, str]:
                 raise GuardError('SOURCE_DIRTY')
         else:
             frozen = plan.get('frozen_evidence')
-            if not isinstance(frozen, dict) or not frozen.get('path') or not frozen.get('sha256'):
+            if not isinstance(frozen, dict) or 'path' not in frozen or 'sha256' not in frozen:
                 raise GuardError('FROZEN_EVIDENCE_REQUIRED')
-            evidence = Path(frozen['path'])
+            filename = frozen['path']
+            if (not isinstance(filename, str) or not filename or
+                    '\x00' in filename or '\n' in filename or '\r' in filename or
+                    not filename.startswith('/') or os.path.normpath(filename) != filename):
+                raise GuardError('FROZEN_EVIDENCE_PATH_INVALID')
+            digest = frozen['sha256']
+            if (not isinstance(digest, str) or len(digest) != 64 or
+                    any(c not in '0123456789abcdef' for c in digest)):
+                raise GuardError('FROZEN_EVIDENCE_DIGEST_INVALID')
+            evidence = Path(filename)
             if not evidence.is_absolute() or _inside(evidence.resolve(), root.resolve()):
                 raise GuardError('FROZEN_EVIDENCE_PATH_INVALID')
-            if not evidence.is_file() or _file_digest(evidence) != frozen['sha256']:
+            if not evidence.is_file() or _file_digest(evidence) != digest:
                 raise GuardError('FROZEN_EVIDENCE_MISMATCH')
         return _result('ALLOW', 'EFFECT_ALLOWED_IN_PHASE_ONLY', phase=phase)
-    except (GuardError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+    except (GuardError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
         reason = str(exc) if isinstance(exc, GuardError) else 'GUARD_INSPECTION_FAILED'
         return _result('BLOCK', reason, phase=str(plan.get('phase', '')) if isinstance(plan, dict) else '')
 
@@ -366,7 +375,7 @@ def main() -> int:
                 evidence_dir=args.evidence_dir, timeout=args.timeout)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0 if result.get('status') in ('ALLOW', 'EXECUTED') and result.get('exit_code', 0) == 0 else 2
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
         print(json.dumps(_result('BLOCK', str(exc) if isinstance(exc, GuardError) else 'GUARD_INPUT_OR_EXECUTION_INVALID')))
         return 2
 
