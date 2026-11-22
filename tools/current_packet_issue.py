@@ -101,6 +101,18 @@ def project_marked_issue(
     return output
 
 
+
+def read_exact_source(path: str) -> str:
+    """Preserve GitHub body bytes: text-mode reads normalize CRLF and break SHA."""
+    if path == "-":
+        raw = sys.stdin.buffer.read(MAX_ISSUE_BYTES + 1)
+    else:
+        with Path(path).open("rb") as stream:
+            raw = stream.read(MAX_ISSUE_BYTES + 1)
+    if len(raw) > MAX_ISSUE_BYTES:
+        raise ContextError("ISSUE_SIZE_INVALID")
+    return raw.decode("utf-8")
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--body-file", required=True, help="Authenticated Issue body file or -")
@@ -108,10 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-target-repo", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.body_file == "-":
-            body = sys.stdin.read()
-        else:
-            body = Path(args.body_file).read_text(encoding="utf-8")
+        body = read_exact_source(args.body_file)
         print(project_marked_issue(
             body,
             expected_source_sha256=args.expect_body_sha256,

@@ -157,6 +157,33 @@ def test_cli_fails_closed_and_succeeds() -> None:
         assert not blocked.stdout
 
 
+def test_cli_exact_crlf_and_invalid_utf8() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "raw-issue.md"
+        source = document().replace("\n", "\r\n")
+        data = source.encode("utf-8")
+        path.write_bytes(data)
+        cli = [
+            sys.executable, "-B", str(ROOT / "tools/current_packet_issue.py"),
+            "--body-file", str(path),
+            "--expect-body-sha256", hashlib.sha256(data).hexdigest(),
+            "--expect-target-repo", REPO,
+        ]
+        success = subprocess.run(cli, cwd=ROOT, text=True, capture_output=True)
+        assert success.returncode == 0, success.stderr
+        assert "PACKET_PROJECTION=PASS" in success.stdout
+        path.write_bytes(b"\xff")
+        failed = subprocess.run(cli, cwd=ROOT, text=True, capture_output=True)
+        assert failed.returncode == 2
+        assert "ISSUE_PACKET=BLOCK" in failed.stderr
+        assert not failed.stdout
+
+
+def test_issue_byte_limit() -> None:
+    source = document(after="A" * (1024 * 1024))
+    reject(source, "ISSUE_SIZE_INVALID")
+
+
 def main() -> None:
     tests = [
         test_large_historical_issue,
@@ -166,6 +193,8 @@ def main() -> None:
         test_invalid_packet_not_silently_repaired,
         test_truncated_bounded_packet,
         test_cli_fails_closed_and_succeeds,
+        test_cli_exact_crlf_and_invalid_utf8,
+        test_issue_byte_limit,
     ]
     for test in tests:
         test()
