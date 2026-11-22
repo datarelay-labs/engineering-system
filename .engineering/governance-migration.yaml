@@ -1,17 +1,13 @@
 contract_version: 2
-from_governance_epoch: 12
-to_governance_epoch: 13
-base_sha: 141bd3fcad6f95d3a382e91fdc351ae0a54819a4
+from_governance_epoch: 13
+to_governance_epoch: 14
+base_sha: a0f5972a4fbdaa5a6c87e5fe6bfa52b34ad0aad4
 requires_exact_head_validate: true
 automation_eligible: false
-rationale: Bind the canonical adoption/check-adoption managed helper closure for the
-  new source-hash-bound current Work Packet. Required governance generation is advanced
-  without weakening the base-owned floor, permission checks, release gates, or existing
-  upgrade policy.
+rationale: Keep canonical CI adoption-checker runtime dependency closure source-bound;
+  include current Issue selector and Handoff contract with version-14 governance receipt.
 changed_surfaces:
+- path: .github/workflows/adoption-compliance.yml
+  head_blob_sha: ce2290203b7950edb8dfdcd59b77fc2e37989b9b
 - path: tools/adopt.py
-  head_blob_sha: 7cc2e124cbd3b9a754dbba2a8ba91954ed6baa65
-- path: tools/check-adoption.py
-  head_blob_sha: 134d46d40cb3209bd18f58bcf1fdeadedcab38c5
-- path: tools/upgrade-adoption.py
-  head_blob_sha: b3522dbc40ed1b08fa5446c0df37fc4920206505
+  head_blob_sha: e7f30fe19a92b7783107c5c0a032f9a39f0e39db

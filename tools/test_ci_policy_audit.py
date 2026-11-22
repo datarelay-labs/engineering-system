@@ -622,8 +622,11 @@ def test_adoption_compliance_calls_runtime_auditor() -> None:
         fail(f"caller checkout changed: {steps[0].get('uses')!r}")
     if "actions/setup-python@" not in str(steps[1].get("uses") or ""):
         fail("setup-python step moved")
-    if steps[2].get("run") != "python -m pip install --disable-pip-version-check PyYAML==6.0.2":
-        fail("PyYAML install step changed")
+    if steps[2].get("run") != (
+        "python -m pip install --disable-pip-version-check "
+        "-r .engineering/requirements-engineering-system.txt"
+    ):
+        fail("managed pinned dependency installation changed")
     if steps[3].get("run") != "test ! -e .engineering-system-runtime":
         fail(f"runtime path guard missing: {steps[3].get('run')!r}")
     runtime_checkout = steps[4]
@@ -640,11 +643,23 @@ def test_adoption_compliance_calls_runtime_auditor() -> None:
         fail("runtime checkout must set persist-credentials false")
     expected_sparse = (
         "tools/ci_policy_audit.py\n"
+        "tools/check-adoption.py\n"
+        "tools/adopt.py\n"
+        "tools/current_packet_issue.py\n"
+        "tools/handoff_contract.py\n"
+        "tools/execution_profile.py\n"
         "tools/context_epoch.py\n"
         "tools/engineering-context.py\n"
+        "tools/governance_floor.py\n"
         "tools/implementation_preflight.py\n"
+        "tools/terminal_completion_notify.py\n"
         "tools/work_packet_authority.py\n"
         ".engineering/project.yaml\n"
+        ".engineering/execution-profile.yaml\n"
+        ".engineering/requirements-engineering-system.txt\n"
+        "schemas/execution-profile.schema.json\n"
+        ".github/ISSUE_TEMPLATE/ai-work-packet.md\n"
+        "templates/AGENTS.md\n"
     )
     if runtime_with.get("sparse-checkout") != expected_sparse:
         fail(f"sparse checkout mismatch: {runtime_with.get('sparse-checkout')!r}")
@@ -653,8 +668,14 @@ def test_adoption_compliance_calls_runtime_auditor() -> None:
     if steps[5].get("run") != "python .engineering-system-runtime/tools/ci_policy_audit.py --root .":
         fail(f"auditor invocation mismatch: {steps[5].get('run')!r}")
     validation = steps[6].get("run") or ""
-    if "ENGINEERING_SYSTEM_ADOPTION=PASS" not in validation:
-        fail("adoption validation step was altered")
+    for required in (
+        "python .engineering-system-runtime/tools/check-adoption.py",
+        '--expected-baseline "$CALLED_WORKFLOW_SHA"',
+        "--expected-mode adopted",
+        "--require-current-policy",
+    ):
+        if required not in validation:
+            fail(f"adoption validation invocation is missing {required!r}")
     for marker in (
         "import json",
         "def scenario_cost",

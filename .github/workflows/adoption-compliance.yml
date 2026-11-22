@@ -32,6 +32,8 @@ jobs:
             tools/ci_policy_audit.py
             tools/check-adoption.py
             tools/adopt.py
+            tools/current_packet_issue.py
+            tools/handoff_contract.py
             tools/execution_profile.py
             tools/context_epoch.py
             tools/engineering-context.py
