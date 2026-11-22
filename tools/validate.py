@@ -88,6 +88,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_org_rollout.py",
     "tools/test_work_packet_authority.py",
     "tools/implementation_preflight.py",
+    "tools/agent_phase_guard.py",
+    "tools/test_agent_phase_guard.py",
     "tools/test_implementation_preflight.py",
     "tools/work_admission.py",
     "tools/test_work_admission.py",
@@ -1837,6 +1839,9 @@ def main():
     validate("templates/PROJECT.yaml", "schemas/project.schema.json")
     validate("templates/TESTS.yaml", "schemas/tests.schema.json")
     validate("templates/RELEASE.yaml", "schemas/release.schema.json")
+
+    completed = subprocess.run(["python3", "tools/test_agent_phase_guard.py"], cwd=ROOT)
+    assert completed.returncode == 0, "intent/phase guard tests failed"
 
     completed = subprocess.run(["python3", "tools/test_implementation_preflight.py"], cwd=ROOT)
     if completed.returncode:

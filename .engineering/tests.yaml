@@ -45,6 +45,10 @@ paths:
     domains: [session-continuity]
   "tools/implementation_preflight.py":
     domains: [session-continuity, workflows]
+  "tools/agent_phase_guard.py":
+    domains: [ai, enforcement, session-continuity, workflows]
+  "tools/test_agent_phase_guard.py":
+    domains: [ai, enforcement, session-continuity, workflows]
   "tools/test_implementation_preflight.py":
     domains: [session-continuity]
   "tools/context_epoch.py":
@@ -1049,4 +1053,22 @@ scenarios:
       - "bug-fix convergence stays on changed/invalidated slices instead of restarting full regression after every fix"
       - "Surface Reconciliation and Full User E2E use targeted remediation reruns followed by one complete confirmation run"
       - "targeted evidence never replaces terminal complete release confirmation"
+    release_gate: true
+
+  - id: ENG-AGENT-PHASE-001
+    cost: cheap
+    estimated_seconds: 3
+    timeout_seconds: 45
+    agent_default: true
+    scope: unit
+    name: Agent intent replay and TEST phase OS write-denial
+    level: unit
+    domains: [ai, enforcement, session-continuity, workflows]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_agent_phase_guard.py"
+    invariants:
+      - "TEST/VERIFY permit tests and external evidence but refuse source edits, commits and builds"
+      - "FIX requires pinned frozen evidence and still grants no external high-risk authority"
+      - "unprivileged guarded runner cannot write a root-owned source tree"
     release_gate: true

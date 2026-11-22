@@ -66,6 +66,60 @@ Read only when relevant:
 
 Do not preload every standard, Wiki page, archive, or historical discussion.
 
+## Agent intent replay and phase-specific test immutability
+
+Repeated agent errors must be corrected through architecture, typed effects, checks and
+negative tests, not by adding another promise in a prompt. Before a substantial
+multi-step task, the agent briefly restates the owner's **goal**, **problem**, current
+execution **phase**, allowed effects and forbidden effects from the *existing* task
+contract. This replay is an interpretation check, **not** a request for repeated
+owner approval, nor permission to invent a different workflow. If it disagrees with
+the canonical test contract, do not execute the conflicting effect.
+
+For a project-local E2E contract that requires test-first/fix-later, enforce this
+sequence without silently overriding narrower project rules:
+
+| Phase | Allowed within assigned test scope | Explicitly forbidden |
+|---|---|---|
+| `TEST` | public product testing, read-only source inspection where contract permits, external evidence collection | source/test-contract/docs edits, candidate rebuild, git commit/push, unrelated changes |
+| `FIX` | bounded fixes of frozen findings, focused regression and normal Git operations | production/permission/release effects without their independent authority |
+| `VERIFY` | exact-HEAD regression/E2E, external evidence collection | source/test-contract/docs edits, candidate rebuild, git commit/push |
+
+Use `tools/agent_phase_guard.py replay --plan <plan.json>` to expose the agent's
+restatement and planned effects, and `check --plan <plan.json> --effect
+<typed-effect>` as a deterministic *per-call* filter. It checks the pinned HEAD,
+clean worktree and digest of the repository-local test contract in TEST/VERIFY.
+FIX is refused until separately frozen evidence exists outside the source tree
+and its digest matches. A failed check stops only its prohibited effect; valid
+independent tests continue. Include the original owner intent and agent's
+restatement as separate structured inputs; lexical checks cannot establish
+natural-language semantic equivalence.
+
+`run-test --user <unprivileged-user> --evidence-dir <external-dir> -- <argv>`
+can additionally run an individual test under a **real OS account boundary**:
+it requires a root-owned checkout not writable by the selected existing
+unprivileged user, drops process privileges, and places writable evidence
+outside the checkout. It fails closed if the source can be written by that
+actor. Do not change shared OS accounts, permissions or an active worker's
+worktree just to enable this optional isolation. Never run a production or
+privileged operation through a generic test sandbox.
+
+**Trust limitation:** a plan written by the agent is not authenticated owner
+intent; a worker-writable copy of this checker is not a root of trust. To
+prevent bypass by direct Git/MCP/shell calls, a **trusted tool gateway** must
+bind the real owner's active phase and route *every mutating effect* through
+its policy, or remove write rights from the test actor using a separate
+host-administered OS boundary. A Git hook, prompt, self-authored phase JSON,
+CI lint or post-test drift check alone does not prevent an agent from modifying
+source outside the guarded runner. This reference implementation does not
+change DRLink MCP's privileges or claim fleet-wide enforcement. Production,
+credentials/permissions, merge and release retain their separate authority.
+
+Regression: `python3 tools/test_agent_phase_guard.py` reproduces the historical
+error class (a forbidden source edit / commit / build during frozen TEST),
+checks allowed evidence execution and HEAD drift, and exercises a real
+unprivileged OS write denial where the test host permits it.
+
 ## Mutating side effects and safe retry
 
 A transient transport failure does not prove that an external mutation failed.
