@@ -87,7 +87,10 @@ sequence without silently overriding narrower project rules:
 
 Use `tools/agent_phase_guard.py replay --plan <plan.json>` to expose the agent's
 restatement and planned effects, and `check --plan <plan.json> --effect
-<typed-effect>` as a deterministic *per-call* filter. It checks the pinned HEAD,
+<typed-effect>` as a deterministic *per-call* filter. It verifies that the declared repository matches the actual Git origin URL
+(default GitHub host) and that the agent's typed planned effects are a subset of
+the owner's explicitly allowed effects. This supplements, but does not replace,
+free-text intent checking. It also checks the pinned HEAD,
 clean worktree and digest of the repository-local test contract in TEST/VERIFY.
 FIX is refused until separately frozen evidence exists outside the source tree
 and its digest matches. A failed check stops only its prohibited effect; valid
@@ -95,14 +98,29 @@ independent tests continue. Include the original owner intent and agent's
 restatement as separate structured inputs; lexical checks cannot establish
 natural-language semantic equivalence.
 
+The plan is JSON and includes (besides the pinned worktree/HEAD and test contract
+SHA-256): `owner_intent: {goal, problem, allowed_effects}` and
+`agent_restatement: {goal, problem, phase, next_phase, planned_effects}`.
+In TEST, use explicit typed effects such as
+`["read", "test_run", "evidence_write"]`; adding `"source_write"` to the
+agent proposal is rejected even when the agent labels its phase TEST. A wrong
+remote-origin repository identity, missing typed effects, unknown effect, or
+invalid input structure also fails closed. Do not copy a stale or untrusted
+worker-authored plan into a new phase and treat it as owner permission.
+
 `run-test --user <unprivileged-user> --evidence-dir <external-dir> -- <argv>`
 can additionally run an individual test under a **real OS account boundary**:
 it requires a root-owned checkout not writable by the selected existing
 unprivileged user, drops process privileges, and places writable evidence
 outside the checkout. It fails closed if the source can be written by that
-actor. Do not change shared OS accounts, permissions or an active worker's
-worktree just to enable this optional isolation. Never run a production or
-privileged operation through a generic test sandbox.
+actor. The deterministic runner drops inherited stdin, gives test-created files
+private (0600 default) permissions, and returns only output byte count and
+SHA-256 rather than exposing raw possibly secret-bearing stdout. An OS file-size
+limit bounds a noisy test. This runner is intended for bounded deterministic
+checks and **does not replace interactive full-user E2E or high-volume data-path
+qualification**. Do not change shared OS accounts, permissions or an active
+worker's worktree just to enable this optional isolation. Never run a production
+or privileged operation through a generic test sandbox.
 
 **Trust limitation:** a plan written by the agent is not authenticated owner
 intent; a worker-writable copy of this checker is not a root of trust. To

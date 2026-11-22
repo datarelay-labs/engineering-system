@@ -1069,6 +1069,7 @@ scenarios:
     command: "python3 tools/test_agent_phase_guard.py"
     invariants:
       - "TEST/VERIFY permit tests and external evidence but refuse source edits, commits and builds"
+      - "Git origin must match declared repository; typed agent effects must remain owner-authorized"
       - "FIX requires pinned frozen evidence and still grants no external high-risk authority"
       - "unprivileged guarded runner cannot write a root-owned source tree"
     release_gate: true

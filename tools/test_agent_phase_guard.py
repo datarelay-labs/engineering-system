@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 TOOL = Path(__file__).with_name('agent_phase_guard.py')
 spec = importlib.util.spec_from_file_location('agent_phase_guard', TOOL)
@@ -44,6 +45,7 @@ class PhaseGuardTests(unittest.TestCase):
         git(self.repo, 'add', '.')
         git(self.repo, 'commit', '-qm', 'baseline')
         self.head = git(self.repo, 'rev-parse', 'HEAD')
+        git(self.repo, 'remote', 'add', 'origin', 'https://github.com/datarelay-labs/datarelay-link.git')
         self.contract = self.repo / 'docs' / 'E2E.md'
         self.ledger = self.root / 'frozen-ledger.json'
         self.ledger.write_text('{"result":"FINAL","scenarios":116}\n')
@@ -59,12 +61,14 @@ class PhaseGuardTests(unittest.TestCase):
             'owner_intent': {
                 'goal': 'Complete all E2E scenarios before fixing issues',
                 'problem': 'The assistant changes code during active tests',
+                'allowed_effects': ['read', 'test_run', 'evidence_write'],
             },
             'agent_restatement': {
                 'goal': 'Test all applicable scenarios at a pinned HEAD and record failures',
                 'problem': 'Prevent fixes and candidate rebuilds during TEST',
                 'phase': 'TEST',
                 'next_phase': 'FIX',
+                'planned_effects': ['read', 'test_run', 'evidence_write'],
             },
         }
 
@@ -105,6 +109,8 @@ class PhaseGuardTests(unittest.TestCase):
 
     def test_fix_requires_frozen_evidence(self):
         self.plan['phase'] = self.plan['owner_phase'] = self.plan['agent_restatement']['phase'] = 'FIX'
+        self.plan['owner_intent']['allowed_effects'].append('source_write')
+        self.plan['agent_restatement']['planned_effects'].append('source_write')
         self.assertEqual(self.decide('source_write')['reason'], 'FROZEN_EVIDENCE_REQUIRED')
         self.plan['frozen_evidence'] = {
             'path': str(self.ledger),
@@ -113,6 +119,88 @@ class PhaseGuardTests(unittest.TestCase):
         self.assertEqual(self.decide('source_write')['status'], 'ALLOW')
         self.ledger.write_text('tampered')
         self.assertEqual(self.decide('source_write')['reason'], 'FROZEN_EVIDENCE_MISMATCH')
+
+    def test_frozen_test_rejects_foreign_repository_origin(self):
+        git(self.repo, 'remote', 'set-url', 'origin', 'https://github.com/other-team/other-repo.git')
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_ORIGIN_MISMATCH')
+
+    def test_frozen_test_rejects_missing_origin(self):
+        git(self.repo, 'remote', 'remove', 'origin')
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_ORIGIN_UNAVAILABLE')
+
+    def test_frozen_test_rejects_wrong_repo_in_owner_plan(self):
+        self.plan['repository'] = 'another-org/another-repo'
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_ORIGIN_MISMATCH')
+
+    def test_frozen_test_rejects_untrusted_git_host_even_matching_repo(self):
+        git(self.repo, 'remote', 'set-url', 'origin', 'https://example.invalid/datarelay-labs/datarelay-link.git')
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_ORIGIN_MISMATCH')
+
+    def test_standard_github_ssh_origin_matches(self):
+        git(self.repo, 'remote', 'set-url', 'origin', 'git@github.com:datarelay-labs/datarelay-link.git')
+        self.assertEqual(self.decide('test_run')['status'], 'ALLOW')
+
+    def test_unhashable_effect_type_fails_closed(self):
+        result = self.decide([])
+        self.assertEqual(result['status'], 'BLOCK')
+        self.assertEqual(result['reason'], 'EFFECT_UNKNOWN')
+
+    def test_replay_malformed_phase_fails_closed(self):
+        self.plan['phase'] = ['TEST']
+        result = module.replay(self.plan)
+        self.assertEqual(result['status'], 'BLOCK')
+        self.assertEqual(result['allowed_effects'], [])
+
+    def test_restatement_planned_fix_disagrees_with_test_contract(self):
+        self.plan['agent_restatement']['planned_effects'].append('source_write')
+        self.assertEqual(self.decide('test_run')['reason'], 'INTENT_EFFECT_MISMATCH')
+
+    def test_owner_did_not_authorize_evidence_write(self):
+        self.plan['owner_intent']['allowed_effects'].remove('evidence_write')
+        self.plan['agent_restatement']['planned_effects'].remove('evidence_write')
+        self.assertEqual(self.decide('evidence_write')['reason'], 'INTENT_EFFECT_NOT_ALLOWED')
+
+    def test_duplicate_planned_effect_is_invalid(self):
+        self.plan['agent_restatement']['planned_effects'].append('read')
+        self.assertEqual(self.decide('test_run')['reason'], 'INTENT_EFFECTS_INVALID')
+
+    def test_unknown_planned_effect_is_invalid(self):
+        self.plan['agent_restatement']['planned_effects'] = ['read', 'sudo_all']
+        self.assertEqual(self.decide('test_run')['reason'], 'INTENT_EFFECTS_INVALID')
+
+    def test_incorrect_host_claim_is_rejected(self):
+        self.plan['git_host'] = 'not-github.example'
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_ORIGIN_MISMATCH')
+
+    def test_explicit_https_origin_matches(self):
+        self.assertEqual(self.decide('read')['status'], 'ALLOW')
+        self.assertEqual(self.decide('test_run')['status'], 'ALLOW')
+
+    def test_replay_only_shows_owner_allowed_effects(self):
+        self.plan['owner_intent']['allowed_effects'].remove('evidence_write')
+        self.plan['agent_restatement']['planned_effects'].remove('evidence_write')
+        summary = module.replay(self.plan)
+        self.assertEqual(summary['status'], 'ALLOW')
+        self.assertNotIn('evidence_write', summary['allowed_effects'])
+        self.assertIn('evidence_write', summary['denied_effects'])
+
+    def test_invalid_git_host_claim_is_blocked(self):
+        self.plan['git_host'] = '..\nspoof=1'
+        self.assertEqual(self.decide('test_run')['reason'], 'REPOSITORY_HOST_INVALID')
+
+    def test_sensitive_effect_not_allowed_even_in_fix(self):
+        self.plan['phase'] = self.plan['owner_phase'] = self.plan['agent_restatement']['phase'] = 'FIX'
+        self.plan['owner_intent']['allowed_effects'].append('release')
+        self.plan['agent_restatement']['planned_effects'].append('release')
+        self.assertEqual(self.decide('release')['reason'], 'EXTERNAL_TRUST_BOUNDARY_REQUIRED')
+
+    def test_untyped_planned_effect_list_fails_closed(self):
+        self.plan['agent_restatement']['planned_effects'] = [['source_write']]
+        self.assertEqual(self.decide('read')['reason'], 'INTENT_EFFECTS_INVALID')
+
+    def test_missing_explicit_owner_allowed_effects_fails_closed(self):
+        self.plan['owner_intent'].pop('allowed_effects')
+        self.assertEqual(self.decide('test_run')['reason'], 'INTENT_EFFECTS_INVALID')
 
     def test_agent_instruction_templates_preserve_test_then_fix(self):
         root = TOOL.parents[1]
@@ -147,6 +235,8 @@ class PhaseGuardTests(unittest.TestCase):
 
     def test_authority_sensitive_effects_never_self_authorize(self):
         self.plan['phase'] = self.plan['owner_phase'] = self.plan['agent_restatement']['phase'] = 'FIX'
+        self.plan['owner_intent']['allowed_effects'].append('source_write')
+        self.plan['agent_restatement']['planned_effects'].append('source_write')
         self.plan['frozen_evidence'] = {
             'path': str(self.ledger),
             'sha256': hashlib.sha256(self.ledger.read_bytes()).hexdigest(),
@@ -198,13 +288,49 @@ class PhaseGuardTests(unittest.TestCase):
             'from pathlib import Path; Path("README.md").write_text("WRONG")']
         blocked = module.run_isolated_test(self.plan, command, user='nobody', evidence_dir=out)
         self.assertNotEqual(blocked['exit_code'], 0)
-        self.assertIn('PermissionError', blocked['stdout_tail'])
+        self.assertNotIn('stdout_tail', blocked)
+        self.assertEqual(len(blocked['stdout_sha256']), 64)
         self.assertEqual((self.repo / 'README.md').read_text(), 'baseline\n')
         self.assertEqual(git(self.repo, 'rev-parse', 'HEAD'), self.head)
         ok = module.run_isolated_test(self.plan, [sys.executable, '-B', '-c',
             'from pathlib import Path; Path("' + str(out / 'receipt.txt') + '").write_text("PASS")'], user='nobody', evidence_dir=out)
         self.assertEqual(ok['exit_code'], 0)
         self.assertEqual((out / 'receipt.txt').read_text(), 'PASS')
+        self.assertEqual((out / 'receipt.txt').stat().st_mode & 0o777, 0o600)
+        private_output = module.run_isolated_test(self.plan, [sys.executable, '-B', '-c',
+            'print("AUTH_TOKEN=do-not-leak")'], user='nobody', evidence_dir=out)
+        self.assertEqual(private_output['exit_code'], 0)
+        self.assertNotIn('do-not-leak', json.dumps(private_output))
+        self.assertEqual(private_output['output_bytes'], len('AUTH_TOKEN=do-not-leak\n'))
+        with mock.patch.object(module, 'OUTPUT_LIMIT_BYTES', 256 * 1024):
+            with self.assertRaisesRegex(module.GuardError, 'TEST_OUTPUT_LIMIT_EXCEEDED'):
+                module.run_isolated_test(self.plan, [sys.executable, '-B', '-c',
+                    'import sys; sys.stdout.write("x" * 500000)'], user='nobody', evidence_dir=out, timeout=10)
+        with self.assertRaisesRegex(module.GuardError, 'ISOLATED_TEST_TIMEOUT'):
+            module.run_isolated_test(self.plan, [sys.executable, '-B', '-c',
+                'import time; time.sleep(2)'], user='nobody', evidence_dir=out, timeout=1)
+
+        # A test actor must also be unable to change Git metadata or emit a
+        # generated candidate inside the source checkout.
+        for script in (
+            'from pathlib import Path; Path("generated-bundle").write_text("bad")',
+            'import subprocess; subprocess.run(["/usr/bin/git", "config", "--local", "audit.dirty", "true"], check=True)',
+        ):
+            attempted = module.run_isolated_test(self.plan, [sys.executable, '-B', '-c', script], user='nobody', evidence_dir=out)
+            self.assertNotEqual(attempted['exit_code'], 0)
+        self.assertFalse((self.repo / 'generated-bundle').exists())
+        self.assertEqual(git(self.repo, 'rev-parse', 'HEAD'), self.head)
+
+    @unittest.skipUnless(os.geteuid() == 0 and any(p.pw_name == 'nobody' for p in pwd.getpwall()), 'OS privilege boundary needs root and existing nobody')
+    def test_evidence_inside_source_rejected(self):
+        acct = pwd.getpwnam('nobody')
+        with self.assertRaisesRegex(module.GuardError, 'EVIDENCE_ROOT_NOT_ISOLATED'):
+            module.run_isolated_test(self.plan, [sys.executable, '-B', '-c', 'print(1)'], user='nobody', evidence_dir=self.repo)
+
+    @unittest.skipUnless(os.geteuid() == 0 and any(p.pw_name == 'nobody' for p in pwd.getpwall()), 'OS privilege boundary needs root and existing nobody')
+    def test_root_actor_rejected(self):
+        with self.assertRaisesRegex(module.GuardError, 'ROOT_TEST_ACTOR_FORBIDDEN'):
+            module.run_isolated_test(self.plan, [sys.executable, '-B', '-c', 'print(1)'], user='root', evidence_dir=self.root)
 
 
 if __name__ == '__main__':

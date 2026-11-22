@@ -12,11 +12,15 @@ import hashlib
 import json
 import os
 import pwd
+import resource
+import re
 import signal
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
 
@@ -70,6 +74,52 @@ def _git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+HOST_RE = re.compile(r"^[a-zA-Z0-9.-]+$")
+KNOWN_EFFECTS = TEST_EFFECTS | FIX_EFFECTS | PROTECTED_EFFECTS
+OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024  # bounded deterministic test output
+
+
+def _origin_identity(raw_url: str) -> tuple[str, str] | None:
+    """Identify a GitHub-style HTTPS, SSH URL or scp-style remote path."""
+    if not isinstance(raw_url, str) or not raw_url:
+        return None
+    scp = re.fullmatch(r"(?:git@)([a-zA-Z0-9.-]+):(.+)", raw_url)
+    if scp:
+        host, remote_path = scp.group(1), scp.group(2)
+    else:
+        try:
+            parsed = urlsplit(raw_url)
+            if parsed.scheme not in ("https", "ssh", "git") or not parsed.hostname:
+                return None
+            host, remote_path = parsed.hostname, parsed.path.lstrip("/")
+        except ValueError:
+            return None
+    if remote_path.endswith(".git"):
+        remote_path = remote_path[:-4]
+    if not REPO_RE.fullmatch(remote_path):
+        return None
+    return host.lower(), remote_path.lower()
+
+
+def _check_repo_binding(root: Path, repo: str, host: str) -> None:
+    try:
+        remote = _git(root, 'config', '--local', '--get', 'remote.origin.url')
+    except GuardError as exc:
+        raise GuardError('REPOSITORY_ORIGIN_UNAVAILABLE') from exc
+    identity = _origin_identity(remote)
+    if identity != (host.lower(), repo.lower()):
+        raise GuardError('REPOSITORY_ORIGIN_MISMATCH')
+
+
+def _effect_set(value: object) -> frozenset[str]:
+    if (not isinstance(value, list) or not value or
+            any(not isinstance(e, str) or e not in KNOWN_EFFECTS for e in value) or
+            len(value) != len(set(value))):
+        raise GuardError('INTENT_EFFECTS_INVALID')
+    return frozenset(value)
+
+
 def _validate(plan: dict, effect: str) -> tuple[str, Path]:
     if not isinstance(plan, dict) or plan.get('contract_version') != 1:
         raise GuardError('CONTRACT_VERSION_INVALID')
@@ -80,16 +130,22 @@ def _validate(plan: dict, effect: str) -> tuple[str, Path]:
         raise GuardError('INTENT_RESTATEMENT_MISSING')
     if plan.get('owner_phase') != phase or plan['agent_restatement'].get('phase') != phase:
         raise GuardError('INTENT_PHASE_MISMATCH')
-    if not _nonempty(plan.get('repository')):
+    if not _nonempty(plan.get('repository')) or not REPO_RE.fullmatch(plan['repository']):
         raise GuardError('REPOSITORY_UNBOUND')
+    git_host = plan.get('git_host', 'github.com')
+    if not _nonempty(git_host) or not HOST_RE.fullmatch(git_host):
+        raise GuardError('REPOSITORY_HOST_INVALID')
     intent = plan.get('owner_intent')
     replay = plan.get('agent_restatement')
     if not isinstance(intent, dict) or not isinstance(replay, dict) or not all(
         _nonempty(d.get(field)) for d in (intent, replay) for field in ('goal', 'problem')
     ) or not _nonempty(replay.get('next_phase')):
         raise GuardError('INTENT_RESTATEMENT_MISSING')
-    # Structural echo only. Natural-language semantic agreement must be checked
-    # by the acting agent and owner or a separate evaluator; not inferred here.
+    # Effect-level differences are machine-checkable; free-form semantics are not.
+    owner_effects = _effect_set(intent.get('allowed_effects'))
+    replay_effects = _effect_set(replay.get('planned_effects'))
+    if not replay_effects.issubset(owner_effects):
+        raise GuardError('INTENT_EFFECT_MISMATCH')
     root_name = plan.get('worktree')
     if not _nonempty(root_name):
         raise GuardError('WORKTREE_UNBOUND')
@@ -98,6 +154,7 @@ def _validate(plan: dict, effect: str) -> tuple[str, Path]:
         raise GuardError('WORKTREE_PATH_INVALID')
     if not root.is_dir():
         raise GuardError('WORKTREE_UNAVAILABLE')
+    _check_repo_binding(root, plan['repository'], git_host)
     contract_name = plan.get('source_contract')
     if not _nonempty(contract_name):
         raise GuardError('SOURCE_CONTRACT_UNBOUND')
@@ -112,7 +169,7 @@ def _validate(plan: dict, effect: str) -> tuple[str, Path]:
         raise GuardError('SOURCE_CONTRACT_DIGEST_INVALID')
     if _file_digest(contract) != digest:
         raise GuardError('CONTRACT_DRIFT')
-    if effect not in TEST_EFFECTS | FIX_EFFECTS | PROTECTED_EFFECTS:
+    if not isinstance(effect, str) or effect not in KNOWN_EFFECTS:
         raise GuardError('EFFECT_UNKNOWN')
     return phase, root
 
@@ -125,6 +182,8 @@ def evaluate(plan: dict, effect: str) -> dict[str, str]:
             return _result('BLOCK', 'EXTERNAL_TRUST_BOUNDARY_REQUIRED', phase=phase)
         if effect not in PHASE_EFFECTS[phase]:
             return _result('BLOCK', 'EFFECT_FORBIDDEN_IN_PHASE', phase=phase)
+        if effect not in plan['owner_intent']['allowed_effects'] or effect not in plan['agent_restatement']['planned_effects']:
+            return _result('BLOCK', 'INTENT_EFFECT_NOT_ALLOWED', phase=phase)
         if phase in ('TEST', 'VERIFY'):
             if _git(root, 'rev-parse', 'HEAD') != plan.get('pinned_head'):
                 raise GuardError('HEAD_DRIFT')
@@ -155,8 +214,15 @@ def replay(plan: dict) -> dict:
         'owner_intent': plan.get('owner_intent'),
         'agent_restatement': plan.get('agent_restatement'),
         'phase': plan.get('phase'),
-        'allowed_effects': sorted(PHASE_EFFECTS.get(plan.get('phase'), [])),
-        'denied_effects': sorted(PROTECTED_EFFECTS | (FIX_EFFECTS - PHASE_EFFECTS.get(plan.get('phase'), frozenset()))),
+        'allowed_effects': sorted(
+            PHASE_EFFECTS[plan['phase']] & frozenset(plan['owner_intent']['allowed_effects'])
+            & frozenset(plan['agent_restatement']['planned_effects'])
+        ) if result['status'] == 'ALLOW' else [],
+        'denied_effects': sorted(
+            KNOWN_EFFECTS - (PHASE_EFFECTS[plan['phase']]
+            & frozenset(plan['owner_intent']['allowed_effects'])
+            & frozenset(plan['agent_restatement']['planned_effects']))
+        ) if result['status'] == 'ALLOW' else sorted(KNOWN_EFFECTS),
         'semantic_equivalence': 'NOT_MACHINE_VERIFIED',
         'authority': 'EXTERNAL_TOOL_GATEWAY_REQUIRED',
     }
@@ -234,28 +300,45 @@ def run_isolated_test(plan: dict, argv: list[str], *, user: str, evidence_dir: P
            'XDG_CACHE_HOME': str(evidence), 'PYTHONDONTWRITEBYTECODE': '1',
            'LANG': 'C', 'LC_ALL': 'C'}
 
+    capture_limit = OUTPUT_LIMIT_BYTES
+
     def drop():
+        # Test outputs and artifacts should not default to world-readable.
+        os.umask(0o077)
+        resource.setrlimit(resource.RLIMIT_FSIZE, (capture_limit, capture_limit))
         os.setgroups([])
         os.setgid(acct.pw_gid)
         os.setuid(acct.pw_uid)
 
-    proc = subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, preexec_fn=drop,
-                            start_new_session=True)
-    try:
-        output, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        output, _ = proc.communicate()
-        raise GuardError('ISOLATED_TEST_TIMEOUT')
+    # Never echo arbitrary test output (it may contain tokens or user data).
+    # A private temporary regular file avoids unbounded Python PIPE memory;
+    # RLIMIT_FSIZE bounds disk growth and the output is hashed, not returned.
+    with tempfile.TemporaryFile(mode='w+b') as capture:
+        proc = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
+                                stdout=capture, stderr=subprocess.STDOUT,
+                                preexec_fn=drop, start_new_session=True)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            raise GuardError('ISOLATED_TEST_TIMEOUT')
+        capture.flush()
+        size = os.fstat(capture.fileno()).st_size
+        capture.seek(0)
+        output_sha256 = hashlib.file_digest(capture, 'sha256').hexdigest()
+    if size >= capture_limit:
+        raise GuardError('TEST_OUTPUT_LIMIT_EXCEEDED')
     # Do not promote the result if any protected source boundary drifted.
     after = evaluate(plan, 'test_run')
     if after['status'] != 'ALLOW':
         raise GuardError('SOURCE_CHANGED_DURING_TEST:' + after['reason'])
     return {'status': 'EXECUTED', 'exit_code': proc.returncode,
-            'stdout_tail': output[-3000:], 'pinned_head': plan['pinned_head'],
+            'output_bytes': size, 'stdout_sha256': output_sha256,
+            'pinned_head': plan['pinned_head'],
             'source_write_protected': True,
             'product_runtime_qualified': False}
+
 
 
 def main() -> int:
