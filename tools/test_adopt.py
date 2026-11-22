@@ -2479,6 +2479,10 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_BOOTSTRAP=PASS" in applied.stdout
         helper = target / "tools" / "context_epoch.py"
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        current_issue = target / "tools" / "current_packet_issue.py"
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
+        handoff = target / "tools" / "handoff_contract.py"
+        assert handoff.read_bytes() == (ROOT / "tools" / "handoff_contract.py").read_bytes()
         affected_selector = target / "tools" / "affected_test_selection.py"
         assert affected_selector.read_bytes() == (
             ROOT / "tools" / "affected_test_selection.py"
@@ -2488,6 +2492,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
             ROOT / "tools" / "terminal_completion_notify.py"
         ).read_bytes()
         helper.unlink()
+        current_issue.unlink()
         affected_selector.unlink()
         notifier.unlink()
         compliance = run(
@@ -2499,6 +2504,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert compliance.returncode != 0
         assert "managed-profile adoption missing required helper tools/context_epoch.py" in compliance.stdout
+        assert "managed-profile adoption missing required helper tools/current_packet_issue.py" in compliance.stdout
         assert (
             "managed adoption missing required file: tools/affected_test_selection.py"
             in compliance.stdout
@@ -2526,6 +2532,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         )
         assert "ADOPTION_UPGRADE=PASS" in upgraded.stdout
         assert "CONTEXT_EPOCH_INSTALLED=tools/context_epoch.py" in upgraded.stdout
+        assert "tools/current_packet_issue.py" in upgraded.stdout
         assert (
             "AFFECTED_TEST_SELECTION_INSTALLED=tools/affected_test_selection.py"
             in upgraded.stdout
@@ -2535,6 +2542,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
             in upgraded.stdout
         )
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
         assert affected_selector.read_bytes() == (
             ROOT / "tools" / "affected_test_selection.py"
         ).read_bytes()
@@ -2567,6 +2575,7 @@ def test_context_epoch_helper_adoption_and_upgrade() -> None:
         assert "ADOPTION_UPGRADE=PASS" in repaired.stdout
         assert "ADOPTION_UPGRADE=NO_CHANGE" not in repaired.stdout
         assert helper.read_bytes() == (ROOT / "tools" / "context_epoch.py").read_bytes()
+        assert current_issue.read_bytes() == (ROOT / "tools" / "current_packet_issue.py").read_bytes()
         assert packet_template.read_bytes() == (
             ROOT / ".github/ISSUE_TEMPLATE/ai-work-packet.md"
         ).read_bytes()

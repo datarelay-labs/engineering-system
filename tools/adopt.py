@@ -111,6 +111,7 @@ EXECUTION_PROFILE_MANAGED = (
 # Context-epoch projection is a provider-neutral managed helper.
 CONTEXT_EPOCH_MANAGED = (
     "tools/context_epoch.py",
+    "tools/current_packet_issue.py",
     "tools/handoff_contract.py",
 )
 
