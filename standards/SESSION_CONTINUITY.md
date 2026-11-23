@@ -600,6 +600,19 @@ report a partial result and preserve remaining data for reconciliation.
 
 Do not bulk-close ACTIVE/PAUSED packets, force-remove worktrees, cleanup
 other workers' files, or treat PR CI/synthetic tests as live user E2E.
+
+For a *read-only live* multi-Issue/Worktree audit use
+\`python3 tools/lifecycle_audit.py --github-repo owner/repo
+--repo-root /absolute/primary/checkout\`. The authenticated GitHub Issue/PR
+census identifies OPEN COMPLETE sources with exact MERGED, CLOSED UNMERGED,
+OPEN, ambiguous or missing PR evidence. Only MERGED and source-matched
+candidates are eligible to consider for finalization; all output is advisory
+and \`MUTATION_AUTHORITY=NO\`. The optional local Worktree scan classifies
+pristine, uniquely merged-source branches with no other open Issue/PR
+reference or observed active process as \`CANDIDATE_REVIEW\` — never as
+permission to bulk delete. Use the exact per-packet digest-bound terminal
+plan/apply for side effects; an old Work Packet claiming COMPLETE does not
+override a closed-unmerged PR.
 A non-merged PR or externally referenced Worktree remains protected.
 
 ## Mutable evidence revalidation
