@@ -1,0 +1,148 @@
+name: Isolated Parser Studio property and Stryker P2 pilot
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ai-qa-product-p2.yml"
+      - "adapters/ai-qa/parser-studio-generative-holdout.test.ts"
+      - "tools/ai_qa_stryker_compare.py"
+      - "tools/test_ai_qa_stryker_compare.py"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-p2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          path: qa
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: xdr-labs/parser-studio
+          ref: 567e0c255312028337898114cac452567bc585cc
+          persist-credentials: false
+          path: product
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Verify exact pinned product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "567e0c255312028337898114cac452567bc585cc"
+          git -C product diff --exit-code
+          sha256sum product/src/guided/normalizationValidation.ts | tee source.sha256
+
+      - name: Verify independent comparator contracts
+        run: python3 -B qa/tools/test_ai_qa_stryker_compare.py
+
+      - name: Install dependencies only inside ephemeral product copy
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm install --no-save --package-lock=false --no-audit --no-fund \
+            fast-check@4.3.0 \
+            @stryker-mutator/core@9.3.0 \
+            @stryker-mutator/vitest-runner@9.3.0
+          npm ls --depth=0 fast-check @stryker-mutator/core @stryker-mutator/vitest-runner
+
+      - name: Run original and independent generative Vitest baseline
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp ../qa/adapters/ai-qa/parser-studio-generative-holdout.test.ts \
+            src/guided/aiQaGenerativeHoldout.test.ts
+          ./node_modules/.bin/vitest run src/guided/normalizationValidation.test.ts --maxWorkers=2
+          ./node_modules/.bin/vitest run \
+            src/guided/normalizationValidation.test.ts \
+            src/guided/aiQaGenerativeHoldout.test.ts --maxWorkers=2
+          test "$(git rev-parse HEAD)" = "567e0c255312028337898114cac452567bc585cc"
+
+      - name: Standard StrykerJS original and independent suite on identical mutants
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base = {
+            "testRunner": "vitest",
+            "mutate": ["src/guided/normalizationValidation.ts:26-28",
+                       "src/guided/normalizationValidation.ts:35-37"],
+            "reporters": ["json", "clear-text"],
+            "concurrency": 2,
+            "timeoutMS": 20000,
+            "timeoutFactor": 1.5,
+            "thresholds": {"high": 100, "low": 0, "break": 0},
+          }
+          for label, tests in [
+            ("original", ["src/guided/normalizationValidation.test.ts"]),
+            ("enhanced", ["src/guided/normalizationValidation.test.ts",
+                          "src/guided/aiQaGenerativeHoldout.test.ts"]),
+          ]:
+            # StrykerJS 9 ignores the legacy testFiles option. Each runner
+            # must load a separate Vitest include configuration instead.
+            path = "p2-" + label + ".vitest.config.mjs"
+            Path(path).write_text(
+              "import {defineConfig} from 'vitest/config';\n"
+              "export default defineConfig({test:{include:"
+              + json.dumps(tests) + "}});\n")
+            config = dict(base, vitest={"related": False, "configFile": path})
+            with open("p2-" + label + ".conf.json", "w") as stream:
+              json.dump(config, stream, sort_keys=True)
+          PY
+          mkdir -p p2-reports
+          ./node_modules/.bin/stryker run p2-original.conf.json | tee p2-reports/original.log
+          grep -E 'Initial test run succeeded\. Ran 3 tests' p2-reports/original.log
+          test -s reports/mutation/mutation.json
+          cp reports/mutation/mutation.json p2-reports/original.json
+          ./node_modules/.bin/stryker run p2-enhanced.conf.json | tee p2-reports/enhanced.log
+          grep -E 'Initial test run succeeded\. Ran 7 tests' p2-reports/enhanced.log
+          test -s reports/mutation/mutation.json
+          cp reports/mutation/mutation.json p2-reports/enhanced.json
+
+      - name: Compare same-mutant Stryker results without PASS inflation
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(sha256sum product/src/guided/normalizationValidation.ts | cut -d' ' -f1)"
+          expected="$(cut -d' ' -f1 source.sha256)"
+          test "$before" = "$expected"
+          test "$(git -C product rev-parse HEAD)" = "567e0c255312028337898114cac452567bc585cc"
+          python3 -B qa/tools/ai_qa_stryker_compare.py \
+            --original product/p2-reports/original.json \
+            --enhanced product/p2-reports/enhanced.json \
+            --head 567e0c255312028337898114cac452567bc585cc \
+            --source-sha256 "$before" \
+            --output product/p2-reports/score.json
+          sha256sum product/p2-reports/*.json
+          git -C product status --short | head -30
+
+      - name: Freeze dependency provenance and exact report hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd product && npm ls --depth=0 --json > p2-reports/package-versions.json)
+          sha256sum product/package-lock.json product/p2-reports/package-versions.json             product/p2-reports/original.json product/p2-reports/enhanced.json             product/p2-reports/score.json
+          test "$(git -C product rev-parse HEAD)" = "567e0c255312028337898114cac452567bc585cc"
+
+      - name: Preserve independent QA evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: parser-studio-p2-frozen-stryker
+          path: |
+            source.sha256
+            product/p2-reports/*.json
+            product/p2-reports/*.log
+          if-no-files-found: error
+          retention-days: 14

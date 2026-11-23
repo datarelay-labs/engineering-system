@@ -4,6 +4,8 @@
 
 Most defects should be discovered close to the change that introduced them. Expensive full-suite and operational E2E validation are release proofs, not the first place ordinary defects are found.
 
+When development or tests are AI-generated, include requirements-first independent QA, known-fault blind benchmarking, property/metamorphic checks and/or mutation testing when risk warrants it, following [AI_QA.md](AI_QA.md). Such tests find gaps in developer-authored assertions; they never bypass or impersonate the human-equivalent user gates below.
+
 ## Levels
 
 - L0 Static / Contract

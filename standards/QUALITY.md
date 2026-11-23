@@ -2,6 +2,10 @@
 
 Quality covers correctness, regression safety, usability, compatibility, resilience, and release evidence.
 
+## Independent AI QA and defect discovery
+
+For AI-generated code, developer-authored PASS counts alone are insufficient evidence of correct user outcomes. Follow [Independent AI QA](AI_QA.md) to freeze requirements-first oracles, use separately held-out faults, exercise user-facing missions, check actual backend/network state, and measure false PASS and fault recall. Read-only benchmark evaluation is **T0 advisory evidence**, never a substitute for trusted verification, selected-runtime human-equivalent Surface Reconciliation, Full User E2E, or release approval.
+
 ## Required quality loop
 
 ```text
