@@ -117,6 +117,14 @@ paths:
     domains: [session-continuity, workflows]
   "tools/test_work_admission.py":
     domains: [session-continuity]
+  "tools/lifecycle_audit.py":
+    domains: [session-continuity, workflows]
+  "tools/test_lifecycle_audit.py":
+    domains: [session-continuity]
+  "tools/worktree_lifecycle.py":
+    domains: [session-continuity, workflows]
+  "tools/test_worktree_lifecycle.py":
+    domains: [session-continuity]
   "tools/independent_verifier.py":
     domains: [session-continuity, workflows]
   "tools/test_independent_verifier.py":
@@ -668,6 +676,25 @@ scenarios:
       - "priority selection denies lower-priority or unlocked drift with explicit owner focus precedence"
       - "stale or non-v3 candidate priority requires reconciliation rather than silent fallback"
       - "unrelated sessions are never mutated to create capacity"
+    release_gate: true
+
+  - id: ENG-TERMINAL-LIFECYCLE-001
+    cost: cheap
+    estimated_seconds: 4
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Work Packet, merged PR and safe Worktree terminal lifecycle
+    level: integration
+    domains: [session-continuity]
+    triggers: [affected, pr, preflight, release]
+    platforms: [linux]
+    command: "python3 tools/test_lifecycle_audit.py && python3 tools/test_worktree_lifecycle.py"
+    invariants:
+      - "new plans never mutate GitHub or Git"
+      - "only authenticated merged exact-HEAD PR and COMPLETE Work Packet can close and remove a clean Worktree"
+      - "dirty, untracked, stale, untrusted, ambiguous and active-worker Worktrees fail closed"
+      - "an explicit SHA-256 plan digest and --apply are required to mutate the Issue and Worktree"
     release_gate: true
 
   - id: ENG-COORDINATOR-001

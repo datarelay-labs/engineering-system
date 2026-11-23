@@ -578,6 +578,30 @@ CLAIMED -> ACTIVE -> WAIT/YIELD or RETRY -> COMPLETE/ABANDON/SUPERSEDED -> RELEA
 - Terminal cleanup may stop disposable sessions and remove temporary worktrees/branches only after proving that no uncommitted/unpushed work, unresolved evidence, or needed PR/branch state will be lost.
 - Dirty, ambiguous, unpushed, or externally referenced state must never be auto-deleted merely to reclaim resources.
 
+**Source-complete terminal reconciliation.** Once a workstream's source and
+its PR are genuinely completed, update the existing Work Packet to
+\`STATUS=COMPLETE\` with \`Blockers: NONE\` only for that bounded source outcome.
+Track future real-user E2E in the owning product's separate evidence status;
+do not leave source-complete Git worktrees alive solely awaiting future use.
+
+For an explicitly owner-authorized terminal operation, run
+\`python3 tools/worktree_lifecycle.py --repo-root <absolute-primary-checkout>
+--worktree <absolute-registered-checkout> --repo owner/name --pr <merged-PR>
+--issue <complete-Issue> --head <exact-source-40-hex>\` (read-only plan).
+The tool fetches fresh GitHub PR, Issue, author-write permission and open-Issue
+references through the authenticated GitHub CLI, checks exact branch/HEAD,
+local Git registration, all tracked/untracked files and foreign-process
+liveness. It returns \`decision=ALLOW\` with \`plan_sha256\` or an explicit
+\`BLOCK\`. Only a second invocation with \`--apply
+--expected-plan-sha256 <the-just-verified-digest>\` may close that exact
+COMPLETE Issue and then invoke plain \`git worktree remove\` (no force and no
+branch deletion). If Issue closure succeeds but local re-check/removal fails,
+report a partial result and preserve remaining data for reconciliation.
+
+Do not bulk-close ACTIVE/PAUSED packets, force-remove worktrees, cleanup
+other workers' files, or treat PR CI/synthetic tests as live user E2E.
+A non-merged PR or externally referenced Worktree remains protected.
+
 ## Mutable evidence revalidation
 
 Evidence tied to immutable source identity may be reused only for that identity. Mutable external state must be re-read at the decision boundary.
