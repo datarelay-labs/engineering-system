@@ -716,6 +716,25 @@ scenarios:
       - "unrelated sessions are never mutated to create capacity"
     release_gate: true
 
+  - id: ENG-SELECTIVE-WEB-GUIDANCE-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 60
+    agent_default: true
+    scope: integration
+    name: Optional web-only Modern Web Guidance and WCAG evidence trust
+    level: integration
+    domains: [ai, adapters, standards]
+    triggers: [affected, pr, preflight]
+    platforms: [linux]
+    command: "python3 -B tools/test_web_guidance_contract.py"
+    invariants:
+      - "existing Git head and web-only project scope required"
+      - "legacy modernization is advisory, never an automatic product change"
+      - "axe automated findings never imply full WCAG or Full User E2E acceptance"
+      - "raw source lines and DOM targets never leave the isolated evidence reader"
+    release_gate: false
+
   - id: ENG-DEVTOOLS-DIAGNOSTIC-001
     cost: cheap
     estimated_seconds: 3
