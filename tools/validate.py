@@ -1926,6 +1926,11 @@ def main():
     completed = subprocess.run(["python3", "tools/test_worktree_skill.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run([
+        "node", "--test", "adapters/chrome-devtools/test-readonly-contract.cjs"
+    ], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
