@@ -200,6 +200,21 @@ def terminal_plan(
     if not isinstance(permission, dict) or permission.get("permission") not in {"write", "maintain", "admin"}:
         raise CleanupBlocked("ISSUE_AUTHOR_NO_WRITE_AUTHORITY")
 
+    # A merged source PR does not prove the branch has no newly opened PR.
+    # Fail closed when pagination cannot establish a complete open PR census.
+    open_prs = api(f"repos/{repo}/pulls?state=open&per_page=100")
+    if not isinstance(open_prs, list) or len(open_prs) >= 100:
+        raise CleanupBlocked("OPEN_PR_INVENTORY_INCOMPLETE")
+    for item in open_prs:
+        if not isinstance(item, dict):
+            raise CleanupBlocked("OPEN_PR_INVENTORY_INVALID")
+        owner = (item.get("head") or {}).get("repo") or {}
+        if (
+            (item.get("head") or {}).get("ref") == branch
+            and owner.get("full_name", "").lower() == repo.lower()
+        ):
+            raise CleanupBlocked("OTHER_OPEN_PR_REFERENCES_BRANCH")
+
     # Do not retire a worktree still referenced by a second open Work Packet.
     other = api(f"repos/{repo}/issues?state=open&per_page=100")
     if not isinstance(other, list) or len(other) >= 100:

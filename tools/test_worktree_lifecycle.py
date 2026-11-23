@@ -81,6 +81,7 @@ class Fixture:
             "merge_commit_sha": "b" * 40,
         }
         self.extra = []
+        self.open_prs = []
         self.writes = []
 
     def api(self, path, *, payload=None):
@@ -93,6 +94,8 @@ class Fixture:
             return self.issue
         if path.endswith("/collaborators/trusted-owner/permission"):
             return {"permission": "admin"}
+        if path.endswith("/pulls?state=open&per_page=100"):
+            return list(self.open_prs)
         if path.endswith("/issues?state=open&per_page=100"):
             return [self.issue] + list(self.extra)
         raise AssertionError("Unexpected API path " + path)
@@ -204,6 +207,18 @@ def test_partial_issue_close_preserves_new_worker_files():
         assert f.issue["state"] == "closed" and (f.wt / "worker-untracked.tmp").exists()
 
 
+def test_other_open_pr_or_partial_inventory_blocks():
+    with tempfile.TemporaryDirectory() as d:
+        f = Fixture(d)
+        f.open_prs.append({
+            "number": 1000,
+            "head": {"ref": "feat/cleanup", "repo": {"full_name": REPO}},
+        })
+        assert f.plan()["reason"] == "OTHER_OPEN_PR_REFERENCES_BRANCH"
+        f.open_prs[:] = [{"number": n, "head": {"ref": "other"}} for n in range(100)]
+        assert f.plan()["reason"] == "OPEN_PR_INVENTORY_INCOMPLETE"
+
+
 def test_symlink_and_different_worktree_block():
     with tempfile.TemporaryDirectory() as d:
         f = Fixture(d)
@@ -234,5 +249,6 @@ if __name__ == "__main__":
     test_active_worker_and_other_open_packet_blocks()
     test_symlink_and_different_worktree_block()
     test_partial_issue_close_preserves_new_worker_files()
+    test_other_open_pr_or_partial_inventory_blocks()
     test_complete_marked_packet_parse()
     print("WORKTREE_LIFECYCLE_TESTS=PASS")
