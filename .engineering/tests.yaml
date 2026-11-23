@@ -37,6 +37,10 @@ paths:
     domains: [ai, workflows]
   "tools/test_ai_qa_bakeoff.py":
     domains: [ai, workflows]
+  "tools/ai_qa_consumer_adoption.py":
+    domains: [ai, workflows, adoption]
+  "tools/test_ai_qa_consumer_adoption.py":
+    domains: [ai, workflows, adoption]
   "tools/test_ai_qa_product_mutation.py":
     domains: [ai, adapters, workflows]
   "tools/ai_qa_stryker_compare.py":
@@ -1257,6 +1261,25 @@ scenarios:
     command: "python3 -B tools/test_ai_qa_bakeoff.py"
     invariants:
       - "common holdout exact HEAD and external pins deny false vendor comparison; claimed price remains unverified"
+    release_gate: false
+
+  - id: ENG-AI-QA-CROSS-PROJECT-ADOPTION-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 60
+    agent_default: true
+    scope: unit
+    name: Authenticated GitHub adoption declaration and exact-head CI census
+    level: unit
+    domains: [ai, workflows, adoption]
+    triggers: [affected, preflight, release]
+    platforms: [linux]
+    command: "python3 -B tools/test_ai_qa_consumer_adoption.py"
+    invariants:
+      - "historical-HEAD CI never attests current-main"
+      - "canonical Engineering System is not misclassified as adopted consumer"
+      - "declared adoption and one green workflow never establish local adoption compliance or product FUE"
+      - "no mutation, release authority or consumer write"
     release_gate: false
 
   - id: ENG-AI-QA-STRYKER-COMPARISON-001
