@@ -11,8 +11,18 @@ def test_closed_active():
  r=audit({"issues":[{"number":4,"state":"CLOSED","body":pkt("x")} ]}); assert r["summary"]["contradictions"]==[4]
 def test_duplicate():
  r=audit({"issues":[{"number":5,"state":"OPEN","body":pkt("x")},{"number":6,"state":"OPEN","body":pkt("x","PAUSED")} ]}); assert r["summary"]["duplicate_candidates"]==[6]
+def test_marked_complete_with_legacy_history():
+ body=(
+     "<!-- ENGINEERING_CURRENT_PACKET_BEGIN -->\n"
+     + pkt("merged-source","COMPLETE")
+     + "<!-- ENGINEERING_CURRENT_PACKET_END -->\n"
+     + "## Historical work\nSTATUS=ACTIVE\n"
+ )
+ r=audit({"issues":[{"number":8,"state":"OPEN","body":body}]})
+ assert r["summary"]["open_complete"]==[8],r
+
 def test_nonpacket():
  r=audit({"issues":[{"number":7,"state":"OPEN","body":"roadmap prose"}]}); assert r["status"]=="PASS" and r["issues"][0]["classification"]=="NOT_PACKET"
 if __name__=='__main__':
- for f in (test_clean,test_stale_complete,test_closed_active,test_duplicate,test_nonpacket): f()
+ for f in (test_clean,test_stale_complete,test_closed_active,test_duplicate,test_nonpacket,test_marked_complete_with_legacy_history): f()
  print('LIFECYCLE_AUDIT_TESTS=PASS')

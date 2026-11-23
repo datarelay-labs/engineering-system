@@ -1880,6 +1880,10 @@ def main():
     completed = subprocess.run(["python3", "tools/test_work_admission.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    for lifecycle_test in ("tools/test_lifecycle_audit.py", "tools/test_worktree_lifecycle.py"):
+        completed = subprocess.run(["python3", lifecycle_test], cwd=ROOT)
+        if completed.returncode:
+            raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_independent_verifier.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

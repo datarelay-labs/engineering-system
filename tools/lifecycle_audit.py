@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
-from context_epoch import parse_packet
+from worktree_lifecycle import packet_for_terminal_issue
 
 TERMINAL={"COMPLETE"}; WAITING={"PAUSED","BLOCKED"}
 
@@ -15,7 +15,7 @@ def audit(payload):
         if not isinstance(raw,dict): raise ValueError("issue must be an object")
         num=raw.get("number"); state=str(raw.get("state","")).upper(); body=raw.get("body","")
         if not isinstance(num,int) or state not in {"OPEN","CLOSED"} or not isinstance(body,str): raise ValueError("invalid issue facts")
-        try: p=parse_packet(body)
+        try: p=packet_for_terminal_issue(body)
         except Exception:
             rows.append({"number":num,"classification":"NOT_PACKET"}); continue
         if "PACKET_VERSION" not in p.metadata:
