@@ -1937,6 +1937,9 @@ def main():
     ], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "-B", "tools/test_web_guidance_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_verification_contract.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)

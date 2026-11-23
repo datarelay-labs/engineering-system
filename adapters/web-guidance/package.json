@@ -1,0 +1,17 @@
+{
+  "name": "es-modern-web-guidance-20261123",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "modern-web-guidance": "1.0.1"
+  }
+}
