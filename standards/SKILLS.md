@@ -28,6 +28,16 @@ Roadmap skill metadata is `trigger` + progressive disclosure of **body / resourc
 
 All paths stay repository-relative (no absolute paths, no `..`, no symlink escape). Cap skill count; no giant always-on catalog.
 
+The canonical worktree-source-audit example has one progressively
+disclosed skill document and only existing read-only audit script and standard
+resources. Its metadata does not define permission profiles or executable
+hooks: the default repo_read profile remains read-only and does not authorize
+shell, network, writes or GitHub actions. An externally authenticated
+GitHub read requires separately authorized host tool access. The script
+is advisory and never closes or removes a Worktree. Run
+python3 tools/test_worktree_skill.py and the existing lifecycle audit tests
+to reproduce this permission and quality boundary.
+
 ## Lifecycle hooks (machine-checkable non-executable metadata)
 
 Hook stages: `session_start`, `pre_tool`, `post_tool`, `session_end`.

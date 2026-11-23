@@ -1,0 +1,11 @@
+version: 1
+skills:
+  - id: worktree-source-audit
+    trigger: >-
+      Audit accumulated local Git Worktrees and completed GitHub Work Packets
+      before proposing any terminal cleanup or Issue closure.
+    body: skills/worktree-source-audit/SKILL.md
+    resources:
+      - standards/SESSION_CONTINUITY.md
+    scripts:
+      - tools/lifecycle_audit.py
