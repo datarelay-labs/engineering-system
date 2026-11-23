@@ -56,3 +56,31 @@ Detect actual novel defects in AI-developed software, independently validate fin
 Measure seeded defect recall by severity, false-PASS journey count (target zero), missing required checks, unmatched alerts requiring triage, independently confirmed actual false positives, reproducibility/flakiness and cost per confirmed new defect. Do not invent percentages or report PASS when user actions or external evidence have not been executed.
 
 Do not mutate production, upload customer secrets/logs, create permission keys, force consumer adoption or claim release permission. Product owning Chats retain native PR/Git/CI and full user-gate responsibilities. Exact-HEAD CI and review must verify each completed code batch; P0 completion alone does not close this multi-phase roadmap.
+
+
+## 2026-11-24 optional tool roadmap and cross-project outcome
+
+These six optional tooling items were evaluated **after** independent P2
+mutation qualification and PR #318 integration. All results are advisory;
+none replace current owner-selected tool authority, native product CI, Full
+User E2E, or actual release gates.
+
+| Candidate | Disposition | Real, bounded evidence |
+| --- | --- | --- |
+| ES-TOOL-1 Chrome DevTools MCP | **IMPLEMENTED OPTIONAL** | PR #326 merged; real isolated Chrome/MCP source frames and local trace; no auth, production, or user-gate attestation |
+| ES-TOOL-2 OpenCodeReview | **NOT_ADOPTED_WITH_EVIDENCE** | Pinned 1.14.1 Delegate/Preview against genuine DSP bug-fix PR; file grouping but no LLM-reviewed findings or independently verified defect gain |
+| ES-TOOL-3 Modern Web Guidance | **IMPLEMENTED OPTIONAL** | PR #327 merged; 1.0.1 static guidance and pinned axe browser WCAG evidence; old Parser Studio snapshot 5 rules/23 nodes, no product fix claimed |
+| ES-TOOL-4 reusable scoped skill | **IMPLEMENTED** | PR #325 merged; Worktree audit skill and existing repo_read profile preserve permissions and no side effects |
+| ES-TOOL-5 OpenComputer-inspired runtime | **NOT_ADOPTED_WITH_EVIDENCE** | Actual two rootless namespace sessions separated files on Atlas, cancellation found an empty-dir lifecycle leak and dev-drcontrol denied userns; no general unattended runner |
+| ES-TOOL-6 consumer adoption verification | **IMPLEMENTED ADVISORY** | `tools/ai_qa_consumer_adoption.py` authenticated 8-repo main census and exact-head CI observation with conservative unknown/failed coverage; `tools/test_ai_qa_consumer_adoption.py` guards false release/E2E claims |
+
+Read real receipts and limits in
+`evals/ai-qa/pilots/20261124-opencomputer-isolation.md` and
+`evals/ai-qa/pilots/20261124-cross-project-adoption.md`.
+The measured historical independent mutation gain remains **19/23 to 23/23**
+on the same fault set (+17.39pp), not a blanket product accuracy claim.
+Product-owned P3 complete Full User E2E, current Parser Studio accessibility
+remediation, Link current-head CI failures and Control main adoption
+reconciliation remain open and owned by their corresponding product teams.
+The generic cross-project census is read-only and does not add a new release
+gate or rewrite consumer branches.

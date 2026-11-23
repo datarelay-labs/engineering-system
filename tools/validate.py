@@ -1965,6 +1965,7 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     for ai_qa_test in ("tools/test_ai_qa_parser_studio_oracle.py", "tools/test_ai_qa_bakeoff.py",
+                       "tools/test_ai_qa_consumer_adoption.py",
                        "tools/test_ai_qa_product_mutation.py", "tools/test_ai_qa_explorer_audit.py",
                        "tools/test_ai_qa_stryker_compare.py"):
         completed = subprocess.run(["python3", "-B", ai_qa_test], cwd=ROOT)
