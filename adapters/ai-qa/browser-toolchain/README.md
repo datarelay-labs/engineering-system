@@ -50,3 +50,28 @@ sandbox as a test PASS or silently fall back to an unsandboxed launch.
 The e2e comparator is limited to a synthetic loopback fixture; its engine
 has its own browser launch policy and is not approved for live products
 by this smoke.
+
+### Optional product observation probes
+
+In a private disposable HOME with the pinned dependencies and Chromium
+installed as above, run the existing product-owned fixture on a fresh
+loopback port. Copy `consumer-driver.py` into that fixture's private
+working directory and run:
+
+    python3 consumer-driver.py atlas cli http://127.0.0.1:PORT
+    python3 consumer-driver.py atlas mcp http://127.0.0.1:PORT
+
+Replace `atlas` with `control`, `grant`, or `foundation` as applicable.
+The three latter probes observe the actual sign-in surface only
+(Foundation at /settings); they do not log in or change credentials.
+Atlas uses the actual WebUiTests disposable source/projection fixture,
+checks cross-project search, exact provenance and one result, and checks
+that the fixture's escaped title remains text rather than executable DOM.
+
+The driver expects the shared pinned node_modules under its private HOME.
+Only use a fresh test fixture, not a live or existing operator service;
+the loopback origin check and origin allowlist are not a network security
+boundary. The product owner must bind the fixture/build to an exact Git
+HEAD and preserve its own independent acceptance oracles. Do not print
+credentials, attach personal browser profiles, or claim any public smoke
+as a formal BFS, FUE, deployment or release receipt.
