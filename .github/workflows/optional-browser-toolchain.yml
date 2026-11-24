@@ -9,7 +9,9 @@ permissions:
   contents: read
 jobs:
   synthetic-browser:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 runner AppArmor blocks user namespaces for the downloaded
+    # Chromium binary. Keep browser sandboxing enabled on the compatible image.
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     defaults:
       run:
@@ -33,14 +35,14 @@ jobs:
         run: |
           set -euo pipefail
           node native-smoke.cjs | tee native-smoke.log
-          python3 cli-smoke.py >cli-smoke.log 2>&1
-          python3 mcp-smoke.py >mcp-smoke.log 2>&1
+          python3 cli-smoke.py >cli-smoke.log 2>&1 || { cat cli-smoke.log; exit 1; }
+          python3 mcp-smoke.py >mcp-smoke.log 2>&1 || { cat mcp-smoke.log; exit 1; }
           grep -q CLI_SMOKE_PASS cli-smoke.log
           grep -q MCP_SMOKE_PASS mcp-smoke.log
       - name: Qualify deterministic e2e and negative control
         run: |
           set -euo pipefail
-          node_modules/.bin/e2e run --strict-cache --workers 1 --assertion-timeout 3000 >e2e-good.log 2>&1
+          node_modules/.bin/e2e run --strict-cache --workers 1 --assertion-timeout 3000 >e2e-good.log 2>&1 || { cat e2e-good.log; exit 1; }
           if POC_FAULT=1 node_modules/.bin/e2e run --strict-cache --workers 1 --assertion-timeout 3000 >e2e-fault.log 2>&1; then
             echo 'False PASS: faulty fixture unexpectedly passed' >&2
             exit 1

@@ -3,7 +3,7 @@ p=pathlib.Path.cwd()
 s=socket.socket();s.bind(('127.0.0.1',0));port=s.getsockname()[1];s.close()
 server=subprocess.Popen(['node','fixture.cjs',str(port)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 err=open('mcp-stderr.log','w')
-m=subprocess.Popen([str(p/'node_modules/.bin/playwright-mcp'),'--headless','--isolated','--browser','chrome','--executable-path',subprocess.check_output(['node','-e',"process.stdout.write(require('playwright').chromium.executablePath())"],text=True),'--allowed-origins',f'http://127.0.0.1:{port}'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=err,text=True,bufsize=1)
+m=subprocess.Popen([str(p/'node_modules/.bin/playwright-mcp'),'--headless','--isolated','--sandbox','--browser','chrome','--executable-path',subprocess.check_output(['node','-e',"process.stdout.write(require('playwright').chromium.executablePath())"],text=True),'--allowed-origins',f'http://127.0.0.1:{port}'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=err,text=True,bufsize=1)
 i=0
 def send(msg):
  m.stdin.write(json.dumps(msg)+'\n');m.stdin.flush()
@@ -47,8 +47,8 @@ try:
  def args(name,values):
   return {k:v for k,v in values.items() if k in schemas[name].get('properties',{})}
  call('browser_type',args('browser_type',{'element':'Value','ref':field,'target':field,'text':'sentinel-20261125'}))
- out=call('browser_click',args('browser_click',{'element':'Submit','ref':button,'target':button}))
- if 'sentinel-20261125' not in out:out=call('browser_snapshot',{})
+ call('browser_click',args('browser_click',{'element':'Submit','ref':button,'target':button}))
+ out=call('browser_snapshot',{})
  assert re.search(r'status[^\n]*sentinel-20261125',out),out
  print('MCP_SMOKE_PASS',flush=True)
 finally:

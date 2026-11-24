@@ -4,7 +4,7 @@ s=socket.socket();s.bind(('127.0.0.1',0));port=s.getsockname()[1];s.close()
 server=subprocess.Popen(['node','fixture.cjs',str(port)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 cli=[str(p/'node_modules/.bin/playwright-cli'),'-s=es-smoke']
 config=p/'cli.json'
-config.write_text(json.dumps({'browser':{'browserName':'chromium','launchOptions':{'headless':True,'executablePath':subprocess.check_output(['node','-e',"process.stdout.write(require('playwright').chromium.executablePath())"],text=True)}}}))
+config.write_text(json.dumps({'browser':{'browserName':'chromium','launchOptions':{'headless':True,'chromiumSandbox':True,'executablePath':subprocess.check_output(['node','-e',"process.stdout.write(require('playwright').chromium.executablePath())"],text=True)}}}))
 def run(*args):
  r=subprocess.run(cli+list(args),capture_output=True,text=True,timeout=10);print(r.stdout,r.stderr,flush=True);r.check_returncode();return r.stdout
 try:
@@ -18,7 +18,7 @@ try:
  run('fill','#value','sentinel-20261125')
  run('click','button')
  out=run('eval',"() => document.querySelector('#result').textContent")
- assert 'sentinel-20261125' in out
+ assert '### Result\n"sentinel-20261125"\n' in out, out
  print('CLI_SMOKE_PASS',flush=True)
 finally:
  try:run('close')

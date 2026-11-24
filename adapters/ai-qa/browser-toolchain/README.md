@@ -23,7 +23,7 @@ ASSERTION_FAILED with observed WRONG:
 
 For authorized interactive exploratory work, use the pinned local
 node_modules/.bin/playwright-cli executable with a fresh named nonpersistent
-session, or node_modules/.bin/playwright-mcp --headless --isolated over stdio.
+session, or node_modules/.bin/playwright-mcp --headless --isolated --sandbox over stdio.
 Do not expose an MCP port, attach to an existing personal profile, grant
 unrestricted file access, or pass real session tokens. Origin allowlists are
 not security boundaries. Apply the existing product mission/origin/write
@@ -38,3 +38,15 @@ release gate. The fixture is synthetic; passing is not product acceptance.
 Run `node native-smoke.cjs` against the same normal and fault fixture for the
 native Playwright comparison. A seeded fault detected by both approaches is
 not evidence of incremental defect yield.
+
+### Chromium sandbox portability
+
+Keep the native, CLI and MCP smoke browser sandbox explicitly enabled.
+The first Ubuntu 24.04 hosted-runner qualification failed with Chromium
+`No usable sandbox!` in MCP. The qualification workflow selects Ubuntu
+22.04 to test on a compatible hosted image without changing kernel,
+AppArmor, or browser security settings. Do not treat a missing usable
+sandbox as a test PASS or silently fall back to an unsandboxed launch.
+The e2e comparator is limited to a synthetic loopback fixture; its engine
+has its own browser launch policy and is not approved for live products
+by this smoke.

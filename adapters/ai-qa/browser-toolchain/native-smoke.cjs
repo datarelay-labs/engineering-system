@@ -20,7 +20,7 @@ async function main() {
       if (i === 49) throw Error('fixture not ready');
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    browser = await chromium.launch({headless:true});
+    browser = await chromium.launch({headless:true, chromiumSandbox:true});
     const page = await browser.newPage();
     for (const [path, expected] of [['/', 'sentinel-20261125'], ['/fault', 'WRONG']]) {
       await page.goto(origin + path);
