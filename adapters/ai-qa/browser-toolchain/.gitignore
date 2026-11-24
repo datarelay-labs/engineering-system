@@ -1,0 +1,8 @@
+node_modules/
+.cache/
+.e2e/
+.playwright-cli/
+.playwright-mcp/
+cli.json
+*.log
+__pycache__/

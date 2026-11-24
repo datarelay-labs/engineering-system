@@ -1,0 +1,59 @@
+name: Optional browser toolchain qualification
+on:
+  pull_request:
+    paths:
+      - 'adapters/ai-qa/browser-toolchain/**'
+      - '.github/workflows/optional-browser-toolchain.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: adapters/ai-qa/browser-toolchain
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install pinned optional tools
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node_modules/.bin/playwright install --with-deps chromium
+      - name: Compare native, CLI, and MCP browser observations
+        run: |
+          set -euo pipefail
+          node native-smoke.cjs | tee native-smoke.log
+          python3 cli-smoke.py >cli-smoke.log 2>&1
+          python3 mcp-smoke.py >mcp-smoke.log 2>&1
+          grep -q CLI_SMOKE_PASS cli-smoke.log
+          grep -q MCP_SMOKE_PASS mcp-smoke.log
+      - name: Qualify deterministic e2e and negative control
+        run: |
+          set -euo pipefail
+          node_modules/.bin/e2e run --strict-cache --workers 1 --assertion-timeout 3000 >e2e-good.log 2>&1
+          if POC_FAULT=1 node_modules/.bin/e2e run --strict-cache --workers 1 --assertion-timeout 3000 >e2e-fault.log 2>&1; then
+            echo 'False PASS: faulty fixture unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -q ASSERTION_FAILED e2e-fault.log
+          grep -q WRONG e2e-fault.log
+      - name: Preserve synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: optional-browser-toolchain-synthetic
+          path: |
+            adapters/ai-qa/browser-toolchain/*.log
+            adapters/ai-qa/browser-toolchain/.e2e/results/
+          include-hidden-files: true
+          retention-days: 14
