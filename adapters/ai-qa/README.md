@@ -112,3 +112,10 @@ tools/ai_qa_bakeoff.py reads 2–12 tools' pinned QA observations and locally ha
     python3 -B tools/ai_qa_bakeoff.py --help
 
 No QA.tech, TestSprite or Momentic paid account was connected or invoked in this pilot. Actual independent provider comparisons require independently collected real invocations and an authorized sanitized test environment.
+
+## Optional Playwright CLI/MCP toolchain
+
+See [browser-toolchain](browser-toolchain/README.md) for the pinned,
+development-only CLI and isolated stdio MCP smoke tests and deterministic
+e2e-inc/e2e comparator. This does not alter mandatory product gates or
+grant new tool authority.

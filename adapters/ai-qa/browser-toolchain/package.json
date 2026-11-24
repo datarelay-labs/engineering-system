@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "dependencies": {
+    "@e2e-dev/web": "0.16.1",
+    "@playwright/cli": "0.1.25",
+    "@playwright/mcp": "0.0.86",
+    "e2e": "0.24.0"
+  },
+  "name": "engineering-system-browser-toolchain"
+}
