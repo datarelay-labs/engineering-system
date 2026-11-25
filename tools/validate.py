@@ -88,6 +88,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_ai_qa_explorer_audit.py",
     "tools/test_ai_qa_autonomous_browser.cjs",
     "tools/test_ai_qa_benchmark.py",
+    "tools/specification_integrity.py",
+    "tools/test_specification_integrity.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -1959,6 +1961,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_affected_test_selection.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "-B", "tools/test_specification_integrity.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "-B", "tools/test_ai_qa_benchmark.py"], cwd=ROOT)

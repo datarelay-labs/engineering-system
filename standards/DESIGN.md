@@ -20,6 +20,36 @@ Before implementing a FEATURE, material REFACTOR, SECURITY change, public-contra
 
 For a small local bug fix or documentation-only change, these items may be implicit if the affected contract and regression are already obvious from existing canonical artifacts.
 
+## Specification integrity — before material implementation
+
+Resolve the current owner-accepted requirement and its observable acceptance
+before changing the affected public contract. Reconcile conflicting active
+specifications in the same change: update the authoritative text, explicitly
+retire superseded guidance (history remains in Git), and repair dependent
+manuals, tests and generated representations. A roadmap, historical Issue or
+Work Packet is not an additional normative source. Do not rewrite the intended
+behavior to match an accidental implementation. Escalate only genuinely
+unresolved material owner choices.
+
+For existing products, audit the current specification inventory against the
+actual public surface and record gaps before claiming completion. Trace material
+requirements to source, implementation, independently defined acceptance and
+test scenarios. Reuse existing IDs and contract systems when they suffice;
+do not impose a second specification framework or create a document for each
+small bug fix. For a bounded pilot or a product without equivalent checking,
+use `tools/specification_integrity.py` with a repository-owned JSON manifest
+(document paths, lifecycle, authority scope, SHA-256, requirement ID and exact
+source/code/test anchors). The checker detects structural drift and missing
+links, not natural-language contradictions, implementation correctness,
+test execution or complete requirement discovery. An owner-approved design
+change can update the relevant manifest after reviewing all affected links.
+
+Run the affected check in the existing PR workflow, using `--require-complete`
+for a declared accepted slice whose completion is claimed. During initial
+migration, report incomplete coverage without representing it as PASS.
+Independent requirements-first QA and exact-candidate evidence remain required
+under TESTING and AI_QA. A green structural check cannot authorize release.
+
 ## Where design state lives
 
 Do not create a new permanent design document for every task.

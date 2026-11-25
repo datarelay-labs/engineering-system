@@ -54,6 +54,14 @@ Retired or legacy knowledge systems are provenance-only and never active depende
 
 If derived knowledge conflicts with canonical Git content, canonical Git content wins.
 
+When a product decision changes, reconcile the existing authoritative text
+and its dependent current documents before affected implementation. Move
+superseded operational instructions out of active discovery; a dated override
+above conflicting legacy instructions is transitional, not a clean specification.
+See [DESIGN](DESIGN.md#specification-integrity--before-material-implementation).
+Do not treat actual code as authority for intended behavior when it conflicts
+with an accepted specification.
+
 ## Context-efficiency rule
 
 Agents should retrieve only the knowledge needed for the current task. Do not load all derived knowledge, archived specifications, ADRs, or historical discussions into every task context. Resolve canonical/local context first; use an optional derived-context adapter only for bounded JIT enrichment that materially helps the current task.
