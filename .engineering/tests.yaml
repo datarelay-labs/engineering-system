@@ -29,6 +29,10 @@ paths:
     domains: [session-continuity]
   "tools/**":
     domains: [workflows]
+  "tools/specification_contract.py":
+    domains: [design]
+  "tools/test_specification_contract.py":
+    domains: [design]
   "tools/ai_qa_benchmark.py":
     domains: [ai, workflows]
   "tools/test_ai_qa_benchmark.py":
@@ -1179,6 +1183,23 @@ scenarios:
       - "owner profile delegates DataRelay to product chats and assigns XDR direct execution to the steward"
       - "organization choices do not leak into managed consumer AGENTS template"
     release_gate: true
+
+  - id: ENG-SPECIFICATION-001
+    cost: cheap
+    estimated_seconds: 2
+    timeout_seconds: 30
+    agent_default: true
+    scope: unit
+    name: Specification inventory and requirement traceability negative regression
+    level: unit
+    domains: [design]
+    triggers: [affected, preflight]
+    platforms: [linux]
+    command: "python3 -B tools/test_specification_contract.py"
+    invariants:
+      - "mixed authority, changed source, duplicate requirements and missing traces fail closed"
+      - "structural PASS never claims semantic or executed test coverage"
+    release_gate: false
 
   - id: ENG-AI-QA-BENCHMARK-001
     cost: cheap
