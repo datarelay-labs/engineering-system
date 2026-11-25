@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+import contextlib
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+import specification_contract as spec
+
+
+class SpecificationContractTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.put("spec.md", "Only two parser creation modes.\nDefault listener port is 6801.\n")
+        self.put("old.md", "Legacy Workbench navigation.\n")
+        self.put("app.py", "PARSER_MODES = ('auto', 'assisted')\n")
+        self.put("test_app.py", "def test_two_modes(): pass\n")
+        self.manifest = {
+            "version": 1,
+            "documents": {
+                p: {"status": status, "sha256": spec.digest((self.root / p).read_bytes())}
+                for p, status in [("spec.md", "active"), ("old.md", "historical")]
+            },
+            "requirements": [{
+                "id": "PS-001", "state": "implemented",
+                "source": {"path": "spec.md", "contains": "Only two parser creation modes."},
+                "implementation": [{"path": "app.py", "contains": "PARSER_MODES = ('auto', 'assisted')"}],
+                "tests": [{"path": "test_app.py", "contains": "def test_two_modes()"}],
+            }],
+        }
+
+    def put(self, path, data):
+        (self.root / path).write_text(data, encoding="utf-8")
+
+    def check(self):
+        return spec.validate(self.root, self.manifest)
+
+    def fail_with(self, msg):
+        with self.assertRaisesRegex(spec.Invalid, msg):
+            self.check()
+
+    def test_structural_pass_not_semantic_proof(self):
+        self.assertEqual(self.check()["implemented"], 1)
+        self.put("manifest.json", json.dumps(self.manifest))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(spec.main(["--root", str(self.root), "--manifest", "manifest.json"]), 0)
+        self.assertIn("SEMANTIC_CONSISTENCY=UNVERIFIED", out.getvalue())
+        self.assertIn("AUTHORIZES_RELEASE=NO", out.getvalue())
+
+    def test_spec_change(self):
+        self.put("spec.md", "Only three parser creation modes.")
+        self.fail_with("specification changed")
+
+    def test_mixed_document(self):
+        self.manifest["documents"]["old.md"]["status"] = "mixed"
+        self.fail_with("unresolved active/historical")
+
+    def test_historical_authority(self):
+        self.manifest["requirements"][0]["source"] = {"path": "old.md", "contains": "Legacy Workbench navigation."}
+        self.fail_with("historical source")
+
+    def test_missing_test(self):
+        self.manifest["requirements"][0]["tests"] = []
+        self.fail_with("missing tests trace")
+
+    def test_deleted_test_assertion_marker(self):
+        self.put("test_app.py", "def unrelated_test(): pass")
+        self.fail_with("marker missing")
+
+    def test_missing_implementation(self):
+        self.manifest["requirements"][0]["implementation"] = []
+        self.fail_with("missing implementation trace")
+
+    def test_duplicate_id(self):
+        self.manifest["requirements"].append(self.manifest["requirements"][0].copy())
+        self.fail_with("duplicate requirement ID")
+
+    def test_duplicate_authority(self):
+        self.manifest["requirements"].append(dict(self.manifest["requirements"][0], id="PS-002"))
+        self.fail_with("duplicate authority marker")
+
+    def test_doc_cannot_replace_test(self):
+        self.manifest["requirements"][0]["tests"] = [{"path": "spec.md", "contains": "Only two parser creation modes."}]
+        self.fail_with("cannot substitute")
+
+    def test_source_cannot_replace_test(self):
+        self.manifest["requirements"][0]["tests"] = self.manifest["requirements"][0]["implementation"]
+        self.fail_with("implementation cannot substitute")
+
+    def test_untracked_authority(self):
+        self.put("extra.md", "Another product requirement.")
+        self.manifest["requirements"][0]["source"] = {"path": "extra.md", "contains": "Another product requirement."}
+        self.fail_with("undeclared specification")
+
+    def test_active_doc_without_requirement(self):
+        self.manifest["documents"]["old.md"]["status"] = "active"
+        self.fail_with("missing requirement inventory")
+
+    def test_planned_not_release_ready(self):
+        self.manifest["requirements"][0].update(state="planned", implementation=[], tests=[])
+        self.assertEqual(self.check()["planned"], 1)
+        with self.assertRaisesRegex(spec.Invalid, "planned requirements remain"):
+            spec.validate(self.root, self.manifest, require_implemented=True)
+
+    def test_retired_with_live_traces(self):
+        self.manifest["requirements"][0]["state"] = "retired"
+        self.fail_with("retired requirement has live traces")
+
+    def test_path_escape(self):
+        self.manifest["requirements"][0]["tests"][0]["path"] = "../test.py"
+        self.fail_with("invalid repository path")
+
+    def test_symlink(self):
+        (self.root / "test_app.py").unlink()
+        (self.root / "test_app.py").symlink_to(self.root / "app.py")
+        self.fail_with("symlink is not permitted")
+
+    def test_duplicate_json_key(self):
+        with self.assertRaisesRegex(spec.Invalid, "duplicate JSON key"):
+            json.loads('{"version":1,"version":2}', object_pairs_hook=spec.unique_object)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
