@@ -118,6 +118,80 @@ class SpecificationContractTest(unittest.TestCase):
         (self.root / "test_app.py").symlink_to(self.root / "app.py")
         self.fail_with("symlink is not permitted")
 
+    def use_v2(self):
+        self.put("spec.md", "<!-- requirement: PS-001 -->\nOnly two parser creation modes.\n")
+        self.manifest["version"] = 2
+        self.manifest["inventory_globs"] = ["*.md"]
+        self.refresh("spec.md")
+
+    def refresh(self, path):
+        self.manifest["documents"][path]["sha256"] = spec.digest((self.root/path).read_bytes())
+
+    def test_v2_scoped_pass(self):
+        self.use_v2()
+        self.assertEqual(self.check()["implemented"], 1)
+
+    def test_v2_unclassified_file(self):
+        self.use_v2()
+        self.put("new.md", "Unclassified product scope.")
+        self.fail_with("unclassified specification files")
+
+    def test_v2_unmatched_glob(self):
+        self.use_v2()
+        self.manifest["inventory_globs"].append("missing/*.md")
+        self.fail_with("matched no files")
+
+    def test_v2_document_outside_scope(self):
+        self.use_v2()
+        self.manifest["inventory_globs"] = ["spec.md"]
+        self.fail_with("declared specification outside scope")
+
+    def test_v2_omitted_requirement(self):
+        self.use_v2()
+        with (self.root/"spec.md").open("a") as f:
+            f.write("<!-- requirement: PS-002 -->\nDefault listener port is 6801.\n")
+        self.refresh("spec.md")
+        self.fail_with("declared requirement missing trace: PS-002")
+
+    def test_v2_duplicate_tag(self):
+        self.use_v2()
+        with (self.root/"spec.md").open("a") as f:
+            f.write("<!-- requirement: PS-001 -->\nConflicting requirement.\n")
+        self.refresh("spec.md")
+        self.fail_with("duplicate declared requirement tag")
+
+    def test_v2_missing_tag(self):
+        self.use_v2()
+        self.put("spec.md", "Only two parser creation modes.\n")
+        self.refresh("spec.md")
+        self.fail_with("source marker is not uniquely bound")
+
+    def test_v2_wrong_marker_section(self):
+        self.use_v2()
+        self.put("spec.md", "<!-- requirement: PS-001 -->\nDifferent statement.\n<!-- requirement: PS-002 -->\nOnly two parser creation modes.\n")
+        self.refresh("spec.md")
+        self.fail_with("source marker is not uniquely bound")
+
+    def test_v2_ambiguous_source_marker(self):
+        self.use_v2()
+        self.put("spec.md", "Only two parser creation modes.\n<!-- requirement: PS-001 -->\nOnly two parser creation modes.\n")
+        self.refresh("spec.md")
+        self.fail_with("ambiguous source marker")
+
+    def test_v2_malformed_marker(self):
+        self.use_v2()
+        with (self.root/"spec.md").open("a") as f:
+            f.write("<!-- requirement: PS-INVALID -->\n")
+        self.refresh("spec.md")
+        self.fail_with("malformed requirement tag")
+
+    def test_v2_supporting_doc_cannot_authorize(self):
+        self.use_v2()
+        self.manifest["documents"]["old.md"]["status"] = "supporting"
+        self.assertEqual(self.check()["implemented"], 1)
+        self.manifest["requirements"][0]["source"] = {"path": "old.md", "contains": "Legacy Workbench navigation."}
+        self.fail_with("historical source")
+
     def test_duplicate_json_key(self):
         with self.assertRaisesRegex(spec.Invalid, "duplicate JSON key"):
             json.loads('{"version":1,"version":2}', object_pairs_hook=spec.unique_object)

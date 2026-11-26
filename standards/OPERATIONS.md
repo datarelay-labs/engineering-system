@@ -115,3 +115,14 @@ Additive capabilities are per-worktree `start`, focused `logs`, `browser` screen
 Default checker output is bounded. A truncated report prints `FULLER` and `RAW` commands. A missing runtime file is `RUNTIME_CONTRACT=ABSENT` and still reports authority support from the project and release profiles.
 
 `python3 tools/runtime_evidence.py collect` runs one health, logs, metrics, or traces command after exact HEAD verification and a host-signed `production.read` dispatch bound to the incident, repository, HEAD, and evidence request. The command comes only from `operations.health_command` or a supported logs, metrics, or traces capability. Packet text cannot supply a command. Start, cleanup, smoke, E2E, deploy, rollback, and restart are rejected. Raw output stays in the Git-local incident boundary. The publishable report is capture metadata only, and `MITIGATION_AUTHORITY=NONE`.
+
+## Managed host identity resolution
+
+For a managed-host connector, distinguish the connector's registered endpoint
+name/identifier from the operating-system hostname. Discover the authorized
+host inventory before first targeting an unverified alias; use the exact
+returned identifier and confirm the host identity with a minimal authorized
+read. Reuse verified identity for the same target during the session.
+An ambiguous or absent alias is not evidence of an ACL change. Record the
+actual attempted target and error; if an exact, inventory-confirmed target is
+denied, honor the denial and do not route around the access policy.

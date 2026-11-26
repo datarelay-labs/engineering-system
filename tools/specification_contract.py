@@ -60,20 +60,66 @@ def marker(root, reference, label):
     return reference["path"]
 
 
+REQUIREMENT_TAG = re.compile(rb"<!-- requirement: ([A-Z][A-Z0-9]*-[0-9]+) -->")
+
+
+def scoped_inventory(root, patterns, documents):
+    if not isinstance(patterns, list) or not patterns:
+        raise Invalid("empty specification scope globs")
+    matched = set()
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern or "\\" in pattern or ":" in pattern:
+            raise Invalid("invalid specification scope glob")
+        path = PurePosixPath(pattern)
+        if path.is_absolute() or ".." in path.parts or str(path) != pattern or pattern == ".":
+            raise Invalid("invalid specification scope glob")
+        paths = {p.relative_to(root).as_posix() for p in root.glob(pattern) if p.is_file()}
+        if not paths:
+            raise Invalid(f"specification scope glob matched no files: {pattern}")
+        matched.update(paths)
+    missing = matched - set(documents)
+    extra = set(documents) - matched
+    if missing:
+        raise Invalid("unclassified specification files: " + ", ".join(sorted(missing)))
+    if extra:
+        raise Invalid("declared specification outside scope: " + ", ".join(sorted(extra)))
+
+
+def declared_tags(root, active_docs):
+    tagged = {}
+    for path in sorted(active_docs):
+        data = read(root, path)
+        matches = list(REQUIREMENT_TAG.finditer(data))
+        if data.count(b"<!-- requirement:") != len(matches):
+            raise Invalid(f"{path}: malformed requirement tag")
+        for index, match in enumerate(matches):
+            ident = match.group(1).decode("ascii")
+            if ident in tagged:
+                raise Invalid(f"duplicate declared requirement tag: {ident}")
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(data)
+            tagged[ident] = (path, data[match.end():end])
+    return tagged
+
+
 def validate(root, manifest, require_implemented=False):
-    shape(manifest, ("version", "documents", "requirements"), "manifest")
-    if type(manifest["version"]) is not int or manifest["version"] != 1:
+    if not isinstance(manifest, dict) or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2):
         raise Invalid("unsupported manifest version")
+    version = manifest["version"]
+    keys = ("version", "documents", "requirements")
+    shape(manifest, keys + (("inventory_globs",) if version == 2 else ()), "manifest")
     documents = manifest["documents"]
     requirements = manifest["requirements"]
     if not isinstance(documents, dict) or not documents:
         raise Invalid("empty or invalid document inventory")
     if not isinstance(requirements, list) or not requirements:
         raise Invalid("empty or invalid requirement inventory")
+    if version == 2:
+        scoped_inventory(root, manifest["inventory_globs"], documents)
     active_docs = set()
     for path, doc in documents.items():
         shape(doc, ("status", "sha256"), path)
-        if doc["status"] not in ("active", "historical", "mixed"):
+        statuses = ("active", "historical", "mixed") + (("supporting",) if version == 2 else ())
+        if doc["status"] not in statuses:
             raise Invalid(f"{path}: invalid document status")
         if doc["status"] == "mixed":
             raise Invalid(f"{path}: unresolved active/historical specification")
@@ -85,6 +131,8 @@ def validate(root, manifest, require_implemented=False):
             active_docs.add(path)
     if not active_docs:
         raise Invalid("no active specification")
+    tags = declared_tags(root, active_docs) if version == 2 else {}
+    live_ids = set()
     ids, anchors, covered = set(), set(), set()
     counts = {"planned": 0, "implemented": 0, "retired": 0}
     for req in requirements:
@@ -109,6 +157,13 @@ def validate(root, manifest, require_implemented=False):
             if path not in active_docs:
                 raise Invalid(f"{ident}: historical source cannot authorize active behavior")
             covered.add(path)
+            live_ids.add(ident)
+            if version == 2:
+                needle = req["source"]["contains"].encode("utf-8")
+                if ident not in tags or tags[ident][0] != path or tags[ident][1].count(needle) != 1:
+                    raise Invalid(f"{ident}: source marker is not uniquely bound to its declared requirement tag")
+                if read(root, path).count(needle) != 1:
+                    raise Invalid(f"{ident}: ambiguous source marker")
         for kind in ("implementation", "tests"):
             refs = req[kind]
             if not isinstance(refs, list):
@@ -129,6 +184,8 @@ def validate(root, manifest, require_implemented=False):
         if state == "implemented":
             if {ref["path"] for ref in req["implementation"]} & {ref["path"] for ref in req["tests"]}:
                 raise Invalid(f"{ident}: implementation cannot substitute for test file")
+    if version == 2 and set(tags) != live_ids:
+        raise Invalid("declared requirement missing trace: " + ", ".join(sorted(set(tags) - live_ids)))
     if covered != active_docs:
         raise Invalid("active document missing requirement inventory: " + ", ".join(sorted(active_docs - covered)))
     if require_implemented and counts["planned"]:

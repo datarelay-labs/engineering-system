@@ -108,6 +108,16 @@ and implementation/test file-and-marker references. Implemented requires both tr
 types; retired must not carry live traces. Mixed documents fail until reconciled.
 Executable examples are in `tools/test_specification_contract.py`.
 
+Version 2 additionally declares a bounded inventory glob list. Classify every
+matched file as active, historical or supporting; a mixed file remains a
+failure. In active specifications tag each independently tracked requirement
+with an HTML comment of the form <!-- requirement: PS-001 --> directly before
+its normative text. The manifest must trace every declared tag exactly once,
+and its source text must be unique in the associated section. This detects an
+omitted trace even when a document hash is refreshed. Scope boundaries and
+unmarked semantic requirements still require independent review; an empty or
+narrowed inventory must never be reported as whole-product coverage.
+
 Run `python3 tools/specification_contract.py --root .` for affected spec changes.
 Review intent and impact before refreshing a digest. Run referenced tests and existing
 affected/public-surface checks separately. Use `--require-implemented` only for an
