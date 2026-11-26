@@ -184,6 +184,36 @@ class AffectedSelectionTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_workflow_does_not_replace_unavailable_base_with_last_commit(self):
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/affected-tests.yml"
+        steps = yaml.safe_load(workflow.read_text())["jobs"]["affected"]["steps"]
+        script = next(step["run"] for step in steps if step.get("id") == "base")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root)
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            git("commit", "--allow-empty", "-qm", "first")
+            base = git("rev-parse", "HEAD").decode().strip()
+            git("commit", "--allow-empty", "-qm", "second")
+            git("commit", "--allow-empty", "-qm", "third")
+            output = root / "github-output"
+            def resolve(explicit="", pr="", push=""):
+                output.write_text("")
+                env = dict(os.environ, INPUT_BASE=explicit, PR_BASE=pr,
+                           PUSH_BEFORE=push, GITHUB_OUTPUT=str(output))
+                proc = subprocess.run(["bash", "-c", script], cwd=root, env=env,
+                                      capture_output=True, text=True, timeout=10)
+                return proc.returncode, output.read_text()
+            self.assertEqual(resolve(pr=base), (0, f"base={base}\n"))
+            rc, emitted = resolve(pr="1" * 40)
+            self.assertNotEqual(rc, 0)
+            self.assertEqual(emitted, "")
+            self.assertEqual(resolve(), (0, "base=\n"))
+            self.assertEqual(resolve(push="0" * 40), (0, "base=\n"))
+
     def test_run_selected_uses_real_git_diff_and_executes_direct_invalidation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

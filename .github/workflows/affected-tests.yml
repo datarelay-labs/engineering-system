@@ -62,13 +62,12 @@ jobs:
           if [[ -n "$base" ]] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             git fetch --no-tags origin "$base" || true
           fi
-          if [[ -z "$base" ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            if git rev-parse HEAD^ >/dev/null 2>&1; then
-              base="$(git rev-parse HEAD^)"
-            else
-              base=""
-            fi
+          if [[ -n "$base" ]] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "FAIL comparison base unavailable; refusing incomplete affected scope" >&2
+            exit 2
           fi
+          # An absent base is distinct from an invalid supplied base.
+          # The shared selector widens when none is supplied; never guess HEAD^.
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "ENGINEERING_BASE_REF=$base"
 
