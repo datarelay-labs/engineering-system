@@ -341,6 +341,7 @@ scenarios:
     invariants:
       - "direct invalidation selects non-local closure scenarios deterministically"
       - "invalid invalidation targets fail closed"
+      - "committed deletion and both sides of a rename invalidate exact paths, including Unicode names"
       - "manifests without invalidation edges remain backward-compatible"
     release_gate: true
 

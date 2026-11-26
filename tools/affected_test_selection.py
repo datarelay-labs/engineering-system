@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -122,11 +123,12 @@ def select_scenarios(
 def changed_files(base: str) -> tuple[list[str], bool]:
     if not base:
         return [], True
+    # Deletion invalidates its old contract; a move invalidates both sides.
+    # Disable rename collapsing and Git's display quoting; preserve exact names.
     payload = subprocess.check_output(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...HEAD"],
-        text=True,
+        ["git", "diff", "--no-renames", "--name-only", "-z", f"{base}...HEAD", "--"],
     )
-    return [line.strip() for line in payload.splitlines() if line.strip()], False
+    return sorted({os.fsdecode(path) for path in payload.split(b"\0") if path}), False
 
 
 def run_selected(manifest_path: Path, base: str, trigger: str) -> int:

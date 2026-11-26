@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_selector_sha256="39904fbf438ea186ef9078659d6f8b4b52e11083ffd6cd0ef221710c5f4799a6"
+          expected_selector_sha256="01070e7e33a6ad33e04059eeddde2b2a7ad7e139403c7db609ea2b2bda1bf553"
           actual_selector_sha256="$(sha256sum tools/affected_test_selection.py 2>/dev/null | awk '{print $1}')"
           if [[ "$actual_selector_sha256" != "$expected_selector_sha256" ]]; then
             echo "FAIL managed affected-test selector does not match pinned Engineering System baseline" >&2
