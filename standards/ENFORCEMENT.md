@@ -50,7 +50,10 @@ The migration manifest is evidence, not authority. A root-of-trust migration add
 
 The ordinary PR validation workflow executes the candidate's deterministic tests on the exact candidate HEAD with its normal read-only CI boundary. After this migration contract is established on the base branch, a future root-of-trust migration is merge-ready only when the base-owned floor passes, exact-head validation passes, current owner approval is present, and actionable review findings are dispositioned.
 
-The one migration that establishes this contract is necessarily a bridge from the legacy self-protecting floor, which cannot authorize replacement of its own helper. For that establishing migration only, the legacy floor may remain BLOCK solely for the known self-change/prose-coupling reasons documented in the trusted Work Packet; the candidate migration contract must PASS against the exact old base, exact-head validation must PASS, the changed root surface set/blob digests must match the manifest, and explicit owner approval is mandatory. Once merged, this bootstrap disposition is retired and MUST NOT be reused.
+For migration from an older supported base, follow the exact base-owned contract and
+[ADOPTION](ADOPTION.md#legacy-governance-bridge-and-truthful-completion).
+The historical self-change bootstrap disposition is retired; it grants no current
+exception to the base-owned gate.
 
 ## Context-loading enforcement
 
@@ -129,26 +132,14 @@ Every adopted repository must contain:
 - `.engineering/tests.yaml`
 - `.engineering/release.yaml`
 
-Engineering System >=1.3.0 additionally requires:
-- `.github/ISSUE_TEMPLATE/ai-work-packet.md`
+Current managed adoption also requires:
+- repository-scoped AI Work Packet Issue template
+- immutable engineering_system.baseline and matching pinned engineering-system.yml workflow
+- explicit operations posture, production incident/runbook requirements and native CI ownership
+- merge-gate enforcement state (verified, advisory or unknown) and pinned enforcement reconciliation
+- design/incident routing in AGENTS.md
 
-Engineering System >=1.4.0 managed adoption additionally requires:
-- immutable `engineering_system.baseline`
-- `.github/workflows/engineering-system.yml` pinned to that baseline
-
-Engineering System >=1.5.0 managed adoption additionally records:
-- explicit operations posture (production or non-production)
-- incident/runbook requirements for production-oriented projects
-- concrete native CI workflow ownership when `ci_mode=native`
-- merge-gate enforcement state as `verified`, `advisory`, or `unknown`
-- design/incident routing in the repository AGENTS entrypoint
-
-Engineering System >=1.6.0 managed adoption additionally:
-- wires `.github/workflows/enforcement-check.yml` through the pinned baseline
-- compares declared merge-gate state with observable live GitHub rulesets on pull requests
-- treats a declared `verified` state that cannot be verified as a failure
-- treats observable `verified` vs `advisory` drift as a configuration failure
-- permits `unknown` when GitHub enforcement visibility genuinely is unavailable
+The read-only reconciliation compares the declared merge-gate state with observable live GitHub rulesets. Unverifiable declared verified state or observable verified/advisory drift fails; unknown is allowed only when visibility genuinely is unavailable. See the live reconciliation section below.
 
 Use `standards/ADOPTION.md` and `tools/adopt.py` for managed adoption. Existing repository rules must be classified before destructive cleanup.
 
@@ -181,7 +172,7 @@ global AI adapter
 
 Workflow existence is not evidence that merge blocking is active.
 
-For 1.6+ adopted repositories:
+For current managed adopted repositories:
 
 ```text
 project.yaml merge_gate_status

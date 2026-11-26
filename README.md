@@ -44,11 +44,11 @@ The goal is not to replace a project's engineering reality. The goal is to make 
 | **Repository-aware adoption** | Inventories rules, tests, CI, release and operations signals before installing anything |
 | **Minimal AI context** | Loads only the repository entrypoints and standards relevant to the current task |
 | **Affected-test-first validation** | Uses the cheapest deterministic check that can disprove correctness before broad suites |
-| **Session continuity** | Keeps active implementation state in repository-scoped GitHub AI Work Packets; Work Packet v2 binds the current owner intent and task kind to the next action instead of relying on giant handoff prompts |
+| **Session continuity** | Keeps active implementation state in repository-scoped GitHub AI Work Packets; Work Packet v3 binds the current owner intent and task kind to the next action instead of relying on giant handoff prompts |
 | **Review discipline** | Requires actionable human or automated review feedback to be fixed or explicitly dispositioned before completion |
 | **Release qualification** | Separates fast PR feedback from expensive release-candidate qualification and requires exact-HEAD evidence |
 | **Operations feedback loop** | Feeds incidents, regressions and operational failures back into tests, runbooks, RCA, ADR or requirements |
-| **Knowledge boundaries** | Keeps GitHub canonical while Athena and human-readable documentation remain derived/searchable layers |
+| **Knowledge boundaries** | Keeps GitHub canonical; optional derived context and the human handbook are non-authoritative |
 
 ## The lifecycle
 
@@ -63,7 +63,7 @@ flowchart LR
     O --> X["Incident / RCA"]
     X --> R
 
-    G["GitHub<br/>Canonical Truth"] --> A["Athena<br/>Derived Knowledge"]
+    G["GitHub<br/>Canonical Truth"] --> A["Optional<br/>Derived Knowledge"]
 ```
 
 The owner retains product scope, final decisions, release approval, and human UX judgment. AI agents assist the engineering process; they do not silently broaden product scope.
@@ -91,10 +91,7 @@ python tools/adopt.py \
 
 If the repository already has mature native CI, map that ownership explicitly instead of adding a duplicate shared gate.
 
-Engineering System 1.7.0 uses ChatGPT Chat as the sole implementation path. Managed adoption stays baseline-pinned, context/test selection remains cost-aware and provider-neutral, and managed upgrades remove retired editor-agent artifacts instead of preserving a compatibility execution path.
-
-
-
+Engineering System 1.7.0 uses ChatGPT Chat as the default implementation runtime under the current execution profile and explicit owner intent. Adoption pins an immutable baseline; upgrades follow [ADOPTION](standards/ADOPTION.md).
 
 ### 3. Qualify the adoption
 
@@ -104,7 +101,7 @@ python tools/check-adoption.py --root /path/to/project
 
 Adoption is not PASS because files exist. Structural validation and the required project-native smoke/affected evidence must succeed.
 
-Existing managed 1.5+ repositories upgrade through the fail-closed `tools/upgrade-adoption.py` path rather than blindly rerunning initial bootstrap. Once adoption is qualified, feature, bugfix, testing, review, release, operations, incident, and retirement work automatically route through the repository entrypoint, project metadata, relevant canonical standard, and deterministic evidence; there is no separate lifecycle activation step.
+Existing supported managed repositories upgrade through the fail-closed `tools/upgrade-adoption.py` path rather than blindly rerunning initial bootstrap. Once adoption is qualified, feature, bugfix, testing, review, release, operations, incident, and retirement work automatically route through the repository entrypoint, project metadata, relevant canonical standard, and deterministic evidence; there is no separate lifecycle activation step.
 
 ## Default execution model
 
@@ -139,6 +136,9 @@ Do not run multi-hour full suites on every PR. Do not continue expensive downstr
 | Version, artifacts, qualification, upgrade, rollback | [`standards/RELEASE.md`](standards/RELEASE.md) |
 | Operations, observability, backup/restore, incidents, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
 | Product Master/OpenSpec/ADR/Wiki source-of-truth roles and optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
+| User acceptance and real user execution | [`standards/USER_ACCEPTANCE.md`](standards/USER_ACCEPTANCE.md) |
+| Independent AI QA | [`standards/AI_QA.md`](standards/AI_QA.md) |
+| Optional skills and trusted permissions | [`standards/SKILLS.md`](standards/SKILLS.md) |
 | AI session continuity and repository-scoped Work Packets | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
 | Provider-guidance alignment, policy layers, and scaffolding lifecycle | [`standards/PROVIDER_GUIDANCE.md`](standards/PROVIDER_GUIDANCE.md) |
 | Official external standards and guidance — informative coverage/gap map | [`standards/EXTERNAL_REFERENCES.md`](standards/EXTERNAL_REFERENCES.md) |
@@ -179,11 +179,11 @@ Do **not** preload the entire Engineering System, Wiki, historical discussions, 
 
 ## Source of truth
 
-> **GitHub is normative. Wiki/Athena is derived/searchable knowledge.**
+> **GitHub is normative. Optional derived context is non-authoritative.**
 
 Code, tests, specifications, commits, PRs, CI evidence, release evidence, and accepted durable decisions belong in canonical Git/GitHub artifacts.
 
-Athena and the [human handbook](https://engineering.datarelay.run) make that knowledge easier to navigate and search, but they do not override canonical repository state.
+The [human handbook](https://engineering.datarelay.run) and optional organization adapters provide derived context. Canonical Git/GitHub state wins; see [KNOWLEDGE](standards/KNOWLEDGE.md).
 
 ## Design principles
 

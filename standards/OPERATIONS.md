@@ -77,7 +77,7 @@ Never perform uncontrolled destructive testing on production/customer systems.
 
 ## Repository operations contract
 
-Engineering System 1.6 production-oriented project profiles record the smallest project-native operational contract needed by future humans and AI agents:
+Production-oriented project profiles record the smallest project-native operational contract needed by future humans and AI agents:
 
 ```yaml
 operations:

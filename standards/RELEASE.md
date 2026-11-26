@@ -38,7 +38,7 @@ For products whose public surface is not a CLI, `Feature/Scenario` means the equ
 
 ### Discovery / remediation / rerun semantics
 
-Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for the execution-profile-selected runtime's primary persona-led public-surface execution.
+Before each user gate begins, resolve the repository-local canonical contract and read the **entire current contract end-to-end**. Do not start with an improvised checklist, wrapper/script replay, generic test harness, source/test oracle, or CI shortcut. Those mechanisms may support the run only where the canonical contract permits them and may not substitute for the applicable acting user's real persona-led public-surface execution.
 
 Each user gate begins as a **finding-discovery pass**, not a stop-on-first-failure release gate. Continue every safe independent scenario/journey after a finding so one defect does not hide others. Record findings with scenario identity and evidence. When the pass finishes, freeze the complete bounded finding set, perform its mandatory final report/readback/offboarding, and then remediate in coherent batches rather than alternating one fix with one remote CI run.
 
@@ -50,7 +50,7 @@ A project may require additional clean repeat passes (for example DRLink's relea
 
 Do not freeze the release candidate or start release-specific upgrade/platform/performance qualification until Surface Reconciliation and Full User E2E are both clean on the same exact HEAD. Do not run final exact-head CI until that product-quality closure and required release-specific qualification are complete. Do not build final release artifacts, SBOM, hashes, provenance, manifest, or attestation until final exact-head CI is green on the frozen candidate.
 
-If source changes after a clean PASS2, upgrade/platform qualification, final CI, or integrity stage, invalidate the affected downstream evidence and resume from the earliest stage whose evidence is no longer exact-candidate valid. Never preserve a later-stage PASS across a source change.
+If source changes after clean product-quality closure, upgrade/platform qualification, final CI, or integrity stage, invalidate the affected downstream evidence and resume from the earliest stage whose evidence is no longer exact-candidate valid. Never preserve a later-stage PASS across a source change.
 
 ### Release-stage parallelism
 
@@ -81,11 +81,9 @@ When `.engineering/project.yaml` declares `project.user_facing: true`, the relea
 
 The release profile must use human-equivalent contract version 2, bind both gates to the same exact candidate, retain their contract paths, require direct persona execution, require finding accumulation before remediation, and require product-quality closure before candidate freeze.
 
-**The runtime selected by the current execution profile MUST execute and finally audit both user gates by directly acting as the applicable User/Operator/Admin personas.** Another runtime, wrapper, automated harness, CI job, unit/integration suite, or synthetic replay cannot substitute for the selected runtime's direct public-surface user execution. Such automation is supporting evidence only. If the selected runtime cannot perform a mandatory real user action because the environment or interaction capability is unavailable, that scenario remains BLOCKED rather than being delegated merely to obtain PASS.
+**The current execution-profile runtime remains the final auditor.** Acting-user execution defaults to AI_DIRECT. Only explicit authenticated owner opt-in for the exact candidate and gate permits HUMAN_OWNER_WITH_CHATGPT_AUDIT, with the owner personally operating the actual supported public surface and the selected ChatGPT runtime independently auditing the evidence. All execution, evidence, provenance and blocking rules are defined in [USER_ACCEPTANCE](USER_ACCEPTANCE.md). No other AI runtime, wrapper, automated harness, CI job, unit/integration suite or synthetic replay may substitute for real persona actions.
 
-CI may validate that the contracts exist and are wired, and `tools/user_acceptance_contract.py` may validate retained evidence and same-HEAD closure, but neither CI/static validation nor machine evidence alone is execution PASS. Actual PASS authority comes from the selected runtime's retained exact-candidate persona-led run evidence under the active release Work Packet.
-
-For `project.primary_user_surface: browser`, the selected runtime MUST perform the user action through an actual Chromium/Chrome browser process. Browser automation frameworks are drivers, not substitutes for the browser. Headless mode is allowed because it still launches a real browser engine.
+CI and tools/user_acceptance_contract.py validate structural contract/evidence consistency only; they cannot establish actual user execution PASS, trusted operator provenance, or release authority. Real Chromium/Chrome is required for browser products in either permitted mode. Missing mandatory interaction or unverified evidence stays BLOCKED.
 
 A product/harness/public-surface change after either gate PASS invalidates affected evidence. Re-establish the required exact-HEAD sequence before release. Canonical portable semantics are in `standards/USER_ACCEPTANCE.md`.
 
@@ -149,7 +147,7 @@ Build/qualification and publication are separate steps.
 
 ## Executable release contract
 
-Engineering System 1.6 turns `.engineering/release.yaml` into an executable contract when project-native commands are known.
+The release profile is an executable contract when project-native commands are known.
 
 Supported command fields are:
 

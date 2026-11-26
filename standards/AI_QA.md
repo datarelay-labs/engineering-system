@@ -22,7 +22,7 @@ The implementer remains the execution-profile-selected runtime. "Independent" re
 - Pinned, hidden-fault **blind benchmark** to measure defect recall and false PASS.
 - Actual Chromium user journeys with Playwright CLI/Test Agents, optional visual exploration with Midscene; keep deterministic independent backend outcome checks.
 - Property/metamorphic invariants with Hypothesis or fast-check, mutation scores with Stryker or a language-native equivalent, API stateful fuzz with Schemathesis, controlled transport faults with Toxiproxy where applicable.
-- An isolated complete confirmation at the product release gate; keep native CI and selected-runtime Full User E2E as independent requirements.
+- An isolated complete confirmation at the product release gate; keep native CI and Full User E2E under the canonical USER_ACCEPTANCE contract as independent requirements.
 - Evaluate optional commercial QA tools on the **same hidden seeded defects** after the above proves useful.
 
 Do not require all these tools for every repository. Native product test selection controls the relevant subset and execution budget. No external tool installation is forced during canonical adoption.
@@ -36,7 +36,7 @@ Do not require all these tools for every repository. Native product test selecti
 - **Flakiness:** outcomes vary under the same input/seed without a relevant product change; investigation required, not rerun-until-green.
 - **Economics:** confirmed important new defects per cost/runtime, reproducibility, and false-positive rate based on independently classified clean controls (not merely unmatched IDs).
 
-## P0 benchmark tool
+## Advisory benchmark tool
 
 The canonical tools/ai_qa_benchmark.py is a **read-only, bounded, advisory-only T0 evaluator**. It never executes browser tests, issues permissions, verifies the asserted actor identity, launches faults, validates raw reproduction semantics, or authorizes user acceptance/release. Its BENCHMARK_COMPLETE output only means pinned benchmark evidence *accounting* is internally complete.
 
@@ -48,11 +48,11 @@ Exit codes: 0=BENCHMARK_COMPLETE on pinned campaign; 2=QUALITY_FAIL or INCOMPLET
 
 ## Adaptive AI-led user exploration
 
-Do not label a fixed Playwright scenario as independent autonomous QA merely because an AI wrote the script. For the bounded P1 model-in-the-loop approach, freeze a requirements-first mission and independent oracle, start a real Chromium session, and let the selected AI choose the next action only after inspecting the current rendered UI and network evidence. Each action carries a current observation identity and a reason; stale or invented controls, non-allowlisted effects and credential entry are rejected. Preserve each decision, screenshot, trace and actual network response in private auditable evidence.
+Do not label a fixed Playwright scenario as independent autonomous QA merely because an AI wrote the script. For the bounded model-in-the-loop approach, freeze a requirements-first mission and independent oracle, start a real Chromium session, and let the selected AI choose the next action only after inspecting the current rendered UI and network evidence. Each action carries a current observation identity and a reason; stale or invented controls, non-allowlisted effects and credential entry are rejected. Preserve each decision, screenshot, trace and actual network response in private auditable evidence.
 
 A host/runtime declaring itself a different QA actor is not an external cryptographic identity. The ChatGPT actor can perform real interactive exploratory QA without any external LLM API connection, but such interaction is **not** a verified second-provider experiment, unattended service or a formal release Full User E2E. The independent provenance auditor reports T0 internal evidence consistency only. See evals/ai-qa/pilots/20261024-autonomous-browser-exploration.md for the confirmed QA harness defect, correction and actual rerun.
 
-## P1–P4 optional executable adapters
+## Optional executable adapters
 
 Product-scoped adapters live in [adapters/ai-qa](../adapters/ai-qa/README.md): a real Parser Studio Chromium collector, frozen raw-field/byte/download oracle, seeded metamorphic/property campaign, semantic observation fault injection and disposable **actual Python source mutation** of the QA benchmark. The source mutation probe measures the Engineering System QA benchmark's regression sensitivity, not Parser Studio's code mutation score. Neither adapter modifies production or supplants a product's full user-gate contract.
 

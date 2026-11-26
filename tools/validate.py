@@ -1042,9 +1042,8 @@ def validate_session_continuity_templates():
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     for token in (
         "PACKET_VERSION=3",
-        "Legacy v2 packets remain bounded compatibility inputs",
-        "Packet version 2 is legacy-compatible only through the current execution profile.",
-        "Packet v1 and versionless packets are non-runnable",
+        "Legacy v2 packets remain bounded compatibility inputs when accepted by the current execution profile.",
+        "Packet v1 or versionless packets are not runnable under profile-v3",
         "8. For packet v3",
         "migrate it to v3",
     ):
@@ -1989,6 +1988,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_org_rollout.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_targeted_convergence_policy.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_owner_delivery_policy.py"], cwd=ROOT)

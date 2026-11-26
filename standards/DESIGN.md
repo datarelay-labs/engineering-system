@@ -140,5 +140,5 @@ Structural PASS proves recorded inventory, hashes and markers are consistent, **
 completeness, semantic consistency, test assertions, executed results or release readiness.
 Use existing AI_QA requirements-first independent oracles and TESTING parity checks.
 Reuse existing tests for small fixes with unambiguous contracts; no mandatory new
-document or duplicate WBS. No blanket rollout until Parser Studio demonstrates real
-drift detection and correction.
+document or duplicate WBS. No blanket mandatory rollout without product-owned evidence of real drift
+detection and correction.

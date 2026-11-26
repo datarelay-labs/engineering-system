@@ -173,21 +173,17 @@ Before either user gate starts, read the repository-local canonical gate contrac
 **Full User E2E** is depth-first. It executes complete realistic user missions through the real primary product surface, proves actual outcomes, injects realistic mistakes/failures, performs user-visible diagnosis and recovery, exercises live edits/destructive lifecycle, and verifies cleanup/orphan truth.
 
 Both gates:
-- are executed and finally audited by **the runtime selected by the current execution profile**, directly acting as the applicable User/Operator/Admin persona;
+- require real persona actions in AI_DIRECT (selected runtime) or explicit authenticated owner opt-in HUMAN_OWNER_WITH_CHATGPT_AUDIT; the selected runtime remains final auditor as defined in [USER_ACCEPTANCE](USER_ACCEPTANCE.md);
 - run on the same exact candidate HEAD;
 - are independently required and never substitute for each other;
 - require zero mandatory FAIL/PARTIAL/BLOCKED for release PASS;
-- may reuse machine evidence for verification but not to replace the selected runtime's real user action;
+- may reuse machine evidence for verification but not to replace the acting user's real action;
 - forbid a coding agent, alternate model, wrapper, scripted scenario replay, test harness, or CI job from impersonating the acting user or declaring the gate PASS;
 - must continue safe independent scenarios after a failure so one defect does not hide others;
 - freeze the complete finding set before batched remediation;
 - must retain machine-readable ledger-derived run/evidence identity in the active release Work Packet.
 
-If the selected runtime cannot execute a mandatory user action because the real environment or required interaction capability is unavailable, that scenario is BLOCKED; do not delegate it to another agent merely to manufacture PASS.
-
-For browser products, The selected runtime MUST perform the user action through an actual Chromium/Chrome browser process. Playwright or an equivalent browser driver is allowed; headless Chromium/Chrome still counts as a real browser. jsdom/component tests, static DOM inspection, API-only flows, and CI contract checks do not count as execution PASS.
-
-For CLI/desktop/mobile products, The selected runtime directly uses the actual supported public primary interface with the same human-equivalent principle. See `standards/USER_ACCEPTANCE.md` for the portable gate semantics and evidence contract.
+A mandatory action that cannot be performed by the applicable acting user or independently verified remains BLOCKED. Use the real supported primary interface; browser products require a real Chromium/Chrome process. Drivers may support AI_DIRECT but cannot replace a human owner's physical actions. Component, static DOM, API-only and CI checks are supplemental. See [USER_ACCEPTANCE](USER_ACCEPTANCE.md) for the complete contract.
 
 ## Performance/resilience
 
