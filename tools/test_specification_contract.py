@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import contextlib
+import copy
 import io
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 
 import specification_contract as spec
@@ -191,6 +193,74 @@ class SpecificationContractTest(unittest.TestCase):
         self.assertEqual(self.check()["implemented"], 1)
         self.manifest["requirements"][0]["source"] = {"path": "old.md", "contains": "Legacy Workbench navigation."}
         self.fail_with("historical source")
+
+    def test_baseline_prevents_silent_removal_of_previously_live_requirement(self):
+        self.use_v2()
+        text = "Default listener port is 6801."
+        self.put("spec.md", "<!-- requirement: PS-001 -->\nOnly two parser creation modes.\n"
+                 "<!-- requirement: PS-002 -->\n" + text + "\n")
+        self.refresh("spec.md")
+        self.manifest["requirements"].append({
+            "id": "PS-002", "state": "planned", "source": {"path": "spec.md", "contains": text},
+            "implementation": [], "tests": [],
+        })
+        self.check()
+        self.put("manifest.json", json.dumps(self.manifest))
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(self.root), *args])
+        git("init", "-q")
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "approved")
+        base = git("rev-parse", "HEAD").decode().strip()
+        # Joint removal of the marker and manifest entry used to pass.
+        self.manifest["requirements"].pop()
+        self.put("spec.md", "<!-- requirement: PS-001 -->\nOnly two parser creation modes.\n")
+        self.refresh("spec.md")
+        self.put("manifest.json", json.dumps(self.manifest))
+        self.assertEqual(self.check()["implemented"], 1)
+        args = ["--root", str(self.root), "--manifest", "manifest.json", "--base", base]
+        with contextlib.redirect_stderr(io.StringIO()) as out:
+            self.assertEqual(spec.main(args), 1)
+        self.assertIn("previously live requirement missing: PS-002", out.getvalue())
+        # Explicit retirement retains the ID without pretending implementation.
+        self.put("old.md", text)
+        self.refresh("old.md")
+        self.manifest["requirements"].append({
+            "id": "PS-002", "state": "retired", "source": {"path": "old.md", "contains": text},
+            "implementation": [], "tests": [],
+        })
+        self.put("manifest.json", json.dumps(self.manifest))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(spec.main(args), 0)
+        self.assertIn("PS-002", out.getvalue())
+        self.assertIn("BASELINE_REVIEW=REQUIRED", out.getvalue())
+
+    def test_requirement_lookup_reuses_authority_and_code_test_paths(self):
+        self.use_v2()
+        self.put("manifest.json", json.dumps(self.manifest))
+        args = ["--root", str(self.root), "--manifest", "manifest.json", "--requirement", "PS-001"]
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(spec.main(args), 0)
+        result = out.getvalue()
+        self.assertIn("REQUIREMENT_TRACE=", result)
+        self.assertIn("spec.md", result)
+        self.assertIn("app.py", result)
+        self.assertIn("test_app.py", result)
+        self.assertIn("TEST_EXECUTION=UNVERIFIED", result)
+        with contextlib.redirect_stderr(io.StringIO()) as out:
+            self.assertEqual(spec.main(args[:-1] + ["PS-999"]), 1)
+        self.assertIn("unknown requirement: PS-999", out.getvalue())
+
+    def test_baseline_delta_identifies_scope_changes_and_downgraded_states(self):
+        self.use_v2()
+        base = copy.deepcopy(self.manifest)
+        self.manifest["requirements"][0].update(state="planned", implementation=[], tests=[])
+        self.manifest["inventory_globs"] = ["spec.md", "old.md"]
+        self.check()
+        delta = spec.baseline_delta(base, self.manifest)
+        self.assertEqual(delta["state_changes"], {"PS-001": ["implemented", "planned"]})
+        self.assertEqual(delta["removed_globs"], ["*.md"])
+        self.assertEqual(delta["added_globs"], ["old.md", "spec.md"])
 
     def test_duplicate_json_key(self):
         with self.assertRaisesRegex(spec.Invalid, "duplicate JSON key"):

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import subprocess
 import sys
 
 
@@ -193,20 +194,102 @@ def validate(root, manifest, require_implemented=False):
     return counts
 
 
+
+def baseline_delta(base, candidate):
+    """Compare declared inventory only; the reviewed Git base is supplied by the caller."""
+    def index(manifest):
+        if not isinstance(manifest, dict) or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2):
+            raise Invalid("unsupported baseline manifest")
+        entries = manifest.get("requirements")
+        docs = manifest.get("documents")
+        globs = manifest.get("inventory_globs", [])
+        if not isinstance(entries, list) or not entries or not isinstance(docs, dict) or not docs:
+            raise Invalid("invalid baseline inventory")
+        if not isinstance(globs, list) or any(not isinstance(p, str) for p in globs):
+            raise Invalid("invalid baseline scope")
+        result = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise Invalid("invalid baseline requirement")
+            ident = entry.get("id")
+            state = entry.get("state")
+            if (not isinstance(ident, str) or not re.fullmatch(r"[A-Z][A-Z0-9]*-[0-9]+", ident)
+                    or ident in result or state not in ("planned", "implemented", "retired")):
+                raise Invalid("invalid baseline requirement identity or state")
+            result[ident] = entry
+        if any(not isinstance(doc, dict) or doc.get("status") not in ("active", "historical", "supporting", "mixed")
+               for doc in docs.values()):
+            raise Invalid("invalid baseline document status")
+        return result, docs, set(globs)
+
+    old, old_docs, old_globs = index(base)
+    new, new_docs, new_globs = index(candidate)
+    missing = sorted(ident for ident, entry in old.items()
+                     if entry["state"] != "retired" and ident not in new)
+    if missing:
+        raise Invalid("previously live requirement missing: " + ", ".join(missing))
+    shared = sorted(old.keys() & new.keys())
+    return {
+        "added_requirements": sorted(new.keys() - old.keys()),
+        "state_changes": {i: [old[i]["state"], new[i]["state"]] for i in shared
+                          if old[i]["state"] != new[i]["state"]},
+        "changed_authorities": [i for i in shared if old[i].get("source") != new[i].get("source")],
+        "changed_traces": [i for i in shared if any(old[i].get(k) != new[i].get(k)
+                           for k in ("implementation", "tests"))],
+        "removed_documents": sorted(old_docs.keys() - new_docs.keys()),
+        "added_documents": sorted(new_docs.keys() - old_docs.keys()),
+        "changed_document_status": sorted(p for p in old_docs.keys() & new_docs.keys()
+                                          if old_docs[p]["status"] != new_docs[p]["status"]),
+        "changed_document_digests": sorted(p for p in old_docs.keys() & new_docs.keys()
+                                           if old_docs[p].get("sha256") != new_docs[p].get("sha256")),
+        "removed_globs": sorted(old_globs - new_globs),
+        "added_globs": sorted(new_globs - old_globs),
+    }
+
+
+def read_base(root, sha, manifest_path):
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise Invalid("base must be an exact 40-character Git commit SHA")
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=15, check=True).stdout
+    try:
+        if Path(git("rev-parse", "--show-toplevel").decode().strip()).resolve() != root:
+            raise Invalid("base comparison requires the Git repository root")
+        if git("cat-file", "-t", sha).strip() != b"commit":
+            raise Invalid("base is not a Git commit")
+        return json.loads(git("show", f"{sha}:{manifest_path}"), object_pairs_hook=unique_object)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise Invalid("base manifest unavailable at the specified Git commit") from exc
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--manifest", default=".engineering/specification.json")
     parser.add_argument("--require-implemented", action="store_true")
+    parser.add_argument("--base", help="Compare with the manifest at a reviewed exact Git commit SHA")
+    parser.add_argument("--requirement", help="Locate one declared requirement, implementation and test trace")
     args = parser.parse_args(argv)
     try:
         root = args.root.resolve(strict=True)
         manifest = json.loads(read(root, args.manifest), object_pairs_hook=unique_object)
         counts = validate(root, manifest, args.require_implemented)
+        delta = baseline_delta(read_base(root, args.base, args.manifest), manifest) if args.base else None
+        trace = None
+        if args.requirement:
+            trace = next((entry for entry in manifest["requirements"]
+                          if entry["id"] == args.requirement), None)
+            if trace is None:
+                raise Invalid(f"unknown requirement: {args.requirement}")
     except (Invalid, OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
         print(f"SPECIFICATION_STRUCTURE=FAIL: {exc}", file=sys.stderr)
         return 1
     print("SPECIFICATION_STRUCTURE=PASS " + json.dumps(counts, sort_keys=True))
+    if delta is not None:
+        print("BASELINE_DELTA=" + json.dumps(delta, sort_keys=True))
+        print("BASELINE_REVIEW=" + ("REQUIRED" if any(delta.values()) else "NO_DECLARED_CHANGE"))
+    if trace is not None:
+        print("REQUIREMENT_TRACE=" + json.dumps(trace, sort_keys=True))
     print("AUTHORITY=STRUCTURAL_ONLY; SEMANTIC_CONSISTENCY=UNVERIFIED; TEST_EXECUTION=UNVERIFIED; INVENTORY_COMPLETENESS=UNVERIFIED; AUTHORIZES_RELEASE=NO")
     return 0
 

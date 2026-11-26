@@ -1199,6 +1199,8 @@ scenarios:
     command: "python3 -B tools/test_specification_contract.py"
     invariants:
       - "mixed authority, changed source, duplicate requirements and missing traces fail closed"
+      - "joint removal of a previously live requirement and tag fails against a reviewed Git baseline"
+      - "requirement lookup reuses existing source, implementation and test markers"
       - "structural PASS never claims semantic or executed test coverage"
     release_gate: false
 

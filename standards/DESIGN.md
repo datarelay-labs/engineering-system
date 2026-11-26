@@ -119,6 +119,19 @@ unmarked semantic requirements still require independent review; an empty or
 narrowed inventory must never be reported as whole-product coverage.
 
 Run `python3 tools/specification_contract.py --root .` for affected spec changes.
+For a repository with an already reviewed manifest, add `--base <exact reviewed commit SHA>`
+to compare the current inventory against the approved Git baseline. A previously live
+requirement cannot silently disappear when its tag and digest are changed together;
+explicit retirement retains its stable ID. Changes to authority, traces, document
+classification, scope and states are reported for review, not automatically approved.
+This does not prove semantics or identify untracked requirements. Omit the base option
+for initial adoption when there is no prior reviewed manifest.
+
+Use `--requirement <ID>` to find the existing authoritative text, implementation and
+test markers without a separate Feature Map or hand-maintained catalog. For actual
+verification, reuse the repository's existing public-surface authority, test scenarios
+and optional runtime contract; no new universal launch or browser framework is required.
+
 Review intent and impact before refreshing a digest. Run referenced tests and existing
 affected/public-surface checks separately. Use `--require-implemented` only for an
 explicitly scoped all-implemented inventory, not a roadmap with planned future features.
