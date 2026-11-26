@@ -14,6 +14,10 @@
 | `datarelay-labs/*-docs` and shared documentation repos | Defines shared documentation policy; records required updates in the relevant owning product/docs roadmap, without opportunistic edits | Owning product/docs chat performs documentation source changes and publication qualification |
 | `xdr-labs/*` **except `xdr-labs/athena`**, including code, documentation, portal, mirror and DP OS upgrade repos | **Direct executor**, not roadmap-only: checks current repo/branch/HEAD/worktree and active work; makes permitted changes, tests, commits/pushes, PR/CI/review and adoption proof itself | May assist only when explicitly assigned by the owner; no mandatory separate product-chat handoff |
 
+## Named delegated exception — owner directive 2026-11-26
+
+- `isoc-labs/parser-studio` and `isoc-labs/parser-studio-docs` — **DELEGATED**. Their owning project Chat is actively implementing the product and documentation. The steward only owns shared engineering standards, tools, policy tests, and roadmap/evidence coordination. Do not edit consumer code, docs, worktrees, branches, PRs or CI, or take over E2E. Preserve earlier draft PRs and uncommitted changes for the owning Chat to evaluate; report findings without changing product state. The explicit named assignment takes precedence over any legacy XDR direct-application allocation; unrelated repositories retain their existing assignment.
+
 ## Explicit exclusions — owner directive 2026-10-11
 
 - `datarelay-labs/athena` — **EXCLUDED**, owner plans to delete this repository.

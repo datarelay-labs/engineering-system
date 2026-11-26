@@ -1,6 +1,6 @@
-# Optional QA adapters — Parser Studio pilot
+# Optional QA adapters — bounded historical product pilots
 
-The core Engineering System is deliberately Python-only and does not install a browser, model or mutation service on adopters. These adapters are product-scoped examples, exercised on an authorized development instance.
+The core Engineering System is deliberately Python-only and does not install a browser, model or mutation service on adopters. These adapters are product-scoped examples, exercised on authorized development fixtures. Product-specific selectors, port/naming expectations and immutable source IDs belong to their historical pilot; do not assume compatibility with the current product or invoke them against a live service. Product owners must verify the exact candidate and adapt the mission/oracle before reuse.
 
 ## Real Chromium: input → analysis → field review → Ruby/CONF artifacts
 
@@ -23,13 +23,13 @@ Independently compare the frozen raw values, exact UTF-8 field byte boundaries, 
       --evidence-root /secure/qa-run-new-directory \
       --expected-mission-sha256 FROZEN64
 
-The current oracle targets the limited synthetic customized_demo_firewall DRAFT naming and port contract. Other missions need separate strict oracles rather than weakening this pilot. Every result remains T0_ADVISORY_ONLY; neither selected-runtime release acceptance nor Stellar native verification is conferred.
+The pilot oracle targets the limited synthetic customized_demo_firewall DRAFT naming and port contract. Other missions need separate strict oracles rather than weakening this pilot. Every result remains T0_ADVISORY_ONLY; neither selected-runtime release acceptance nor Stellar native verification is conferred.
 
 ## Model-selected independent browser exploration (P1)
 
 The provider-neutral autonomous-browser-explorer.cjs runs a **persistent real Chromium** browser but intentionally does not embed an external LLM API. The selected CHATGPT_CHAT operator must read each actual UI/HTTP/screenshot observation, choose the next button/input/scroll/press/select/back action, and provide a reason. An action must reference the latest fresh observation ID and currently visible element; replaying stale selectors, attempting external origins, credentials or unapproved writes is denied. Offscreen controls appear only after a real scroll and new observation, including long mapping forms.
 
-A synthetic-only mission must be frozen and given with its exact SHA-256 before browsing. The current public development site allows only same-origin GET/HEAD/OPTIONS and a predeclared safe preview-batch POST, no state-changing parser generation. Evidence stays in a new private directory, with JSONL action/observation journal, screenshot digests, real Playwright trace and advisory result. No commercial LLM/QA account is required or invoked by the adapter.
+A synthetic-only mission must be frozen and given with its exact SHA-256 before browsing. The pinned pilot development fixture allowed only same-origin GET/HEAD/OPTIONS and a predeclared safe preview-batch POST, no state-changing parser generation. Evidence stays in a new private directory, with JSONL action/observation journal, screenshot digests, real Playwright trace and advisory result. No commercial LLM/QA account is required or invoked by the adapter.
 
     PLAYWRIGHT_MODULE_ROOT=/path/to/existing/playwright/node_modules node \
       adapters/ai-qa/autonomous-browser-explorer.cjs \
@@ -86,10 +86,10 @@ This proves the QA benchmark's source regression sensitivity in a narrow subset.
 
 A separate product-scoped adapter now archives the immutable exact Parser Studio HEAD into a disposable temporary sandbox, links the *already installed* pinned Vitest dependencies, executes the unchanged product-native normalization regression against five syntax-checked TypeScript source mutants, then adds an independent requirements-derived holdout for nested mapping destination collisions. The original checkout, its node_modules and its deployed service are not modified.
 
-Command (use the qualified nonproduction 154+155+156 source, and a NEW private output path):
+Command (use an isolated checkout of the exact historical source, and a NEW private output path):
 
     python3 -B adapters/ai-qa/parser-studio-product-mutation.py \
-      --product-root /home/aella/parser-studio-dev-integration-154155156-20261024 \
+      --product-root /path/to/isolated-pinned-parser-studio \
       --expected-head 567e0c255312028337898114cac452567bc585cc \
       --out /private/new-product-source-mutation.json
 

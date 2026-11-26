@@ -183,9 +183,9 @@ Adopted `AGENTS.md` may route optional knowledge freshness through `python3 tool
 
 Adopted `AGENTS.md` may route optional runtime checks through `python3 tools/runtime-contract.py check`. Bootstrap and managed upgrade install that helper and `schemas/runtime-contract.schema.json` when the paths are missing. A pre-existing different copy fails closed before any adoption or upgrade writes. `.engineering/runtime.yaml` stays optional and is never created or rewritten. Health, smoke, and operational E2E commands remain in the project and release profiles.
 
-For Engineering System >=1.6.0, the generated pull-request workflow also calls the pinned enforcement-reconciliation workflow. If live GitHub rulesets are visible during adoption, `merge_gate_status` is detected automatically; an explicit value that contradicts observable GitHub enforcement is rejected.
+The generated pull-request workflow calls the pinned enforcement-reconciliation workflow. If live GitHub rulesets are visible during adoption, `merge_gate_status` is detected automatically; an explicit value that contradicts observable GitHub enforcement is rejected.
 
-Production-oriented 1.6 adoption additionally requires:
+Production-oriented adoption additionally requires:
 - at least one repository runbook path
 - a deterministic health command
 - an operational E2E command and pass count
@@ -279,7 +279,7 @@ For an upgrade:
 5. rerun adoption qualification
 6. keep the upgrade in a separate branch/PR from unrelated product work
 
-For the managed 1.5 -> 1.6 transition, use the deterministic helper:
+For a supported managed baseline upgrade, use the deterministic helper:
 
 ```bash
 python tools/upgrade-adoption.py --root /path/to/project --audit

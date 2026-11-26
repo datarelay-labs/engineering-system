@@ -39,6 +39,10 @@ def violations(core: str, adoption: str, owner: str, template: str) -> list[str]
         findings.append("profile:DATARELAY_DELEGATION_MISSING")
     if "**Directly implements**" not in owner or "**Direct executor**" not in owner:
         findings.append("profile:DIRECT_EXECUTION_MISSING")
+    for delegated in ("isoc-labs/parser-studio", "isoc-labs/parser-studio-docs"):
+        if not any(line.startswith("- ") and f"`{delegated}`" in line and "**DELEGATED**" in line
+                   for line in owner.splitlines()):
+            findings.append(f"profile:NAMED_DELEGATION_MISSING:{delegated}")
     if "its own prior unfinished Work Packet" not in owner:
         findings.append("profile:FIRST_ACTION_PRIORITY_LOST")
     for excluded in ("datarelay-labs/athena", "xdr-labs/athena"):
@@ -106,6 +110,10 @@ def main() -> int:
         owner.replace("Product Foundation, Link plugin", "Product Foundation, Athena, Link plugin"),
         template,
     )
+    for delegated in ("isoc-labs/parser-studio", "isoc-labs/parser-studio-docs"):
+        assert f"profile:NAMED_DELEGATION_MISSING:{delegated}" in violations(
+            core, adoption, owner.replace(f"`{delegated}`", "removed"), template
+        )
     print("OWNER_DELIVERY_POLICY_REGRESSION=PASS")
     return 0
 

@@ -88,6 +88,8 @@ REQUIRED_METHOD_FILES = (
     "tools/test_ai_qa_explorer_audit.py",
     "tools/test_ai_qa_autonomous_browser.cjs",
     "tools/test_ai_qa_benchmark.py",
+    "tools/specification_contract.py",
+    "tools/test_specification_contract.py",
     "tools/engineering-test.py",
     "tools/test_token_efficiency.py",
     "tools/test_adopt.py",
@@ -1040,9 +1042,8 @@ def validate_session_continuity_templates():
     session = (ROOT / "standards/SESSION_CONTINUITY.md").read_text(encoding="utf-8")
     for token in (
         "PACKET_VERSION=3",
-        "Legacy v2 packets remain bounded compatibility inputs",
-        "Packet version 2 is legacy-compatible only through the current execution profile.",
-        "Packet v1 and versionless packets are non-runnable",
+        "Legacy v2 packets remain bounded compatibility inputs when accepted by the current execution profile.",
+        "Packet v1 or versionless packets are not runnable under profile-v3",
         "8. For packet v3",
         "migrate it to v3",
     ):
@@ -1964,6 +1965,9 @@ def main():
     completed = subprocess.run(["python3", "-B", "tools/test_ai_qa_benchmark.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "-B", "tools/test_specification_contract.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
     for ai_qa_test in ("tools/test_ai_qa_parser_studio_oracle.py", "tools/test_ai_qa_bakeoff.py",
                        "tools/test_ai_qa_consumer_adoption.py",
                        "tools/test_ai_qa_product_mutation.py", "tools/test_ai_qa_explorer_audit.py",
@@ -1984,6 +1988,9 @@ def main():
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_org_rollout.py"], cwd=ROOT)
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+    completed = subprocess.run(["python3", "tools/test_targeted_convergence_policy.py"], cwd=ROOT)
     if completed.returncode:
         raise SystemExit(completed.returncode)
     completed = subprocess.run(["python3", "tools/test_owner_delivery_policy.py"], cwd=ROOT)

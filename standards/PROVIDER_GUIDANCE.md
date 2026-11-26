@@ -87,16 +87,19 @@ Canonical `policy_epoch` is policy-freshness state. Repository-local root-of-tru
 
 Engineering completion is determined by the completion contract and evidence. Notification delivery is operational state. A failed owner-notification transport may require retry and should be visible to the owner, but it does not retroactively make correct code or passing release evidence false.
 
-## 2026-10-07 cleanup decisions and evidence limits
+## Evidence limits
 
-- KEEP: owner scope, target/worktree isolation, high-risk approval and existing base-owned verification; these are not scaffolding to relax for a green check.
-- MAKE_CONDITIONAL: packet lint, admission, coordinator/watch and independent-review helpers. Use the concrete ambiguity, continuity, concurrency or risk trigger; ordinary commands do not run the whole toolchain.
-- RELAX: root instructions become a task-specific context map; user-gate details stay in the actual contracts. Contract-first, direct-persona, same-candidate and final complete confirmation remain mandatory when those gates are requested.
-- DELETE: portable human-hour/file-count sizing heuristics and runtime-specific reset recipes. Use coupling, completion oracles and observed context capacity.
-- EVIDENCE: document/routing lint is not live-agent behavior. Deterministic wait checks exercise the optional planner's state transitions, not a model's obedience. Source byte counts are not provider token/cost savings. No live A/B autonomy improvement is claimed without observed comparable runs.
-- MIGRATION: a legacy contract-v1 base accepts exactly one policy-epoch increment. Land and verify that bridge first; only its v2 successor may converge policy freshness in a separate change. Already-merged invalid historical transitions cannot be retroactively labelled PASS by a newer checker; retain the discrepancy and verify forward changes honestly.
+Packet lint, admission, coordinator/watch and independent-review helpers remain
+conditional on the actual ambiguity, continuity, concurrency or risk trigger.
+Do not run the whole toolchain for ordinary work. Size work by coupling,
+completion oracles and actual context capacity. Keep user-gate execution details
+in the canonical user-acceptance contract.
 
-The official references above inform these decisions; they do not mandate this repository's packet format, helper stack or two user-gate names. Review/remove remaining scaffolding only with evidence, not an arbitrary deletion percentage.
+Document/routing lint is not live-agent behavior. Deterministic wait checks
+exercise planner state transitions, not model obedience. Source byte counts
+are not provider token or cost savings. Do not claim live A/B improvement
+without comparable observed runs. For migration compatibility, see
+[ADOPTION](ADOPTION.md#legacy-governance-bridge-and-truthful-completion).
 
 ## Access-diagnosis scaffold review
 

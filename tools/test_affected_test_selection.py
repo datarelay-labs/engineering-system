@@ -12,6 +12,7 @@ import yaml
 from affected_test_selection import (
     SelectionError,
     analyze_impact,
+    changed_files,
     run_selected,
     select_scenarios,
 )
@@ -121,6 +122,97 @@ class AffectedSelectionTests(unittest.TestCase):
         self.assertEqual(
             impact.invalidated_scenarios, frozenset({"ARTIFACT-INTEGRITY-001"})
         )
+
+    def test_committed_deleted_and_renamed_paths_select_both_contracts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root)
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            (root / "docs").mkdir()
+            (root / "src").mkdir()
+            (root / "docs" / "obsolete.md").write_text("retire")
+            (root / "docs" / "설계 old.md").write_text("move")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD").decode().strip()
+            git("rm", "docs/obsolete.md")
+            git("mv", "docs/설계 old.md", "src/설계 new.md")
+            git("commit", "-qm", "change")
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                changed, no_base = changed_files(base)
+                self.assertFalse(no_base)
+                self.assertEqual(set(changed), {
+                    "docs/obsolete.md", "docs/설계 old.md", "src/설계 new.md",
+                })
+                selected, _ = select_scenarios(manifest(), changed, "pr")
+                self.assertEqual({item["id"] for item in selected}, {
+                    "CORE-UNIT-001", "SURFACE-PARITY-001", "GLOBAL-PR-001",
+                })
+            finally:
+                os.chdir(previous)
+
+    def test_deletion_only_runs_required_check_and_fails_if_behavior_lost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root)
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            (root / "docs").mkdir()
+            (root / "docs" / "contract.md").write_text("required")
+            data = manifest()
+            for scenario in data["scenarios"]:
+                if scenario["id"] == "SURFACE-PARITY-001":
+                    scenario["command"] = "test -f docs/contract.md"
+            (root / "tests.yaml").write_text(yaml.safe_dump(data))
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD").decode().strip()
+            git("rm", "docs/contract.md")
+            git("commit", "-qm", "delete")
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with self.assertRaisesRegex(SelectionError, "SURFACE-PARITY-001 exit=1"):
+                    run_selected(root / "tests.yaml", base, "pr")
+            finally:
+                os.chdir(previous)
+
+    def test_workflow_does_not_replace_unavailable_base_with_last_commit(self):
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/affected-tests.yml"
+        steps = yaml.safe_load(workflow.read_text())["jobs"]["affected"]["steps"]
+        script = next(step["run"] for step in steps if step.get("id") == "base")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root)
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            git("commit", "--allow-empty", "-qm", "first")
+            base = git("rev-parse", "HEAD").decode().strip()
+            git("commit", "--allow-empty", "-qm", "second")
+            git("commit", "--allow-empty", "-qm", "third")
+            output = root / "github-output"
+            def resolve(explicit="", pr="", push=""):
+                output.write_text("")
+                env = dict(os.environ, INPUT_BASE=explicit, PR_BASE=pr,
+                           PUSH_BEFORE=push, GITHUB_OUTPUT=str(output))
+                proc = subprocess.run(["bash", "-c", script], cwd=root, env=env,
+                                      capture_output=True, text=True, timeout=10)
+                return proc.returncode, output.read_text()
+            self.assertEqual(resolve(pr=base), (0, f"base={base}\n"))
+            rc, emitted = resolve(pr="1" * 40)
+            self.assertNotEqual(rc, 0)
+            self.assertEqual(emitted, "")
+            self.assertEqual(resolve(), (0, "base=\n"))
+            self.assertEqual(resolve(push="0" * 40), (0, "base=\n"))
 
     def test_run_selected_uses_real_git_diff_and_executes_direct_invalidation(self):
         with tempfile.TemporaryDirectory() as tmp:

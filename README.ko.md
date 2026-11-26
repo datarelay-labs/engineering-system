@@ -44,11 +44,11 @@ Target repository에 `tools/adopt.py`가 미리 있을 필요는 없습니다. �
 | **Repository-aware adoption** | 기존 rule, test, CI, release, operations 신호를 먼저 조사한 뒤 적용 |
 | **Minimal AI context** | 현재 작업에 필요한 repository entrypoint와 standard만 로드 |
 | **Affected-test-first validation** | broad suite 전에 오류를 가장 싸고 빠르게 증명할 deterministic check부터 실행 |
-| **Session continuity** | 긴 handoff prompt 대신 repository-scoped AI Work Packet을 사용하고, Work Packet v2의 `TASK_KIND`/`OWNER_INTENT`로 현재 사용자 의도와 다음 작업을 묶어 stale handoff를 방지 |
+| **Session continuity** | 긴 handoff prompt 대신 repository-scoped AI Work Packet을 사용하고, Work Packet v3의 `TASK_KIND`/`OWNER_INTENT`로 현재 사용자 의도와 다음 작업을 묶어 stale handoff를 방지 |
 | **Review discipline** | 사람 또는 자동 reviewer의 actionable finding을 수정하거나 근거와 함께 disposition하기 전에는 완료 처리하지 않음 |
 | **Release qualification** | 빠른 PR feedback과 비싼 release-candidate qualification을 분리하고 exact-HEAD evidence 요구 |
 | **Operations feedback loop** | incident, regression, 운영 장애를 test/runbook/RCA/ADR/requirement로 환류 |
-| **Knowledge boundaries** | GitHub는 canonical로 유지하고 Athena와 사람용 문서는 derived/searchable layer로 사용 |
+| **Knowledge boundaries** | GitHub는 canonical로 유지하고 선택적 derived context와 사람용 문서는 비권위적 참조로 사용 |
 
 ## 전체 Lifecycle
 
@@ -63,7 +63,7 @@ flowchart LR
     O --> X["Incident / RCA"]
     X --> R
 
-    G["GitHub<br/>Canonical Truth"] --> A["Athena<br/>Derived Knowledge"]
+    G["GitHub<br/>Canonical Truth"] --> A["Optional<br/>Derived Knowledge"]
 ```
 
 Product scope, 최종 의사결정, release 승인, human UX 판단은 Owner에게 남습니다. AI는 engineering process를 지원하지만 product scope를 임의로 확장하지 않습니다.
@@ -91,10 +91,7 @@ python tools/adopt.py \
 
 이미 성숙한 project-native CI가 있다면 같은 검증을 중복으로 추가하지 말고 ownership을 명시적으로 mapping합니다.
 
-Engineering System 1.7.0은 ChatGPT Chat을 단일 구현 경로로 사용합니다. managed adoption은 immutable baseline pin을 유지하고, context/test 선택은 provider-neutral 비용 기준을 유지하며, managed upgrade는 더 이상 쓰지 않는 editor-agent artifact를 호환 실행 경로로 보존하지 않고 제거합니다.
-
-
-
+Engineering System 1.7.0의 기본 구현 runtime은 현재 execution profile과 명시적 Owner 의도에 따른 ChatGPT Chat입니다. Adoption은 immutable baseline을 pin하고 upgrade는 [ADOPTION](standards/ADOPTION.md)을 따릅니다.
 
 ### 3. Adoption qualification
 
@@ -104,7 +101,7 @@ python tools/check-adoption.py --root /path/to/project
 
 파일이 생겼다는 이유만으로 adoption이 PASS가 되는 것은 아닙니다. 구조 검증과 필요한 project-native smoke/affected evidence가 실제로 성공해야 합니다.
 
-기존 managed 1.5+ repository는 initial bootstrap을 다시 덮어쓰는 대신 fail-closed `tools/upgrade-adoption.py` 경로로 upgrade합니다. Adoption이 qualification되면 이후 feature, bugfix, test, review, release, operations, incident, retirement 작업은 repository entrypoint, project metadata, 관련 canonical standard, deterministic evidence를 통해 자동으로 lifecycle에 연결되며 별도의 "lifecycle 활성화" 단계는 없습니다.
+지원되는 기존 managed repository는 initial bootstrap을 다시 덮어쓰는 대신 fail-closed `tools/upgrade-adoption.py` 경로로 upgrade합니다. Adoption이 qualification되면 이후 feature, bugfix, test, review, release, operations, incident, retirement 작업은 repository entrypoint, project metadata, 관련 canonical standard, deterministic evidence를 통해 자동으로 lifecycle에 연결되며 별도의 "lifecycle 활성화" 단계는 없습니다.
 
 ## 기본 실행 모델
 
@@ -139,6 +136,9 @@ release candidate
 | Version, artifact, qualification, upgrade, rollback | [`standards/RELEASE.md`](standards/RELEASE.md) |
 | Operations, observability, backup/restore, incident, DR | [`standards/OPERATIONS.md`](standards/OPERATIONS.md) |
 | Product Master/OpenSpec/ADR/Wiki source-of-truth 역할과 optional knowledge index | [`standards/KNOWLEDGE.md`](standards/KNOWLEDGE.md) |
+| 사용자 인수 검증 | [`standards/USER_ACCEPTANCE.md`](standards/USER_ACCEPTANCE.md) |
+| 독립 AI QA | [`standards/AI_QA.md`](standards/AI_QA.md) |
+| 선택적 skills 및 신뢰 권한 | [`standards/SKILLS.md`](standards/SKILLS.md) |
 | AI session continuity와 repository-scoped Work Packet | [`standards/SESSION_CONTINUITY.md`](standards/SESSION_CONTINUITY.md) |
 | Provider guidance 정렬, 정책 계층, scaffolding 생명주기 | [`standards/PROVIDER_GUIDANCE.md`](standards/PROVIDER_GUIDANCE.md) |
 | Automated repository adoption과 qualification | [`standards/ADOPTION.md`](standards/ADOPTION.md) |
@@ -178,11 +178,11 @@ Engineering System 전체, Wiki 전체, 과거 대화, 현재 작업과 무관�
 
 ## Source of Truth
 
-> **GitHub is normative. Wiki/Athena is derived/searchable knowledge.**
+> **GitHub is normative. Optional derived context is non-authoritative.**
 
 Code, test, specification, commit, PR, CI evidence, release evidence, accepted durable decision은 canonical Git/GitHub artifact에 남습니다.
 
-Athena와 [사람용 handbook](https://engineering.datarelay.run/ko)은 이 지식을 사람이 탐색하고 AI가 검색하기 쉽게 만드는 layer이며 canonical repository state를 덮어쓰지 않습니다.
+[사람용 handbook](https://engineering.datarelay.run/ko)과 선택적 조직별 adapter는 derived context를 제공합니다. canonical Git/GitHub 상태가 우선합니다. [KNOWLEDGE](standards/KNOWLEDGE.md) 참조.
 
 ## 설계 원칙
 

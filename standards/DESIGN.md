@@ -90,3 +90,55 @@ Design is sufficient when another engineer or AI agent can state:
 - how correctness will be demonstrated
 
 Anything beyond that is optional unless project risk requires it.
+
+## Specification reconciliation pilot (opt-in until product validation)
+
+For material requirement or public-contract changes, resolve the current authoritative
+specification and acceptance criteria **before** implementation. Reconcile affected
+active documents in the same change; archive obsolete decisions rather than layering
+contradictory instructions. Work Packets coordinate execution, not product specification.
+Never change approved intent just to make current code/tests pass. Resolve material
+ambiguity under the existing design review trigger.
+
+The bounded pilot `tools/specification_contract.py` reads a repository-local JSON
+inventory (default `.engineering/specification.json`). For declared spec files record
+status (active, historical, or mixed pending reconciliation) and SHA-256. For each
+requirement record a stable ID, state (planned, implemented, retired), source marker,
+and implementation/test file-and-marker references. Implemented requires both trace
+types; retired must not carry live traces. Mixed documents fail until reconciled.
+Executable examples are in `tools/test_specification_contract.py`.
+
+Version 2 additionally declares a bounded inventory glob list. Classify every
+matched file as active, historical or supporting; a mixed file remains a
+failure. In active specifications tag each independently tracked requirement
+with an HTML comment of the form <!-- requirement: PS-001 --> directly before
+its normative text. The manifest must trace every declared tag exactly once,
+and its source text must be unique in the associated section. This detects an
+omitted trace even when a document hash is refreshed. Scope boundaries and
+unmarked semantic requirements still require independent review; an empty or
+narrowed inventory must never be reported as whole-product coverage.
+
+Run `python3 tools/specification_contract.py --root .` for affected spec changes.
+For a repository with an already reviewed manifest, add `--base <exact reviewed commit SHA>`
+to compare the current inventory against the approved Git baseline. A previously live
+requirement cannot silently disappear when its tag and digest are changed together;
+explicit retirement retains its stable ID. Changes to authority, traces, document
+classification, scope and states are reported for review, not automatically approved.
+This does not prove semantics or identify untracked requirements. Omit the base option
+for initial adoption when there is no prior reviewed manifest.
+
+Use `--requirement <ID>` to find the existing authoritative text, implementation and
+test markers without a separate Feature Map or hand-maintained catalog. For actual
+verification, reuse the repository's existing public-surface authority, test scenarios
+and optional runtime contract; no new universal launch or browser framework is required.
+
+Review intent and impact before refreshing a digest. Run referenced tests and existing
+affected/public-surface checks separately. Use `--require-implemented` only for an
+explicitly scoped all-implemented inventory, not a roadmap with planned future features.
+
+Structural PASS proves recorded inventory, hashes and markers are consistent, **not**
+completeness, semantic consistency, test assertions, executed results or release readiness.
+Use existing AI_QA requirements-first independent oracles and TESTING parity checks.
+Reuse existing tests for small fixes with unambiguous contracts; no mandatory new
+document or duplicate WBS. No blanket mandatory rollout without product-owned evidence of real drift
+detection and correction.
